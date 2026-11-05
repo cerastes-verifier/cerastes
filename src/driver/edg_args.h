@@ -14,8 +14,8 @@ namespace cerastes::args {
 // then passed on to EDG); `consumes_next` says that the following word is this option's value.
 struct FeCheck
 {
-    const char* message = nullptr;
-    bool consumes_next = false;
+    const char* message {nullptr};
+    bool consumes_next {false};
 };
 
 // `cerastes-fe` passes every EDG option through, so it refuses the ones cerastes cannot support (the list in

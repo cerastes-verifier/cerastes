@@ -16,7 +16,7 @@ struct ErrorKind
     const char* id;
     const char* category;
 };
-const ErrorKind kErrorKinds[] = {
+const ErrorKind kErrorKinds[] {
     {R"(Assignment might fail\.)", "assignment.failed", "assignment"},
     {R"(Method call might fail\.)", "call.failed", "call"},
     {R"(Contract might not be well-formed\.)", "not.wellformed", "wellformedness"},
@@ -53,7 +53,7 @@ struct ReasonKind
     const char* id;
     const char* pattern;
 };
-const ReasonKind kReasons[] = {
+const ReasonKind kReasons[] {
     {"assertion.false", R"(Assertion [\s\S]+ might not hold\.)"},
     {"receiver.null", R"(Receiver of [\s\S]+ might be null\.)"},
     {"division.by.zero", R"(Divisor [\s\S]+ might be zero\.)"},
@@ -89,46 +89,49 @@ struct CompiledKind
 };
 const std::vector<CompiledKind>& error_regexes()
 {
-    static const std::vector<CompiledKind> v = []
-    {
-        std::vector<CompiledKind> out;
-        for (const ErrorKind& k : kErrorKinds)
+    static const std::vector<CompiledKind> v {
+        []
         {
-            out.push_back({std::regex(std::string(k.prefix) + R"(\s+([\s\S]*))"), &k});
-        }
-        return out;
-    }();
+            std::vector<CompiledKind> out;
+            for (const ErrorKind& k : kErrorKinds)
+            {
+                out.push_back({std::regex(std::string(k.prefix) + R"(\s+([\s\S]*))"), &k});
+            }
+            return out;
+        }()};
     return v;
 }
 const std::vector<std::pair<const ReasonKind*, std::regex>>& reason_regexes()
 {
-    static const std::vector<std::pair<const ReasonKind*, std::regex>> v = []
-    {
-        std::vector<std::pair<const ReasonKind*, std::regex>> out;
-        for (const ReasonKind& r : kReasons)
+    static const std::vector<std::pair<const ReasonKind*, std::regex>> v {
+        []
         {
-            out.emplace_back(&r, std::regex(r.pattern));
-        }
-        return out;
-    }();
+            std::vector<std::pair<const ReasonKind*, std::regex>> out;
+            for (const ReasonKind& r : kReasons)
+            {
+                out.emplace_back(&r, std::regex(r.pattern));
+            }
+            return out;
+        }()};
     return v;
 }
 
 std::string strip(const std::string& s)
 {
-    size_t a = s.find_first_not_of(" \t\r\n");
+    size_t a {s.find_first_not_of(" \t\r\n")};
     if (a == std::string::npos)
     {
         return "";
     }
-    size_t b = s.find_last_not_of(" \t\r\n");
-    return s.substr(a, b - a + 1);
+    size_t b {s.find_last_not_of(" \t\r\n")};
+    return s.substr(a, b - a + 1U);
 }
 
 std::string one_line(const std::string& s)
 {
     std::istringstream in(s);
-    std::string word, out;
+    std::string word;
+    std::string out;
     while (in >> word)
     {
         if (!out.empty())
@@ -147,14 +150,14 @@ SiliconError classify_silicon_message(const std::string& entry)
     SiliconError e;
     e.viper_id = e.category = e.reason = "unknown";
     e.message = one_line(entry);
-    std::string message = entry;
+    std::string message {entry};
     static const std::regex position(R"(\s*\(([^()@]+)@(\d+)\.(\d+)(?:--(\d+)\.(\d+))?\)\s*$)");
     std::smatch pm;
     if (std::regex_search(message, pm, position))
     {
-        e.file = pm[1].str();
-        e.line = std::atoi(pm[2].str().c_str());
-        message = message.substr(0, static_cast<size_t>(pm.position(0)));
+        e.file = pm[1U].str();
+        e.line = std::atoi(pm[2U].str().c_str());
+        message = message.substr(0U, static_cast<size_t>(pm.position(0U)));
     }
     message = strip(message);
     for (const CompiledKind& k : error_regexes())
@@ -166,7 +169,7 @@ SiliconError classify_silicon_message(const std::string& entry)
         }
         e.viper_id = k.kind->id;
         e.category = k.kind->category;
-        const std::string rest = m[1].str();
+        const std::string rest {m[1U].str()};
         static const std::regex timed_out(R"(\s*An SMT query timed out after \d+ms\.$)");
         if (std::regex_search(rest, timed_out))
         {
@@ -196,7 +199,9 @@ SiliconVerdict parse_silicon_output(const std::string& output, int exit_code)
     std::istringstream in(output);
     std::string raw;
     std::string stray; // the first line that is neither part of a verdict nor of an error message
-    int banners = 0, successes = 0, founds = 0;
+    int banners {0};
+    int successes {0};
+    int founds {0};
     std::string found_count;
     while (std::getline(in, raw))
     {
@@ -207,7 +212,7 @@ SiliconVerdict parse_silicon_output(const std::string& output, int exit_code)
         std::smatch m;
         if (std::regex_match(raw, m, entry_re))
         {
-            entries.push_back(m[2].str());
+            entries.push_back(m[2U].str());
         }
         else if (strip(raw).empty())
         {
@@ -225,7 +230,7 @@ SiliconVerdict parse_silicon_output(const std::string& output, int exit_code)
         else if (std::regex_match(raw, m, found_line_re))
         {
             ++founds;
-            found_count = m[1].str();
+            found_count = m[1U].str();
         }
         else if (!entries.empty())
         {
@@ -252,7 +257,7 @@ SiliconVerdict parse_silicon_output(const std::string& output, int exit_code)
     if (!stray.empty() || banners != 1 || successes + founds != 1)
     {
         v.problem = "Silicon's output is not a banner and one verdict" +
-                    (stray.empty() ? std::string() : " (unexpected line: " + stray.substr(0, 120) + ")") +
+                    (stray.empty() ? std::string() : " (unexpected line: " + stray.substr(0U, 120U) + ")") +
                     " (exit status " + std::to_string(exit_code) + ")";
         return v;
     }

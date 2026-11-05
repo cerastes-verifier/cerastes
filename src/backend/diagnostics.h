@@ -30,11 +30,11 @@ const char* tag_of(Diag d);
 // position in the source file (the start of the macro invocation).
 struct DiagPos
 {
-    bool known = false;
-    bool in_primary = false; // the position is not in an include file
-    unsigned long seq = 0;   // for ordering
-    unsigned long line = 0;
-    unsigned long col = 0;
+    bool known {false};
+    bool in_primary {false}; // the position is not in an include file
+    unsigned long seq {0U};  // for ordering
+    unsigned long line {0U};
+    unsigned long col {0U};
     std::string file;      // display file name
     std::string full_name; // path used to read the source line, "" if unknown
 };

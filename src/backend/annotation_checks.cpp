@@ -66,7 +66,7 @@ void collect(char* entry, an_il_entry_kind kind)
 {
     if (kind == iek_routine)
     {
-        auto r = reinterpret_cast<a_routine_ptr>(entry);
+        auto r {reinterpret_cast<a_routine_ptr>(entry)};
         if (g_c.routine_set.insert(r).second)
         {
             g_c.routines.push_back(r);
@@ -78,7 +78,7 @@ void collect(char* entry, an_il_entry_kind kind)
     }
     else if (kind == iek_variable)
     {
-        auto v = reinterpret_cast<a_variable_ptr>(entry);
+        auto v {reinterpret_cast<a_variable_ptr>(entry)};
         g_c.all_variables.push_back(v);
         if (v->source_corresp.enclosing_routine == nullptr)
         {
@@ -91,7 +91,7 @@ void collect(char* entry, an_il_entry_kind kind)
     }
     else if (kind == iek_expr_node)
     {
-        auto e = reinterpret_cast<an_expr_node_ptr>(entry);
+        auto e {reinterpret_cast<an_expr_node_ptr>(entry)};
         if (e->kind == enk_routine)
         {
             g_c.routine_nodes.push_back(e);
@@ -99,7 +99,7 @@ void collect(char* entry, an_il_entry_kind kind)
     }
     else if (kind == iek_type)
     {
-        auto t = reinterpret_cast<a_type_ptr>(entry);
+        auto t {reinterpret_cast<a_type_ptr>(entry)};
         if ((t->kind == tk_struct || t->kind == tk_class || t->kind == tk_union) &&
             t->variant.class_struct_union.extra_info != nullptr &&
             t->variant.class_struct_union.extra_info->template_arg_list != nullptr)
@@ -109,7 +109,7 @@ void collect(char* entry, an_il_entry_kind kind)
     }
     else if (kind == iek_constant)
     {
-        auto c = reinterpret_cast<a_constant_ptr>(entry);
+        auto c {reinterpret_cast<a_constant_ptr>(entry)};
         if ((c->kind == ck_address && c->variant.address.kind == abk_routine) ||
             (c->kind == ck_ptr_to_member && c->variant.ptr_to_member.is_function_ptr))
         {
@@ -118,7 +118,7 @@ void collect(char* entry, an_il_entry_kind kind)
     }
     else if (kind == iek_attribute)
     {
-        auto a = reinterpret_cast<an_attribute_ptr>(entry);
+        auto a {reinterpret_cast<an_attribute_ptr>(entry)};
         if (is_registered_cerastes(a))
         {
             g_c.cerastes_attributes.push_back(a);
@@ -126,8 +126,8 @@ void collect(char* entry, an_il_entry_kind kind)
     }
     else if (kind == iek_statement)
     {
-        auto st = reinterpret_cast<a_statement_ptr>(entry);
-        for (an_attribute_ptr a = st->attributes; a; a = a->next)
+        auto st {reinterpret_cast<a_statement_ptr>(entry)};
+        for (an_attribute_ptr a {st->attributes}; a; a = a->next)
         {
             if (is_registered_cerastes(a))
             {
@@ -140,7 +140,7 @@ void collect(char* entry, an_il_entry_kind kind)
 
 bool has_cerastes_attribute(a_routine_ptr r)
 {
-    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+    for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
     {
         if (is_registered_cerastes(a))
         {
@@ -159,7 +159,7 @@ a_constant_ptr unknown_callee_constant(a_constant_ptr c)
     {
         return nullptr;
     }
-    const auto& tp = c->variant.template_param;
+    const auto& tp {c->variant.template_param};
     if (tp.kind == tpck_unknown_function)
     {
         return c;
@@ -183,7 +183,7 @@ bool is_spec_name(const char* n)
 // global namespace.
 a_namespace_ptr resolve_alias(a_namespace_ptr ns)
 {
-    for (int guard = 0; ns != nullptr && ns->is_namespace_alias && guard < 64; ++guard)
+    for (int guard {0}; ns != nullptr && ns->is_namespace_alias && guard < 64; ++guard)
     {
         ns = ns->variant.assoc_namespace;
     }
@@ -197,7 +197,7 @@ bool is_cerastes_namespace(a_namespace_ptr ns)
     {
         return false;
     }
-    a_scope_ptr parent = ns->source_corresp.parent_scope;
+    a_scope_ptr parent {ns->source_corresp.parent_scope};
     return parent == nullptr || parent->kind == sck_file;
 }
 
@@ -212,12 +212,12 @@ bool scope_is_cerastes_namespace(a_scope_ptr sp)
 // denote a specification function.
 bool cerastes_namespace_in_tu()
 {
-    static int cached = -1;
+    static int cached {-1};
     if (cached < 0)
     {
         cached = 0;
-        a_scope_ptr file = il_header.region_scope_entry[FILE_SCOPE_REGION_NUMBER];
-        for (a_namespace_ptr ns = file ? file->namespaces : nullptr; ns; ns = ns->next)
+        a_scope_ptr file {il_header.region_scope_entry[FILE_SCOPE_REGION_NUMBER]};
+        for (a_namespace_ptr ns {file ? file->namespaces : nullptr}; ns; ns = ns->next)
         {
             if (is_cerastes_namespace(ns))
             {
@@ -249,12 +249,12 @@ bool namespace_reaches_cerastes(a_namespace_ptr ns, const char* name, int depth,
     {
         return true;
     }
-    a_scope_ptr sp = ns->variant.assoc_scope;
+    a_scope_ptr sp {ns->variant.assoc_scope};
     if (sp == nullptr)
     {
         return true; // unknown: fail closed
     }
-    for (a_using_decl_ptr u = sp->using_directives; u; u = u->next)
+    for (a_using_decl_ptr u {sp->using_directives}; u; u = u->next)
     {
         if (u->entity.kind == iek_namespace &&
             namespace_reaches_cerastes(reinterpret_cast<a_namespace_ptr>(u->entity.ptr), name, depth + 1, visited))
@@ -262,9 +262,9 @@ bool namespace_reaches_cerastes(a_namespace_ptr ns, const char* name, int depth,
             return true;
         }
     }
-    for (a_using_decl_ptr u = sp->using_declarations; u; u = u->next)
+    for (a_using_decl_ptr u {sp->using_declarations}; u; u = u->next)
     {
-        a_source_correspondence* scp = nullptr;
+        a_source_correspondence* scp {nullptr};
         if (u->entity.kind == iek_routine)
         {
             scp = &reinterpret_cast<a_routine_ptr>(u->entity.ptr)->source_corresp;
@@ -294,7 +294,7 @@ bool namespace_reaches_cerastes(a_namespace_ptr ns, const char* name, int depth,
 // Without namespace cerastes in the translation unit nothing is one.
 const char* dependent_spec_callee(a_constant_ptr c)
 {
-    a_constant_ptr k = unknown_callee_constant(c);
+    a_constant_ptr k {unknown_callee_constant(c)};
     if (k == nullptr || !is_spec_name(k->source_corresp.name))
     {
         return nullptr;
@@ -303,16 +303,17 @@ const char* dependent_spec_callee(a_constant_ptr c)
     {
         return nullptr;
     }
-    const char* name = k->source_corresp.name;
+    const char* name {k->source_corresp.name};
     // A template_ref's `con` need not be a template-parameter constant (CP7 #11):
     // read is_qualified_name only when it is; otherwise treat it as qualified and
     // let the qualifier decide (failing closed when it is unknown).
-    const bool qualified = k->kind == ck_template_param ? k->variant.template_param.is_qualified_name : true;
+    const bool qualified {
+        static_cast<bool>(k->kind == ck_template_param ? k->variant.template_param.is_qualified_name : true)};
     if (!qualified)
     {
         return name;
     }
-    a_scope_ptr scope = k->source_corresp.parent_scope;
+    a_scope_ptr scope {k->source_corresp.parent_scope};
     if (scope == nullptr)
     {
         return name; // unknown qualifier: fail closed
@@ -346,7 +347,7 @@ bool is_instance(a_routine_ptr r)
 std::string instance_name(a_routine_ptr r)
 {
     std::string args;
-    for (a_template_arg_ptr a = r->template_arg_list; a; a = a->next)
+    for (a_template_arg_ptr a {r->template_arg_list}; a; a = a->next)
     {
         if (a->kind == tak_start_of_pack_expansion)
         {
@@ -358,7 +359,7 @@ std::string instance_name(a_routine_ptr r)
         }
         args += render_template_arg(a);
     }
-    std::string n = rname(r);
+    std::string n {rname(r)};
     if (!args.empty())
     {
         n += "<" + args + ">";
@@ -377,7 +378,7 @@ std::string instance_context(a_routine_ptr r)
 
 a_type_ptr return_type_of(a_routine_ptr r)
 {
-    a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+    a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
     return (rt && rt->kind == tk_routine) ? rt->variant.routine.return_type : nullptr;
 }
 
@@ -385,7 +386,7 @@ void add_scope_variables(a_scope_ptr sp, std::set<std::string>* names, std::set<
 {
     auto each = [&](a_variable_ptr list)
     {
-        for (a_variable_ptr v = list; v; v = v->next)
+        for (a_variable_ptr v {list}; v; v = v->next)
         {
             if (names && v->source_corresp.name)
             {
@@ -403,7 +404,7 @@ void add_scope_variables(a_scope_ptr sp, std::set<std::string>* names, std::set<
     {
         each(sp->variant.routine.parameters);
     }
-    for (a_scope_ptr c = sp->scopes; c; c = c->next)
+    for (a_scope_ptr c {sp->scopes}; c; c = c->next)
     {
         if (c->kind == sck_block || c->kind == sck_condition)
         {
@@ -425,46 +426,46 @@ bool class_has_member(a_type_ptr cls, const char* name)
     {
         return false;
     }
-    a_type_ptr t = skip_typerefs(cls);
+    a_type_ptr t {skip_typerefs(cls)};
     if (!is_immediate_class_type(t))
     {
         return false;
     }
-    for (a_field_ptr f = t->variant.class_struct_union.field_list; f; f = f->next)
+    for (a_field_ptr f {t->variant.class_struct_union.field_list}; f; f = f->next)
     {
         if (f->source_corresp.name && std::strcmp(f->source_corresp.name, name) == 0)
         {
             return true;
         }
     }
-    a_class_type_supplement_ptr x = t->variant.class_struct_union.extra_info;
-    a_scope_ptr sp = x ? x->assoc_scope : nullptr;
+    a_class_type_supplement_ptr x {t->variant.class_struct_union.extra_info};
+    a_scope_ptr sp {x ? x->assoc_scope : nullptr};
     if (sp == nullptr)
     {
         return false;
     }
-    for (a_variable_ptr v = sp->variables; v; v = v->next)
+    for (a_variable_ptr v {sp->variables}; v; v = v->next)
     {
         if (v->source_corresp.name && std::strcmp(v->source_corresp.name, name) == 0)
         {
             return true;
         }
     }
-    for (a_routine_ptr r = sp->routines; r; r = r->next)
+    for (a_routine_ptr r {sp->routines}; r; r = r->next)
     {
         if (r->source_corresp.name && std::strcmp(r->source_corresp.name, name) == 0)
         {
             return true;
         }
     }
-    for (a_constant_ptr c = sp->constants; c; c = c->next)
+    for (a_constant_ptr c {sp->constants}; c; c = c->next)
     {
         if (c->source_corresp.name && std::strcmp(c->source_corresp.name, name) == 0)
         {
             return true;
         }
     }
-    for (a_type_ptr ty = sp->types; ty; ty = ty->next)
+    for (a_type_ptr ty {sp->types}; ty; ty = ty->next)
     {
         if (ty->source_corresp.name && std::strcmp(ty->source_corresp.name, name) == 0)
         {
@@ -478,47 +479,47 @@ bool class_has_member(a_type_ptr cls, const char* name)
 // finds it), or a null position.
 a_source_position first_member_position(a_type_ptr cls, const char* name)
 {
-    a_source_position none = null_source_position;
+    a_source_position none {null_source_position};
     if (cls == nullptr || name == nullptr)
     {
         return none;
     }
-    a_type_ptr t = skip_typerefs(cls);
+    a_type_ptr t {skip_typerefs(cls)};
     if (!is_immediate_class_type(t))
     {
         return none;
     }
-    a_source_position best = none;
+    a_source_position best {none};
     auto consider = [&](const a_source_correspondence& sc)
     {
-        if (sc.name && std::strcmp(sc.name, name) == 0 && sc.decl_position.seq != 0 &&
-            (best.seq == 0 || sc.decl_position.seq < best.seq ||
+        if (sc.name && std::strcmp(sc.name, name) == 0 && sc.decl_position.seq != 0U &&
+            (best.seq == 0U || sc.decl_position.seq < best.seq ||
              (sc.decl_position.seq == best.seq && sc.decl_position.column < best.column)))
         {
             best = sc.decl_position;
         }
     };
-    for (a_field_ptr f = t->variant.class_struct_union.field_list; f; f = f->next)
+    for (a_field_ptr f {t->variant.class_struct_union.field_list}; f; f = f->next)
     {
         consider(f->source_corresp);
     }
-    a_class_type_supplement_ptr x = t->variant.class_struct_union.extra_info;
-    a_scope_ptr sp = x ? x->assoc_scope : nullptr;
+    a_class_type_supplement_ptr x {t->variant.class_struct_union.extra_info};
+    a_scope_ptr sp {x ? x->assoc_scope : nullptr};
     if (sp != nullptr)
     {
-        for (a_variable_ptr v = sp->variables; v; v = v->next)
+        for (a_variable_ptr v {sp->variables}; v; v = v->next)
         {
             consider(v->source_corresp);
         }
-        for (a_routine_ptr r = sp->routines; r; r = r->next)
+        for (a_routine_ptr r {sp->routines}; r; r = r->next)
         {
             consider(r->source_corresp);
         }
-        for (a_constant_ptr c = sp->constants; c; c = c->next)
+        for (a_constant_ptr c {sp->constants}; c; c = c->next)
         {
             consider(c->source_corresp);
         }
-        for (a_type_ptr ty = sp->types; ty; ty = ty->next)
+        for (a_type_ptr ty {sp->types}; ty; ty = ty->next)
         {
             consider(ty->source_corresp);
         }
@@ -538,8 +539,8 @@ bool class_declares_member_later(a_type_ptr cls, const char* name, const a_sourc
     {
         return false;
     }
-    a_source_position m = first_member_position(cls, name);
-    if (m.seq == 0 || at.seq == 0)
+    a_source_position m {first_member_position(cls, name)};
+    if (m.seq == 0U || at.seq == 0U)
     {
         return true; // unknown: fail closed
     }
@@ -553,17 +554,17 @@ bool class_declares_member_later(a_type_ptr cls, const char* name, const a_sourc
 // (`this-><unnamed>.i`, and a lambda's capture fields, CP8) peeled off.
 an_expr_node_ptr peel_member_object(an_expr_node_ptr obj)
 {
-    for (int guard = 0; obj != nullptr && obj->kind == enk_operation && guard < 1024; ++guard)
+    for (int guard {0}; obj != nullptr && obj->kind == enk_operation && guard < 1024; ++guard)
     {
-        const auto& o = obj->variant.operation;
+        const auto& o {obj->variant.operation};
         if (o.operands == nullptr)
         {
             break;
         }
-        const bool anonymous_member = (o.kind == eok_dot_field || o.kind == eok_points_to_field) &&
-                                      o.operands->next != nullptr && o.operands->next->kind == enk_field &&
-                                      o.operands->next->variant.field.ptr != nullptr &&
-                                      o.operands->next->variant.field.ptr->source_corresp.name == nullptr;
+        const bool anonymous_member {(o.kind == eok_dot_field || o.kind == eok_points_to_field) &&
+                                     o.operands->next != nullptr && o.operands->next->kind == enk_field &&
+                                     o.operands->next->variant.field.ptr != nullptr &&
+                                     o.operands->next->variant.field.ptr->source_corresp.name == nullptr};
         if (o.kind != eok_cast && o.kind != eok_base_class_cast && o.kind != eok_indirect && o.kind != eok_address_of &&
             !anonymous_member)
         {
@@ -585,7 +586,7 @@ bool object_named_unqualified(an_expr_node_ptr obj)
     }
     if (obj->kind == enk_param_ref)
     {
-        return obj->variant.param_ref.param_num == 0;
+        return obj->variant.param_ref.param_num == 0U;
     }
     if (obj->kind == enk_variable && obj->variant.variable.ptr != nullptr)
     {
@@ -626,17 +627,17 @@ bool is_spec_name_in_nested_cerastes_namespace(a_routine_ptr callee)
     {
         return false;
     }
-    a_scope_ptr sp = callee->source_corresp.parent_scope;
+    a_scope_ptr sp {callee->source_corresp.parent_scope};
     if (sp == nullptr || (sp->kind != sck_namespace && sp->kind != sck_namespace_extension))
     {
         return false;
     }
-    a_namespace_ptr ns = resolve_alias(sp->variant.assoc_namespace);
+    a_namespace_ptr ns {resolve_alias(sp->variant.assoc_namespace)};
     if (ns == nullptr || ns->source_corresp.name == nullptr || std::strcmp(ns->source_corresp.name, "cerastes") != 0)
     {
         return false;
     }
-    a_scope_ptr parent = ns->source_corresp.parent_scope;
+    a_scope_ptr parent {ns->source_corresp.parent_scope};
     return parent != nullptr && parent->kind != sck_file;
 }
 
@@ -646,7 +647,7 @@ void check_namespaced_spec(an_expr_node_ptr e)
     {
         return;
     }
-    a_routine_ptr callee = e->variant.routine.ptr;
+    a_routine_ptr callee {e->variant.routine.ptr};
     if (is_spec_name_in_nested_cerastes_namespace(callee))
     {
         report(Diag::cerastes_header_in_namespace, e->position, {rname(callee)});
@@ -660,7 +661,7 @@ void check_old_in_spec_body(an_expr_node_ptr e)
 {
     if (e->kind == enk_routine)
     {
-        a_routine_ptr callee = e->variant.routine.ptr;
+        a_routine_ptr callee {e->variant.routine.ptr};
         if (callee != nullptr && rname(callee) == "cerastes::old")
         {
             report(Diag::old_outside_ensures, e->position);
@@ -668,12 +669,12 @@ void check_old_in_spec_body(an_expr_node_ptr e)
     }
     else if (e->kind == enk_constant)
     {
-        const char* callee = dependent_spec_callee(e->variant.constant.ptr);
+        const char* callee {dependent_spec_callee(e->variant.constant.ptr)};
         if (callee != nullptr && std::strcmp(callee, "old") == 0)
         {
             report(Diag::old_outside_ensures, e->position);
         }
-        a_routine_ptr by_address = address_constant_routine(e->variant.constant.ptr);
+        a_routine_ptr by_address {address_constant_routine(e->variant.constant.ptr)};
         if (by_address != nullptr && rname(by_address) == "cerastes::old")
         {
             report(Diag::old_outside_ensures, e->position);
@@ -685,10 +686,10 @@ void check_old_in_spec_body(an_expr_node_ptr e)
 
 struct Scan
 {
-    a_type_ptr member_class = nullptr;              // contract of a member function: its class
+    a_type_ptr member_class {nullptr};              // contract of a member function: its class
     std::set<std::pair<int, std::string>> reported; // one diagnostic per kind and text per attribute
-    Annot annot = Annot::none;
-    a_routine_ptr owner = nullptr;
+    Annot annot {Annot::none};
+    a_routine_ptr owner {nullptr};
     std::string context;
     std::set<std::string> loop_names;     // invariant: names the loop declares
     std::set<a_variable_ptr> lambda_vars; // variables declared in lambdas of the argument
@@ -698,9 +699,9 @@ struct Scan
     // named after `.`/`->`, never unqualified (CP7), so no shadowing check.
     std::set<an_expr_node_ptr> object_member_callees;
 };
-Scan* g_scan = nullptr;
-bool g_error_injected = false; // --cerastes_checks_selftest
-bool g_type_injected = false;
+Scan* g_scan {nullptr};
+bool g_error_injected {false}; // --cerastes_checks_selftest
+bool g_type_injected {false};
 // Lambdas written in annotation arguments: their bodies are annotation code,
 // not ordinary code (spec_call_in_code).
 std::set<a_routine_ptr> g_annotation_lambda_routines;
@@ -765,24 +766,24 @@ const char* side_effect_of(an_expr_operator_kind k)
     }
 }
 
-constexpr unsigned long kBudget = 1000000;
+constexpr unsigned long kBudget {1000000U};
 // The budget of shared expressions a traversal may follow.  The self-test lowers
 // it to one, so that the first folded constant (an unnamed constant that records
 // the expression it came from, such as `1 + 1`) exhausts it and the limit is
 // reported (analysis_limit_reached).
 unsigned long budget()
 {
-    return options().checks_selftest ? 1 : kBudget;
+    return options().checks_selftest ? 1U : kBudget;
 }
 
 void scan_lambda_body(a_lambda_ptr l, an_expr_or_stmt_traversal_block_ptr tb, const a_source_position& at)
 {
-    a_routine_ptr r = l ? l->lambda_routine : nullptr;
+    a_routine_ptr r {l ? l->lambda_routine : nullptr};
     if (r == nullptr)
     {
         return;
     }
-    a_scope_ptr sp = body_scope(r);
+    a_scope_ptr sp {body_scope(r)};
     if (sp != nullptr)
     {
         add_scope_variables(sp, nullptr, &g_scan->lambda_vars);
@@ -796,7 +797,7 @@ void scan_lambda_body(a_lambda_ptr l, an_expr_or_stmt_traversal_block_ptr tb, co
     // does not use the parameter has no node of that type.  So the return type and every parameter type are checked
     // too, not only the nodes of the body.  The body is scanned first: when it already reported a substitution error
     // for this attribute (an erroneous node or type), that error is the one reported (once per attribute).
-    bool reported_substitution_error = false;
+    bool reported_substitution_error {false};
     for (const auto& rep : g_scan->reported)
     {
         if (rep.first == static_cast<int>(Diag::annotation_substitution_error))
@@ -808,14 +809,14 @@ void scan_lambda_body(a_lambda_ptr l, an_expr_or_stmt_traversal_block_ptr tb, co
     {
         return;
     }
-    a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+    a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
     if (rt == nullptr || rt->kind != tk_routine)
     {
         return;
     }
-    bool bad = rt->variant.routine.return_type != nullptr && is_error_type(rt->variant.routine.return_type);
-    a_routine_type_supplement_ptr x = rt->variant.routine.extra_info;
-    for (a_param_type_ptr p = x ? x->param_type_list : nullptr; p; p = p->next)
+    bool bad {rt->variant.routine.return_type != nullptr && is_error_type(rt->variant.routine.return_type)};
+    a_routine_type_supplement_ptr x {rt->variant.routine.extra_info};
+    for (a_param_type_ptr p {x ? x->param_type_list : nullptr}; p; p = p->next)
     {
         if (p->type != nullptr && is_error_type(p->type))
         {
@@ -830,7 +831,7 @@ void scan_lambda_body(a_lambda_ptr l, an_expr_or_stmt_traversal_block_ptr tb, co
 
 void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
 {
-    Scan& sc = *g_scan;
+    Scan& sc {*g_scan};
     if (!sc.seen.insert(e).second)
     {
         tb->suppress_subtree_walk = TRUE;
@@ -841,7 +842,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
     // An erroneous node: the front end gives up on an argument it cannot
     // substitute (for example a lambda in an instance's contract) without always
     // reporting it.  Never read such an annotation as meaning anything.
-    an_expr_node_kind seen_kind = static_cast<an_expr_node_kind>(e->kind);
+    an_expr_node_kind seen_kind {static_cast<an_expr_node_kind>(e->kind)};
     if (options().checks_selftest && !g_error_injected)
     {
         // Self-test: the first node of the first annotation is read as an error node,
@@ -873,7 +874,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
     {
         case enk_operation:
         {
-            const auto& op = e->variant.operation;
+            const auto& op {e->variant.operation};
             if (const char* what = side_effect_of(op.kind))
             {
                 scan_report(sc, Diag::annotation_side_effect, e->position, {what});
@@ -883,7 +884,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
             if ((op.kind == eok_dot_field || op.kind == eok_points_to_field) && op.operands != nullptr &&
                 op.operands->next != nullptr && op.operands->next->kind == enk_field)
             {
-                a_field_ptr f = op.operands->next->variant.field.ptr;
+                a_field_ptr f {op.operands->next->variant.field.ptr};
                 if (f && f->source_corresp.name && sc.loop_names.count(f->source_corresp.name) &&
                     object_named_unqualified(op.operands))
                 {
@@ -893,7 +894,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
             if ((op.kind == eok_dot_member_call || op.kind == eok_points_to_member_call) && op.operands != nullptr &&
                 op.operands->next != nullptr && !object_named_unqualified(op.operands->next))
             {
-                an_expr_node_ptr callee = op.operands;
+                an_expr_node_ptr callee {op.operands};
                 if (callee->kind == enk_operation && callee->variant.operation.operands != nullptr)
                 {
                     callee = callee->variant.operation.operands; // an address of the routine
@@ -905,7 +906,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
             }
             if (is_call_kind(op.kind) && sc.annot != Annot::ensures)
             {
-                a_routine_ptr callee = direct_callee(e);
+                a_routine_ptr callee {direct_callee(e)};
                 if (callee && rname(callee) == "cerastes::old")
                 {
                     scan_report(sc, Diag::old_outside_ensures, e->position);
@@ -924,8 +925,8 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
             break;
         case enk_routine:
         {
-            a_routine_ptr r = e->variant.routine.ptr;
-            const char* n = r ? r->source_corresp.name : nullptr;
+            a_routine_ptr r {e->variant.routine.ptr};
+            const char* n {r ? r->source_corresp.name : nullptr};
             if (sc.object_member_callees.count(e))
             {
                 break;
@@ -943,12 +944,12 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
         }
         case enk_constant:
         {
-            a_constant_ptr nc = e->variant.constant.ptr;
+            a_constant_ptr nc {e->variant.constant.ptr};
             // A named constant (an enumerator, a named constant) with the name of a
             // variable the loop declares, or of a member the class declares later.
             if (nc != nullptr && nc->kind != ck_template_param && nc->source_corresp.name != nullptr)
             {
-                const char* n = nc->source_corresp.name;
+                const char* n {nc->source_corresp.name};
                 if (sc.loop_names.count(n))
                 {
                     scan_report(sc, Diag::invariant_shadowed_by_loop_variable, e->position, {n});
@@ -962,7 +963,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
             // A call of `cerastes::old` that depends on a template parameter is a
             // constant that names the callee (tpck_unknown_function, or tpck_template_ref
             // for old<T>(x)); in an instance the call is resolved and found above.
-            const char* callee = dependent_spec_callee(e->variant.constant.ptr);
+            const char* callee {dependent_spec_callee(e->variant.constant.ptr)};
             if (sc.annot != Annot::ensures && callee != nullptr && std::strcmp(callee, "old") == 0)
             {
                 scan_report(sc, Diag::old_outside_ensures, e->position);
@@ -971,7 +972,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
         }
         case enk_variable:
         {
-            a_variable_ptr v = e->variant.variable.ptr;
+            a_variable_ptr v {e->variant.variable.ptr};
             if (v && v->source_corresp.name && sc.loop_names.count(v->source_corresp.name) && !sc.lambda_vars.count(v))
             {
                 scan_report(sc, Diag::invariant_shadowed_by_loop_variable, e->position, {v->source_corresp.name});
@@ -987,7 +988,7 @@ void scan_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
         }
         case enk_lambda:
         {
-            a_lambda_ptr l = e->variant.init.source.lambda;
+            a_lambda_ptr l {e->variant.init.source.lambda};
             if (l && (l->is_generic || l->has_template_param_list))
             {
                 scan_report(sc, Diag::generic_lambda_in_annotation, e->position);
@@ -1016,7 +1017,7 @@ void scan_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb)
     g_exempt_constants.insert(c);
     if (c->expr != nullptr && c->source_corresp.name == nullptr)
     {
-        if (tb->shared_expr_budget != 0 && --tb->shared_expr_budget == 0)
+        if (tb->shared_expr_budget != 0U && --tb->shared_expr_budget == 0U)
         {
             tb->terminate = TRUE;
             return;
@@ -1037,7 +1038,7 @@ void scan_expression(an_expr_node_ptr root, Scan& sc)
     {
         return;
     }
-    Scan* saved = g_scan;
+    Scan* saved {g_scan};
     g_scan = &sc;
     an_expr_or_stmt_traversal_block tb;
     clear_expr_or_stmt_traversal_block(&tb);
@@ -1048,7 +1049,7 @@ void scan_expression(an_expr_node_ptr root, Scan& sc)
     tb.process_expressions_for_constants = FALSE;
     tb.shared_expr_budget = budget();
     traverse_expr(root, &tb);
-    if (tb.terminate && tb.shared_expr_budget == 0)
+    if (tb.terminate && tb.shared_expr_budget == 0U)
     {
         scan_report(sc, Diag::analysis_limit_reached, root->position, {"the budget of shared expressions"});
     }
@@ -1059,7 +1060,7 @@ void scan_expression(an_expr_node_ptr root, Scan& sc)
 
 an_expr_node_ptr strip_to_call_candidate(an_expr_node_ptr e)
 {
-    for (int guard = 0; e && guard < 32; ++guard)
+    for (int guard {0}; e && guard < 32; ++guard)
     {
         if (e->kind == enk_operation && e->variant.operation.kind == eok_parens && e->variant.operation.operands)
         {
@@ -1094,14 +1095,14 @@ bool dependent(an_expr_node_ptr e)
 
 void check_fold(an_attribute_ptr a, an_expr_node_ptr root, const std::string& context)
 {
-    const std::string what = a->name ? a->name : "fold";
-    an_expr_node_ptr e = strip_to_call_candidate(root);
+    const std::string what {a->name ? a->name : "fold"};
+    an_expr_node_ptr e {strip_to_call_candidate(root)};
     if (e == nullptr)
     {
         return;
     }
-    const bool is_call = e->kind == enk_operation && is_call_kind(e->variant.operation.kind) &&
-                         !e->variant.operation.call_uses_operator_syntax;
+    const bool is_call {e->kind == enk_operation && is_call_kind(e->variant.operation.kind) &&
+                        !e->variant.operation.call_uses_operator_syntax};
     if (!is_call)
     {
         if (dependent(e))
@@ -1111,10 +1112,10 @@ void check_fold(an_attribute_ptr a, an_expr_node_ptr root, const std::string& co
         report(Diag::fold_argument_not_call, e->position, {what}, context);
         return;
     }
-    a_routine_ptr callee = direct_callee(e);
+    a_routine_ptr callee {direct_callee(e)};
     if (callee == nullptr)
     {
-        an_expr_node_ptr first = e->variant.operation.operands;
+        an_expr_node_ptr first {e->variant.operation.operands};
         if (dependent(e) || dependent(first))
         {
             return; // a dependent callee: decided in each instance
@@ -1132,7 +1133,7 @@ void check_fold(an_attribute_ptr a, an_expr_node_ptr root, const std::string& co
 
 void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr stmt)
 {
-    Annot k = classify(a);
+    Annot k {classify(a)};
     if (k == Annot::none)
     {
         return;
@@ -1147,9 +1148,9 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
     {
         return;
     }
-    const std::string context = instance_context(owner);
+    const std::string context {instance_context(owner)};
     // `decreases` before a loop is the loop's measure (like `invariant`); on a function it is a contract.
-    const bool function_form = is_contract(k) && stmt == nullptr;
+    const bool function_form {is_contract(k) && stmt == nullptr};
     if (function_form && a->syntactic_location != al_post_func)
     {
         report(Diag::contract_not_after_parameters, a->position, {a->name}, context);
@@ -1174,7 +1175,7 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
         }
         if (stmt->kind == stmk_for)
         {
-            a_for_loop_ptr f = stmt->variant.for_loop.extra_info;
+            a_for_loop_ptr f {stmt->variant.for_loop.extra_info};
             if (f && f->for_init_scope)
             {
                 add_scope_variables(f->for_init_scope, &sc.loop_names, nullptr);
@@ -1182,7 +1183,7 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
         }
         else if (stmt->kind == stmk_range_based_for)
         {
-            a_range_based_for_loop_ptr f = stmt->variant.range_based_for_loop.extra_info;
+            a_range_based_for_loop_ptr f {stmt->variant.range_based_for_loop.extra_info};
             if (f && f->iterator && f->iterator->source_corresp.name)
             {
                 sc.loop_names.insert(f->iterator->source_corresp.name);
@@ -1221,7 +1222,7 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
     // Fail closed (invariant 3): a part of the tree that the printer has no line
     // for, a parameter reference that the convention does not explain, a shared
     // node, a tree too deep, a lambda that is not a single return.
-    bool side_effect_reported = false;
+    bool side_effect_reported {false};
     for (const auto& r : sc.reported)
     {
         if (r.first == static_cast<int>(Diag::annotation_side_effect))
@@ -1249,13 +1250,13 @@ void note_lambda(a_lambda_ptr l)
     {
         return;
     }
-    a_routine_ptr r = l->lambda_routine;
+    a_routine_ptr r {l->lambda_routine};
     if (r == nullptr)
     {
         return;
     }
     g_lambda_routines.insert(r);
-    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+    for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
     {
         if (is_registered_cerastes(a))
         {
@@ -1270,14 +1271,14 @@ void note_lambda(a_lambda_ptr l)
 // self-test perturbs the data, not the test: it appends a parameter to the list.
 bool has_pack_before_last(a_routine_ptr r)
 {
-    a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+    a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
     if (rt == nullptr || rt->kind != tk_routine)
     {
         return false;
     }
-    a_routine_type_supplement_ptr x = rt->variant.routine.extra_info;
+    a_routine_type_supplement_ptr x {rt->variant.routine.extra_info};
     std::vector<bool> is_pack;
-    for (a_param_type_ptr p = x ? x->param_type_list : nullptr; p; p = p->next)
+    for (a_param_type_ptr p {x ? x->param_type_list : nullptr}; p; p = p->next)
     {
         is_pack.push_back(p->is_parameter_pack);
     }
@@ -1285,7 +1286,7 @@ bool has_pack_before_last(a_routine_ptr r)
     {
         is_pack.push_back(false);
     }
-    for (size_t i = 0; i + 1 < is_pack.size(); ++i)
+    for (size_t i {0U}; i + 1U < is_pack.size(); ++i)
     {
         if (is_pack[i])
         {
@@ -1302,7 +1303,7 @@ bool has_pack_before_last(a_routine_ptr r)
 DiagPos module_declaration_position()
 {
     DiagPos p;
-    a_source_file_ptr f = il_header.primary_source_file;
+    a_source_file_ptr f {il_header.primary_source_file};
     if (f == nullptr || f->full_name == nullptr)
     {
         return p;
@@ -1310,13 +1311,13 @@ DiagPos module_declaration_position()
     p.known = true;
     p.file = f->file_name ? f->file_name : f->full_name;
     p.full_name = f->full_name;
-    p.line = 1;
-    p.col = 0;
+    p.line = 1U;
+    p.col = 0U;
     std::ifstream in(f->full_name);
     std::string line;
     auto word = [&](size_t& i, const char* w)
     {
-        size_t n = std::strlen(w);
+        size_t n {std::strlen(w)};
         if (line.compare(i, n, w) != 0)
         {
             return false;
@@ -1328,14 +1329,14 @@ DiagPos module_declaration_position()
         i += n;
         return true;
     };
-    for (unsigned long n = 1; std::getline(in, line); ++n)
+    for (unsigned long n {1U}; std::getline(in, line); ++n)
     {
-        size_t i = 0;
+        size_t i {0U};
         while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i])))
         {
             ++i;
         }
-        const size_t start = i;
+        const size_t start {i};
         if (word(i, "export"))
         {
             while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i])))
@@ -1354,7 +1355,7 @@ DiagPos module_declaration_position()
         if (i < line.size() && (std::isalpha(static_cast<unsigned char>(line[i])) || line[i] == '_'))
         {
             p.line = n;
-            p.col = start + 1;
+            p.col = start + 1U;
             break;
         }
     }
@@ -1372,7 +1373,7 @@ void check_modules()
     {
         report_at(Diag::modules_unsupported, module_declaration_position());
     }
-    for (a_module_import_decl_ptr i = il_header.imported_modules; i; i = i->next)
+    for (a_module_import_decl_ptr i {il_header.imported_modules}; i; i = i->next)
     {
         if (!i->impl_unit_importing_self)
         {
@@ -1390,14 +1391,14 @@ void check_modules()
 // directive of that shape is an error even in a skipped #if block.  A file that
 // cannot be read, or an include tree deeper than the cap, is an error too (the
 // check could not be made).
-constexpr int kIncludeDepthCap = 256;
+constexpr int kIncludeDepthCap {256};
 
 void report_scan_incomplete(const std::string& why, a_source_file_ptr f)
 {
     DiagPos p;
     p.known = true;
-    p.line = 1;
-    p.col = 0;
+    p.line = 1U;
+    p.col = 0U;
     p.file = f && f->file_name ? f->file_name : "";
     p.full_name = f && f->full_name ? f->full_name : "";
     report_at(Diag::source_scan_incomplete, p, {why});
@@ -1424,16 +1425,16 @@ void scan_file_for_macro_change(a_source_file_ptr f)
     // Translation phase 2: backslash-newline splices are removed.
     std::string spliced;
     spliced.reserve(raw.size());
-    for (size_t i = 0; i < raw.size(); ++i)
+    for (size_t i {0U}; i < raw.size(); ++i)
     {
-        if (raw[i] == '\\' && i + 1 < raw.size() && raw[i + 1] == '\n')
+        if (raw[i] == '\\' && i + 1U < raw.size() && raw[i + 1U] == '\n')
         {
             ++i;
             continue;
         }
-        if (raw[i] == '\\' && i + 2 < raw.size() && raw[i + 1] == '\r' && raw[i + 2] == '\n')
+        if (raw[i] == '\\' && i + 2U < raw.size() && raw[i + 1U] == '\r' && raw[i + 2U] == '\n')
         {
-            i += 2;
+            i += 2U;
             continue;
         }
         spliced += raw[i];
@@ -1448,22 +1449,23 @@ void scan_file_for_macro_change(a_source_file_ptr f)
     std::vector<std::pair<unsigned long, unsigned long>> where;
     std::string text;
     {
-        unsigned long line = 1, col = 1;
+        unsigned long line {1U};
+        unsigned long col {1U};
         where.reserve(raw.size());
-        for (size_t i = 0; i < raw.size(); ++i)
+        for (size_t i {0U}; i < raw.size(); ++i)
         {
-            if (raw[i] == '\\' && i + 1 < raw.size() && raw[i + 1] == '\n')
+            if (raw[i] == '\\' && i + 1U < raw.size() && raw[i + 1U] == '\n')
             {
                 ++line;
-                col = 1;
+                col = 1U;
                 ++i;
                 continue;
             }
-            if (raw[i] == '\\' && i + 2 < raw.size() && raw[i + 1] == '\r' && raw[i + 2] == '\n')
+            if (raw[i] == '\\' && i + 2U < raw.size() && raw[i + 1U] == '\r' && raw[i + 2U] == '\n')
             {
                 ++line;
-                col = 1;
-                i += 2;
+                col = 1U;
+                i += 2U;
                 continue;
             }
             text += raw[i];
@@ -1471,7 +1473,7 @@ void scan_file_for_macro_change(a_source_file_ptr f)
             if (raw[i] == '\n')
             {
                 ++line;
-                col = 1;
+                col = 1U;
             }
             else
             {
@@ -1483,16 +1485,16 @@ void scan_file_for_macro_change(a_source_file_ptr f)
     // lines: the directive continues after it); the newlines inside it go.
     std::string code;
     std::vector<std::pair<unsigned long, unsigned long>> cwhere;
-    for (size_t i = 0; i < text.size(); ++i)
+    for (size_t i {0U}; i < text.size(); ++i)
     {
-        if (text.compare(i, 2, "/*") == 0)
+        if (text.compare(i, 2U, "/*") == 0)
         {
-            size_t end = text.find("*/", i + 2);
+            size_t end {text.find("*/", i + 2U)};
             code += ' ';
             cwhere.push_back(where[i]);
-            i = end == std::string::npos ? text.size() : end + 1;
+            i = end == std::string::npos ? text.size() : end + 1U;
         }
-        else if (text.compare(i, 2, "//") == 0)
+        else if (text.compare(i, 2U, "//") == 0)
         {
             while (i < text.size() && text[i] != '\n')
             {
@@ -1507,22 +1509,22 @@ void scan_file_for_macro_change(a_source_file_ptr f)
         }
     }
     // Directives: logical lines of the comment-free text.
-    size_t pos = 0;
+    size_t pos {0U};
     while (pos < code.size())
     {
-        size_t eol = code.find('\n', pos);
+        size_t eol {code.find('\n', pos)};
         if (eol == std::string::npos)
         {
             eol = code.size();
         }
-        const std::string line = code.substr(pos, eol - pos);
-        const size_t base = pos;
-        pos = eol + 1;
+        const std::string line {code.substr(pos, eol - pos)};
+        const size_t base {pos};
+        pos = eol + 1U;
         if (line.find("__CERASTES__") == std::string::npos)
         {
             continue;
         }
-        size_t i = 0;
+        size_t i {0U};
         auto skip_ws = [&]
         {
             while (i < line.size() &&
@@ -1532,41 +1534,41 @@ void scan_file_for_macro_change(a_source_file_ptr f)
             }
         };
         skip_ws();
-        const size_t hash = i;
+        const size_t hash {i};
         if (i < line.size() && line[i] == '#')
         {
             ++i;
         }
-        else if (line.compare(i, 2, "%:") == 0)
+        else if (line.compare(i, 2U, "%:") == 0)
         {
-            i += 2;
+            i += 2U;
         }
         else
         {
             continue;
         }
         skip_ws();
-        const char* what = nullptr;
-        if (line.compare(i, 5, "undef") == 0)
+        const char* what {nullptr};
+        if (line.compare(i, 5U, "undef") == 0)
         {
             what = "undefined";
-            i += 5;
+            i += 5U;
         }
-        else if (line.compare(i, 6, "define") == 0)
+        else if (line.compare(i, 6U, "define") == 0)
         {
             what = "redefined";
-            i += 6;
+            i += 6U;
         }
         if (what == nullptr || i >= line.size() || !std::isspace(static_cast<unsigned char>(line[i])))
         {
             continue;
         }
         skip_ws();
-        if (line.compare(i, 12, "__CERASTES__") != 0)
+        if (line.compare(i, 12U, "__CERASTES__") != 0)
         {
             continue;
         }
-        if (i + 12 < line.size() && (std::isalnum(static_cast<unsigned char>(line[i + 12])) || line[i + 12] == '_'))
+        if (i + 12U < line.size() && (std::isalnum(static_cast<unsigned char>(line[i + 12U])) || line[i + 12U] == '_'))
         {
             continue;
         }
@@ -1597,7 +1599,7 @@ void scan_files_for_macro_change(a_source_file_ptr f, int depth)
 
 void check_macro_unchanged()
 {
-    a_source_file_ptr primary = il_header.primary_source_file;
+    a_source_file_ptr primary {il_header.primary_source_file};
     if (primary == nullptr)
     {
         return;
@@ -1621,41 +1623,41 @@ void check_macro_unchanged()
 // such options themselves; this keeps the front end honest when run directly).
 const std::string& real_cerastes_header()
 {
-    static const std::string path = canonical_path(std::string(CERASTES_SOURCE_INCLUDE_DIR) + "/cerastes.h");
+    static const std::string path {canonical_path(std::string(CERASTES_SOURCE_INCLUDE_DIR) + "/cerastes.h")};
     return path;
 }
 
 bool is_protected_macro_name(const std::string& n, const std::set<std::string>& predefined)
 {
-    static const char* const fixed[] = {"cerastes",
-                                        "requires",
-                                        "ensures",
-                                        "invariant",
-                                        "check",
-                                        "fold",
-                                        "unfold",
-                                        "predicate",
-                                        "pure",
-                                        "decreases",
-                                        "old",
-                                        "owns",
-                                        "reads",
-                                        "live",
-                                        "forall",
-                                        "owns_range",
-                                        "CERASTES_H",
-                                        "owning",
-                                        "uninit",
-                                        "ref_to_uninit",
-                                        "must_init",
-                                        "cerastes_owns",
-                                        "cerastes_reads",
-                                        "cerastes_live",
-                                        "cerastes_old_",
-                                        "cerastes_old",
-                                        "owns_block",
-                                        "cerastes_owns_block",
-                                        "cerastes_zeroed"};
+    static const char* const fixed[] {"cerastes",
+                                      "requires",
+                                      "ensures",
+                                      "invariant",
+                                      "check",
+                                      "fold",
+                                      "unfold",
+                                      "predicate",
+                                      "pure",
+                                      "decreases",
+                                      "old",
+                                      "owns",
+                                      "reads",
+                                      "live",
+                                      "forall",
+                                      "owns_range",
+                                      "CERASTES_H",
+                                      "owning",
+                                      "uninit",
+                                      "ref_to_uninit",
+                                      "must_init",
+                                      "cerastes_owns",
+                                      "cerastes_reads",
+                                      "cerastes_live",
+                                      "cerastes_old_",
+                                      "cerastes_old",
+                                      "owns_block",
+                                      "cerastes_owns_block",
+                                      "cerastes_zeroed"};
     for (const char* f : fixed)
     {
         if (n == f)
@@ -1663,11 +1665,11 @@ bool is_protected_macro_name(const std::string& n, const std::set<std::string>& 
             return true;
         }
     }
-    if (n.compare(0, 9, "CERASTES_") == 0)
+    if (n.compare(0U, 9U, "CERASTES_") == 0)
     {
         return true;
     }
-    return predefined.count(n) != 0;
+    return predefined.count(n) != 0U;
 }
 
 std::string macro_name(a_macro_ptr m)
@@ -1681,13 +1683,13 @@ std::string macro_name(a_macro_ptr m)
     {
         return "";
     }
-    const char* t = m->text;
-    t += std::strncmp(t, "#undef", 6) == 0 ? 6 : std::strncmp(t, "#define", 7) == 0 ? 7 : 0;
+    const char* t {m->text};
+    t += std::strncmp(t, "#undef", 6U) == 0 ? 6 : std::strncmp(t, "#define", 7U) == 0 ? 7 : 0;
     while (*t == ' ' || *t == '\t')
     {
         ++t;
     }
-    const char* e = t;
+    const char* e {t};
     while (std::isalnum(static_cast<unsigned char>(*e)) || *e == '_')
     {
         ++e;
@@ -1698,14 +1700,14 @@ std::string macro_name(a_macro_ptr m)
 // The logical file record of a directive (a `#pragma GCC system_header` starts a record of its own), or null.
 a_source_file_ptr directive_file(a_macro_ptr m)
 {
-    if (m->is_command_line_definition || m->source_corresp.decl_position.seq == 0)
+    if (m->is_command_line_definition || m->source_corresp.decl_position.seq == 0U)
     {
         return nullptr;
     }
-    a_const_char* file = nullptr;
-    a_const_char* full = nullptr;
-    a_line_number line = 0;
-    a_boolean at_end = FALSE;
+    a_const_char* file {nullptr};
+    a_const_char* full {nullptr};
+    a_line_number line {0U};
+    a_boolean at_end {FALSE};
     return conv_seq_to_file_and_line(m->source_corresp.decl_position.seq, &file, &full, &line, &at_end);
 }
 
@@ -1715,7 +1717,7 @@ a_source_file_ptr directive_file(a_macro_ptr m)
 // files (audit, S5).
 bool directive_in_system_file(a_macro_ptr m)
 {
-    a_source_file_ptr f = directive_file(m);
+    a_source_file_ptr f {directive_file(m)};
     if (f == nullptr || !f->from_system_include_dir)
     {
         return false;
@@ -1745,11 +1747,11 @@ void check_macros_in_il()
     std::set<std::string> predefined;
     // the last predefinition of each name: the state user code starts in
     std::map<std::string, a_macro_ptr> predefinition;
-    for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next)
+    for (a_macro_ptr m {il_header.macros}; m != nullptr; m = m->next)
     {
         if (m->is_predefined && !m->is_undef)
         {
-            const std::string n = macro_name(m);
+            const std::string n {macro_name(m)};
             if (!n.empty())
             {
                 predefined.insert(n), predefinition[n] = m;
@@ -1763,24 +1765,24 @@ void check_macros_in_il()
     // "c ## L"; string literals are kept as written), so the comparison is exact.
     auto is_predefinition_text = [&](a_macro_ptr m, const std::string& n)
     {
-        auto p = predefinition.find(n);
+        auto p {predefinition.find(n)};
         return p != predefinition.end() && !m->is_undef && m->object_like == p->second->object_like &&
                m->text != nullptr && p->second->text != nullptr && p->second->text[0] != '\0' &&
                std::strcmp(m->text, p->second->text) == 0;
     };
     std::set<a_macro_ptr> no_change;
-    for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next)
+    for (a_macro_ptr m {il_header.macros}; m != nullptr; m = m->next)
     {
         if (m->is_predefined || !m->is_undef || !directive_in_system_file(m))
         {
             continue;
         }
-        const std::string n = macro_name(m);
-        if (n.empty() || predefinition.count(n) == 0)
+        const std::string n {macro_name(m)};
+        if (n.empty() || predefinition.count(n) == 0U)
         {
             continue;
         }
-        a_macro_ptr next = m->next;
+        a_macro_ptr next {m->next};
         while (next != nullptr && macro_name(next) != n)
         {
             next = next->next;
@@ -1789,12 +1791,13 @@ void check_macros_in_il()
         {
             continue;
         }
-        a_source_file_ptr f = directive_file(m);
+        a_source_file_ptr f {directive_file(m)};
         if (f == nullptr || directive_file(next) != f)
         {
             continue; // the same inclusion, the same record
         }
-        const a_seq_number from = m->source_corresp.decl_position.seq, to = next->source_corresp.decl_position.seq;
+        const a_seq_number from {m->source_corresp.decl_position.seq};
+        const a_seq_number to {next->source_corresp.decl_position.seq};
         if (to <= from || file_starts_between(il_header.primary_source_file, from, to))
         {
             continue;
@@ -1802,14 +1805,14 @@ void check_macros_in_il()
         no_change.insert(m);
         no_change.insert(next);
     }
-    const std::string& header = real_cerastes_header();
-    for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next)
+    const std::string& header {real_cerastes_header()};
+    for (a_macro_ptr m {il_header.macros}; m != nullptr; m = m->next)
     {
         if (m->is_predefined && !m->is_undef)
         {
             continue; // the predefinition itself
         }
-        const std::string n = macro_name(m);
+        const std::string n {macro_name(m)};
         if (n.empty() || !is_protected_macro_name(n, predefined))
         {
             continue;
@@ -1819,13 +1822,13 @@ void check_macros_in_il()
         {
             continue;
         }
-        if (no_change.count(m) != 0)
+        if (no_change.count(m) != 0U)
         {
             continue;
         }
         if (!m->is_command_line_definition)
         {
-            const std::string where = physical_path(m->source_corresp.decl_position);
+            const std::string where {physical_path(m->source_corresp.decl_position)};
             if (!header.empty() && where == header)
             {
                 continue;
@@ -1838,10 +1841,11 @@ void check_macros_in_il()
 
 void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_template_ptr>& proto_owner)
 {
-    const std::string name = rname(r);
-    const std::string context = instance_context(r);
-    an_attribute_ptr predicate = nullptr, pure = nullptr;
-    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+    const std::string name {rname(r)};
+    const std::string context {instance_context(r)};
+    an_attribute_ptr predicate {nullptr};
+    an_attribute_ptr pure {nullptr};
+    for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
     {
         if (classify(a) == Annot::predicate && !predicate)
         {
@@ -1852,10 +1856,10 @@ void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_templa
             pure = a;
         }
     }
-    const bool is_pred = predicate != nullptr || marked(r, Annot::predicate);
-    const bool is_pure = pure != nullptr || marked(r, Annot::pure);
-    a_type_ptr ret = return_type_of(r);
-    const bool dependent_ret = ret != nullptr && is_template_dependent_type(ret);
+    const bool is_pred {predicate != nullptr || marked(r, Annot::predicate)};
+    const bool is_pure {pure != nullptr || marked(r, Annot::pure)};
+    a_type_ptr ret {return_type_of(r)};
+    const bool dependent_ret {ret != nullptr && is_template_dependent_type(ret)};
 
     // The marker of a specification function is a promise about the whole function: it goes on a function of
     // the user's own (not one declared in a system file, such as a library function, or built in), and never on a
@@ -1864,24 +1868,24 @@ void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_templa
     // of the declarations, and `on_primary_declaration` is the definition's (see the 0006 note on item 10).
     if (!is_instance(r))
     {
-        const SrcPos decl = resolve(r->source_corresp.decl_position);
-        const bool library = !decl.known || decl.in_system;
-        for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+        const SrcPos decl {resolve(r->source_corresp.decl_position)};
+        const bool library {!decl.known || decl.in_system};
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
         {
-            const Annot k = classify(a);
+            const Annot k {classify(a)};
             if (k != Annot::predicate && k != Annot::pure)
             {
                 continue;
             }
-            const char* what = a->name ? a->name : "?";
-            const bool special =
+            const char* what {a->name ? a->name : "?"};
+            const bool special {
                 r->special_kind == sfk_constructor || r->special_kind == sfk_destructor ||
-                (r->source_corresp.name != nullptr && std::strcmp(r->source_corresp.name, "operator=") == 0);
+                (r->source_corresp.name != nullptr && std::strcmp(r->source_corresp.name, "operator=") == 0)};
             if (special)
             {
                 report(Diag::spec_marker_on_special_member, a->position, {what, name}, context);
             }
-            const SrcPos where = resolve(a->position);
+            const SrcPos where {resolve(a->position)};
             if (library || (where.known && where.in_system))
             {
                 report(Diag::spec_marker_in_system_file, a->position, {what, name}, context);
@@ -1891,8 +1895,8 @@ void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_templa
 
     // Where a diagnostic about the mark points: the attribute on this routine, or
     // the routine's declaration when the mark comes from the root template only.
-    const a_source_position& mark_pos =
-        predicate ? predicate->position : (pure ? pure->position : r->source_corresp.decl_position);
+    const a_source_position& mark_pos {predicate ? predicate->position
+                                                 : (pure ? pure->position : r->source_corresp.decl_position)};
     if (predicate && pure)
     {
         report(Diag::predicate_and_pure, (pure->position.seq > predicate->position.seq ? pure : predicate)->position,
@@ -1907,11 +1911,11 @@ void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_templa
         report(Diag::pure_returns_void, pure ? pure->position : r->source_corresp.decl_position, {name}, context);
     }
     // Self-test: pretend that the return type is void (the data, not the test).
-    a_type_ptr ret_for_result_name = options().checks_selftest ? void_type() : ret;
+    a_type_ptr ret_for_result_name {options().checks_selftest ? void_type() : ret};
 
-    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+    for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
     {
-        Annot k = classify(a);
+        Annot k {classify(a)};
         if (is_contract(k))
         {
             if (is_pred)
@@ -1948,7 +1952,7 @@ void check_routine_level(a_routine_ptr r, const std::map<a_routine_ptr, a_templa
     // constructor (friends_or_originator.inherited_routine), whose contract applies.
     if (!r->is_prototype_instantiation && !r->is_inheriting_ctor)
     {
-        a_routine_ptr root = root_routine(r);
+        a_routine_ptr root {root_routine(r)};
         if (root != nullptr && !contracts_agree(root, r, /*perturb=*/options().checks_selftest))
         {
             report(Diag::contract_not_propagated, r->source_corresp.decl_position,
@@ -1973,12 +1977,12 @@ std::vector<SpecCall> g_spec_calls;
 struct BodyState
 {
     a_source_position pos {}; // where the constants of an initializer are reported
-    a_routine_ptr routine = nullptr;
-    bool spec_caller = false; // the routine is itself a specification function
+    a_routine_ptr routine {nullptr};
+    bool spec_caller {false}; // the routine is itself a specification function
     std::set<a_statement_ptr> statements;
     std::set<an_expr_node_ptr> seen;
 };
-BodyState* g_body = nullptr;
+BodyState* g_body {nullptr};
 std::set<a_statement_ptr> g_checked_statements; // statements with annotations checked in a body
 
 // The address of a specification function (a constant of kind ck_address on a
@@ -1986,8 +1990,8 @@ std::set<a_statement_ptr> g_checked_statements; // statements with annotations c
 // call through the pointer would go unseen.
 void note_spec_address_constant(a_constant_ptr c, const a_source_position& at)
 {
-    a_routine_ptr r = address_constant_routine(c);
-    if (r == nullptr || !is_spec_routine(r) || at.seq == 0)
+    a_routine_ptr r {address_constant_routine(c)};
+    if (r == nullptr || !is_spec_routine(r) || at.seq == 0U)
     {
         return;
     }
@@ -1998,7 +2002,7 @@ void note_spec_address_constant(a_constant_ptr c, const a_source_position& at)
 // of a specification function (`call<&p>(x)`).
 void note_spec_template_arguments(a_routine_ptr callee, const a_source_position& at)
 {
-    for (a_template_arg_ptr a = callee->template_arg_list; a; a = a->next)
+    for (a_template_arg_ptr a {callee->template_arg_list}; a; a = a->next)
     {
         if (a->kind == tak_nontype && !a->is_array_bound_of_unknown_type)
         {
@@ -2013,7 +2017,7 @@ void body_on_statement(a_statement_ptr s, an_expr_or_stmt_traversal_block_ptr)
     {
         return;
     }
-    for (an_attribute_ptr a = s->attributes; a; a = a->next)
+    for (an_attribute_ptr a {s->attributes}; a; a = a->next)
     {
         if (is_registered_cerastes(a))
         {
@@ -2025,7 +2029,7 @@ void body_on_statement(a_statement_ptr s, an_expr_or_stmt_traversal_block_ptr)
 
 void body_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
 {
-    BodyState& b = *g_body;
+    BodyState& b {*g_body};
     if (!b.seen.insert(e).second)
     {
         tb->suppress_subtree_walk = TRUE;
@@ -2033,7 +2037,7 @@ void body_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
     }
     if (e->kind == enk_lambda)
     {
-        a_lambda_ptr l = e->variant.init.source.lambda;
+        a_lambda_ptr l {e->variant.init.source.lambda};
         if (l)
         {
             note_lambda(l);
@@ -2051,7 +2055,7 @@ void body_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
     // is found by entity, whatever its spelling (using, qualified or not).
     if (e->kind == enk_routine)
     {
-        a_routine_ptr callee = e->variant.routine.ptr;
+        a_routine_ptr callee {e->variant.routine.ptr};
         if (callee == nullptr)
         {
             return;
@@ -2067,7 +2071,7 @@ void body_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
     {
         // A dependent call of a specification function in a template that may never be
         // instantiated: only its name is known.
-        const char* callee = dependent_spec_callee(e->variant.constant.ptr);
+        const char* callee {dependent_spec_callee(e->variant.constant.ptr)};
         if (callee != nullptr)
         {
             g_spec_calls.push_back({b.routine, e->position, std::string("cerastes::") + callee});
@@ -2081,7 +2085,7 @@ void body_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb)
     if (g_body->spec_caller)
     {
         g_exempt_constants.insert(c);
-        a_routine_ptr by_address = address_constant_routine(c);
+        a_routine_ptr by_address {address_constant_routine(c)};
         if (by_address != nullptr && rname(by_address) == "cerastes::old")
         {
             report(Diag::old_outside_ensures, c->source_corresp.decl_position);
@@ -2095,7 +2099,7 @@ void body_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb)
     // argument records a file-scope expression.
     if (c->expr != nullptr && c->source_corresp.name == nullptr && !in_file_scope(c->expr))
     {
-        if (tb->shared_expr_budget != 0 && --tb->shared_expr_budget == 0)
+        if (tb->shared_expr_budget != 0U && --tb->shared_expr_budget == 0U)
         {
             tb->terminate = TRUE;
             return;
@@ -2121,18 +2125,18 @@ void init_traversal(an_expr_or_stmt_traversal_block* tb)
 // mem-initializers and default arguments.
 void check_body(a_routine_ptr r)
 {
-    a_scope_ptr sp = body_scope(r);
+    a_scope_ptr sp {body_scope(r)};
     BodyState b;
     b.routine = r;
     b.spec_caller = marked(r, Annot::predicate) || marked(r, Annot::pure);
-    BodyState* saved = g_body;
+    BodyState* saved {g_body};
     g_body = &b;
     an_expr_or_stmt_traversal_block tb;
     init_traversal(&tb);
-    a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+    a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
     if (rt && rt->kind == tk_routine && rt->variant.routine.extra_info)
     {
-        for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p; p = p->next)
+        for (a_param_type_ptr p {rt->variant.routine.extra_info->param_type_list}; p; p = p->next)
         {
             if (p->default_arg_expr)
             {
@@ -2142,7 +2146,7 @@ void check_body(a_routine_ptr r)
     }
     if (sp != nullptr)
     {
-        for (a_constructor_init_ptr ci = sp->variant.routine.constructor_inits; ci; ci = ci->next)
+        for (a_constructor_init_ptr ci {sp->variant.routine.constructor_inits}; ci; ci = ci->next)
         {
             if (ci->initializer)
             {
@@ -2158,7 +2162,7 @@ void check_body(a_routine_ptr r)
             traverse_statement(sp->assoc_block, &tb);
         }
     }
-    if (tb.terminate && tb.shared_expr_budget == 0)
+    if (tb.terminate && tb.shared_expr_budget == 0U)
     {
         report(Diag::analysis_limit_reached, r->source_corresp.decl_position,
                {"the budget of shared expressions in \"" + rname(r) + "\""});
@@ -2171,13 +2175,13 @@ void check_body(a_routine_ptr r)
 void check_initializers()
 {
     BodyState b;
-    BodyState* saved = g_body;
+    BodyState* saved {g_body};
     g_body = &b;
     an_expr_or_stmt_traversal_block tb;
     init_traversal(&tb);
     for (a_variable_ptr v : g_c.variables)
     {
-        SrcPos pos = resolve(v->source_corresp.decl_position);
+        SrcPos pos {resolve(v->source_corresp.decl_position)};
         if (!pos.known || pos.in_system || v->compiler_generated)
         {
             continue;
@@ -2194,7 +2198,7 @@ void check_initializers()
     }
     for (a_field_ptr f : g_c.fields)
     {
-        SrcPos pos = resolve(f->source_corresp.decl_position);
+        SrcPos pos {resolve(f->source_corresp.decl_position)};
         if (!pos.known || pos.in_system)
         {
             continue;
@@ -2205,7 +2209,7 @@ void check_initializers()
             traverse_dynamic_init(f->initializer, &tb);
         }
     }
-    if (tb.terminate && tb.shared_expr_budget == 0)
+    if (tb.terminate && tb.shared_expr_budget == 0U)
     {
         report(Diag::analysis_limit_reached, null_source_position,
                {"the budget of shared expressions in the initializers"});
@@ -2231,9 +2235,9 @@ void mark_on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr tb)
     }
     if (e->kind == enk_lambda)
     {
-        a_lambda_ptr l = e->variant.init.source.lambda;
-        a_routine_ptr lr = l ? l->lambda_routine : nullptr;
-        a_scope_ptr sp = lr ? body_scope(lr) : nullptr;
+        a_lambda_ptr l {e->variant.init.source.lambda};
+        a_routine_ptr lr {l ? l->lambda_routine : nullptr};
+        a_scope_ptr sp {lr ? body_scope(lr) : nullptr};
         if (sp != nullptr && sp->assoc_block != nullptr)
         {
             traverse_statement(sp->assoc_block, tb);
@@ -2246,7 +2250,7 @@ void mark_on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb)
     g_exempt_constants.insert(c);
     if (c->expr != nullptr && c->source_corresp.name == nullptr)
     {
-        if (tb->shared_expr_budget != 0 && --tb->shared_expr_budget == 0)
+        if (tb->shared_expr_budget != 0U && --tb->shared_expr_budget == 0U)
         {
             tb->terminate = TRUE;
             return;
@@ -2282,7 +2286,7 @@ void mark_attribute_arguments(an_attribute_ptr a)
         an_expr_or_stmt_traversal_block tb;
         init_mark_traversal(&tb);
         traverse_expr(g.expr, &tb);
-        if (tb.terminate && tb.shared_expr_budget == 0)
+        if (tb.terminate && tb.shared_expr_budget == 0U)
         {
             report(Diag::analysis_limit_reached, g.expr->position,
                    {"the budget of shared expressions in an annotation"});
@@ -2292,13 +2296,13 @@ void mark_attribute_arguments(an_attribute_ptr a)
 
 void mark_spec_body(a_routine_ptr r)
 {
-    a_scope_ptr sp = body_scope(r);
+    a_scope_ptr sp {body_scope(r)};
     an_expr_or_stmt_traversal_block tb;
     init_mark_traversal(&tb);
-    a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+    a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
     if (rt && rt->kind == tk_routine && rt->variant.routine.extra_info)
     {
-        for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p; p = p->next)
+        for (a_param_type_ptr p {rt->variant.routine.extra_info->param_type_list}; p; p = p->next)
         {
             if (p->default_arg_expr)
             {
@@ -2308,7 +2312,7 @@ void mark_spec_body(a_routine_ptr r)
     }
     if (sp != nullptr)
     {
-        for (a_constructor_init_ptr ci = sp->variant.routine.constructor_inits; ci; ci = ci->next)
+        for (a_constructor_init_ptr ci {sp->variant.routine.constructor_inits}; ci; ci = ci->next)
         {
             if (ci->initializer)
             {
@@ -2324,7 +2328,7 @@ void mark_spec_body(a_routine_ptr r)
             traverse_statement(sp->assoc_block, &tb);
         }
     }
-    if (tb.terminate && tb.shared_expr_budget == 0)
+    if (tb.terminate && tb.shared_expr_budget == 0U)
     {
         report(Diag::analysis_limit_reached, r->source_corresp.decl_position,
                {"the budget of shared expressions in \"" + rname(r) + "\""});
@@ -2339,7 +2343,7 @@ void mark_exempt_nodes()
     }
     for (a_routine_ptr r : g_c.routines)
     {
-        for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
         {
             mark_attribute_arguments(a);
         }
@@ -2350,7 +2354,7 @@ void mark_exempt_nodes()
     }
     for (a_statement_ptr st : g_c.annotated_statements)
     {
-        for (an_attribute_ptr a = st->attributes; a; a = a->next)
+        for (an_attribute_ptr a {st->attributes}; a; a = a->next)
         {
             mark_attribute_arguments(a);
         }
@@ -2360,7 +2364,7 @@ void mark_exempt_nodes()
 // The class type a variable's type reaches through typedefs, arrays, pointers and references, or null.
 a_type_ptr class_behind(a_type_ptr t)
 {
-    for (int guard = 0; t != nullptr && guard < 32; ++guard)
+    for (int guard {0}; t != nullptr && guard < 32; ++guard)
     {
         t = skip_typerefs(t);
         if (t->kind == tk_array)
@@ -2384,13 +2388,13 @@ a_type_ptr class_behind(a_type_ptr t)
 bool is_spec_routine_cached(a_routine_ptr r)
 {
     static std::map<a_routine_ptr, bool> cache;
-    auto it = cache.find(r);
+    auto it {cache.find(r)};
     if (it != cache.end())
     {
         return it->second;
     }
-    bool result = marked(r, Annot::predicate) || marked(r, Annot::pure) ||
-                  (is_spec_name(r->source_corresp.name) && is_spec_routine(r));
+    bool result {marked(r, Annot::predicate) || marked(r, Annot::pure) ||
+                 (is_spec_name(r->source_corresp.name) && is_spec_routine(r))};
     cache[r] = result;
     return result;
 }
@@ -2402,7 +2406,7 @@ void check_all_spec_references()
     std::set<std::tuple<std::string, unsigned long, std::string>> done;
     for (const SpecCall& c : g_spec_calls)
     {
-        SrcPos p = resolve(c.at);
+        SrcPos p {resolve(c.at)};
         if (p.known)
         {
             done.insert({p.file, p.line, c.callee});
@@ -2410,13 +2414,13 @@ void check_all_spec_references()
     }
     auto fresh = [&](const a_source_position& at, const std::string& callee)
     {
-        SrcPos p = resolve(at);
+        SrcPos p {resolve(at)};
         return !p.known || done.insert({p.file, p.line, callee}).second;
     };
     for (an_expr_node_ptr e : g_c.routine_nodes)
     {
         check_namespaced_spec(e);
-        a_routine_ptr callee = e->variant.routine.ptr;
+        a_routine_ptr callee {e->variant.routine.ptr};
         if (callee == nullptr || !is_spec_routine_cached(callee))
         {
             continue;
@@ -2427,7 +2431,7 @@ void check_all_spec_references()
         }
         // A node with no position is compiler-generated (a copy of a template argument or a default argument whose
         // original, written in the source, has its own node and position).
-        if (e->position.seq == 0)
+        if (e->position.seq == 0U)
         {
             continue;
         }
@@ -2439,8 +2443,8 @@ void check_all_spec_references()
     // `&f` and `&S::f` (R4b): constants that name a specification function, wherever they are used.
     for (a_constant_ptr c : g_c.address_constants)
     {
-        a_routine_ptr r = address_constant_routine(c);
-        if (r == nullptr || !is_spec_routine_cached(r) || c->source_corresp.decl_position.seq == 0)
+        a_routine_ptr r {address_constant_routine(c)};
+        if (r == nullptr || !is_spec_routine_cached(r) || c->source_corresp.decl_position.seq == 0U)
         {
             continue;
         }
@@ -2459,13 +2463,13 @@ void check_all_spec_references()
     std::map<a_type_ptr, std::string> flagged;
     for (a_type_ptr t : g_c.class_instances)
     {
-        for (a_template_arg_ptr a = t->variant.class_struct_union.extra_info->template_arg_list; a; a = a->next)
+        for (a_template_arg_ptr a {t->variant.class_struct_union.extra_info->template_arg_list}; a; a = a->next)
         {
             if (a->kind != tak_nontype || a->is_array_bound_of_unknown_type)
             {
                 continue;
             }
-            a_routine_ptr r = address_constant_routine(a->variant.constant);
+            a_routine_ptr r {address_constant_routine(a->variant.constant)};
             if (r != nullptr && is_spec_routine_cached(r))
             {
                 flagged[t] = rname(r);
@@ -2475,10 +2479,10 @@ void check_all_spec_references()
     std::set<a_type_ptr> placed;
     for (a_variable_ptr v : g_c.all_variables)
     {
-        a_type_ptr t = class_behind(v->type);
-        auto it = t ? flagged.find(t) : flagged.end();
+        a_type_ptr t {class_behind(v->type)};
+        auto it {t ? flagged.find(t) : flagged.end()};
         // compiler-generated variables (the parameters of implicit members) have no position
-        if (it == flagged.end() || v->source_corresp.decl_position.seq == 0)
+        if (it == flagged.end() || v->source_corresp.decl_position.seq == 0U)
         {
             continue;
         }
@@ -2500,7 +2504,7 @@ void check_all_spec_references()
             continue;
         }
         // Another type entry of an instance already placed (a qualified or reference variant, with no position)
-        if (f.first->source_corresp.decl_position.seq == 0 && placed_callees.count(f.second))
+        if (f.first->source_corresp.decl_position.seq == 0U && placed_callees.count(f.second))
         {
             continue;
         }
@@ -2528,12 +2532,12 @@ void check_in_class_specialization(a_routine_ptr r)
     {
         return;
     }
-    bool contract = has_contract(r);
-    const char* name = r->source_corresp.name;
-    a_scope_ptr cs = r->source_corresp.parent_scope;
+    bool contract {has_contract(r)};
+    const char* name {r->source_corresp.name};
+    a_scope_ptr cs {r->source_corresp.parent_scope};
     if (!contract && name != nullptr && cs != nullptr && cs->kind == sck_class_struct_union)
     {
-        for (a_routine_ptr m = cs->routines; m != nullptr && !contract; m = m->next)
+        for (a_routine_ptr m {cs->routines}; m != nullptr && !contract; m = m->next)
         {
             if (m != r && !m->is_in_class_specialization && m->source_corresp.name != nullptr &&
                 std::strcmp(m->source_corresp.name, name) == 0 && has_contract(m))
@@ -2544,7 +2548,7 @@ void check_in_class_specialization(a_routine_ptr r)
         if (!contract)
         {
             // the primary may be a template that is only reachable through the root template of this routine
-            a_routine_ptr root = root_routine(r);
+            a_routine_ptr root {root_routine(r)};
             if (root != nullptr && root != r && has_contract(root))
             {
                 contract = true;
@@ -2569,7 +2573,7 @@ void check_annotations()
     g_handled_nodes.clear();
     g_exempt_constants.clear();
     walk_file_scope_il(collect, nullptr, nullptr, nullptr, nullptr, /*clear_fe_pointers=*/FALSE);
-    for (a_memory_region_number region = FILE_SCOPE_REGION_NUMBER + 1; region <= highest_used_region_number; ++region)
+    for (a_memory_region_number region {FILE_SCOPE_REGION_NUMBER + 1}; region <= highest_used_region_number; ++region)
     {
         if (mem_region_table[region] == nullptr)
         {
@@ -2583,7 +2587,7 @@ void check_annotations()
         {
             continue;
         }
-        a_template_ptr def = t->definition_template;
+        a_template_ptr def {t->definition_template};
         if (def && def->prototype_instantiation.routine)
         {
             g_proto_owner[def->prototype_instantiation.routine] = def;
@@ -2593,7 +2597,7 @@ void check_annotations()
     // Prototypes and plain routines first, instances after: a diagnostic found in
     // both is recorded once, without the instantiation context.
     std::vector<a_routine_ptr> order;
-    for (int pass = 0; pass < 2; ++pass)
+    for (int pass {0}; pass < 2; ++pass)
     {
         for (a_routine_ptr r : g_c.routines)
         {
@@ -2611,8 +2615,8 @@ void check_annotations()
     std::vector<a_routine_ptr> checked;
     for (a_routine_ptr r : order)
     {
-        SrcPos pos = resolve(r->source_corresp.decl_position);
-        const bool attributed = has_cerastes_attribute(r);
+        SrcPos pos {resolve(r->source_corresp.decl_position)};
+        const bool attributed {has_cerastes_attribute(r)};
         if (!pos.known)
         {
             if (!attributed)
@@ -2621,7 +2625,7 @@ void check_annotations()
             }
             // An annotated routine that cannot be placed in the source: checked, and an
             // error (it cannot be vouched for).
-            for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+            for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
             {
                 if (is_registered_cerastes(a))
                 {
@@ -2656,7 +2660,7 @@ void check_annotations()
         {
             continue;
         }
-        for (an_attribute_ptr a = st->attributes; a; a = a->next)
+        for (an_attribute_ptr a {st->attributes}; a; a = a->next)
         {
             if (is_registered_cerastes(a))
             {
@@ -2671,7 +2675,7 @@ void check_annotations()
         // closure class), not by where the lambda is written.
         if (r->is_lambda_body || g_lambda_routines.count(r))
         {
-            for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+            for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
             {
                 if (is_registered_cerastes(a))
                 {
@@ -2681,7 +2685,7 @@ void check_annotations()
             continue;
         }
         check_routine_level(r, g_proto_owner);
-        for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
         {
             if (is_registered_cerastes(a))
             {

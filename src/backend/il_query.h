@@ -91,8 +91,8 @@ struct IlEntities
     {
         a_source_position position;
         // the type as the declaration wrote it (a typedef'd function type stays a typeref)
-        a_type_ptr declared_type = nullptr;
-        an_attribute_ptr attributes = nullptr;
+        a_type_ptr declared_type {nullptr};
+        an_attribute_ptr attributes {nullptr};
     };
     std::map<a_routine_ptr, std::vector<SecondaryDecl>> secondary_decls;
     // Decision 0041 item 2: the other declarations of a file-scope variable (a_src_seq_secondary_decl entries whose entity is the variable): one in a

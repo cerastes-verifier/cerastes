@@ -17,9 +17,9 @@ namespace {
 // il_to_str writes through callbacks with no user data, so the target string
 // and the active control block are file-locals.  Single-threaded by
 // construction.
-std::string* g_target = nullptr;
-an_il_to_str_output_control_block* g_octl = nullptr;
-bool g_in_type = false; // rendering through form_type (see name_hook)
+std::string* g_target {nullptr};
+an_il_to_str_output_control_block* g_octl {nullptr};
+bool g_in_type {false}; // rendering through form_type (see name_hook)
 
 void sink(a_const_char* s, an_il_to_str_output_control_block_ptr)
 {
@@ -54,10 +54,10 @@ void put_closure(a_type_ptr t)
 // default, not by this hook.
 void name_hook(char* entry, an_il_entry_kind kind)
 {
-    auto saved = g_octl->output_name;
+    auto saved {g_octl->output_name};
     if (kind == iek_type)
     {
-        auto t = reinterpret_cast<a_type_ptr>(entry);
+        auto t {reinterpret_cast<a_type_ptr>(entry)};
         if (is_closure_class(t))
         {
             put_closure(t);
@@ -91,7 +91,7 @@ void class_qualifier_hook(a_type_ptr type, a_boolean for_ptr_to_data_member)
         g_octl->output_str("::", g_octl);
         return;
     }
-    auto saved = g_octl->output_class_qualifier;
+    auto saved {g_octl->output_class_qualifier};
     g_octl->output_class_qualifier = nullptr;
     a_parent_class_or_namespace parent;
     parent.class_type = type;
@@ -105,8 +105,8 @@ template <class Fn>
 std::string capture(Fn fn)
 {
     std::string out;
-    std::string* saved = g_target;
-    an_il_to_str_output_control_block* saved_octl = g_octl;
+    std::string* saved {g_target};
+    an_il_to_str_output_control_block* saved_octl {g_octl};
     g_target = &out;
     an_il_to_str_output_control_block octl;
     clear_il_to_str_output_control_block(&octl);
@@ -125,12 +125,12 @@ std::string capture(Fn fn)
 
 std::string position_label(const a_source_position& p)
 {
-    DiagPos d = diag_position(p);
+    DiagPos d {diag_position(p)};
     if (!d.known)
     {
         return "-";
     }
-    std::string s = "L" + std::to_string(d.line) + ":" + std::to_string(d.col);
+    std::string s {"L" + std::to_string(d.line) + ":" + std::to_string(d.col)};
     return d.in_primary ? s : d.file + ":" + s;
 }
 
@@ -143,7 +143,7 @@ bool seq_is_in_system_file(a_seq_number seq)
 {
     if (verify_config().on)
     {
-        return seq != 0 && !seq_in_verified_file(seq);
+        return seq != 0U && !seq_in_verified_file(seq);
     }
     return seq_is_in_system_header(seq);
 }
@@ -151,16 +151,16 @@ bool seq_is_in_system_file(a_seq_number seq)
 SrcPos resolve(const a_source_position& p)
 {
     SrcPos r;
-    if (p.seq == 0)
+    if (p.seq == 0U)
     {
         return r;
     }
     r.known = true;
     r.col = p.column;
-    a_const_char* file = nullptr;
-    a_const_char* full = nullptr;
-    a_line_number line = 0;
-    a_boolean at_end = FALSE;
+    a_const_char* file {nullptr};
+    a_const_char* full {nullptr};
+    a_line_number line {0U};
+    a_boolean at_end {FALSE};
     conv_seq_to_file_and_line(p.seq, &file, &full, &line, &at_end);
     r.line = line;
     r.file = file ? file : "";
@@ -175,13 +175,13 @@ std::string render_type(a_type_ptr t)
     {
         return "<null>";
     }
-    bool saved = g_in_type;
+    bool saved {g_in_type};
     g_in_type = true;
-    std::string s = capture(
+    std::string s {capture(
         [&](an_il_to_str_output_control_block_ptr o)
         {
             form_type(t, o);
-        });
+        })};
     g_in_type = saved;
     // EDG's formatter prints exactly "<unnamed>" for a type it cannot name
     // (dependent expression types).  Show the type's kind instead, which is the
@@ -190,7 +190,7 @@ std::string render_type(a_type_ptr t)
     // ("struct <unnamed> &") is a real unnamed tag and is left to EDG.
     if (s == "<unnamed>")
     {
-        a_type_ptr u = skip_typerefs(t);
+        a_type_ptr u {skip_typerefs(t)};
         s = std::string("<") +
             (u->kind == tk_template_param ? name_of(u->variant.template_param.kind) : name_of(u->kind)) + ">";
     }
@@ -210,13 +210,13 @@ std::string render_name(a_source_correspondence* scp, an_il_entry_kind kind)
 // (g_in_type): an unnamed struct/enum keeps its keyword as in EDG's default.
 std::string render_template_arg(a_template_arg_ptr a)
 {
-    bool saved = g_in_type;
+    bool saved {g_in_type};
     g_in_type = true;
-    std::string s = capture(
+    std::string s {capture(
         [&](an_il_to_str_output_control_block_ptr o)
         {
             form_a_template_arg(a, o);
-        });
+        })};
     g_in_type = saved;
     return s;
 }
@@ -240,20 +240,20 @@ std::string render_template_args(a_template_ptr tmpl, a_template_arg_ptr list)
     {
         return "none";
     }
-    a_template_parameter_ptr tp = (tmpl && tmpl->template_decl) ? tmpl->template_decl->param_list : nullptr;
+    a_template_parameter_ptr tp {(tmpl && tmpl->template_decl) ? tmpl->template_decl->param_list : nullptr};
     std::vector<std::string> parts;
     std::vector<std::string> pack;
     std::string pack_name;
-    bool in_pack = false;
-    int index = 0;
+    bool in_pack {false};
+    int index {0};
     auto flush_pack = [&]
     {
         if (!in_pack)
         {
             return;
         }
-        std::string s = pack_name + "=pack{";
-        for (size_t i = 0; i < pack.size(); ++i)
+        std::string s {pack_name + "=pack{"};
+        for (size_t i {0U}; i < pack.size(); ++i)
         {
             s += (i ? ", " : "") + pack[i];
         }
@@ -261,7 +261,7 @@ std::string render_template_args(a_template_ptr tmpl, a_template_arg_ptr list)
         in_pack = false;
         pack.clear();
     };
-    for (a_template_arg_ptr a = list; a; a = a->next)
+    for (a_template_arg_ptr a {list}; a; a = a->next)
     {
         if (a->kind == tak_start_of_pack_expansion)
         {
@@ -290,7 +290,7 @@ std::string render_template_args(a_template_ptr tmpl, a_template_arg_ptr list)
     }
     flush_pack();
     std::string s;
-    for (size_t i = 0; i < parts.size(); ++i)
+    for (size_t i {0U}; i < parts.size(); ++i)
     {
         s += (i ? ", " : "") + parts[i];
     }
@@ -305,7 +305,7 @@ std::string render_constant(a_constant_ptr c)
     }
     if (c->kind == ck_integer)
     {
-        a_type_ptr t = c->type ? skip_typerefs(c->type) : nullptr;
+        a_type_ptr t {c->type ? skip_typerefs(c->type) : nullptr};
         // A null pointer constant of type std::nullptr_t is `nullptr`, a bool `true` or
         // `false`; anything else its plain decimal value as diagnostics print it
         // (const_ints.h), without suffix or cast.
@@ -313,7 +313,7 @@ std::string render_constant(a_constant_ptr c)
         {
             return "nullptr";
         }
-        a_number_buffer b = decimal_str_for_integer_constant(c);
+        a_number_buffer b {decimal_str_for_integer_constant(c)};
         if (t != nullptr && is_bool_type(t))
         {
             return std::string(b.as_temp_characters()) == "0" ? "false" : "true";
@@ -336,7 +336,7 @@ std::string render_constant(a_constant_ptr c)
 std::string render_attribute(an_attribute_ptr a)
 {
     // namespace_name: as written ([[ns::name]]); NULL when none (il_def.h:3206).
-    std::string s = "[[";
+    std::string s {"[["};
     if (a->namespace_name)
     {
         s += a->namespace_name;
@@ -350,8 +350,8 @@ std::string render_attribute(an_attribute_ptr a)
         // not text.  Recognized attributes with other argument kinds are shown by
         // kind.
         std::string args;
-        bool first = true;
-        for (an_attribute_arg_ptr g = a->arguments; g; g = g->next)
+        bool first {true};
+        for (an_attribute_arg_ptr g {a->arguments}; g; g = g->next)
         {
             std::string piece;
             switch (g->kind)
@@ -400,11 +400,11 @@ std::string render_constraint(an_expr_node_ptr e)
         {
             // il_def.h:15710-15718.  For a type constraint (is_type_constraint) the
             // first template argument is implicit and absent from `args`.
-            auto& c = e->variant.concept_id;
-            std::string s = render_name(&c.concept_template->source_corresp, iek_template);
+            auto& c {e->variant.concept_id};
+            std::string s {render_name(&c.concept_template->source_corresp, iek_template)};
             if (c.args)
             {
-                bool saved = g_in_type;
+                bool saved {g_in_type};
                 g_in_type = true; // see render_template_arg
                 s += capture(
                     [&](an_il_to_str_output_control_block_ptr o)
@@ -417,15 +417,15 @@ std::string render_constraint(an_expr_node_ptr e)
         }
         case enk_operation:
         {
-            auto& op = e->variant.operation;
+            auto& op {e->variant.operation};
             if ((op.kind == eok_land || op.kind == eok_lor) && op.operands && op.operands->next)
             {
                 auto side = [&](an_expr_node_ptr n)
                 {
-                    std::string r = render_constraint(n);
-                    bool other = n->kind == enk_operation &&
-                                 (n->variant.operation.kind == eok_land || n->variant.operation.kind == eok_lor) &&
-                                 n->variant.operation.kind != op.kind;
+                    std::string r {render_constraint(n)};
+                    bool other {n->kind == enk_operation &&
+                                (n->variant.operation.kind == eok_land || n->variant.operation.kind == eok_lor) &&
+                                n->variant.operation.kind != op.kind};
                     return other ? "(" + r + ")" : r;
                 };
                 return side(op.operands) + (op.kind == eok_land ? " && " : " || ") + side(op.operands->next);

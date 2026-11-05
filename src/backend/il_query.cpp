@@ -20,7 +20,7 @@ a_scope_ptr body_scope(a_routine_ptr r)
     {
         return nullptr;
     }
-    a_scope_ptr sp = scope_for_routine_or_null(r);
+    a_scope_ptr sp {scope_for_routine_or_null(r)};
     if (sp == nullptr || sp->kind != sck_function || sp->variant.routine.ptr != r)
     {
         return nullptr;
@@ -39,7 +39,7 @@ a_routine_ptr direct_callee(an_expr_node_ptr e)
     {
         return nullptr;
     }
-    const auto& op = e->variant.operation;
+    const auto& op {e->variant.operation};
     if (!is_call_kind(op.kind))
     {
         return nullptr;
@@ -67,7 +67,7 @@ bool marked(a_routine_ptr r, Annot k)
     {
         return true;
     }
-    a_routine_ptr root = root_routine(r);
+    a_routine_ptr root {root_routine(r)};
     return root != nullptr && has_annot(root, k);
 }
 
@@ -78,20 +78,20 @@ bool is_spec_routine(a_routine_ptr r)
 
 a_source_file_ptr physical_file(a_seq_number seq)
 {
-    if (seq == 0)
+    if (seq == 0U)
     {
         return nullptr;
     }
-    a_source_file_ptr f = nullptr;
-    a_line_number line = 0;
-    a_boolean at_end = FALSE;
+    a_source_file_ptr f {nullptr};
+    a_line_number line {0U};
+    a_boolean at_end {FALSE};
     conv_seq_to_physical_file_and_line(seq, &f, &line, &at_end);
     return f;
 }
 
 std::string physical_path(const a_source_position& p)
 {
-    a_source_file_ptr f = physical_file(p.seq);
+    a_source_file_ptr f {physical_file(p.seq)};
     if (f == nullptr || f->full_name == nullptr)
     {
         return "";
@@ -106,11 +106,11 @@ bool in_verified_file(const a_source_position& p)
 
 bool seq_in_verified_file(a_seq_number seq)
 {
-    if (seq == 0)
+    if (seq == 0U)
     {
         return false; // no position: compiler-generated
     }
-    a_source_file_ptr f = physical_file(seq);
+    a_source_file_ptr f {physical_file(seq)};
     // A file that cannot be placed is a verified file, never a system file (decision 0011 item 4: fail closed).
     if (f == nullptr || f->full_name == nullptr)
     {
@@ -118,15 +118,15 @@ bool seq_in_verified_file(a_seq_number seq)
     }
     // One answer per file record (the configuration is fixed for the run; every position of a header asks).
     static std::map<a_source_file_ptr, bool> cache;
-    auto it = cache.find(f);
+    auto it {cache.find(f)};
     if (it != cache.end())
     {
         return it->second;
     }
-    bool verified = true;
-    if (const std::string c = canonical_path(f->full_name); !c.empty())
+    bool verified {true};
+    if (const std::string c {canonical_path(f->full_name)}; !c.empty())
     {
-        const VerifyConfig& cfg = verify_config();
+        const VerifyConfig& cfg {verify_config()};
         verified = !is_system_file(cfg.system_dirs, cfg.cerastes_header, c, cfg.library_dirs);
     }
     cache.emplace(f, verified);
@@ -135,19 +135,19 @@ bool seq_in_verified_file(a_seq_number seq)
 
 bool seq_in_library_file(a_seq_number seq)
 {
-    const VerifyConfig& cfg = verify_config();
-    if (!cfg.on || cfg.library_dirs.empty() || seq == 0)
+    const VerifyConfig& cfg {verify_config()};
+    if (!cfg.on || cfg.library_dirs.empty() || seq == 0U)
     {
         return false;
     }
-    a_source_file_ptr f = physical_file(seq);
+    a_source_file_ptr f {physical_file(seq)};
     if (f == nullptr || f->full_name == nullptr)
     {
         return false;
     }
     // One answer per file record: the configuration is fixed for the run, and EDG's flag is asked for every position of a header.
     static std::map<a_source_file_ptr, bool> cache;
-    auto it = cache.find(f);
+    auto it {cache.find(f)};
     if (it == cache.end())
     {
         it = cache.emplace(f, is_library_file(cfg.library_dirs, f->full_name)).first;
@@ -161,10 +161,10 @@ bool in_library_file(const a_source_position& p)
 }
 
 namespace {
-IlEntities* g_collect_out = nullptr;
-std::set<char*>* g_collect_seen = nullptr;
-bool g_collect_in_region = false;
-a_memory_region_number g_collect_region = NULL_region_number;
+IlEntities* g_collect_out {nullptr};
+std::set<char*>* g_collect_seen {nullptr};
+bool g_collect_in_region {false};
+a_memory_region_number g_collect_region {NULL_region_number};
 void collect_entry(char* entry, an_il_entry_kind kind)
 {
     if (!g_collect_seen->insert(entry).second)
@@ -181,7 +181,7 @@ void collect_entry(char* entry, an_il_entry_kind kind)
             break;
         case iek_variable:
         {
-            auto v = reinterpret_cast<a_variable_ptr>(entry);
+            auto v {reinterpret_cast<a_variable_ptr>(entry)};
             if (v->source_corresp.enclosing_routine == nullptr)
             {
                 g_collect_out->variables.push_back(v);
@@ -193,7 +193,7 @@ void collect_entry(char* entry, an_il_entry_kind kind)
             break;
         case iek_src_seq_secondary_decl:
         {
-            auto sd = reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry);
+            auto sd {reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry)};
             if (sd->entity.kind == iek_routine)
             {
                 g_collect_out->secondary_decls[reinterpret_cast<a_routine_ptr>(sd->entity.ptr)].push_back(
@@ -208,7 +208,7 @@ void collect_entry(char* entry, an_il_entry_kind kind)
         }
         case iek_local_static_variable_init:
         {
-            auto li = reinterpret_cast<a_local_static_variable_init_ptr>(entry);
+            auto li {reinterpret_cast<a_local_static_variable_init_ptr>(entry)};
             if (li->variable != nullptr)
             {
                 g_collect_out->static_local_inits[li->variable] = li;
@@ -217,7 +217,7 @@ void collect_entry(char* entry, an_il_entry_kind kind)
         }
         case iek_asm_entry:
         {
-            auto a = reinterpret_cast<an_asm_entry_ptr>(entry);
+            auto a {reinterpret_cast<an_asm_entry_ptr>(entry)};
             // Only those the file-scope walk reports: an asm statement of a body is in a routine's memory region.
             if (!g_collect_in_region && a->source_corresp.enclosing_routine == nullptr)
             {
@@ -227,7 +227,7 @@ void collect_entry(char* entry, an_il_entry_kind kind)
         }
         case iek_static_assertion:
         {
-            auto sa = reinterpret_cast<a_static_assertion_ptr>(entry);
+            auto sa {reinterpret_cast<a_static_assertion_ptr>(entry)};
             // Block-scope ones are in function regions (kept with the region's number, decision 0025 item 5); the file scope's are on its
             // source sequence list (decision 0024).
             if (g_collect_in_region)
@@ -254,7 +254,7 @@ IlEntities collect_entities()
     g_collect_seen = &seen;
     walk_file_scope_il(collect_entry, nullptr, nullptr, nullptr, nullptr, /*clear_fe_pointers=*/FALSE);
     g_collect_in_region = true;
-    for (a_memory_region_number region = FILE_SCOPE_REGION_NUMBER + 1; region <= highest_used_region_number; ++region)
+    for (a_memory_region_number region {FILE_SCOPE_REGION_NUMBER + 1}; region <= highest_used_region_number; ++region)
     {
         if (mem_region_table[region] == nullptr)
         {
@@ -268,7 +268,7 @@ IlEntities collect_entities()
     if (il_header.primary_scope != nullptr)
     {
         // Only the static assertions are read from the list; every other kind is stepped over, sublists included.
-        for (a_source_sequence_entry_ptr e = il_header.primary_scope->source_sequence_list; e != nullptr; e = e->next)
+        for (a_source_sequence_entry_ptr e {il_header.primary_scope->source_sequence_list}; e != nullptr; e = e->next)
         {
             if (e->entity.kind == iek_static_assertion)
             {
@@ -281,7 +281,7 @@ IlEntities collect_entities()
         std::vector<a_static_assertion_ptr> rest;
         for (a_static_assertion_ptr a : out.other_static_assertions)
         {
-            if (listed.count(a) == 0)
+            if (listed.count(a) == 0U)
             {
                 rest.push_back(a);
             }

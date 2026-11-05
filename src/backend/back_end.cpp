@@ -39,7 +39,7 @@ void back_end(void)
         cerastes::walk_il_and_print();
     }
     // `cerastes verify` (decision 0011): encode the IL when the annotation checks found nothing wrong.
-    if (cerastes::verify_config().on && cerastes::reported_count() == 0)
+    if (cerastes::verify_config().on && cerastes::reported_count() == 0U)
     {
         cerastes::verify_encode();
     }

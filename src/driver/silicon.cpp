@@ -25,9 +25,9 @@ namespace {
 namespace fs = std::filesystem;
 
 // What silicon_signal_cleanup() needs; plain data, set before the child exists and cleared after it is reaped.
-volatile sig_atomic_t g_pgid = 0;
-char g_file[1024] = "";
-char g_dir[1024] = "";
+volatile sig_atomic_t g_pgid {0};
+char g_file[1024] {""};
+char g_dir[1024] {""};
 
 struct TempDir
 {
@@ -52,12 +52,12 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
 
     // A private directory (mode 0700): Silicon and Z3 may write there, and nothing else shares it.
     std::error_code ec;
-    fs::path base = fs::temp_directory_path(ec);
+    fs::path base {fs::temp_directory_path(ec)};
     if (ec)
     {
         base = "/tmp";
     }
-    std::string templ = (base / "cerastes-silicon-XXXXXX").string();
+    std::string templ {(base / "cerastes-silicon-XXXXXX").string()};
     std::vector<char> buf(templ.begin(), templ.end());
     buf.push_back('\0');
     if (::mkdtemp(buf.data()) == nullptr)
@@ -67,7 +67,7 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     }
     TempDir dir;
     dir.path = buf.data();
-    const std::string file = dir.path + "/" + run.vpr_name;
+    const std::string file {dir.path + "/" + run.vpr_name};
     std::snprintf(g_dir, sizeof g_dir, "%s", dir.path.c_str());
     std::snprintf(g_file, sizeof g_file, "%s", file.c_str());
     {
@@ -92,7 +92,7 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
 
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0U);
     posix_spawn_file_actions_adddup2(&fa, fds[1], 1);
     posix_spawn_file_actions_adddup2(&fa, fds[1], 2);
 
@@ -116,7 +116,8 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
 
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
-    sigset_t none, all;
+    sigset_t none;
+    sigset_t all;
     sigemptyset(&none);
     sigfillset(&all);
     posix_spawnattr_setsigmask(&attr, &none);
@@ -124,7 +125,7 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     posix_spawnattr_setpgroup(&attr, 0); // its own process group, so that a timeout reaches Z3 too
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETPGROUP);
 
-    std::vector<std::string> argv_s = {
+    std::vector<std::string> argv_s {
         tools.java, "-Xss128m", "-jar", tools.jar, "--z3Exe", tools.z3, "--numberOfErrorsToReport", "0", run.vpr_name};
     std::vector<char*> argv;
     for (std::string& s : argv_s)
@@ -133,8 +134,8 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     }
     argv.push_back(nullptr);
     // A clean environment: a stray JAVA_TOOL_OPTIONS or Z3 setting cannot change a result (0011 item 3).
-    std::vector<std::string> env_s = {"PATH=/usr/bin:/bin", "HOME=" + dir.path, "TMPDIR=" + dir.path,
-                                      "LC_ALL=en_US.UTF-8"};
+    std::vector<std::string> env_s {"PATH=/usr/bin:/bin", "HOME=" + dir.path, "TMPDIR=" + dir.path,
+                                    "LC_ALL=en_US.UTF-8"};
     std::vector<char*> envp;
     for (std::string& s : env_s)
     {
@@ -142,8 +143,8 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     }
     envp.push_back(nullptr);
 
-    pid_t pid = 0;
-    int rc = posix_spawn(&pid, tools.java.c_str(), &fa, &attr, argv.data(), envp.data());
+    pid_t pid {0};
+    int rc {posix_spawn(&pid, tools.java.c_str(), &fa, &attr, argv.data(), envp.data())};
     posix_spawn_file_actions_destroy(&fa);
     posix_spawnattr_destroy(&attr);
     ::close(fds[1]);
@@ -157,13 +158,13 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     g_pgid = pid;
 
     ::fcntl(fds[0], F_SETFL, ::fcntl(fds[0], F_GETFL) | O_NONBLOCK);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+    const auto deadline {std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds)};
     auto drain = [&]
     {
         char chunk[8192];
         for (;;)
         {
-            ssize_t got = ::read(fds[0], chunk, sizeof chunk);
+            ssize_t got {::read(fds[0], chunk, sizeof chunk)};
             if (got > 0)
             {
                 run.output.append(chunk, static_cast<size_t>(got));
@@ -174,8 +175,8 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
             }
         }
     };
-    int status = 0;
-    bool reaped = false;
+    int status {0};
+    bool reaped {false};
     // Poll until Silicon itself has exited or the deadline passes.  End of file on the pipe is not waited for: a Z3
     // that outlives Silicon may hold the write end open (it is killed with the group below).
     for (;;)
@@ -184,7 +185,7 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
         // child is reaped, while its process group id is still ours, and only then waited for.
         siginfo_t info;
         info.si_pid = 0;
-        int w = ::waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT);
+        int w {::waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT)};
         if (w == 0 && info.si_pid == pid)
         {
             drain();
@@ -204,8 +205,8 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
             run.timed_out = true;
             break;
         }
-        struct pollfd p = {fds[0], POLLIN, 0};
-        ::poll(&p, 1, 50);
+        struct pollfd p {fds[0], POLLIN, 0};
+        ::poll(&p, 1U, 50);
         drain();
     }
     // On a timeout (or a failed wait) the child is still ours: kill the group before waiting for it.
@@ -239,7 +240,7 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
 
 void silicon_signal_cleanup()
 {
-    const pid_t g = static_cast<pid_t>(g_pgid);
+    const pid_t g {static_cast<pid_t>(g_pgid)};
     if (g > 0)
     {
         ::killpg(g, SIGKILL);

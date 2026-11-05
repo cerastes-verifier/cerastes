@@ -17,10 +17,10 @@ struct SiliconTools
 
 struct SiliconRun
 {
-    bool started = false;   // the process was created
-    bool timed_out = false; // killed at the deadline
-    bool signaled = false;  // ended by a signal (not ours)
-    int exit_code = -1;     // the exit status when it ended normally
+    bool started {false};   // the process was created
+    bool timed_out {false}; // killed at the deadline
+    bool signaled {false};  // ended by a signal (not ours)
+    int exit_code {-1};     // the exit status when it ended normally
     std::string output;     // standard output and standard error, in the order written
     std::string error;      // why `started` is false, or other trouble, "" for none
     // The name of the .vpr file given to Silicon: Silicon prints it in its error positions.

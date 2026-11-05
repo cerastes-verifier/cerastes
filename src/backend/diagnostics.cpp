@@ -52,8 +52,8 @@ const char* template_of(Diag d)
 std::string substitute(const char* tmpl, const std::vector<std::string>& args)
 {
     std::string out;
-    size_t next = 0;
-    for (const char* p = tmpl; *p; ++p)
+    size_t next {0U};
+    for (const char* p {tmpl}; *p; ++p)
     {
         if (p[0] == '%' && p[1] == 's')
         {
@@ -75,20 +75,20 @@ std::string substitute(const char* tmpl, const std::vector<std::string>& args)
 // --no_wrap_diagnostics switch it off.
 std::string wrap(const std::string& text, size_t first_indent, size_t continuation_indent)
 {
-    const bool wrapping = !do_not_wrap_diagnostics && !brief_diagnostics;
+    const bool wrapping {!do_not_wrap_diagnostics && !brief_diagnostics};
     std::string out;
-    size_t indent = first_indent;
-    size_t start = 0;
+    size_t indent {first_indent};
+    size_t start {0U};
     for (;;)
     {
-        const size_t usable = MAX_ERROR_OUTPUT_LINE_LENGTH - indent;
+        const size_t usable {MAX_ERROR_OUTPUT_LINE_LENGTH - indent};
         out.append(indent, ' ');
-        const size_t length = text.size() - start;
+        const size_t length {text.size() - start};
         if (wrapping && length > usable)
         {
-            size_t seg = usable;
-            size_t cur = start + seg - 1;
-            if (text[cur + 1] == ' ')
+            size_t seg {usable};
+            size_t cur {start + seg - 1U};
+            if (text[cur + 1U] == ' ')
             {
                 ++cur;
             }
@@ -124,13 +124,13 @@ std::string wrap(const std::string& text, size_t first_indent, size_t continuati
 std::string source_line(const std::string& path, unsigned long line, bool& ok)
 {
     ok = false;
-    if (path.empty() || line == 0)
+    if (path.empty() || line == 0U)
     {
         return "";
     }
     std::ifstream in(path);
     std::string s;
-    for (unsigned long i = 1; std::getline(in, s); ++i)
+    for (unsigned long i {1U}; std::getline(in, s); ++i)
     {
         if (i == line)
         {
@@ -147,7 +147,7 @@ std::string source_line(const std::string& path, unsigned long line, bool& ok)
 
 std::string render(const Entry& e)
 {
-    const char* tag = tag_of(e.diag);
+    const char* tag {tag_of(e.diag)};
     std::string head;
     if (e.pos.known)
     {
@@ -164,22 +164,22 @@ std::string render(const Entry& e)
         head += std::string(" #cerastes-") + tag;
     }
     head += ": " + e.message;
-    std::string out = wrap(head, 0, 10);
+    std::string out {wrap(head, 0U, 10U)};
     if (!brief_diagnostics && e.pos.known)
     {
-        bool ok = false;
-        std::string text = source_line(e.pos.full_name, e.pos.line, ok);
+        bool ok {false};
+        std::string text {source_line(e.pos.full_name, e.pos.line, ok)};
         if (ok)
         {
             out += "  " + text + "\n";
-            if (e.pos.col != 0)
+            if (e.pos.col != 0U)
             {
-                std::string caret = "  ";
-                for (unsigned long i = 0; i + 1 < e.pos.col && i < text.size(); ++i)
+                std::string caret {"  "};
+                for (unsigned long i {0U}; i + 1U < e.pos.col && i < text.size(); ++i)
                 {
                     caret += text[i] == '\t' ? '\t' : ' ';
                 }
-                for (unsigned long i = text.size(); i + 1 < e.pos.col; ++i)
+                for (unsigned long i {text.size()}; i + 1U < e.pos.col; ++i)
                 {
                     caret += ' ';
                 }
@@ -193,7 +193,7 @@ std::string render(const Entry& e)
     }
     if (!e.context.empty())
     {
-        out += wrap(e.context, 10, 20);
+        out += wrap(e.context, 10U, 20U);
     }
     if (!brief_diagnostics)
     {
@@ -223,15 +223,15 @@ const char* tag_of(Diag d)
 DiagPos diag_position(const a_source_position& p)
 {
     DiagPos r;
-    a_seq_number seq = p.seq;
-    a_column_number col = p.column;
+    a_seq_number seq {p.seq};
+    a_column_number col {p.column};
     // The original position of macro-argument text counts when it lies in a user or a library file (decision 0046 item 3), not in a system one.
-    if (p.orig_seq != 0 && !seq_is_in_system_file(p.orig_seq))
+    if (p.orig_seq != 0U && !seq_is_in_system_file(p.orig_seq))
     {
         seq = p.orig_seq;
         col = p.orig_column;
     }
-    if (seq == 0)
+    if (seq == 0U)
     {
         return r;
     }
@@ -239,10 +239,10 @@ DiagPos diag_position(const a_source_position& p)
     r.seq = seq;
     r.col = col;
     r.in_primary = !seq_is_in_include_file(seq);
-    a_const_char* file = nullptr;
-    a_const_char* full = nullptr;
-    a_line_number line = 0;
-    a_boolean at_end = FALSE;
+    a_const_char* file {nullptr};
+    a_const_char* full {nullptr};
+    a_line_number line {0U};
+    a_boolean at_end {FALSE};
     conv_seq_to_file_and_line(seq, &file, &full, &line, &at_end);
     r.line = line;
     r.file = file ? file : "";
@@ -272,7 +272,7 @@ size_t reported_count()
 
 void flush_diagnostics()
 {
-    std::vector<Entry>& v = entries();
+    std::vector<Entry>& v {entries()};
     if (v.empty())
     {
         return;
@@ -284,7 +284,7 @@ void flush_diagnostics()
                                 std::tie(b.pos.seq, b.pos.line, b.pos.col, b.message);
                      });
     // EDG's own error stream (stderr unless --error_output redirected it), so that the two are in order in one place.
-    FILE* out = f_error != nullptr ? f_error : stderr;
+    FILE* out {f_error != nullptr ? f_error : stderr};
     for (const Entry& e : v)
     {
         std::fputs(render(e).c_str(), out);

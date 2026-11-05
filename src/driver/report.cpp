@@ -14,17 +14,17 @@ namespace {
 std::vector<std::string> split_tabs(const std::string& line)
 {
     std::vector<std::string> out;
-    size_t start = 0;
+    size_t start {0U};
     for (;;)
     {
-        size_t t = line.find('\t', start);
+        size_t t {line.find('\t', start)};
         if (t == std::string::npos)
         {
             out.push_back(line.substr(start));
             return out;
         }
         out.push_back(line.substr(start, t - start));
-        start = t + 1;
+        start = t + 1U;
     }
 }
 
@@ -34,8 +34,8 @@ bool parse_int(const std::string& s, int* out)
     {
         return false;
     }
-    char* end = nullptr;
-    long v = std::strtol(s.c_str(), &end, 10);
+    char* end {nullptr};
+    long v {std::strtol(s.c_str(), &end, 10)};
     if (*end != '\0' || v < 0 || v > 100000000L)
     {
         return false;
@@ -51,7 +51,7 @@ std::vector<MapRow> parse_position_map(const std::string& text, std::string* pro
     std::vector<MapRow> rows;
     std::istringstream in(text);
     std::string line;
-    int number = 0;
+    int number {0};
     while (std::getline(in, line))
     {
         ++number;
@@ -59,10 +59,10 @@ std::vector<MapRow> parse_position_map(const std::string& text, std::string* pro
         {
             continue;
         }
-        std::vector<std::string> f = split_tabs(line);
+        std::vector<std::string> f {split_tabs(line)};
         MapRow r;
-        if ((f.size() != 7 && f.size() != 8) || !parse_int(f[0], &r.vpr_line) || !parse_int(f[4], &r.line) ||
-            !parse_int(f[5], &r.column))
+        if ((f.size() != 7U && f.size() != 8U) || !parse_int(f[0U], &r.vpr_line) || !parse_int(f[4U], &r.line) ||
+            !parse_int(f[5U], &r.column))
         {
             if (problem)
             {
@@ -70,18 +70,18 @@ std::vector<MapRow> parse_position_map(const std::string& text, std::string* pro
             }
             return rows;
         }
-        r.viper_id = f[1];
-        r.category = f[2];
-        r.file = f[3];
-        r.message = f[6];
-        if (f.size() == 8)
+        r.viper_id = f[1U];
+        r.category = f[2U];
+        r.file = f[3U];
+        r.message = f[6U];
+        if (f.size() == 8U)
         {
             // `<file>:<line>:<text>`: the file may contain no colon (paths are repository-relative or absolute
             // without one); the text may.
-            const std::string& n = f[7];
-            size_t a = n.find(':');
-            size_t b = a == std::string::npos ? a : n.find(':', a + 1);
-            if (b == std::string::npos || !parse_int(n.substr(a + 1, b - a - 1), &r.note_line))
+            const std::string& n {f[7U]};
+            size_t a {n.find(':')};
+            size_t b {a == std::string::npos ? a : n.find(':', a + 1U)};
+            if (b == std::string::npos || !parse_int(n.substr(a + 1U, b - a - 1U), &r.note_line))
             {
                 if (problem)
                 {
@@ -90,8 +90,8 @@ std::vector<MapRow> parse_position_map(const std::string& text, std::string* pro
                 return rows;
             }
             r.has_note = true;
-            r.note_file = n.substr(0, a);
-            r.note_text = n.substr(b + 1);
+            r.note_file = n.substr(0U, a);
+            r.note_text = n.substr(b + 1U);
         }
         rows.push_back(std::move(r));
     }
@@ -137,8 +137,8 @@ MappedVerdict map_errors(const SiliconVerdict& verdict, const std::vector<MapRow
                             " of the program, which the position map does not explain: " + e.message);
             continue;
         }
-        const MapRow* first = hits.front();
-        bool same = true;
+        const MapRow* first {hits.front()};
+        bool same {true};
         for (const MapRow* h : hits)
         {
             if (h->category != first->category || h->file != first->file || h->line != first->line ||
@@ -163,10 +163,10 @@ MappedVerdict map_errors(const SiliconVerdict& verdict, const std::vector<MapRow
         // The checks the encoder emits are assertions, preconditions, postconditions and invariants: each can fail only
         // because an assertion does not hold.  Any other reason (a division by zero Viper found, insufficient
         // permission, ...) is something the encoder did not mean to say (decision 0011 item 11).
-        const bool termination = e.viper_id == "termination.failed";
-        const bool reason_ok = termination ? (e.reason == "tuple.false" || e.reason == "tuple.condition.false" ||
-                                              e.reason == "termination.condition.false")
-                                           : e.reason == "assertion.false";
+        const bool termination {e.viper_id == "termination.failed"};
+        const bool reason_ok {termination ? (e.reason == "tuple.false" || e.reason == "tuple.condition.false" ||
+                                             e.reason == "termination.condition.false")
+                                          : e.reason == "assertion.false"};
         if (!reason_ok)
         {
             failures.insert("Silicon reported " + e.viper_id + " at line " + std::to_string(e.line) +
@@ -204,7 +204,7 @@ MappedVerdict map_errors(const SiliconVerdict& verdict, const std::vector<MapRow
 
 std::string render_error(const UserError& e)
 {
-    std::string s = e.file + ":" + std::to_string(e.line) + ": error: " + e.category + ": " + e.message + "\n";
+    std::string s {e.file + ":" + std::to_string(e.line) + ": error: " + e.category + ": " + e.message + "\n"};
     if (e.has_note)
     {
         s += e.note_file + ":" + std::to_string(e.note_line) + ": note: " + e.note_text + "\n";

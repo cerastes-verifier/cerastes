@@ -26,7 +26,7 @@ struct TreeProblem
     // The problem is explained by the side-effect diagnostic when the annotation
     // has one (a lambda body of several statements that assigns): the check does not
     // report it a second time.
-    bool explained_by_side_effect = false;
+    bool explained_by_side_effect {false};
 };
 
 struct TreeWalk

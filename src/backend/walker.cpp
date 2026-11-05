@@ -104,7 +104,7 @@ std::set<an_attribute_ptr> g_fn_type_attrs;
 // registered through their owners as well as through iek_attribute entries.
 void note_owner(an_attribute_ptr list, const std::string& owner)
 {
-    for (an_attribute_ptr a = list; a; a = a->next)
+    for (an_attribute_ptr a {list}; a; a = a->next)
     {
         g_collected.attr_owner.emplace(a, owner);
         if (g_collected.attr_set.insert(a).second)
@@ -152,14 +152,14 @@ void collect(char* entry, an_il_entry_kind kind)
     {
         case iek_routine:
         {
-            auto r = reinterpret_cast<a_routine_ptr>(entry);
+            auto r {reinterpret_cast<a_routine_ptr>(entry)};
             // Decision 0024: with source sequence lists a routine also holds the type as declared at its definition
             // (a_routine.declared_type, il_def.h:12288 region), a type of its own when the definition's declarator differs from the
             // first declaration's (`T f(T x) [[a]]; ... T f(T x) [[b]] {}`).  The routine is listed with its own type; the unrecognized
             // attributes of that other type are not listed again as orphans.  (A registered cerastes:: one is still reported.)
             if (r->declared_type != nullptr && r->declared_type != r->type)
             {
-                for (an_attribute_ptr a = r->declared_type->source_corresp.attributes; a; a = a->next)
+                for (an_attribute_ptr a {r->declared_type->source_corresp.attributes}; a; a = a->next)
                 {
                     if (!is_registered_cerastes(a))
                     {
@@ -176,7 +176,7 @@ void collect(char* entry, an_il_entry_kind kind)
         }
         case iek_template:
         {
-            auto t = reinterpret_cast<a_template_ptr>(entry);
+            auto t {reinterpret_cast<a_template_ptr>(entry)};
             if (g_collected.template_set.insert(t).second)
             {
                 g_collected.templates.push_back(t);
@@ -188,8 +188,8 @@ void collect(char* entry, an_il_entry_kind kind)
         {
             // Decision 0024 (source sequence lists on): the copies of a secondary declaration's attributes are reached by
             // the walk (decls.c, wrapup_sse_for_simple_decl); the entity's own list is what the listing prints.
-            auto sd = reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry);
-            for (an_attribute_ptr a = sd->attributes; a; a = a->next)
+            auto sd {reinterpret_cast<a_src_seq_secondary_decl_ptr>(entry)};
+            for (an_attribute_ptr a {sd->attributes}; a; a = a->next)
             {
                 g_secondary_copies.insert(a);
             }
@@ -200,7 +200,7 @@ void collect(char* entry, an_il_entry_kind kind)
             if ((sd->entity.kind == iek_routine || sd->entity.kind == iek_template) && sd->declared_type != nullptr &&
                 sd->declared_type->kind == tk_routine)
             {
-                for (an_attribute_ptr a = sd->declared_type->source_corresp.attributes; a; a = a->next)
+                for (an_attribute_ptr a {sd->declared_type->source_corresp.attributes}; a; a = a->next)
                 {
                     if (!is_registered_cerastes(a))
                     {
@@ -212,7 +212,7 @@ void collect(char* entry, an_il_entry_kind kind)
         }
         case iek_attribute:
         {
-            auto a = reinterpret_cast<an_attribute_ptr>(entry);
+            auto a {reinterpret_cast<an_attribute_ptr>(entry)};
             if (g_collected.attr_set.insert(a).second)
             {
                 g_collected.attrs.push_back(a);
@@ -221,10 +221,10 @@ void collect(char* entry, an_il_entry_kind kind)
         }
         case iek_type:
         {
-            auto t = reinterpret_cast<a_type_ptr>(entry);
+            auto t {reinterpret_cast<a_type_ptr>(entry)};
             // A named typeref is a typedef or alias declaration (typerefs that have
             // no name, such as decltype types, carry no attributes).
-            bool alias = t->kind == tk_typeref;
+            bool alias {t->kind == tk_typeref};
             note_scp_owner(&t->source_corresp, kind, alias ? "typedef" : "type", true);
             break;
         }
@@ -249,13 +249,13 @@ void collect(char* entry, an_il_entry_kind kind)
             break;
         case iek_param_type:
         {
-            auto p = reinterpret_cast<a_param_type_ptr>(entry);
+            auto p {reinterpret_cast<a_param_type_ptr>(entry)};
             note_owner(p->attributes, std::string("param ") + (p->name ? p->name : "_"));
             break;
         }
         case iek_statement:
         {
-            auto s = reinterpret_cast<a_statement_ptr>(entry);
+            auto s {reinterpret_cast<a_statement_ptr>(entry)};
             note_owner(s->attributes, std::string("statement ") + name_of(s->kind));
             break;
         }
@@ -331,8 +331,8 @@ bool is_function_template(a_template_ptr t)
 
 struct Item
 {
-    unsigned long line = 0, col = 0;
-    int order = 0;
+    unsigned long line {0U}, col {0U};
+    int order {0};
     std::string key;  // stable tie-break
     std::string text; // complete, newline-terminated
 };
@@ -340,7 +340,7 @@ struct Item
 // "<pos>"; "-" when the IL records no source position.
 std::string at(const a_source_position& p)
 {
-    SrcPos s = resolve(p);
+    SrcPos s {resolve(p)};
     return s.known ? s.str() : "-";
 }
 
@@ -355,7 +355,7 @@ std::set<std::pair<an_attribute_ptr, a_routine_ptr>> g_printed_registered;
 
 void add_attrs(std::string& out, an_attribute_ptr list, const std::string& on, a_routine_ptr owner = nullptr)
 {
-    for (an_attribute_ptr a = list; a; a = a->next)
+    for (an_attribute_ptr a {list}; a; a = a->next)
     {
         // Pseudo-attributes (empty group, `using` prefix) and implicit ones that
         // never appeared in the source are not reported.
@@ -398,20 +398,20 @@ std::string param_name(a_template_parameter_ptr tp, int index)
 // Constraint lines for a prototype routine.
 void add_constraints(std::string& out, a_routine_ptr r, a_template_ptr tmpl)
 {
-    a_template_decl_ptr d = tmpl ? tmpl->template_decl : nullptr;
+    a_template_decl_ptr d {tmpl ? tmpl->template_decl : nullptr};
     if (d)
     {
         // Type-constraints and abbreviated `Concept auto` parameters live on the
         // template parameter's placeholder type (il_def.h:9380-9401).
-        int index = -1;
-        for (a_template_parameter_ptr tp = d->param_list; tp; tp = tp->next)
+        int index {-1};
+        for (a_template_parameter_ptr tp {d->param_list}; tp; tp = tp->next)
         {
             ++index;
             if (tp->kind != tpk_type)
             {
                 continue;
             }
-            a_type_ptr ty = tp->variant.type.ptr;
+            a_type_ptr ty {tp->variant.type.ptr};
             if (ty)
             {
                 ty = skip_typerefs(ty);
@@ -420,7 +420,7 @@ void add_constraints(std::string& out, a_routine_ptr r, a_template_ptr tmpl)
             {
                 continue;
             }
-            a_template_param_type_supplement_ptr x = ty->variant.template_param.extra_info;
+            a_template_param_type_supplement_ptr x {ty->variant.template_param.extra_info};
             if (!x)
             {
                 continue;
@@ -457,9 +457,9 @@ void add_constraints(std::string& out, a_routine_ptr r, a_template_ptr tmpl)
 // ---- Body walk --------------------------------------------------------------
 
 // Traversal callbacks carry no user data, so the sink is file-local.
-std::string* g_body = nullptr;
-bool g_body_is_proto = false;
-an_expr_node_ptr g_cur_const_expr = nullptr; // innermost enk_constant being walked
+std::string* g_body {nullptr};
+bool g_body_is_proto {false};
+an_expr_node_ptr g_cur_const_expr {nullptr}; // innermost enk_constant being walked
 // Operation nodes already reported for the current routine.  A node can be
 // reached through more than one constant (a constant's own recorded expression
 // and its template-parameter variant, shared expressions); each node is one
@@ -471,7 +471,7 @@ std::set<an_expr_node_ptr> g_seen_ops;
 std::set<std::pair<a_constant_ptr, an_expr_node_ptr>> g_seen_consts;
 // True while walking the routine's OWN default arguments: those expressions are
 // file-scope, and the folds written in them belong to this routine.
-bool g_in_own_default_args = false;
+bool g_in_own_default_args {false};
 
 // Whether a recorded expression may be followed: it must live in the routine's
 // own region (a genuine fold of an expression in this body), or be part of the
@@ -482,12 +482,12 @@ bool followable(an_expr_node_ptr e)
     return g_in_own_default_args || !in_file_scope(e);
 }
 
-a_routine_ptr g_body_routine = nullptr; // the routine whose body is being walked
+a_routine_ptr g_body_routine {nullptr}; // the routine whose body is being walked
 
 void on_statement(a_statement_ptr s, an_expr_or_stmt_traversal_block_ptr)
 {
     // a_statement.attributes (il_def.h:16540)
-    for (an_attribute_ptr a = s->attributes; a; a = a->next)
+    for (an_attribute_ptr a {s->attributes}; a; a = a->next)
     {
         if (is_pseudo(a))
         {
@@ -536,7 +536,7 @@ void on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr)
     }
     // il_def.h:15126-15144: operation kind and the kind of type it acts on
     // (tk_template_param or tk_unknown for dependent operations).
-    auto& op = e->variant.operation;
+    auto& op {e->variant.operation};
     *g_body += std::string("  op ") + name_of(op.kind) + " type_kind=" + name_of(op.type_kind) +
                " type=" + render_type(e->type) + " @ " + at(e->position) + "\n";
 }
@@ -545,7 +545,7 @@ void on_expr(an_expr_node_ptr e, an_expr_or_stmt_traversal_block_ptr)
 // does for the walk's own following (il_walk.c:2914-2942).
 bool spend_shared_budget(an_expr_or_stmt_traversal_block_ptr tb)
 {
-    if (tb->shared_expr_budget != 0 && --tb->shared_expr_budget == 0)
+    if (tb->shared_expr_budget != 0U && --tb->shared_expr_budget == 0U)
     {
         tb->terminate = TRUE;
         return false;
@@ -590,7 +590,7 @@ void on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb)
         // expr_node_from_constant (il.c:15154), which the walk uses for
         // ck_template_param, prefers the backing expression c->expr and so never
         // reaches the variant's own expression node; follow that one here too.
-        an_expr_node_ptr own = nullptr;
+        an_expr_node_ptr own {nullptr};
         if (c->variant.template_param.kind == tpck_expression)
         {
             own = c->variant.template_param.variant.expr;
@@ -625,10 +625,10 @@ void on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb)
     {
         return; // already reported for this use
     }
-    std::string pos = "-";
+    std::string pos {"-"};
     if (g_cur_const_expr && g_cur_const_expr->variant.constant.ptr == c)
     {
-        SrcPos p = resolve(g_cur_const_expr->position);
+        SrcPos p {resolve(g_cur_const_expr->position)};
         if (p.known)
         {
             pos = p.str();
@@ -636,7 +636,7 @@ void on_constant(a_constant_ptr c, an_expr_or_stmt_traversal_block_ptr tb)
     }
     if (pos == "-")
     {
-        SrcPos p = resolve(c->source_corresp.decl_position);
+        SrcPos p {resolve(c->source_corresp.decl_position)};
         if (p.known)
         {
             pos = p.str();
@@ -651,7 +651,7 @@ void add_variable_attrs(std::string& out, a_scope_ptr sp)
 {
     auto each = [&](a_variable_ptr list)
     {
-        for (a_variable_ptr v = list; v; v = v->next)
+        for (a_variable_ptr v {list}; v; v = v->next)
         {
             add_attrs(out, v->source_corresp.attributes,
                       std::string("variable ") + (v->source_corresp.name ? v->source_corresp.name : "<unnamed>"));
@@ -663,7 +663,7 @@ void add_variable_attrs(std::string& out, a_scope_ptr sp)
     {
         each(sp->variant.routine.parameters);
     }
-    for (a_scope_ptr c = sp->scopes; c; c = c->next)
+    for (a_scope_ptr c {sp->scopes}; c; c = c->next)
     {
         if (c->kind == sck_block || c->kind == sck_condition)
         {
@@ -672,7 +672,7 @@ void add_variable_attrs(std::string& out, a_scope_ptr sp)
     }
 }
 
-constexpr unsigned long kSharedExprBudget = 1000000;
+constexpr unsigned long kSharedExprBudget {1000000U};
 
 // Initializers of local statics that are statically (constant) initialized are
 // held on the scope's local_static_variable_inits list (il_def.h:18542), not in
@@ -681,14 +681,14 @@ constexpr unsigned long kSharedExprBudget = 1000000;
 // twice.  Nested block scopes have their own lists.
 void walk_static_inits(a_scope_ptr sp, an_expr_or_stmt_traversal_block_ptr tb)
 {
-    for (a_local_static_variable_init_ptr i = sp->local_static_variable_inits; i; i = i->next)
+    for (a_local_static_variable_init_ptr i {sp->local_static_variable_inits}; i; i = i->next)
     {
         if (i->init_kind == initk_static && i->initializer.constant)
         {
             traverse_constant(i->initializer.constant, tb);
         }
     }
-    for (a_scope_ptr c = sp->scopes; c; c = c->next)
+    for (a_scope_ptr c {sp->scopes}; c; c = c->next)
     {
         if (c->kind == sck_block || c->kind == sck_condition)
         {
@@ -702,15 +702,15 @@ void walk_static_inits(a_scope_ptr sp, an_expr_or_stmt_traversal_block_ptr tb)
 Item describe(a_routine_ptr r)
 {
     Item it;
-    RKind kind = classify(r);
-    SrcPos pos = resolve(r->source_corresp.decl_position);
+    RKind kind {classify(r)};
+    SrcPos pos {resolve(r->source_corresp.decl_position)};
     it.line = pos.line;
     it.col = pos.col;
     it.order = static_cast<int>(kind);
 
-    std::string name = render_name(&r->source_corresp, iek_routine);
-    a_scope_ptr scope = body_scope(r);
-    std::string out = "routine " + name + " " + rkind_name(kind);
+    std::string name {render_name(&r->source_corresp, iek_routine)};
+    a_scope_ptr scope {body_scope(r)};
+    std::string out {"routine " + name + " " + rkind_name(kind)};
     if (r->compiler_generated)
     {
         out += " implicit";
@@ -720,14 +720,14 @@ Item describe(a_routine_ptr r)
 
     // Signature: routine type is a tk_routine, possibly behind typerefs.
     std::vector<an_expr_node_ptr> default_args;
-    a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+    a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
     if (rt && rt->kind == tk_routine)
     {
         out += "  returns " + render_type(rt->variant.routine.return_type) + "\n";
-        a_routine_type_supplement_ptr x = rt->variant.routine.extra_info;
-        int i = 1;
+        a_routine_type_supplement_ptr x {rt->variant.routine.extra_info};
+        int i {1};
         std::string param_attrs;
-        for (a_param_type_ptr pt = x ? x->param_type_list : nullptr; pt; pt = pt->next, ++i)
+        for (a_param_type_ptr pt {x ? x->param_type_list : nullptr}; pt; pt = pt->next, ++i)
         {
             out += "  param " + std::to_string(i) + " " + (pt->name ? pt->name : "_") + ": " + render_type(pt->type) +
                    "\n";
@@ -745,10 +745,10 @@ Item describe(a_routine_ptr r)
     }
 
     // Template link.
-    a_template_ptr tmpl = r->assoc_template;
+    a_template_ptr tmpl {r->assoc_template};
     if (kind == RKind::prototype && tmpl == nullptr)
     {
-        auto f = g_proto_owner.find(r);
+        auto f {g_proto_owner.find(r)};
         if (f != g_proto_owner.end())
         {
             tmpl = f->second;
@@ -772,7 +772,7 @@ Item describe(a_routine_ptr r)
     // uses them; their own attributes belong to the alias, not to this routine,
     // and are reported once as a top-level `on typedef`.
     add_attrs(out, r->source_corresp.attributes, "routine", r);
-    for (a_type_ptr t = r->type; t; t = t->variant.typeref.type)
+    for (a_type_ptr t {r->type}; t; t = t->variant.typeref.type)
     {
         if (t->kind != tk_typeref)
         {
@@ -799,7 +799,7 @@ Item describe(a_routine_ptr r)
     // of its root template only on the root.
     if (kind == RKind::prototype && tmpl != nullptr)
     {
-        a_routine_ptr root = root_routine_of_template(tmpl);
+        a_routine_ptr root {root_routine_of_template(tmpl)};
         if (root != nullptr && root != r && contract_names(root) != contract_names(r))
         {
             out += "  contract from root template " + render_name(&root->source_corresp, iek_routine) + "\n";
@@ -845,7 +845,7 @@ Item describe(a_routine_ptr r)
     {
         // Constructor mem-initializers (a_scope variant.routine.constructor_inits,
         // il_def.h:18412) are not part of the statement tree.
-        for (a_constructor_init_ptr ci = scope->variant.routine.constructor_inits; ci; ci = ci->next)
+        for (a_constructor_init_ptr ci {scope->variant.routine.constructor_inits}; ci; ci = ci->next)
         {
             if (ci->initializer)
             {
@@ -864,7 +864,7 @@ Item describe(a_routine_ptr r)
     }
     g_body = nullptr;
     g_body_routine = nullptr;
-    if (tb.terminate && tb.shared_expr_budget == 0)
+    if (tb.terminate && tb.shared_expr_budget == 0U)
     {
         out += "  warning: expression walk truncated (shared-expression budget exhausted)\n";
     }
@@ -894,14 +894,14 @@ bool is_cerastes_or_unrecognized(an_attribute_ptr a)
 std::vector<Item> line_directive_warnings()
 {
     std::vector<Item> out;
-    a_source_file_ptr primary = il_header.primary_source_file;
+    a_source_file_ptr primary {il_header.primary_source_file};
     if (primary == nullptr)
     {
         return out;
     }
-    for (a_seq_number_lookup_entry_ptr e = il_header.seq_number_lookup_entries; e; e = e->next)
+    for (a_seq_number_lookup_entry_ptr e {il_header.seq_number_lookup_entries}; e; e = e->next)
     {
-        a_source_file_ptr f = e->source_file;
+        a_source_file_ptr f {e->source_file};
         if (f == nullptr || f->full_name != nullptr)
         {
             continue; // not directive-generated
@@ -910,8 +910,8 @@ std::vector<Item> line_directive_warnings()
         {
             continue;
         }
-        bool in_include = false;
-        for (a_source_file_ptr c = primary->first_child_file; c; c = c->next)
+        bool in_include {false};
+        for (a_source_file_ptr c {primary->first_child_file}; c; c = c->next)
         {
             if (c->full_name != nullptr && e->first >= c->first_seq_number && e->first <= c->last_seq_number)
             {
@@ -923,14 +923,14 @@ std::vector<Item> line_directive_warnings()
             continue;
         }
         // The entry starts on the line after the directive.
-        a_source_file_ptr phys = nullptr;
-        a_line_number line = 0;
-        a_boolean at_end = FALSE;
+        a_source_file_ptr phys {nullptr};
+        a_line_number line {0U};
+        a_boolean at_end {FALSE};
         conv_seq_to_physical_file_and_line(e->first, &phys, &line, &at_end);
-        unsigned long dir_line = line > 1 ? line - 1 : line;
+        unsigned long dir_line {line > 1U ? line - 1U : line};
         Item w;
         w.line = dir_line;
-        w.col = 0;
+        w.col = 0U;
         w.order = 60;
         w.key = f->file_name ? f->file_name : "";
         w.text = "warning: line directive in the primary file at L" + std::to_string(dir_line) +
@@ -947,7 +947,7 @@ void walk_il_and_print()
     // File scope, then every function memory region (the file-scope walk does
     // not enter them, il_walk.c:217-219).
     walk_file_scope_il(collect, nullptr, nullptr, nullptr, nullptr, /*clear_fe_pointers=*/FALSE);
-    for (a_memory_region_number region = FILE_SCOPE_REGION_NUMBER + 1; region <= highest_used_region_number; ++region)
+    for (a_memory_region_number region {FILE_SCOPE_REGION_NUMBER + 1}; region <= highest_used_region_number; ++region)
     {
         if (mem_region_table[region] == nullptr)
         {
@@ -963,7 +963,7 @@ void walk_il_and_print()
         {
             continue;
         }
-        a_template_ptr def = t->definition_template;
+        a_template_ptr def {t->definition_template};
         if (t->canonical_template == t && def && def->prototype_instantiation.routine)
         {
             g_proto_owner[def->prototype_instantiation.routine] = def;
@@ -971,10 +971,11 @@ void walk_il_and_print()
     }
 
     std::vector<Item> items;
-    unsigned long reported = 0, outside_user_with_body = 0;
+    unsigned long reported {0U};
+    unsigned long outside_user_with_body {0U};
     for (a_routine_ptr r : g_collected.routines)
     {
-        SrcPos pos = resolve(r->source_corresp.decl_position);
+        SrcPos pos {resolve(r->source_corresp.decl_position)};
         // Primary-file filter: a routine is reported iff its decl_position is a
         // known position outside any include file.  Consequences (checked with
         // inc<std::int64_t> and a std:: class template):
@@ -1005,23 +1006,23 @@ void walk_il_and_print()
         {
             continue;
         }
-        SrcPos pos = resolve(t->source_corresp.decl_position);
+        SrcPos pos {resolve(t->source_corresp.decl_position)};
         if (!pos.in_primary)
         {
             continue;
         }
-        a_template_ptr def = t->definition_template;
+        a_template_ptr def {t->definition_template};
         if (def == nullptr)
         {
             continue; // declaration only: no body, no prototype routine expected
         }
-        a_routine_ptr proto = def->prototype_instantiation.routine;
+        a_routine_ptr proto {def->prototype_instantiation.routine};
         // A prototype routine has no body by nature when it is a deduction guide, an
         // explicitly defaulted or deleted function, a pure virtual function or an
         // implicit one; only a routine that is defined and has lost its body counts.
-        const bool bodyless_by_nature =
-            proto && (proto->special_kind == sfk_deduction_guide || proto->is_defaulted || proto->is_deleted ||
-                      proto->pure_virtual || proto->compiler_generated);
+        const bool bodyless_by_nature {proto &&
+                                       (proto->special_kind == sfk_deduction_guide || proto->is_defaulted ||
+                                        proto->is_deleted || proto->pure_virtual || proto->compiler_generated)};
         // A friend function template defined in a class template has two prototype routines, one for the friend
         // declaration (never defined) and one for the definition (R2-8, a false alarm of this check): only a
         // prototype that is defined and has lost its body counts.
@@ -1049,7 +1050,7 @@ void walk_il_and_print()
     }
     for (a_routine_ptr r : g_collected.routines)
     {
-        SrcPos pos = resolve(r->source_corresp.decl_position);
+        SrcPos pos {resolve(r->source_corresp.decl_position)};
         if (!pos.in_primary || r->is_prototype_instantiation)
         {
             continue;
@@ -1075,7 +1076,7 @@ void walk_il_and_print()
     // written on the root template only; that is shown, not an error.
     for (a_routine_ptr r : g_collected.routines)
     {
-        SrcPos pos = resolve(r->source_corresp.decl_position);
+        SrcPos pos {resolve(r->source_corresp.decl_position)};
         if (!pos.in_primary)
         {
             continue;
@@ -1088,7 +1089,7 @@ void walk_il_and_print()
         {
             continue; // takes the contract of the inherited constructor
         }
-        a_routine_ptr root = root_routine(r);
+        a_routine_ptr root {root_routine(r)};
         if (root == nullptr)
         {
             continue;
@@ -1122,7 +1123,7 @@ void walk_il_and_print()
         {
             continue;
         }
-        SrcPos pos = resolve(a->position);
+        SrcPos pos {resolve(a->position)};
         if (!pos.known)
         {
             continue;
@@ -1133,12 +1134,12 @@ void walk_il_and_print()
             {
                 continue;
             }
-            auto o = g_collected.attr_owner.find(a);
+            auto o {g_collected.attr_owner.find(a)};
             Item w;
             w.line = pos.line;
             w.col = pos.col;
             w.order = 50;
-            std::string owner = o != g_collected.attr_owner.end() ? o->second : "<unknown owner>";
+            std::string owner {o != g_collected.attr_owner.end() ? o->second : "<unknown owner>"};
             w.key = owner;
             if (is_registered_cerastes(a))
             {

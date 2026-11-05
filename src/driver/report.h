@@ -16,16 +16,16 @@ namespace cerastes {
 // One line of the position map (internal/encoding.md section 5).
 struct MapRow
 {
-    int vpr_line = 0;
+    int vpr_line {0};
     std::string viper_id;
     std::string category;
     std::string file;
-    int line = 0;
-    int column = 0;
+    int line {0};
+    int column {0};
     std::string message;
-    bool has_note = false;
+    bool has_note {false};
     std::string note_file;
-    int note_line = 0;
+    int note_line {0};
     std::string note_text;
 };
 
@@ -36,12 +36,12 @@ std::vector<MapRow> parse_position_map(const std::string& text, std::string* pro
 struct UserError
 {
     std::string file;
-    int line = 0;
+    int line {0};
     std::string category;
     std::string message;
-    bool has_note = false;
+    bool has_note {false};
     std::string note_file;
-    int note_line = 0;
+    int note_line {0};
     std::string note_text;
 };
 

@@ -35,11 +35,11 @@ extern a_function_pointer function_pointers[]; // EDG's table of handler functio
 namespace cerastes {
 namespace {
 
-constexpr an_attr_registration_flag_set kContract = RAF_ENTITY_ATTACHED | RAF_MUST_MATCH;
+constexpr an_attr_registration_flag_set kContract {RAF_ENTITY_ATTACHED | RAF_MUST_MATCH};
 
 // The table lives for the life of the program (register_attribute_namespace
 // keeps the pointer).
-const an_attr_registration kAttributes[] = {
+const an_attr_registration kAttributes[] {
     {"requires", "(Xb)", "r", kContract},
     // "R": an optional first argument names the function's result (the fork's
     // result-name signature code, decision 0007 item 6); it needs RAF_ENTITY_ATTACHED.
@@ -77,7 +77,7 @@ const an_attr_registration kAttributes[] = {
     {nullptr, nullptr, nullptr, RAF_NO_FLAGS},
 };
 
-an_attr_namespace_registration g_namespace = {"cerastes", RANF_CLOSED, kAttributes, nullptr};
+an_attr_namespace_registration g_namespace {"cerastes", RANF_CLOSED, kAttributes, nullptr};
 
 } // namespace
 
@@ -96,8 +96,8 @@ std::vector<a_source_position> g_diag_pragma_sites;
 void record_diag_pragma(a_pending_pragma_ptr ppp)
 {
     // the start of the directive (for _Pragma, its string literal is id_position)
-    a_source_position p = ppp->pragma_position;
-    if (p.seq == 0)
+    a_source_position p {ppp->pragma_position};
+    if (p.seq == 0U)
     {
         p = ppp->id_position;
     }

@@ -10,7 +10,7 @@
 
 namespace cerastes {
 namespace {
-bool g_back_end_ran = false;
+bool g_back_end_ran {false};
 }
 
 void note_back_end_ran()

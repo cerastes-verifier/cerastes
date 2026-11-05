@@ -38,14 +38,14 @@ PipelineResult run_pipeline(const PipelineOptions& options, const std::string& v
         }
     }
     std::string problem;
-    std::vector<MapRow> rows = parse_position_map(map, &problem);
+    std::vector<MapRow> rows {parse_position_map(map, &problem)};
     if (!problem.empty())
     {
         fail(problem);
         return r;
     }
 
-    SiliconRun run = run_silicon(options.tools, vpr, options.timeout_seconds);
+    SiliconRun run {run_silicon(options.tools, vpr, options.timeout_seconds)};
     if (!run.started)
     {
         fail("Silicon could not be run: " + run.error);
@@ -61,8 +61,8 @@ PipelineResult run_pipeline(const PipelineOptions& options, const std::string& v
         fail("Silicon was killed by a signal");
         return r;
     }
-    SiliconVerdict verdict = parse_silicon_output(run.output, run.exit_code);
-    MappedVerdict mapped = map_errors(verdict, rows, run.vpr_name);
+    SiliconVerdict verdict {parse_silicon_output(run.output, run.exit_code)};
+    MappedVerdict mapped {map_errors(verdict, rows, run.vpr_name)};
     for (const UserError& e : mapped.errors)
     {
         r.out += render_error(e);

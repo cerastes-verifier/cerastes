@@ -61,7 +61,7 @@ inline Annot classify(an_attribute_ptr a)
     {
         const char* name;
         Annot kind;
-    } kNames[] = {
+    } kNames[] {
         {"requires", Annot::requires_},  {"ensures", Annot::ensures}, {"invariant", Annot::invariant},
         {"check", Annot::check},         {"fold", Annot::fold},       {"unfold", Annot::unfold},
         {"predicate", Annot::predicate}, {"pure", Annot::pure},       {"decreases", Annot::decreases},
@@ -93,18 +93,18 @@ struct AnnotArg
         binder,
         expression,
         other
-    } kind = Kind::other;
-    int index = 0; // 1-based position in the argument list
-    an_attribute_arg_ptr raw = nullptr;
-    const char* binder_name = nullptr; // Kind::binder
-    an_expr_node_ptr expr = nullptr;   // Kind::expression (may be null: unreadable)
+    } kind {Kind::other};
+    int index {0}; // 1-based position in the argument list
+    an_attribute_arg_ptr raw {nullptr};
+    const char* binder_name {nullptr}; // Kind::binder
+    an_expr_node_ptr expr {nullptr};   // Kind::expression (may be null: unreadable)
 };
 
 inline std::vector<AnnotArg> arguments_of(an_attribute_ptr a)
 {
     std::vector<AnnotArg> out;
-    int i = 0;
-    for (an_attribute_arg_ptr g = a->arguments; g; g = g->next)
+    int i {0};
+    for (an_attribute_arg_ptr g {a->arguments}; g; g = g->next)
     {
         if (g->kind == aak_empty)
         {
@@ -148,8 +148,8 @@ struct ParamRef
         binder,
         this_param,
         unmapped
-    } kind = Kind::unmapped;
-    unsigned num = 0;
+    } kind {Kind::unmapped};
+    unsigned num {0U};
 };
 
 // Interpret an enk_param_ref found in attribute `a` (see the convention above).
@@ -161,22 +161,22 @@ struct ParamRef
 inline ParamRef interpret_param_ref(an_expr_node_ptr e, Annot a, bool binder_present, int nesting = 0)
 {
     ParamRef r;
-    const auto& p = e->variant.param_ref;
+    const auto& p {e->variant.param_ref};
     r.num = p.param_num;
     if (nesting < 0)
     {
         return r;
     }
-    const unsigned levels = p.levels_up;
-    const unsigned inner = static_cast<unsigned>(nesting);
+    const unsigned levels {p.levels_up};
+    const unsigned inner {static_cast<unsigned>(nesting)};
     if (levels < inner)
     {
         return r; // a parameter of a nested construct: not ours
     }
-    const unsigned up = levels - inner;
-    if (p.param_num == 0)
+    const unsigned up {levels - inner};
+    if (p.param_num == 0U)
     {
-        if (up == 0)
+        if (up == 0U)
         {
             r.kind = ParamRef::Kind::this_param;
         }
@@ -184,16 +184,16 @@ inline ParamRef interpret_param_ref(an_expr_node_ptr e, Annot a, bool binder_pre
     }
     if (a == Annot::ensures)
     {
-        if (up == 1)
+        if (up == 1U)
         {
             r.kind = ParamRef::Kind::param;
         }
-        else if (up == 0 && p.param_num == 1 && binder_present)
+        else if (up == 0U && p.param_num == 1U && binder_present)
         {
             r.kind = ParamRef::Kind::binder;
         }
     }
-    else if (up == 0)
+    else if (up == 0U)
     {
         r.kind = ParamRef::Kind::param;
     }
@@ -208,7 +208,7 @@ inline ParamRef interpret_param_ref(an_expr_node_ptr e, Annot a, bool binder_pre
 inline std::vector<an_attribute_ptr> contracts_of(a_routine_ptr r)
 {
     std::vector<an_attribute_ptr> out;
-    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+    for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
     {
         if (is_contract(classify(a)) && a->syntactic_location == al_post_func)
         {
@@ -221,7 +221,7 @@ inline std::vector<an_attribute_ptr> contracts_of(a_routine_ptr r)
 // Whether the attributes of `r` include a registered attribute of kind `k`.
 inline bool has_annot(a_routine_ptr r, Annot k)
 {
-    for (an_attribute_ptr a = r->source_corresp.attributes; a; a = a->next)
+    for (an_attribute_ptr a {r->source_corresp.attributes}; a; a = a->next)
     {
         if (classify(a) == k)
         {
@@ -242,12 +242,12 @@ inline a_routine_ptr root_routine_of_template(a_template_ptr t)
     {
         return nullptr;
     }
-    for (int guard = 0; t->prototype_template != nullptr && guard < 64; ++guard)
+    for (int guard {0}; t->prototype_template != nullptr && guard < 64; ++guard)
     {
         t = t->prototype_template;
     }
-    a_template_ptr c = t->canonical_template ? t->canonical_template : t;
-    a_template_ptr d = c->definition_template ? c->definition_template : c;
+    a_template_ptr c {t->canonical_template ? t->canonical_template : t};
+    a_template_ptr d {c->definition_template ? c->definition_template : c};
     if (d->kind != templk_function && d->kind != templk_member_function)
     {
         return nullptr;
@@ -266,7 +266,7 @@ inline a_routine_ptr root_routine_of_template(a_template_ptr t)
 // contract applies; neither the walker nor the checks compare it.
 inline a_routine_ptr root_routine(a_routine_ptr r)
 {
-    a_routine_ptr root = root_routine_of_template(r->assoc_template);
+    a_routine_ptr root {root_routine_of_template(r->assoc_template)};
     return root == r ? nullptr : root;
 }
 

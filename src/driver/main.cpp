@@ -44,9 +44,9 @@ int main(int argc, char** argv)
     // cerastes defines __CERASTES__ itself, so that a direct run of this binary
     // cannot silently drop every contract (decision 0008).  It comes before the
     // user's options.
-    static char define_cerastes[] = "-D__CERASTES__=1";
+    static char define_cerastes[] {"-D__CERASTES__=1"};
     args.push_back(define_cerastes);
-    for (int i = 1; i < argc; ++i)
+    for (int i {1}; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--cerastes_walk") == 0)
         {
@@ -62,8 +62,8 @@ int main(int argc, char** argv)
         }
         else
         {
-            cerastes::args::FeCheck check =
-                cerastes::args::check_fe_argument(argv[i], i + 1 < argc ? argv[i + 1] : nullptr);
+            cerastes::args::FeCheck check {
+                cerastes::args::check_fe_argument(argv[i], i + 1 < argc ? argv[i + 1] : nullptr)};
             if (check.message != nullptr)
             {
                 cerastes::print_refusal(check.message);

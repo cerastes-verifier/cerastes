@@ -14,24 +14,24 @@ namespace cerastes {
 // What the encoder produced (set by verify_encode(), read by the driver after edg_main returns).
 struct VerifyOutput
 {
-    bool encoded = false; // the encoder ran to the end without rejecting anything
+    bool encoded {false}; // the encoder ran to the end without rejecting anything
     std::string vpr;      // the Viper program
     std::string map;      // its position map (internal/encoding.md section 5)
-    int functions = 0;    // functions whose bodies were verified
+    int functions {0};    // functions whose bodies were verified
     // Decision 0022 item 12: lowering's internal errors, the emitter's problems or the encoder's "encoded twice" guard fired.  The
     // diagnostics are shown as usual, but the run is a tool failure (exit status 3), never a rejection (2).
-    bool internal_inconsistency = false;
+    bool internal_inconsistency {false};
 };
 
 struct VerifyConfig
 {
-    bool on = false;
+    bool on {false};
     // The self-test hook of 0011 item 13 ("" for none): the names and what each does are listed above is_hook in
     // src/driver/verify_main.cpp, the one place that accepts them.
     std::string hook;
     // `--strict-init` (decision 0042 item 8): every local without an initializer must carry `[[cerastes::uninit]]`, and an argument of a
     // `ref_to_uninit`/`must_init` parameter must be `&x` of such a local or the caller's own marked parameter passed unchanged.
-    bool strict_init = false;
+    bool strict_init {false};
     // Canonical (realpath) system directories: the driver's own system include directories, without
     // /usr/local/include (a user directory).  A file under one of them is a system file.
     std::vector<std::string> system_dirs;

@@ -8,7 +8,7 @@ namespace cerastes::args {
 namespace {
 
 // Every long option EDG describes (see edg_options.inc).
-constexpr const char* kEdgOptions[] = {
+constexpr const char* kEdgOptions[] {
 #include "edg_options.inc"
 };
 
@@ -21,15 +21,15 @@ const char* resolve_option(std::string_view keyword)
     {
         return nullptr;
     }
-    const char* only = nullptr;
-    int matches = 0;
+    const char* only {nullptr};
+    int matches {0};
     for (const char* name : kEdgOptions)
     {
         if (keyword == name)
         {
             return name;
         }
-        if (std::string_view(name).substr(0, keyword.size()) == keyword)
+        if (std::string_view(name).substr(0U, keyword.size()) == keyword)
         {
             only = name;
             ++matches;
@@ -66,13 +66,13 @@ const char* keep(std::string s)
 
 const char* macro_message(std::string_view value, std::string_view option)
 {
-    std::string m = macro_refusal(value, option, /*verify_mode=*/false);
+    std::string m {macro_refusal(value, option, /*verify_mode=*/false)};
     return m.empty() ? nullptr : keep(std::move(m));
 }
 
-constexpr const char kOldC[] =
+constexpr const char kOldC[] {
     "C before C23 is not supported: use --c23 (--c selects an older default; older C lets identifier-list "
-    "declarators bind a contract's names to globals; decision 0007)";
+    "declarators bind a contract's names to globals; decision 0007)"};
 
 } // namespace
 
@@ -80,7 +80,7 @@ namespace {
 
 bool is_identifier(std::string_view n)
 {
-    if (n.empty() || (n[0] >= '0' && n[0] <= '9'))
+    if (n.empty() || (n[0U] >= '0' && n[0U] <= '9'))
     {
         return false;
     }
@@ -98,7 +98,7 @@ bool is_identifier(std::string_view n)
 // Every predefined macro is one (`__cplusplus`, `__STDC_VERSION__`, `__has_cpp_attribute`, `__CERASTES__`, ...).
 bool is_reserved_identifier(std::string_view n)
 {
-    if (n.size() >= 2 && n[0] == '_' && ((n[1] >= 'A' && n[1] <= 'Z') || n[1] == '_'))
+    if (n.size() >= 2U && n[0U] == '_' && ((n[1U] >= 'A' && n[1U] <= 'Z') || n[1U] == '_'))
     {
         return true;
     }
@@ -109,9 +109,9 @@ bool is_reserved_identifier(std::string_view n)
 // make contracts vanish, or change what they mean, without a diagnostic.
 bool is_cerastes_name(std::string_view n)
 {
-    static constexpr std::string_view names[] = {"cerastes", "requires",   "ensures",    "invariant", "check", "fold",
-                                                 "unfold",   "predicate",  "pure",       "old",       "owns",  "reads",
-                                                 "forall",   "owns_range", "owns_block", "CERASTES_H"};
+    static constexpr std::string_view names[] {"cerastes", "requires",   "ensures",    "invariant", "check", "fold",
+                                               "unfold",   "predicate",  "pure",       "old",       "owns",  "reads",
+                                               "forall",   "owns_range", "owns_block", "CERASTES_H"};
     for (std::string_view x : names)
     {
         if (n == x)
@@ -119,7 +119,7 @@ bool is_cerastes_name(std::string_view n)
             return true;
         }
     }
-    return n.substr(0, 9) == "CERASTES_";
+    return n.substr(0U, 9U) == "CERASTES_";
 }
 
 } // namespace
@@ -128,16 +128,16 @@ std::string macro_refusal(std::string_view value, std::string_view option, bool 
 {
     // `-D__CERASTES__`, `-D__CERASTES__=0`, `-U__CERASTES__`, `-D'name(x)=...'`: the name is what is before an
     // `=` or a `(`.  EDG trims blanks around the name (`-D" __CERASTES__"` defines it), so compare the trimmed name.
-    std::string_view name = value.substr(0, value.find_first_of("=("));
+    std::string_view name {value.substr(0U, value.find_first_of("=("))};
     while (!name.empty() && (name.front() == ' ' || name.front() == '\t'))
     {
-        name.remove_prefix(1);
+        name.remove_prefix(1U);
     }
     while (!name.empty() && (name.back() == ' ' || name.back() == '\t'))
     {
-        name.remove_suffix(1);
+        name.remove_suffix(1U);
     }
-    const bool undefine = option == "-U" || option == "--undefine_macro";
+    const bool undefine {option == "-U" || option == "--undefine_macro"};
     std::string msg(option);
     if (name == "__CERASTES__")
     {
@@ -184,19 +184,19 @@ FeCheck check_fe_argument(const char* arg, const char* next)
 {
     FeCheck r;
     std::string_view a(arg);
-    if (a.size() >= 2 && a[0] == '-' && a[1] == '-')
+    if (a.size() >= 2U && a[0U] == '-' && a[1U] == '-')
     {
-        std::string_view body = a.substr(2);
-        size_t eq = body.find('=');
-        std::string_view keyword = body.substr(0, eq);
-        const char* name = resolve_option(keyword);
+        std::string_view body {a.substr(2U)};
+        size_t eq {body.find('=')};
+        std::string_view keyword {body.substr(0U, eq)};
+        const char* name {resolve_option(keyword)};
         if (name == nullptr)
         {
             return r;
         }
         std::string_view n(name);
-        bool has_value = eq != std::string_view::npos;
-        std::string_view value = has_value ? body.substr(eq + 1) : (next ? std::string_view(next) : "");
+        bool has_value {eq != std::string_view::npos};
+        std::string_view value {has_value ? body.substr(eq + 1U) : (next ? std::string_view(next) : "")};
         r.consumes_next = takes_value(n) && !has_value && next != nullptr;
         if (n == "remove_unneeded_entities")
         {
@@ -235,15 +235,15 @@ FeCheck check_fe_argument(const char* arg, const char* next)
         }
         return r;
     }
-    if (a.size() >= 2 && a[0] == '-')
+    if (a.size() >= 2U && a[0U] == '-')
     {
         // Short options: -Uname, -U name, -Dname, -D name, -K (old C).
-        char letter = a[1];
+        char letter {a[1U]};
         if (letter == 'U' || letter == 'D')
         {
-            std::string_view value = a.size() > 2 ? a.substr(2) : (next ? std::string_view(next) : "");
+            std::string_view value {a.size() > 2U ? a.substr(2U) : (next ? std::string_view(next) : "")};
             r.message = macro_message(value, letter == 'U' ? "-U" : "-D");
-            r.consumes_next = a.size() == 2 && next != nullptr;
+            r.consumes_next = a.size() == 2U && next != nullptr;
             return r;
         }
         if (letter == 'K')
@@ -253,7 +253,7 @@ FeCheck check_fe_argument(const char* arg, const char* next)
         }
         // Other short options with a separate value (-I dir, -o file, ...): do not
         // mistake the value for an option.
-        if (a.size() == 2 && is_one_of(a.substr(1), {"I", "e", "L", "X", "o", "D", "U"}))
+        if (a.size() == 2U && is_one_of(a.substr(1U), {"I", "e", "L", "X", "o", "D", "U"}))
         {
             r.consumes_next = next != nullptr;
         }

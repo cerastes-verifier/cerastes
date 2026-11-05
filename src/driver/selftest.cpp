@@ -27,8 +27,8 @@ namespace fs = std::filesystem;
 
 struct Checks
 {
-    int total = 0;
-    int failed = 0;
+    int total {0};
+    int failed {0};
     void expect(bool ok, const std::string& what)
     {
         ++total;
@@ -61,8 +61,8 @@ void touch(const fs::path& p)
 void test_paths(Checks& c)
 {
     std::error_code ec;
-    fs::path tmp = fs::temp_directory_path(ec);
-    std::string templ = (tmp / "cerastes-selftest-XXXXXX").string();
+    fs::path tmp {fs::temp_directory_path(ec)};
+    std::string templ {(tmp / "cerastes-selftest-XXXXXX").string()};
     std::vector<char> buf(templ.begin(), templ.end());
     buf.push_back('\0');
     if (::mkdtemp(buf.data()) == nullptr)
@@ -70,7 +70,7 @@ void test_paths(Checks& c)
         c.expect(false, "cannot create a temporary directory");
         return;
     }
-    const fs::path base = canonical_path(buf.data());
+    const fs::path base {canonical_path(buf.data())};
     struct Cleanup
     {
         fs::path p;
@@ -93,10 +93,10 @@ void test_paths(Checks& c)
     fs::create_symlink("../cer/include/cerastes.h", base / "user/ch.h");
     fs::create_symlink("../cer/include/other.h", base / "user/oh.h");
 
-    const std::string sys = (base / "sys/inc").string();
-    const std::string header = (base / "cer/include/cerastes.h").string();
-    const std::vector<std::string> dirs =
-        system_directories({sys, "/usr/local/include", (base / "nowhere").string()}, {});
+    const std::string sys {(base / "sys/inc").string()};
+    const std::string header {(base / "cer/include/cerastes.h").string()};
+    const std::vector<std::string> dirs {
+        system_directories({sys, "/usr/local/include", (base / "nowhere").string()}, {})};
     c.eq(dirs, std::vector<std::string> {sys}, "system_directories drops /usr/local/include and a missing directory");
     auto sysfile = [&](const fs::path& p)
     {
@@ -124,9 +124,9 @@ void test_paths(Checks& c)
     c.expect(!sysfile(base / "user/oh.h"), "a symbolic link to another file of include/ is a user file");
 
     // A user -I directory that is also a system directory makes it a user directory.
-    c.eq(system_directories({sys}, {sys}).size(), static_cast<size_t>(0),
+    c.eq(system_directories({sys}, {sys}).size(), static_cast<size_t>(0U),
          "a -I directory named as a system directory is a user directory");
-    c.eq(system_directories({sys}, {(base / "user/linkdir").string()}).size(), static_cast<size_t>(0),
+    c.eq(system_directories({sys}, {(base / "user/linkdir").string()}).size(), static_cast<size_t>(0U),
          "...also through a symbolic link");
     // Decision 0046 item 3: library files (vlibc's include/ and, for the harness, a fixture directory) are verified files, never system
     // files, even when the front end's system include directories contain them or a system directory contains them.
@@ -137,10 +137,10 @@ void test_paths(Checks& c)
     touch(base / "sys/inc/lib/z.h");
     fs::create_symlink("../lib/include/vlibc/stdlib.h", base / "user/libl.h");
     fs::create_directory_symlink("../lib/include", base / "user/libdir");
-    const std::string lib = (base / "lib/include").string();
-    const std::vector<std::string> libs = {lib};
-    const std::vector<std::string> sys_with_lib =
-        system_directories({(base / "lib/include/vlibc").string(), lib, sys, "/usr/local/include"}, {}, libs);
+    const std::string lib {(base / "lib/include").string()};
+    const std::vector<std::string> libs {lib};
+    const std::vector<std::string> sys_with_lib {
+        system_directories({(base / "lib/include/vlibc").string(), lib, sys, "/usr/local/include"}, {}, libs)};
     c.eq(
         sys_with_lib, std::vector<std::string> {sys},
         "system_directories drops a library directory and every directory below it, whatever the front end's include order");
@@ -196,24 +196,24 @@ void test_paths(Checks& c)
 void test_silicon_output(Checks& c)
 {
     {
-        SiliconVerdict v = parse_silicon_output(
-            "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\nSilicon finished verification successfully in 1.2s.\n", 0);
+        SiliconVerdict v {parse_silicon_output(
+            "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\nSilicon finished verification successfully in 1.2s.\n", 0)};
         c.expect(v.verified && v.errors.empty() && v.problem.empty(), "a success line with exit status 0 is verified");
     }
     {
-        SiliconVerdict v = parse_silicon_output("Silicon finished verification successfully in 1.2s.\n", 1);
+        SiliconVerdict v {parse_silicon_output("Silicon finished verification successfully in 1.2s.\n", 1)};
         c.expect(!v.verified && !v.problem.empty(), "a success line with exit status 1 is a problem");
     }
     {
-        const char* out =
+        const char* out {
             "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\n"
             "Silicon found 1 error in 4.92s:\n"
-            "  [0] Assert might fail. Assertion !(a + b < -1 || 1 < a + b) might not hold. (program.vpr@15.10--15.142)\n";
-        SiliconVerdict v = parse_silicon_output(out, 1);
-        c.expect(!v.verified && v.problem.empty() && v.errors.size() == 1, "one error is a verdict");
-        if (v.errors.size() == 1)
+            "  [0] Assert might fail. Assertion !(a + b < -1 || 1 < a + b) might not hold. (program.vpr@15.10--15.142)\n"};
+        SiliconVerdict v {parse_silicon_output(out, 1)};
+        c.expect(!v.verified && v.problem.empty() && v.errors.size() == 1U, "one error is a verdict");
+        if (v.errors.size() == 1U)
         {
-            const SiliconError& e = v.errors[0];
+            const SiliconError& e {v.errors[0U]};
             c.eq(e.viper_id, std::string("assert.failed"), "kind of an assert");
             c.eq(e.reason, std::string("assertion.false"), "reason of an assert");
             c.eq(e.file, std::string("program.vpr"), "file of the position");
@@ -221,54 +221,54 @@ void test_silicon_output(Checks& c)
         }
     }
     {
-        const char* out =
+        const char* out {
             "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\n"
             "Silicon found 4 errors in 4.92s:\n"
             "  [0] The precondition of method f_g__1 might not hold. Assertion a > 0 might not hold.\n"
             "      (program.vpr@3.4--3.20)\n"
             "  [1] Loop invariant x >= 0 might not hold on entry. Assertion x >= 0 might not hold. (program.vpr@9.1)\n"
             "  [2] Postcondition of f_f__0 might not hold. Assertion res > 0 might not hold. (program.vpr@4.3--4.9)\n"
-            "  [3] Assert might fail. Divisor b might be zero. (program.vpr@7.5--7.12)\n";
-        SiliconVerdict v = parse_silicon_output(out, 1);
-        c.expect(v.problem.empty() && v.errors.size() == 4, "four errors, the first continued on a second line");
-        if (v.errors.size() == 4)
+            "  [3] Assert might fail. Divisor b might be zero. (program.vpr@7.5--7.12)\n"};
+        SiliconVerdict v {parse_silicon_output(out, 1)};
+        c.expect(v.problem.empty() && v.errors.size() == 4U, "four errors, the first continued on a second line");
+        if (v.errors.size() == 4U)
         {
-            c.eq(v.errors[0].viper_id, std::string("call.precondition"), "precondition kind");
-            c.eq(v.errors[0].reason, std::string("assertion.false"), "a continued message keeps its reason");
-            c.eq(v.errors[0].line, 3, "a continued message keeps its position");
-            c.eq(v.errors[1].viper_id, std::string("invariant.not.established"), "invariant entry kind");
-            c.eq(v.errors[1].line, 9, "a position without an end");
-            c.eq(v.errors[2].viper_id, std::string("postcondition.violated"), "postcondition kind");
-            c.eq(v.errors[3].reason, std::string("division.by.zero"), "division by zero reason");
+            c.eq(v.errors[0U].viper_id, std::string("call.precondition"), "precondition kind");
+            c.eq(v.errors[0U].reason, std::string("assertion.false"), "a continued message keeps its reason");
+            c.eq(v.errors[0U].line, 3, "a continued message keeps its position");
+            c.eq(v.errors[1U].viper_id, std::string("invariant.not.established"), "invariant entry kind");
+            c.eq(v.errors[1U].line, 9, "a position without an end");
+            c.eq(v.errors[2U].viper_id, std::string("postcondition.violated"), "postcondition kind");
+            c.eq(v.errors[3U].reason, std::string("division.by.zero"), "division by zero reason");
         }
     }
     {
-        SiliconVerdict v = parse_silicon_output(
+        SiliconVerdict v {parse_silicon_output(
             "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\nSilicon found 1 error in 1s:\n  [0] Assert might fail. An SMT query timed out after 5000ms. (program.vpr@2.1--2.9)\n",
-            1);
-        c.expect(v.errors.size() == 1 && v.errors[0].reason == "timeout", "a solver timeout has reason timeout");
+            1)};
+        c.expect(v.errors.size() == 1U && v.errors[0U].reason == "timeout", "a solver timeout has reason timeout");
     }
     {
-        SiliconVerdict v = parse_silicon_output(
+        SiliconVerdict v {parse_silicon_output(
             "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\nSilicon found 1 error in 1s:\n  [0] Parse error: something (program.vpr@2.1)\n",
-            1);
-        c.expect(v.errors.size() == 1 && v.errors[0].viper_id == "unknown" && v.errors[0].reason == "unknown",
+            1)};
+        c.expect(v.errors.size() == 1U && v.errors[0U].viper_id == "unknown" && v.errors[0U].reason == "unknown",
                  "a message that is not a verification error is unknown");
     }
     {
-        SiliconVerdict v = parse_silicon_output(
+        SiliconVerdict v {parse_silicon_output(
             "Silicon 1.1-SNAPSHOT (x)\nSilicon found 2 errors in 1s:\n  [0] Assert might fail. Assertion x might not hold. (program.vpr@2.1)\n",
-            1);
+            1)};
         c.expect(!v.problem.empty(), "a count that does not match the entries is a problem");
     }
     {
-        SiliconVerdict v = parse_silicon_output("Exception in thread \"main\" java.lang.OutOfMemoryError\n", 1);
+        SiliconVerdict v {parse_silicon_output("Exception in thread \"main\" java.lang.OutOfMemoryError\n", 1)};
         c.expect(!v.verified && !v.problem.empty(), "a crash is not a verdict");
     }
     {
         // Anything besides the banner, the verdict and its error list is not a verdict (decision 0011 item 11).
-        const char* clean =
-            "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\nSilicon finished verification successfully in 1.2s.\n";
+        const char* clean {
+            "Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\nSilicon finished verification successfully in 1.2s.\n"};
         c.expect(parse_silicon_output(clean, 0).verified, "the banner and a success line are a verdict");
         c.expect(!parse_silicon_output(std::string("WARNING: something\n") + clean, 0).verified,
                  "a stray line before the banner is not a verdict");
@@ -283,7 +283,7 @@ void test_silicon_output(Checks& c)
                  "a banner without a verdict is not a verdict");
     }
     {
-        SiliconVerdict v = parse_silicon_output("", 0);
+        SiliconVerdict v {parse_silicon_output("", 0)};
         c.expect(!v.verified && !v.problem.empty(), "no output is not a verdict");
     }
 }
@@ -292,7 +292,7 @@ void test_silicon_output(Checks& c)
 
 void test_report(Checks& c)
 {
-    const std::string map =
+    const std::string map {
         "7\tnot.wellformed\tinternal\tt.c\t1\t3\tinternal check: well-formedness of the contract of `f`\n"
         "9\tpostcondition.violated\tinternal\tt.c\t1\t3\tinternal check: Silicon's own check of the postcondition of `f`\n"
         "15\tassert.failed\toverflow\tt.c\t6\t3\tsigned `int` addition may overflow\n"
@@ -300,16 +300,16 @@ void test_report(Checks& c)
         "30\tcall.precondition\tprecondition\th.h\t4\t1\tthe precondition of `g` may not hold\th.h:2:the clause\n"
         "30\tassert.failed\tcheck\tt.c\t3\t1\tcheck may not hold\n"
         "41\tassert.failed\tuninitialized\tt.c\t8\t3\t`x` may be read here before it is given a value\n"
-        "42\tinvariant.not.established\tuninitialized\tt.c\t9\t3\t`x` may be read here before it is given a value\n";
+        "42\tinvariant.not.established\tuninitialized\tt.c\t9\t3\t`x` may be read here before it is given a value\n"};
     std::string problem;
-    std::vector<MapRow> rows = parse_position_map(map, &problem);
-    c.expect(problem.empty() && rows.size() == 8, "a well-formed position map parses");
-    if (rows.size() == 8)
+    std::vector<MapRow> rows {parse_position_map(map, &problem)};
+    c.expect(problem.empty() && rows.size() == 8U, "a well-formed position map parses");
+    if (rows.size() == 8U)
     {
-        c.expect(rows[3].has_note && rows[3].note_file == "t.c" && rows[3].note_line == 10 &&
-                     rows[3].note_text == "this clause may not hold",
+        c.expect(rows[3U].has_note && rows[3U].note_file == "t.c" && rows[3U].note_line == 10 &&
+                     rows[3U].note_text == "this clause may not hold",
                  "a note is read");
-        c.eq(rows[4].file, std::string("h.h"), "a header's file");
+        c.eq(rows[4U].file, std::string("h.h"), "a header's file");
     }
     parse_position_map("7\tnot.wellformed\n", &problem);
     c.expect(!problem.empty(), "a short map line is a problem");
@@ -327,19 +327,19 @@ void test_report(Checks& c)
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 20), err("call.precondition", 30), err("assert.failed", 15)};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.failures.empty() && m.errors.size() == 3, "three errors map");
-        if (m.errors.size() == 3)
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.failures.empty() && m.errors.size() == 3U, "three errors map");
+        if (m.errors.size() == 3U)
         {
             // Sorted by file, line, category: h.h, t.c:6, t.c:12.
-            c.eq(render_error(m.errors[0]),
+            c.eq(render_error(m.errors[0U]),
                  std::string(
                      "h.h:4: error: precondition: the precondition of `g` may not hold\nh.h:2: note: the clause\n"),
                  "a precondition error and its note, sorted first by file");
-            c.eq(render_error(m.errors[1]), std::string("t.c:6: error: overflow: signed `int` addition may overflow\n"),
-                 "an overflow error");
+            c.eq(render_error(m.errors[1U]),
+                 std::string("t.c:6: error: overflow: signed `int` addition may overflow\n"), "an overflow error");
             c.eq(
-                render_error(m.errors[2]),
+                render_error(m.errors[2U]),
                 std::string(
                     "t.c:12: error: postcondition: the postcondition may not hold\nt.c:10: note: this clause may not hold\n"),
                 "a postcondition error and its note");
@@ -349,14 +349,14 @@ void test_report(Checks& c)
         // Decision 0019 item 8: a failed read of a local without a value is an assertion at the read, or a loop-invariant check.
         SiliconVerdict v;
         v.errors = {err("assert.failed", 41), err("invariant.not.established", 42)};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.failures.empty() && m.errors.size() == 2, "the two shapes of an uninitialized read map");
-        if (m.errors.size() == 2)
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.failures.empty() && m.errors.size() == 2U, "the two shapes of an uninitialized read map");
+        if (m.errors.size() == 2U)
         {
-            c.eq(render_error(m.errors[0]),
+            c.eq(render_error(m.errors[0U]),
                  std::string("t.c:8: error: uninitialized: `x` may be read here before it is given a value\n"),
                  "an uninitialized read at its line");
-            c.eq(render_error(m.errors[1]),
+            c.eq(render_error(m.errors[1U]),
                  std::string("t.c:9: error: uninitialized: `x` may be read here before it is given a value\n"),
                  "an uninitialized read in a loop invariant");
         }
@@ -364,61 +364,61 @@ void test_report(Checks& c)
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 15), err("assert.failed", 15)};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.failures.empty() && m.errors.size() == 1, "an error reported twice is printed once");
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.failures.empty() && m.errors.size() == 1U, "an error reported twice is printed once");
     }
     {
         SiliconVerdict v;
         v.errors = {err("postcondition.violated", 9)};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1,
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
                  "an internal check that fails is a tool failure, not an error");
     }
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 99)};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1, "an error the map does not explain is a tool failure");
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U, "an error the map does not explain is a tool failure");
     }
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 15)}; // line 15 has an assert.failed entry; ask for another kind
-        v.errors[0].viper_id = "call.precondition";
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1,
+        v.errors[0U].viper_id = "call.precondition";
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
                  "an error of another kind at a mapped line is a tool failure");
     }
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 15, "timeout")};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1, "a solver timeout is a tool failure");
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U, "a solver timeout is a tool failure");
     }
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 15)};
-        v.errors[0].file = "other.vpr";
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1, "a position in another file is a tool failure");
+        v.errors[0U].file = "other.vpr";
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U, "a position in another file is a tool failure");
     }
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 15, "division.by.zero")};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1,
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
                  "an assertion error whose reason is not assertion.false is a tool failure");
     }
     {
         SiliconVerdict v;
         v.errors = {err("assert.failed", 15, "insufficient.permission")};
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1, "an insufficient-permission error is a tool failure");
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U, "an insufficient-permission error is a tool failure");
     }
     {
         SiliconVerdict v;
         v.problem = "Silicon did not produce a verdict (exit status 7)";
-        MappedVerdict m = map_errors(v, rows, "program.vpr");
-        c.expect(m.errors.empty() && m.failures.size() == 1, "a verdict problem is a tool failure");
+        MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U, "a verdict problem is a tool failure");
     }
 }
 
@@ -428,7 +428,7 @@ struct Built
 {
     std::string vpr;
     std::string map;
-    bool ok = false;
+    bool ok {false};
 };
 
 // `int f(int a) requires 0 <= a < 100 ensures result == a + 1 { return a + 1; }` and, when `with_g`,
@@ -438,16 +438,16 @@ Built build_program(bool with_g)
     using namespace vir;
     Program p;
     Builder b(p);
-    const IntType* it = p.int_type("int", 32, true);
-    const Type T = Type::integer(it);
+    const IntType* it {p.int_type("int", 32, true)};
+    const Type T {Type::integer(it)};
     auto loc = [](int line, int col = 3)
     {
         return SrcLoc {"t.c", line, col};
     };
 
-    Function* f = p.add_function("f", T, loc(1), loc(5));
+    Function* f {p.add_function("f", T, loc(1), loc(5))};
     f->add_param("a", T, loc(1));
-    const Expr* a0 = b.formal(*f, 0, loc(2));
+    const Expr* a0 {b.formal(*f, 0, loc(2))};
     f->requires_.push_back(
         {b.binary(BinaryOp::LAnd, b.binary(BinaryOp::Ge, a0, b.int_const(T, "0", loc(2)), loc(2)),
                   b.binary(BinaryOp::Lt, b.formal(*f, 0, loc(2)), b.int_const(T, "100", loc(2)), loc(2)), loc(2)),
@@ -462,7 +462,7 @@ Built build_program(bool with_g)
         loc(1));
     if (with_g)
     {
-        Function* g = p.add_function("g", T, loc(7), loc(10));
+        Function* g {p.add_function("g", T, loc(7), loc(10))};
         g->add_param("a", T, loc(7));
         g->body = b.block({b.return_stmt(b.binary(BinaryOp::Add, b.local(g->param_var(0), loc(9)),
                                                   b.int_const(T, "1", loc(9)), loc(9)),
@@ -474,12 +474,12 @@ Built build_program(bool with_g)
     {
         return out;
     }
-    LowerResult lr = lower_program(p);
+    LowerResult lr {lower_program(p)};
     if (!lr.errors.empty() || !lr.rejections.empty())
     {
         return out;
     }
-    viper::Emitted e = viper::emit(lr.program);
+    viper::Emitted e {viper::emit(lr.program)};
     out.vpr = e.vpr;
     out.map = e.map;
     out.ok = true;
@@ -494,21 +494,21 @@ Built build_nonterminating()
     using namespace vir;
     Program p;
     Builder b(p);
-    const IntType* it = p.int_type("int", 32, true);
-    const IntType* lt = p.int_type("long", 64, true);
-    const Type T = Type::integer(it);
-    const Type L = Type::integer(lt);
+    const IntType* it {p.int_type("int", 32, true)};
+    const IntType* lt {p.int_type("long", 64, true)};
+    const Type T {Type::integer(it)};
+    const Type L {Type::integer(lt)};
     auto loc = [](int line, int col = 3)
     {
         return SrcLoc {"t.c", line, col};
     };
-    Function* f = p.add_function("f", Type::void_type(), loc(1), loc(8));
+    Function* f {p.add_function("f", Type::void_type(), loc(1), loc(8))};
     f->add_param("n", T, loc(1));
     f->requires_.push_back(
         {b.binary(BinaryOp::Ge, b.formal(*f, 0, loc(2)), b.int_const(T, "1", loc(2)), loc(2)), loc(2)});
-    Var* i = f->new_local("i", T, loc(3));
-    const Expr* gap = b.binary(BinaryOp::Sub, b.convert(L, b.local(f->param_var(0), loc(5)), false, loc(5)),
-                               b.convert(L, b.local(i, loc(5)), false, loc(5)), loc(5));
+    Var* i {f->new_local("i", T, loc(3))};
+    const Expr* gap {b.binary(BinaryOp::Sub, b.convert(L, b.local(f->param_var(0), loc(5)), false, loc(5)),
+                              b.convert(L, b.local(i, loc(5)), false, loc(5)), loc(5))};
     f->body =
         b.block({b.decl(i, b.int_const(T, "0", loc(3)), loc(3)),
                  b.while_stmt(b.binary(BinaryOp::Lt, b.local(i, loc(4)), b.local(f->param_var(0), loc(4)), loc(4)), {},
@@ -519,12 +519,12 @@ Built build_nonterminating()
     {
         return out;
     }
-    LowerResult lr = lower_program(p);
+    LowerResult lr {lower_program(p)};
     if (!lr.errors.empty() || !lr.rejections.empty())
     {
         return out;
     }
-    viper::Emitted e = viper::emit(lr.program);
+    viper::Emitted e {viper::emit(lr.program)};
     out.vpr = e.vpr;
     out.map = e.map;
     out.ok = true;
@@ -539,11 +539,11 @@ void test_pipeline(Checks& c, const SiliconTools& tools)
     po.primary_file = "t.c";
     po.functions = 1;
     {
-        Built b = build_program(false);
+        Built b {build_program(false)};
         c.expect(b.ok, "the verified program builds");
         if (b.ok)
         {
-            PipelineResult r = run_pipeline(po, b.vpr, b.map);
+            PipelineResult r {run_pipeline(po, b.vpr, b.map)};
             c.eq(r.exit_code, 0, "a correct program verifies (exit status)");
             c.eq(
                 r.out,
@@ -551,25 +551,25 @@ void test_pipeline(Checks& c, const SiliconTools& tools)
                     "t.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)\n"),
                 "the verdict line");
             c.eq(r.err, std::string(""), "nothing on standard error");
-            PipelineOptions timeout = po;
+            PipelineOptions timeout {po};
             timeout.timeout_seconds = 0;
-            PipelineResult t = run_pipeline(timeout, b.vpr, b.map);
+            PipelineResult t {run_pipeline(timeout, b.vpr, b.map)};
             c.eq(t.exit_code, 3, "a timeout of zero is a tool failure");
             c.expect(t.out.empty() && t.err.find("did not finish") != std::string::npos,
                      "the timeout is named, and nothing is claimed");
-            PipelineOptions broken = po;
+            PipelineOptions broken {po};
             broken.tools.java = "/nonexistent/java";
-            PipelineResult m = run_pipeline(broken, b.vpr, b.map);
+            PipelineResult m {run_pipeline(broken, b.vpr, b.map)};
             c.eq(m.exit_code, 3, "a java that cannot be run is a tool failure");
         }
     }
     {
-        Built b = build_program(true);
+        Built b {build_program(true)};
         c.expect(b.ok, "the failing program builds");
         if (b.ok)
         {
             po.functions = 2;
-            PipelineResult r = run_pipeline(po, b.vpr, b.map);
+            PipelineResult r {run_pipeline(po, b.vpr, b.map)};
             c.eq(r.exit_code, 1, "g's overflow is a verification error (exit status)");
             c.eq(r.out, std::string("t.c:9: error: overflow: signed `int` addition may overflow\n"),
                  "the error is at g's line");
@@ -577,14 +577,14 @@ void test_pipeline(Checks& c, const SiliconTools& tools)
         }
     }
     {
-        Built b = build_nonterminating();
+        Built b {build_nonterminating()};
         c.expect(b.ok, "the non-terminating program builds");
         if (b.ok)
         {
             po.functions = 1;
-            PipelineResult r = run_pipeline(po, b.vpr, b.map);
+            PipelineResult r {run_pipeline(po, b.vpr, b.map)};
             c.eq(r.exit_code, 1, "a loop whose measure does not decrease is a verification error (exit status)");
-            c.expect(r.out.rfind("t.c:5: error: termination: ", 0) == 0,
+            c.expect(r.out.rfind("t.c:5: error: termination: ", 0U) == 0U,
                      "the termination error is at the measure's line: " + r.out);
             c.eq(r.err, std::string(""), "nothing on standard error");
         }
@@ -601,23 +601,23 @@ vir::LowerResult lower_nested_calls(bool perturb, bool* valid)
     using namespace vir;
     Program p;
     Builder b(p);
-    const IntType* it = p.int_type("int", 32, true);
-    const Type T = Type::integer(it);
+    const IntType* it {p.int_type("int", 32, true)};
+    const Type T {Type::integer(it)};
     auto loc = [](int line, int col = 3)
     {
         return SrcLoc {"t.c", line, col};
     };
-    Function* g = p.add_function("g", T, loc(1), loc(1));
+    Function* g {p.add_function("g", T, loc(1), loc(1))};
     g->add_param("x", T, loc(1));
     g->trusted_reason = "declared here, defined in another unit";
-    Function* f1 = p.add_function("f1", T, loc(2), loc(2));
+    Function* f1 {p.add_function("f1", T, loc(2), loc(2))};
     f1->add_param("x", T, loc(2));
     f1->trusted_reason = "declared here, defined in another unit";
     f1->requires_.push_back(
         {b.binary(BinaryOp::Gt, b.formal(*f1, 0, loc(2)), b.int_const(T, "0", loc(2)), loc(2)), loc(2)});
-    Function* c = p.add_function("c", T, loc(3), loc(5));
+    Function* c {p.add_function("c", T, loc(3), loc(5))};
     c->add_param("x", T, loc(3));
-    const Expr* inner = b.call(g, {b.local(c->param_var(0), loc(4))}, loc(4));
+    const Expr* inner {b.call(g, {b.local(c->param_var(0), loc(4))}, loc(4))};
     c->body = b.block({b.return_stmt(b.call(f1, {inner}, loc(4)), loc(4))}, loc(3));
     LowerOptions lo;
     lo.perturb_fixed_order = perturb;
@@ -638,14 +638,14 @@ void test_internal_inconsistency(Checks& c)
     c.eq(front_end_exit_status(out, 1), 3, "an internal inconsistency is exit status 3, never 2");
     c.eq(front_end_exit_status(out, 0), 3,
          "an internal inconsistency is a tool failure even if the front end reported nothing");
-    bool valid = false;
-    vir::LowerResult ok = lower_nested_calls(false, &valid);
+    bool valid {false};
+    vir::LowerResult ok {lower_nested_calls(false, &valid)};
     c.expect(valid, "the nested calls pass check_program");
     c.expect(ok.errors.empty() && ok.rejections.empty(), "the nested calls lower without the hook");
-    vir::LowerResult bad = lower_nested_calls(true, &valid);
+    vir::LowerResult bad {lower_nested_calls(true, &valid)};
     c.expect(!bad.errors.empty(), "perturb_fixed_order makes lowering report an internal error");
     c.expect(!bad.errors.empty() &&
-                 bad.errors[0].reason.find("are not exactly the set it depends on") != std::string::npos,
+                 bad.errors[0U].reason.find("are not exactly the set it depends on") != std::string::npos,
              "the internal error is the order check's");
     c.expect(bad.rejections.empty(), "the internal error is not a rejection");
     // What the encoder does with LowerResult::errors: it sets the flag, and the status is then 3.

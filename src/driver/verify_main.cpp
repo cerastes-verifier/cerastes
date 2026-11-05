@@ -47,7 +47,7 @@ extern int edg_main(int argc, char** argv);
 
 namespace {
 
-constexpr const char kVersion[] = "cerastes (M3 development build)";
+constexpr const char kVersion[] {"cerastes (M3 development build)"};
 
 // `--version`: the build, and the vlibc commit it was configured with (decision 0046 item 1; "unknown" when vlibc is not a git tree).
 void print_version()
@@ -55,7 +55,7 @@ void print_version()
     std::printf("%s; vlibc %s\n", kVersion, CERASTES_TOOL_VLIBC_COMMIT);
 }
 
-constexpr const char kUsage[] =
+constexpr const char kUsage[] {
     "usage: cerastes verify <file> [options]\n"
     "       cerastes --help | --version\n"
     "\n"
@@ -73,7 +73,7 @@ constexpr const char kUsage[] =
     "                           is &x of such a local or the caller's own marked parameter passed on\n"
     "  --help, --version\n"
     "\n"
-    "exit status: 0 verified, 1 verification errors, 2 the program is not accepted, 3 tool failure\n";
+    "exit status: 0 verified, 1 verification errors, 2 the program is not accepted, 3 tool failure\n"};
 
 struct Args
 {
@@ -81,10 +81,10 @@ struct Args
     std::string std_mode; // "c++20" or "c23"
     std::vector<std::string> includes;
     std::vector<std::string> macro_options; // "-DNAME=VALUE" / "-UNAME", in order
-    bool keep = false;
+    bool keep {false};
     std::string keep_path;
-    int timeout = 300;
-    bool strict_init = false; // --strict-init (decision 0042 item 8)
+    int timeout {300};
+    bool strict_init {false}; // --strict-init (decision 0042 item 8)
     std::string hook;
 };
 
@@ -116,25 +116,25 @@ bool is_hook(const std::string& h)
     {
         return true;
     }
-    if (h.rfind("drop_assert=", 0) != 0 || h.size() == 12)
+    if (h.rfind("drop_assert=", 0U) != 0U || h.size() == 12U)
     {
         return false;
     }
-    for (size_t i = 12; i < h.size(); ++i)
+    for (size_t i {12U}; i < h.size(); ++i)
     {
         if (h[i] < '0' || h[i] > '9')
         {
             return false;
         }
     }
-    return h.size() < 20;
+    return h.size() < 20U;
 }
 
 std::vector<std::string> split_colons(const char* s)
 {
     std::vector<std::string> out;
     std::string cur;
-    for (const char* p = s; *p; ++p)
+    for (const char* p {s}; *p; ++p)
     {
         if (*p == ':')
         {
@@ -158,22 +158,22 @@ std::vector<std::string> split_colons(const char* s)
 
 bool ends_with(const std::string& s, const char* suffix)
 {
-    size_t n = std::strlen(suffix);
+    size_t n {std::strlen(suffix)};
     return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
 }
 
 // Returns 0 to go on, else the exit status (a refusal, or --help).
 int parse_args(int argc, char** argv, Args& a)
 {
-    for (int i = 0; i < argc; ++i)
+    for (int i {0}; i < argc; ++i)
     {
-        const std::string s = argv[i];
+        const std::string s {argv[i]};
         auto value_of = [&](const char* flag, std::string* out) -> int
         {
             // `-I dir` / `-Idir`: the value is the rest of the word, or the next word.
-            if (s.size() > 2)
+            if (s.size() > 2U)
             {
-                *out = s.substr(2);
+                *out = s.substr(2U);
                 return 0;
             }
             if (i + 1 >= argc)
@@ -193,9 +193,9 @@ int parse_args(int argc, char** argv, Args& a)
             print_version();
             return -1;
         }
-        else if (s.rfind("--std=", 0) == 0)
+        else if (s.rfind("--std=", 0U) == 0U)
         {
-            std::string v = s.substr(6);
+            std::string v {s.substr(6U)};
             if (v != "c++20" && v != "c23")
             {
                 return refuse(
@@ -208,10 +208,10 @@ int parse_args(int argc, char** argv, Args& a)
         {
             a.keep = true;
         }
-        else if (s.rfind("--keep-vpr=", 0) == 0)
+        else if (s.rfind("--keep-vpr=", 0U) == 0U)
         {
             a.keep = true;
-            a.keep_path = s.substr(11);
+            a.keep_path = s.substr(11U);
             if (a.keep_path.empty())
             {
                 return refuse("--keep-vpr= needs a path");
@@ -221,26 +221,26 @@ int parse_args(int argc, char** argv, Args& a)
         {
             a.strict_init = true;
         }
-        else if (s.rfind("--timeout=", 0) == 0)
+        else if (s.rfind("--timeout=", 0U) == 0U)
         {
-            const std::string v = s.substr(10);
-            char* end = nullptr;
-            long t = std::strtol(v.c_str(), &end, 10);
+            const std::string v {s.substr(10U)};
+            char* end {nullptr};
+            long t {std::strtol(v.c_str(), &end, 10)};
             if (v.empty() || *end != '\0' || t < 1 || t > 86400)
             {
                 return refuse("--timeout needs a whole number of seconds from 1 to 86400");
             }
             a.timeout = static_cast<int>(t);
         }
-        else if (s.rfind("--cerastes_verify_selftest=", 0) == 0)
+        else if (s.rfind("--cerastes_verify_selftest=", 0U) == 0U)
         {
-            a.hook = s.substr(27);
+            a.hook = s.substr(27U);
             if (!is_hook(a.hook))
             {
                 return refuse("unknown self-test hook \"" + a.hook + "\"");
             }
         }
-        else if (s.rfind("-I", 0) == 0)
+        else if (s.rfind("-I", 0U) == 0U)
         {
             std::string dir;
             if (int rc = value_of("-I", &dir))
@@ -253,7 +253,7 @@ int parse_args(int argc, char** argv, Args& a)
             }
             // `-I-` makes every directory before it quote-only, which would take the shim and the platform's headers out of reach of
             // `#include <...>`; a value that starts with `-` is no directory (decision 0046 item 2).
-            if (dir[0] == '-')
+            if (dir[0U] == '-')
             {
                 return refuse(
                     "-I" + dir +
@@ -261,26 +261,26 @@ int parse_args(int argc, char** argv, Args& a)
             }
             a.includes.push_back(dir);
         }
-        else if (s.rfind("-D", 0) == 0 || s.rfind("-U", 0) == 0)
+        else if (s.rfind("-D", 0U) == 0U || s.rfind("-U", 0U) == 0U)
         {
             std::string v;
-            if (int rc = value_of(s.rfind("-D", 0) == 0 ? "-D" : "-U", &v))
+            if (int rc = value_of(s.rfind("-D", 0U) == 0U ? "-D" : "-U", &v))
             {
                 return rc;
             }
-            const char* opt = s[1] == 'D' ? "-D" : "-U";
+            const char* opt {s[1U] == 'D' ? "-D" : "-U"};
             if (v.empty())
             {
                 return refuse(std::string(opt) + " needs a name");
             }
-            std::string why = cerastes::args::macro_refusal(v, opt, /*verify_mode=*/true);
+            std::string why {cerastes::args::macro_refusal(v, opt, /*verify_mode=*/true)};
             if (!why.empty())
             {
                 return refuse(why);
             }
             a.macro_options.push_back(std::string(opt) + v);
         }
-        else if (!s.empty() && s[0] == '-')
+        else if (!s.empty() && s[0U] == '-')
         {
             return refuse("option \"" + s +
                           "\" is not supported by \"cerastes verify\" (run `cerastes verify --help`)");
@@ -326,22 +326,22 @@ void scrub_environment()
 // A front-end abort (EDG's internal-error path ends in abort()) or a crash of ours is a tool failure: exit
 // status 3 with one line (decision 0011 item 8).  Only async-signal-safe calls.
 // The temporary directory of EDG's diagnostics, for the handlers to remove (plain data, async-signal-safe to use).
-char g_diag_file[1024] = "";
-char g_diag_dir[1024] = "";
+char g_diag_file[1024] {""};
+char g_diag_dir[1024] {""};
 // Copies what EDG wrote to its diagnostics file to standard error (so that what it found before a crash or an
 // interruption is not lost), then removes the file and its directory.  Raw system calls on a static buffer only.
 void dump_and_remove_diag_files()
 {
     if (g_diag_file[0] != '\0')
     {
-        int fd = ::open(g_diag_file, O_RDONLY);
+        int fd {::open(g_diag_file, O_RDONLY)};
         if (fd >= 0)
         {
             static char buf[4096];
             ssize_t n;
             while ((n = ::read(fd, buf, sizeof buf)) > 0)
             {
-                ssize_t ignored = ::write(2, buf, static_cast<size_t>(n));
+                ssize_t ignored {::write(2, buf, static_cast<size_t>(n))};
                 (void)ignored;
             }
             ::close(fd);
@@ -357,8 +357,8 @@ void dump_and_remove_diag_files()
 extern "C" void crash_handler(int)
 {
     dump_and_remove_diag_files();
-    static const char msg[] = "cerastes: error: internal error in the front end (the program was not checked)\n";
-    ssize_t ignored = ::write(2, msg, sizeof msg - 1);
+    static const char msg[] {"cerastes: error: internal error in the front end (the program was not checked)\n"};
+    ssize_t ignored {::write(2, msg, sizeof msg - 1U)};
     (void)ignored;
     ::_exit(3);
 }
@@ -387,13 +387,13 @@ void* signal_thread(void*)
     {
         sigaddset(&set, sig);
     }
-    int sig = 0;
+    int sig {0};
     sigwait(&set, &sig);
     cerastes::silicon_signal_cleanup();
     std::fflush(nullptr);
     dump_and_remove_diag_files();
-    static const char msg[] = "cerastes: error: interrupted (the program was not checked)\n";
-    ssize_t ignored = ::write(2, msg, sizeof msg - 1);
+    static const char msg[] {"cerastes: error: interrupted (the program was not checked)\n"};
+    ssize_t ignored {::write(2, msg, sizeof msg - 1U)};
     (void)ignored;
     ::_exit(3);
     return nullptr;
@@ -442,18 +442,18 @@ struct EdgCommand
     std::vector<std::string> edg;
     std::vector<std::string> sys_includes;
     std::vector<std::string> library_dirs;
-    int rc = 0; // nonzero: a refusal or a tool failure was printed, this is the exit status
+    int rc {0}; // nonzero: a refusal or a tool failure was printed, this is the exit status
 };
 
 EdgCommand build_edg_command(const Args& a, bool probe)
 {
     EdgCommand out;
-    const bool c_mode = a.std_mode == "c23";
+    const bool c_mode {a.std_mode == "c23"};
     out.sys_includes = split_colons(c_mode ? CERASTES_TOOL_C_SYS_INCLUDES : CERASTES_TOOL_CXX_SYS_INCLUDES);
-    const std::vector<std::string>& sys_includes = out.sys_includes;
+    const std::vector<std::string>& sys_includes {out.sys_includes};
 
     // The EDG command line: ours entirely (0011 item 2).
-    std::vector<std::string>& edg = out.edg;
+    std::vector<std::string>& edg {out.edg};
     edg = {
         "cerastes",
         "-D__CERASTES__=1", // before the user's options (0008)
@@ -463,8 +463,8 @@ EdgCommand build_edg_command(const Args& a, bool probe)
     // before the platform's directories, so a bare <stdlib.h> (the program's, or a system header's) reaches the shim, whose
     // `#include_next` continues with the platform's header; EDG flags both as system, cerastes decides by path (item 3).  The
     // library_fixture hook (item 10) adds its fixture directory, first.
-    const std::string vlibc_include = cerastes::canonical_path(CERASTES_TOOL_VLIBC_INCLUDE_DIR);
-    const std::string vlibc_shim = cerastes::canonical_path(std::string(CERASTES_TOOL_VLIBC_INCLUDE_DIR) + "/vlibc");
+    const std::string vlibc_include {cerastes::canonical_path(CERASTES_TOOL_VLIBC_INCLUDE_DIR)};
+    const std::string vlibc_shim {cerastes::canonical_path(std::string(CERASTES_TOOL_VLIBC_INCLUDE_DIR) + "/vlibc")};
     if (vlibc_include.empty() || vlibc_shim.empty())
     {
         std::fprintf(stderr, "cerastes: error: vlibc is missing (%s): run scripts/bootstrap.sh\n",
@@ -472,11 +472,11 @@ EdgCommand build_edg_command(const Args& a, bool probe)
         out.rc = 3;
         return out;
     }
-    std::vector<std::string>& library_dirs = out.library_dirs;
+    std::vector<std::string>& library_dirs {out.library_dirs};
     library_dirs.push_back(vlibc_shim);
     if (a.hook == "library_fixture")
     {
-        const std::string fixture = cerastes::canonical_path(CERASTES_TOOL_LIBRARY_FIXTURE_DIR);
+        const std::string fixture {cerastes::canonical_path(CERASTES_TOOL_LIBRARY_FIXTURE_DIR)};
         if (fixture.empty())
         {
             out.rc = refuse(std::string("the library_fixture hook needs the directory ") +
@@ -586,26 +586,26 @@ int verify_command(int argc, char** argv)
         }
     }
 
-    EdgCommand cmd = build_edg_command(a, /*probe=*/false);
+    EdgCommand cmd {build_edg_command(a, /*probe=*/false)};
     if (cmd.rc != 0)
     {
         return cmd.rc;
     }
-    std::vector<std::string> edg = std::move(cmd.edg);
-    const std::vector<std::string>& sys_includes = cmd.sys_includes;
-    const std::vector<std::string>& library_dirs = cmd.library_dirs;
+    std::vector<std::string> edg {std::move(cmd.edg)};
+    const std::vector<std::string>& sys_includes {cmd.sys_includes};
+    const std::vector<std::string>& library_dirs {cmd.library_dirs};
     edg.push_back(a.file);
     // EDG's diagnostics go to a file of ours first, so that the driver can tell an internal error from a missing
     // source file; they are copied to standard error as they are.
     std::string diag_dir;
     {
         std::error_code ec;
-        std::filesystem::path base = std::filesystem::temp_directory_path(ec);
+        std::filesystem::path base {std::filesystem::temp_directory_path(ec)};
         if (ec)
         {
             base = "/tmp";
         }
-        std::string templ = (base / "cerastes-diag-XXXXXX").string();
+        std::string templ {(base / "cerastes-diag-XXXXXX").string()};
         std::vector<char> buf(templ.begin(), templ.end());
         buf.push_back('\0');
         if (::mkdtemp(buf.data()) == nullptr)
@@ -615,7 +615,7 @@ int verify_command(int argc, char** argv)
         }
         diag_dir = buf.data();
     }
-    const std::string diag_file = diag_dir + "/diagnostics.txt";
+    const std::string diag_file {diag_dir + "/diagnostics.txt"};
     std::snprintf(g_diag_dir, sizeof g_diag_dir, "%s", diag_dir.c_str());
     std::snprintf(g_diag_file, sizeof g_diag_file, "%s", diag_file.c_str());
     // (before the source file, which stays last)
@@ -627,7 +627,7 @@ int verify_command(int argc, char** argv)
     }
     edg_argv.push_back(nullptr);
 
-    cerastes::VerifyConfig& cfg = cerastes::verify_config();
+    cerastes::VerifyConfig& cfg {cerastes::verify_config()};
     cfg.on = true;
     cfg.hook = a.hook;
     cfg.strict_init = a.strict_init;
@@ -648,23 +648,23 @@ int verify_command(int argc, char** argv)
     // when the default path is used).
     if (a.keep)
     {
-        std::string keep = a.keep_path;
+        std::string keep {a.keep_path};
         if (keep.empty())
         {
-            std::string stem = a.file;
-            size_t slash = stem.find_last_of('/');
+            std::string stem {a.file};
+            size_t slash {stem.find_last_of('/')};
             if (slash != std::string::npos)
             {
-                stem = stem.substr(slash + 1);
+                stem = stem.substr(slash + 1U);
             }
-            size_t dot = stem.find_last_of('.');
-            if (dot != std::string::npos && dot > 0)
+            size_t dot {stem.find_last_of('.')};
+            if (dot != std::string::npos && dot > 0U)
             {
-                stem = stem.substr(0, dot);
+                stem = stem.substr(0U, dot);
             }
             keep = stem + ".vpr";
         }
-        const std::string src = cerastes::canonical_path(a.file);
+        const std::string src {cerastes::canonical_path(a.file)};
         for (const std::string& k : {keep, keep + ".map"})
         {
             if (k == a.file || (!src.empty() && cerastes::canonical_path(k) == src))
@@ -681,9 +681,9 @@ int verify_command(int argc, char** argv)
     install_terminate_handlers();
     cerastes::register_cerastes_annotations();
     cerastes::install_diag_pragma_recorder();
-    const int edg_status = edg_main(static_cast<int>(edg_argv.size()) - 1, edg_argv.data());
+    const int edg_status {edg_main(static_cast<int>(edg_argv.size()) - 1, edg_argv.data())};
     std::fflush(stderr);
-    const std::string diagnostics = slurp(diag_file);
+    const std::string diagnostics {slurp(diag_file)};
     {
         std::error_code ec;
         std::filesystem::remove_all(diag_dir, ec);
@@ -747,21 +747,21 @@ int verify_command(int argc, char** argv)
         }
         else
         {
-            std::string stem = a.file;
-            size_t slash = stem.find_last_of('/');
+            std::string stem {a.file};
+            size_t slash {stem.find_last_of('/')};
             if (slash != std::string::npos)
             {
-                stem = stem.substr(slash + 1);
+                stem = stem.substr(slash + 1U);
             }
-            size_t dot = stem.find_last_of('.');
-            if (dot != std::string::npos && dot > 0)
+            size_t dot {stem.find_last_of('.')};
+            if (dot != std::string::npos && dot > 0U)
             {
-                stem = stem.substr(0, dot);
+                stem = stem.substr(0U, dot);
             }
             po.keep_vpr = stem + ".vpr";
         }
     }
-    cerastes::PipelineResult r = cerastes::run_pipeline(po, cfg.out.vpr, cfg.out.map);
+    cerastes::PipelineResult r {cerastes::run_pipeline(po, cfg.out.vpr, cfg.out.map)};
     std::fputs(r.out.c_str(), stdout);
     std::fputs(r.err.c_str(), stderr);
     std::fflush(stdout);
@@ -773,7 +773,7 @@ int verify_command(int argc, char** argv)
 // scripts/run_tests.py: one `error` line per entry, then one `verdict` line.
 int classify_command(const char* path, const char* exit_code)
 {
-    FILE* f = std::fopen(path, "rb");
+    FILE* f {std::fopen(path, "rb")};
     if (f == nullptr)
     {
         return refuse(std::string("cannot read ") + path);
@@ -781,12 +781,12 @@ int classify_command(const char* path, const char* exit_code)
     std::string text;
     char buf[4096];
     size_t n;
-    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0)
+    while ((n = std::fread(buf, 1U, sizeof buf, f)) > 0U)
     {
         text.append(buf, n);
     }
     std::fclose(f);
-    cerastes::SiliconVerdict v = cerastes::parse_silicon_output(text, std::atoi(exit_code));
+    cerastes::SiliconVerdict v {cerastes::parse_silicon_output(text, std::atoi(exit_code))};
     for (const cerastes::SiliconError& e : v.errors)
     {
         std::printf("error\t%s\t%s\t%s\t%s\t%d\n", e.viper_id.c_str(), e.category.c_str(), e.reason.c_str(),
@@ -806,7 +806,7 @@ int main(int argc, char** argv)
         std::fputs(kUsage, stderr);
         return 2;
     }
-    const std::string cmd = argv[1];
+    const std::string cmd {argv[1]};
     if (cmd == "--help" || cmd == "-h" || cmd == "help")
     {
         std::fputs(kUsage, stdout);
@@ -826,8 +826,9 @@ int main(int argc, char** argv)
     {
         // For scripts/check_edg_config.sh: EDG's own report of the configuration this binary was built with.
         ::setenv("EDG_BASE", CERASTES_TOOL_EDG_BASE, 1);
-        static char a0[] = "cerastes", a1[] = "--dump_configuration";
-        char* v[] = {a0, a1, nullptr};
+        static char a0[] {"cerastes"};
+        static char a1[] {"--dump_configuration"};
+        char* v[] {a0, a1, nullptr};
         return edg_main(2, v);
     }
     if (cmd == "--cerastes_print_edg_command" && argc == 3)
@@ -840,12 +841,12 @@ int main(int argc, char** argv)
         {
             return refuse("--cerastes_print_edg_command needs c23 or c++20");
         }
-        EdgCommand c = build_edg_command(a, /*probe=*/true);
+        EdgCommand c {build_edg_command(a, /*probe=*/true)};
         if (c.rc != 0)
         {
             return c.rc;
         }
-        for (size_t i = 1; i < c.edg.size(); ++i)
+        for (size_t i {1U}; i < c.edg.size(); ++i)
         {
             std::printf("%s\n", c.edg[i].c_str());
         }

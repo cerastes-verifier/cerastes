@@ -52,15 +52,15 @@ using vir::Stmt;
 // What an EDG type means in VIR, or why it has no meaning.
 struct VType
 {
-    bool ok = false;
-    vir::Type t = vir::Type::void_type();
+    bool ok {false};
+    vir::Type t {vir::Type::void_type()};
     std::string name;                   // the type as the program spells it, for messages
-    Diag diag = Diag::unsupported_type; // the diagnostic when !ok
-    bool silent = false; // !ok and already reported at the declaration (an enumeration, decision 0018 item 2)
+    Diag diag {Diag::unsupported_type}; // the diagnostic when !ok
+    bool silent {false}; // !ok and already reported at the declaration (an enumeration, decision 0018 item 2)
     // ok, a pointer parameter's own `restrict` (allow_restrict): decision 0037 item 2 decides whether it is accepted
-    bool restrict_q = false;
+    bool restrict_q {false};
     // !ok because this typeref has a non-type template argument (0024 item 6): reported once per function
-    a_type_ptr computed_at = nullptr;
+    a_type_ptr computed_at {nullptr};
 };
 
 // The names vlibc's headers declare with a contract (decision 0046 item 6), each with the header that declares it: generated at configure time by
@@ -71,15 +71,15 @@ struct VlibcName
 {
     const char* name;
     const char* header;
-    const char* paired = nullptr;
+    const char* paired {nullptr};
 };
-const VlibcName kVlibcReserved[] = {
+const VlibcName kVlibcReserved[] {
 #include "vlibc_names.inc"
     {nullptr, nullptr}};
 
 bool vlibc_reserved(const char* name)
 {
-    for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
+    for (const VlibcName* n {kVlibcReserved}; n->name != nullptr; ++n)
     {
         if (std::strcmp(n->name, name) == 0)
         {
@@ -93,7 +93,7 @@ bool vlibc_reserved(const char* name)
 // script checked, never by a table or a prefix test here (decision 0048 item 4, 0050 item 2).
 bool vlibc_own_name(const char* name)
 {
-    for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
+    for (const VlibcName* n {kVlibcReserved}; n->name != nullptr; ++n)
     {
         if (std::strcmp(n->name, name) == 0)
         {
@@ -108,14 +108,14 @@ bool vlibc_own_name(const char* name)
 // field on a `vlibc_` name must never read as the platform's allocator, so lib_trust reports this as an internal library error (exit status 3).
 std::string vlibc_class_problem(const char* name)
 {
-    for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
+    for (const VlibcName* n {kVlibcReserved}; n->name != nullptr; ++n)
     {
         if (std::strcmp(n->name, name) != 0)
         {
             continue;
         }
-        const bool own = std::strncmp(name, "vlibc_", 6) == 0;
-        const bool has_pair = n->paired != nullptr && n->paired[0] != '\0';
+        const bool own {std::strncmp(name, "vlibc_", 6U) == 0};
+        const bool has_pair {n->paired != nullptr && n->paired[0] != '\0'};
         if (own && (!has_pair || std::strcmp(n->paired, name + 6) != 0))
         {
             return "vlibc's list of names (scripts/vlibc_contracts.py names) does not pair `" + std::string(name) +
@@ -137,7 +137,7 @@ std::string vlibc_class_problem(const char* name)
 // The header of a reserved name, for the messages ("stdlib.h"); "" for any other name.
 std::string vlibc_header_of(const char* name)
 {
-    for (const VlibcName* n = kVlibcReserved; n->name != nullptr; ++n)
+    for (const VlibcName* n {kVlibcReserved}; n->name != nullptr; ++n)
     {
         if (std::strcmp(n->name, name) == 0)
         {
@@ -150,9 +150,9 @@ std::string vlibc_header_of(const char* name)
 // The attributes a verified file may carry besides cerastes's own (decision 0011 item 7), by name.
 bool allowed_attribute_name(std::string n)
 {
-    if (n.size() > 4 && n.compare(0, 2, "__") == 0 && n.compare(n.size() - 2, 2, "__") == 0)
+    if (n.size() > 4U && n.compare(0U, 2U, "__") == 0 && n.compare(n.size() - 2U, 2U, "__") == 0)
     {
-        n = n.substr(2, n.size() - 4);
+        n = n.substr(2U, n.size() - 4U);
     }
     return n == "maybe_unused" || n == "nodiscard" || n == "deprecated" || n == "likely" || n == "unlikely" ||
            n == "unused" || n == "warn_unused_result" || n == "fallthrough"; // 0014 item 11: no run-time meaning (P18)
@@ -194,7 +194,7 @@ public:
     Encoder() : b_(prog_) {}
 
     void run(const IlEntities& ents);
-    const IlEntities* ents_ = nullptr; // the entities of the run (secondary declarations, decision 0040 item 3)
+    const IlEntities* ents_ {nullptr}; // the entities of the run (secondary declarations, decision 0040 item 3)
 
     // After run(): the program, when nothing was rejected.
     vir::Program& program()
@@ -210,8 +210,8 @@ private:
     // ---- per-function state --------------------------------------------------------------------------------
     struct Ctx
     {
-        a_routine_ptr routine = nullptr;
-        vir::Function* fn = nullptr;
+        a_routine_ptr routine {nullptr};
+        vir::Function* fn {nullptr};
         std::map<a_variable_ptr, vir::Var*> vars;
         std::set<a_variable_ptr> pending; // declared, initializer not yet seen
         // The IL nodes with a side effect (assignment, ++/--, call) encoded in this function (decision 0020 item 10).
@@ -220,40 +220,40 @@ private:
         std::map<const Expr*, a_source_position> assign_positions;
         std::set<a_variable_ptr> rejected_vars; // declarations rejected: their uses are not diagnosed again
         a_source_position stmt_pos {};          // the statement being encoded, for nodes without a position
-        a_variable_ptr declaring = nullptr;     // the variable whose initializer is being encoded
-        int const_depth = 0;                    // inside the original expression of a folded constant
+        a_variable_ptr declaring {nullptr};     // the variable whose initializer is being encoded
+        int const_depth {0};                    // inside the original expression of a folded constant
         // Annotation mode (a `requires` or `ensures` of the routine):
-        bool contract = false;
-        bool annotation = false; // a `check` or an `invariant` of a statement
+        bool contract {false};
+        bool annotation {false}; // a `check` or an `invariant` of a statement
         // ... and it is a `check`: evaluated like code where it stands, so `&x` and `*p` are allowed (decision 0032)
-        bool check_clause = false;
+        bool check_clause {false};
         // ... or a loop's `invariant` or `decreases` (decision 0038 item 6): `&x` and `*p` allowed as in a `check`
-        bool loop_clause = false;
+        bool loop_clause {false};
         // ... and it is an `invariant` (not a measure): selects the message of a permission atom's rejection
-        bool loop_invariant = false;
+        bool loop_invariant {false};
         // ... of a loop that is not a `do ... while (0)`: a permission atom of a pointer variable is accepted (decision
         // 0040 item 5)
-        bool invariant_atoms_ok = false;
+        bool invariant_atoms_ok {false};
         // the name of the result in the `ensures` being encoded ("" when it has none), for the messages of `*result`
         std::string binder_name;
-        Annot annot = Annot::none;
-        bool binder_present = false;
-        int old_depth = 0;
-        bool use_own = false;  // building a node of a user macro body: positions are the definition's
-        bool suppress = false; // after a variable length array: what follows is the compiler's cleanup, not the user's
+        Annot annot {Annot::none};
+        bool binder_present {false};
+        int old_depth {0};
+        bool use_own {false};  // building a node of a user macro body: positions are the definition's
+        bool suppress {false}; // after a variable length array: what follows is the compiler's cleanup, not the user's
         // The loops and switches being encoded, innermost last (decision 0014 item 7).  A `break` or `continue` is a
         // compiler-generated goto; its label belongs to the construct whose label statement stands where EDG puts it.
         struct Target
         {
-            bool is_switch = false;
-            int id = 0;                           // the VIR jump id
-            a_label_ptr break_label = nullptr;    // the label statement right after the construct, if there is one
-            a_label_ptr continue_label = nullptr; // the label statement ending the body of a loop, if there is one
+            bool is_switch {false};
+            int id {0};                           // the VIR jump id
+            a_label_ptr break_label {nullptr};    // the label statement right after the construct, if there is one
+            a_label_ptr continue_label {nullptr}; // the label statement ending the body of a loop, if there is one
         };
         std::vector<Target> targets;
         // User labels: one VIR id per label entity (decision 0015 item 2); the C/C++ position of each user `goto`, for the
         // diagnostics of vir::goto_problems.
-        bool in_for_step = false; // encoding the increment of a `for` loop
+        bool in_for_step {false}; // encoding the increment of a `for` loop
         // the IL call nodes of a struct-returning function that a consumer takes (decision 0044 item 2): an argument, a
         // return, a copy source, a member operand, an expression statement
         std::set<an_expr_node_ptr> struct_call_ok;
@@ -261,22 +261,22 @@ private:
         // item 7)
         std::vector<vir::Var*> literal_pending;
         // encoding a loop's condition: evaluated at every iteration, outside the body's block
-        bool in_loop_cond = false;
+        bool in_loop_cond {false};
         // a by-value struct parameter or result is read as the operand of a member in a contract (decision 0044 item 3)
-        bool struct_param_ok = false;
+        bool struct_param_ok {false};
         // inside an arm of a `void` `?:` statement: a struct copy there is rejected (decision 0043 item 7, audit B3)
-        int in_conditional_arm = 0;
+        int in_conditional_arm {0};
         // Decision 0041 item 6 (audit B2): while the original expression of a folded address constant is encoded (const_depth is raised with it), `&g`
         // inside it is read as `GlobalAddr`; `addr_const` counts those levels.
-        int addr_const = 0;
+        int addr_const {0};
         // Case values (decision 0017 items 5-6): while a case label's value (or the initializer of a local constant it names)
         // is encoded, a use of a variable is noted, and in C++ a `const` local with a constant initializer is a function
         // local constant, whose uses are literals.
-        bool case_value = false;
+        bool case_value {false};
         std::string case_var; // the first variable the case value names (empty: none)
         struct ConstInit
         {
-            a_constant_ptr c = nullptr; // the initializer's constant (the declaration's `dik_constant`, P23)
+            a_constant_ptr c {nullptr}; // the initializer's constant (the declaration's `dik_constant`, P23)
             a_source_position at {};    // the declaration
         };
         // const locals declared so far with a constant initializer
@@ -295,7 +295,7 @@ private:
         std::set<const vir::Var*> uninit_marked;
         struct StrictPass
         {
-            int param = 0; // the caller's parameter index
+            int param {0}; // the caller's parameter index
             a_source_position at;
             std::string callee, callee_param;
         };
@@ -321,7 +321,7 @@ private:
     std::map<a_variable_ptr, NamedInfo> named_;
     // file-scope variables rejected at their declaration: uses are not diagnosed again
     std::set<a_variable_ptr> rejected_globals_;
-    a_variable_ptr encoding_named_ = nullptr; // the named constant whose initializer is being encoded
+    a_variable_ptr encoding_named_ {nullptr}; // the named constant whose initializer is being encoded
 
     // Mutable globals and `static` locals (decision 0041): the variables that are blocks of the program, by variable.
     std::map<a_variable_ptr, vir::Global*> gmap_;
@@ -337,17 +337,17 @@ private:
     std::vector<PendingGlobal> pending_globals_;
     vir::Global* global_of(a_variable_ptr v) const
     {
-        auto it = gmap_.find(v);
+        auto it {gmap_.find(v)};
         return it == gmap_.end() ? nullptr : it->second;
     }
 
     // Enumerations (decision 0018): one VIR type per enumeration type entry, and what was decided about it.
     struct EnumInfo
     {
-        bool ok = false;
-        bool silent = false; // !ok and already reported at the declaration: the uses are not diagnosed again
-        vir::Type type = vir::Type::void_type();
-        Diag diag = Diag::unsupported_type; // the diagnostic when !ok and !silent (a system enumeration, at its use)
+        bool ok {false};
+        bool silent {false}; // !ok and already reported at the declaration: the uses are not diagnosed again
+        vir::Type type {vir::Type::void_type()};
+        Diag diag {Diag::unsupported_type}; // the diagnostic when !ok and !silent (a system enumeration, at its use)
         std::string name;                   // the type as a message names it when !ok
     };
     std::map<a_type_ptr, EnumInfo> enums_;
@@ -356,10 +356,10 @@ private:
     // definition is reported once, at the definition (or at the member), so the uses of its type stay silent (`silent`), as for enumerations.
     struct StructInfo
     {
-        bool ok = false;
-        bool silent = false; // !ok and already reported at the definition
-        vir::Type type = vir::Type::void_type();
-        Diag diag = Diag::unsupported_type; // the diagnostic when !ok and !silent (a system struct, at its use)
+        bool ok {false};
+        bool silent {false}; // !ok and already reported at the definition
+        vir::Type type {vir::Type::void_type()};
+        Diag diag {Diag::unsupported_type}; // the diagnostic when !ok and !silent (a system struct, at its use)
         std::string name;                   // the type as a message names it when !ok
     };
     std::map<a_type_ptr, StructInfo> structs_;
@@ -367,7 +367,7 @@ private:
     // static data members and member types.  Filled on first use from the entities of the run.
     std::map<a_type_ptr, std::string> class_features_;
     std::map<a_type_ptr, std::string> class_implicit_; // implicit special members that are not trivial or are deleted
-    bool class_features_done_ = false;
+    bool class_features_done_ {false};
     void collect_class_features();
     const StructInfo& struct_info(a_type_ptr t);
     static bool is_struct_kind(a_type_ptr t)
@@ -378,25 +378,25 @@ private:
     VType struct_vtype(a_type_ptr type)
     {
         VType r;
-        a_type_ptr t = type != nullptr ? skip_typerefs(type) : nullptr;
+        a_type_ptr t {type != nullptr ? skip_typerefs(type) : nullptr};
         if (t == nullptr)
         {
             r.name = "<unknown>";
             return r;
         }
         r.name = render_type(t);
-        const a_type_qualifier_set q = f_get_type_qualifiers(type, TRUE);
-        if ((q & TQ_VOLATILE) != 0)
+        const a_type_qualifier_set q {f_get_type_qualifiers(type, TRUE)};
+        if ((q & TQ_VOLATILE) != 0U)
         {
             r.name = "volatile " + r.name;
             return r;
         }
-        if ((q & TQ_C11_ATOMIC) != 0)
+        if ((q & TQ_C11_ATOMIC) != 0U)
         {
             r.name = "_Atomic " + r.name;
             return r;
         }
-        const StructInfo& si = struct_info(t);
+        const StructInfo& si {struct_info(t)};
         r.ok = si.ok;
         r.silent = si.silent;
         r.diag = si.diag;
@@ -413,7 +413,7 @@ private:
     // As vtype(type, true), but a struct type is an object type here: the type of a local or of a pointee.
     VType vtype_object(a_type_ptr type)
     {
-        a_type_ptr t = type != nullptr ? skip_typerefs(type) : nullptr;
+        a_type_ptr t {type != nullptr ? skip_typerefs(type) : nullptr};
         if (is_struct_kind(t))
         {
             return struct_vtype(type);
@@ -422,20 +422,20 @@ private:
     }
     // The type of a parameter or a result (decision 0044 items 3-4): a verified struct is a by-value struct here (a `const` one waits for M4.6); every other type is
     // vtype's, a pointer included.
-    VType signature_vtype(a_type_ptr type, bool allow_restrict = false, a_type_qualifier_set extra_quals = 0)
+    VType signature_vtype(a_type_ptr type, bool allow_restrict = false, a_type_qualifier_set extra_quals = 0U)
     {
-        a_type_ptr t = type != nullptr ? skip_typerefs(type) : nullptr;
+        a_type_ptr t {type != nullptr ? skip_typerefs(type) : nullptr};
         if (!is_struct_kind(t))
         {
             return vtype(type, true, allow_restrict, extra_quals);
         }
-        VType r = struct_vtype(type);
+        VType r {struct_vtype(type)};
         if (!r.ok && r.silent)
         {
             // a rejected struct is reported again where a signature uses it (as before decision 0044)
             return vtype(type, true, allow_restrict, extra_quals);
         }
-        if (r.ok && ((f_get_type_qualifiers(type, TRUE) | extra_quals) & TQ_CONST) != 0)
+        if (r.ok && ((f_get_type_qualifiers(type, TRUE) | extra_quals) & TQ_CONST) != 0U)
         {
             r.ok = false;
             r.diag = Diag::unsupported_declaration;
@@ -447,12 +447,12 @@ private:
     // `const` object (M4.6).  A rejected struct is reported at the variable, as before.
     VType global_vtype(a_variable_ptr v, bool mutable_obj)
     {
-        a_type_ptr t = skip_typerefs(v->type);
+        a_type_ptr t {skip_typerefs(v->type)};
         if (!is_struct_kind(t))
         {
             return vtype(v->type, mutable_obj);
         }
-        VType r = struct_vtype(v->type);
+        VType r {struct_vtype(v->type)};
         if (!r.ok && r.silent)
         {
             r = vtype(v->type, mutable_obj);
@@ -490,11 +490,11 @@ private:
     // ---- diagnostics and positions ---------------------------------------------------------------------------
     a_source_position pos_or(const a_source_position& p) const
     {
-        if (p.seq != 0)
+        if (p.seq != 0U)
         {
             return p;
         }
-        if (cx_.stmt_pos.seq != 0)
+        if (cx_.stmt_pos.seq != 0U)
         {
             return cx_.stmt_pos;
         }
@@ -510,11 +510,11 @@ private:
     // position of an argument token of a CERASTES_* macro (0006 item 10).
     DiagPos position_for(const a_source_position& p) const
     {
-        a_source_position q = pos_or(p);
+        a_source_position q {pos_or(p)};
         if (!cx_.contract && !cx_.annotation)
         {
-            q.orig_seq = 0;
-            q.orig_column = 0;
+            q.orig_seq = 0U;
+            q.orig_column = 0U;
         }
         return diag_position(q);
     }
@@ -523,7 +523,7 @@ private:
     {
         // A token of a macro body keeps its own position (the `#define`) while its node is built; macro_site() then reports
         // the obligations at the expansion site, with a note here.
-        DiagPos d = cx_.use_own ? diag_position(pos_or(p)) : position_for(p);
+        DiagPos d {cx_.use_own ? diag_position(pos_or(p)) : position_for(p)};
         SrcLoc l;
         if (d.known)
         {
@@ -540,7 +540,7 @@ private:
     // Whether some rejection was already reported on the line of `p`.
     bool rejection_on_line(const a_source_position& p)
     {
-        const DiagPos dp = position_for(p);
+        const DiagPos dp {position_for(p)};
         for (const auto& r : rejected_)
         {
             if (std::get<1>(r) == dp.file && std::get<2>(r) == dp.line)
@@ -554,7 +554,7 @@ private:
     // As reject(), at a VIR node's position (one that loc_of made).
     void reject_loc(Diag d, const SrcLoc& l, const std::string& what)
     {
-        auto it = diag_positions_.find(std::make_tuple(l.file, l.line, l.column));
+        auto it {diag_positions_.find(std::make_tuple(l.file, l.line, l.column))};
         if (it != diag_positions_.end())
         {
             reject_at(d, it->second, what);
@@ -569,7 +569,7 @@ private:
         {
             return;
         }
-        DiagPos dp = position_for(p);
+        DiagPos dp {position_for(p)};
         if (!rejected_.insert({static_cast<int>(d), dp.file, dp.line}).second)
         {
             return;
@@ -584,7 +584,7 @@ private:
         {
             return;
         }
-        DiagPos dp = position_for(p);
+        DiagPos dp {position_for(p)};
         if (!rejected_.insert({static_cast<int>(d), dp.file, dp.line}).second)
         {
             return;
@@ -611,30 +611,31 @@ private:
     // `[[...]]` groups and macro calls `NAME(...)`, then the keyword.  Without attributes it is the statement's own position.
     DiagPos loop_keyword_position(a_statement_ptr s)
     {
-        DiagPos d = position_for(s->position);
+        DiagPos d {position_for(s->position)};
         if (s->attributes == nullptr || !d.known || d.full_name.empty())
         {
             return d;
         }
         std::ifstream in(d.full_name);
         std::vector<std::string> lines;
-        for (std::string l; std::getline(in, l) && lines.size() < d.line + 40;)
+        for (std::string l; std::getline(in, l) && lines.size() < d.line + 40U;)
         {
             lines.push_back(l);
         }
-        size_t li = d.line - 1, ci = d.col > 0 ? d.col - 1 : 0;
+        size_t li {d.line - 1U};
+        size_t ci {d.col > 0U ? d.col - 1U : 0U};
         auto at = [&](size_t l, size_t c) -> char
         {
             return l < lines.size() && c < lines[l].size() ? lines[l][c] : '\n';
         };
-        int guard = 0;
+        int guard {0};
         while (li < lines.size() && ++guard < 4000)
         {
-            char c = at(li, ci);
+            char c {at(li, ci)};
             if (c == '\n')
             { // end of line
                 ++li;
-                ci = 0;
+                ci = 0U;
                 continue;
             }
             if (c == ' ' || c == '\t')
@@ -642,12 +643,12 @@ private:
                 ++ci;
                 continue;
             }
-            if (c == '[' && at(li, ci + 1) == '[')
+            if (c == '[' && at(li, ci + 1U) == '[')
             {
-                int depth = 0;
+                int depth {0};
                 for (;;)
                 {
-                    char x = at(li, ci);
+                    char x {at(li, ci)};
                     if (li >= lines.size())
                     {
                         return d;
@@ -655,7 +656,7 @@ private:
                     if (x == '\n')
                     {
                         ++li;
-                        ci = 0;
+                        ci = 0U;
                         continue;
                     }
                     if (x == '[')
@@ -673,16 +674,16 @@ private:
             }
             if (std::isalpha(static_cast<unsigned char>(c)) || c == '_')
             {
-                size_t j = ci;
+                size_t j {ci};
                 while (std::isalnum(static_cast<unsigned char>(at(li, j))) || at(li, j) == '_')
                 {
                     ++j;
                 }
-                const std::string word = lines[li].substr(ci, j - ci);
+                const std::string word {lines[li].substr(ci, j - ci)};
                 if (word == "do" || word == "while" || word == "for")
                 {
-                    d.line = li + 1;
-                    d.col = ci + 1;
+                    d.line = li + 1U;
+                    d.col = ci + 1U;
                     return d;
                 }
                 ci = j;
@@ -692,18 +693,18 @@ private:
                 }
                 if (at(li, ci) == '(')
                 {
-                    int depth = 0;
+                    int depth {0};
                     for (;;)
                     {
                         if (li >= lines.size())
                         {
                             return d;
                         }
-                        char x = at(li, ci);
+                        char x {at(li, ci)};
                         if (x == '\n')
                         {
                             ++li;
-                            ci = 0;
+                            ci = 0U;
                             continue;
                         }
                         if (x == '(')
@@ -754,7 +755,7 @@ private:
         {
             return false;
         }
-        a_type_ptr t = skip_typerefs(type);
+        a_type_ptr t {skip_typerefs(type)};
         return t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference;
     }
 
@@ -764,7 +765,7 @@ private:
     // `allow_restrict` (a parameter, decision 0037 item 2): a `restrict` on the pointer itself is noted in `restrict_q` instead of rejected; the
     // contract decides afterwards (function_of).  `extra_quals` are the top-level qualifiers the parameter list keeps beside the type.
     VType vtype(a_type_ptr type, bool allow_ptr = false, bool allow_restrict = false,
-                a_type_qualifier_set extra_quals = 0)
+                a_type_qualifier_set extra_quals = 0U)
     {
         VType r;
         if (type == nullptr)
@@ -772,7 +773,7 @@ private:
             r.name = "<unknown>";
             return r;
         }
-        a_type_ptr t = skip_typerefs(type);
+        a_type_ptr t {skip_typerefs(type)};
         r.name = render_type(t);
         {
             // Decision 0024 item 6: an alias template instance or a member typedef of a class instance with a non-type argument
@@ -785,13 +786,13 @@ private:
                 return r;
             }
         }
-        const a_type_qualifier_set q = f_get_type_qualifiers(type, TRUE);
-        if ((q & TQ_VOLATILE) != 0)
+        const a_type_qualifier_set q {f_get_type_qualifiers(type, TRUE)};
+        if ((q & TQ_VOLATILE) != 0U)
         {
             r.name = "volatile " + r.name;
             return r;
         }
-        if ((q & TQ_C11_ATOMIC) != 0)
+        if ((q & TQ_C11_ATOMIC) != 0U)
         {
             r.name = "_Atomic " + r.name;
             return r;
@@ -804,10 +805,10 @@ private:
                 return r;
             case tk_integer:
             {
-                const auto& i = t->variant.integer;
+                const auto& i {t->variant.integer};
                 if (i.enum_type)
                 {
-                    const EnumInfo& ei = enum_info(t);
+                    const EnumInfo& ei {enum_info(t)};
                     r.ok = ei.ok;
                     r.silent = ei.silent;
                     r.diag = ei.diag;
@@ -831,7 +832,7 @@ private:
                     r.t = vir::Type::bool_type();
                     return r;
                 }
-                const int bits = static_cast<int>(t->size) * static_cast<int>(targ_char_bit);
+                const int bits {static_cast<int>(t->size) * static_cast<int>(targ_char_bit)};
                 if (bits <= 0 || bits > 128)
                 {
                     return r;
@@ -852,8 +853,8 @@ private:
                 {
                     // A verified struct used as a value in a position that takes none (not a by-value parameter or result, not a call argument, return or copy: decision 0044) is `unsupported_type`; the declaration of a struct
                     // global or `static` local says `unsupported_declaration` (its callers change the tag); a struct that is itself rejected keeps the old tag.
-                    const bool closure = t->variant.class_struct_union.extra_info != nullptr &&
-                                         t->variant.class_struct_union.extra_info->is_lambda_closure_class;
+                    const bool closure {t->variant.class_struct_union.extra_info != nullptr &&
+                                        t->variant.class_struct_union.extra_info->is_lambda_closure_class};
                     if (!closure && !t->incomplete && struct_info(t).ok)
                     {
                         r.diag = Diag::unsupported_type;
@@ -877,7 +878,7 @@ private:
                     r.name += " (a pointer as a parameter or a result)";
                     return r;
                 }
-                if (((q | extra_quals) & TQ_RESTRICT) != 0)
+                if (((q | extra_quals) & TQ_RESTRICT) != 0U)
                 { // C23 6.7.3.1: a write through another name would be undefined
                     if (!allow_restrict || il_header.source_language != sl_C)
                     { // C only (decision 0037 item 2): `__restrict` in C++ is an extension
@@ -886,15 +887,15 @@ private:
                     }
                     r.restrict_q = true;
                 }
-                a_type_ptr pointee = t->variant.pointer.type;
-                const a_type_qualifier_set pq = pointee != nullptr ? f_get_type_qualifiers(pointee, TRUE) : 0;
-                if (pointee == nullptr || (pq & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0)
+                a_type_ptr pointee {t->variant.pointer.type};
+                const a_type_qualifier_set pq {pointee != nullptr ? f_get_type_qualifiers(pointee, TRUE) : 0U};
+                if (pointee == nullptr || (pq & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0U)
                 {
                     r.name += " (a pointer to a volatile or _Atomic object)";
                     return r;
                 }
                 // Decision 0040 item 2: the pointee may be a pointer, at any depth; the innermost pointee is a bool, an integer or an enumeration.
-                VType e = vtype_object(pointee);
+                VType e {vtype_object(pointee)};
                 if (!e.ok || e.t.is_void())
                 {
                     r.name +=
@@ -919,7 +920,7 @@ private:
     // A value type (not void) or a rejection at `p`.
     bool value_type(a_type_ptr type, const a_source_position& p, VType* out, bool allow_ptr = false)
     {
-        VType t = vtype(type, allow_ptr);
+        VType t {vtype(type, allow_ptr)};
         if (!t.ok || t.t.is_void())
         {
             if (t.ok)
@@ -940,7 +941,7 @@ private:
     // own, on a routine it declares), which the routine-level check of every declaration needs.
     void check_attributes(an_attribute_ptr list, bool on_noreturn_routine = false, bool skip_unplaced = false)
     {
-        for (an_attribute_ptr a = list; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {list}; a != nullptr; a = a->next)
         {
             if (is_registered_cerastes(a))
             {
@@ -950,7 +951,7 @@ private:
             {
                 continue;
             }
-            if (a->position.seq != 0 ? !in_verified_file(a->position) : skip_unplaced)
+            if (a->position.seq != 0U ? !in_verified_file(a->position) : skip_unplaced)
             {
                 continue;
             }
@@ -959,23 +960,23 @@ private:
             // Only on a routine whose type carries the flag (the caller says so); anywhere else it is rejected below.
             if (a->kind == ak_noreturn && a->name != nullptr && on_noreturn_routine)
             {
-                std::string n = a->name;
-                if (n.size() > 4 && n.compare(0, 2, "__") == 0 && n.compare(n.size() - 2, 2, "__") == 0)
+                std::string n {a->name};
+                if (n.size() > 4U && n.compare(0U, 2U, "__") == 0 && n.compare(n.size() - 2U, 2U, "__") == 0)
                 {
-                    n = n.substr(2, n.size() - 4);
+                    n = n.substr(2U, n.size() - 4U);
                 }
                 if (n == "noreturn" || n == "_Noreturn")
                 {
                     continue;
                 }
             }
-            const char* ns = a->namespace_name;
-            const bool ns_ok = ns == nullptr || *ns == '\0' || std::strcmp(ns, "gnu") == 0;
+            const char* ns {a->namespace_name};
+            const bool ns_ok {ns == nullptr || *ns == '\0' || std::strcmp(ns, "gnu") == 0};
             if (ns_ok && a->name != nullptr && allowed_attribute_name(a->name))
             {
                 continue;
             }
-            const std::string text = "\"" + render_attribute(a) + "\"";
+            const std::string text {"\"" + render_attribute(a) + "\""};
             reject(a->kind == ak_unrecognized ? Diag::unrecognized_attribute : Diag::unsupported_attribute, a->position,
                    text);
         }
@@ -986,19 +987,19 @@ private:
     // encoded too (decisions 0043 item 9, 0044 items 3-4), so its member atoms and members are checked like a called one's.
     static bool has_struct_pointer_param(a_routine_ptr r)
     {
-        a_routine_type_supplement_ptr x = routine_supplement(r);
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
         if (x == nullptr)
         {
             return false;
         }
-        if (a_type_ptr rt = return_type(r); rt != nullptr && is_struct_kind(skip_typerefs(rt)))
+        if (a_type_ptr rt {return_type(r)}; rt != nullptr && is_struct_kind(skip_typerefs(rt)))
         {
             return true;
         }
-        for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next)
+        for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next)
         {
-            a_type_ptr t = p->type != nullptr ? skip_typerefs(p->type) : nullptr;
-            for (int guard = 0; t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference && guard < 16;
+            a_type_ptr t {p->type != nullptr ? skip_typerefs(p->type) : nullptr};
+            for (int guard {0}; t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference && guard < 16;
                  ++guard)
             {
                 t = t->variant.pointer.type != nullptr ? skip_typerefs(t->variant.pointer.type) : nullptr;
@@ -1019,15 +1020,15 @@ private:
         {
             return false;
         }
-        if (a_routine_ptr c = direct_callee(e); c != nullptr)
+        if (a_routine_ptr c {direct_callee(e)}; c != nullptr)
         {
-            const SpecFn fn = spec_fn(c);
+            const SpecFn fn {spec_fn(c)};
             if (fn == SpecFn::owns_block || fn == SpecFn::zeroed)
             {
                 return true;
             }
         }
-        for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+        for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
         {
             if (mentions_block_spec(o))
             {
@@ -1055,8 +1056,8 @@ private:
     // or `predicate`/`pure` function, and that no system header declares first.  On any other routine the program wrote a marker that nothing would read: rejected.
     void reject_unread_function_markers(a_routine_ptr r)
     {
-        an_attribute_ptr m = nullptr;
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr && m == nullptr; a = a->next)
+        an_attribute_ptr m {nullptr};
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr && m == nullptr; a = a->next)
         {
             if (is_registered_cerastes(a) && is_param_marker(classify(a)) && written_by_program(a->position))
             {
@@ -1067,7 +1068,7 @@ private:
         {
             return;
         }
-        const char* what = nullptr;
+        const char* what {nullptr};
         if (r->is_lambda_body)
         {
             what = "a lambda's call operator";
@@ -1086,15 +1087,15 @@ private:
         }
         if (what == nullptr)
         {
-            bool system_first =
-                r->source_corresp.decl_position.seq != 0 && !in_verified_file(r->source_corresp.decl_position);
+            bool system_first {r->source_corresp.decl_position.seq != 0U &&
+                               !in_verified_file(r->source_corresp.decl_position)};
             if (ents_ != nullptr)
             {
-                if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+                if (auto sd {ents_->secondary_decls.find(r)}; sd != ents_->secondary_decls.end())
                 {
                     for (const IlEntities::SecondaryDecl& q : sd->second)
                     {
-                        if (q.position.seq != 0 && !in_verified_file(q.position))
+                        if (q.position.seq != 0U && !in_verified_file(q.position))
                         {
                             system_first = true;
                         }
@@ -1118,7 +1119,7 @@ private:
     // `owning` or `ref_to_uninit` written by the program on the function itself (decision 0047 item 5).
     static bool has_function_marker(a_routine_ptr r)
     {
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
         {
             if (is_registered_cerastes(a) && is_param_marker(classify(a)) && written_by_program(a->position))
             {
@@ -1136,20 +1137,20 @@ private:
 
     static a_routine_type_supplement_ptr routine_supplement(a_routine_ptr r)
     {
-        a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+        a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
         return (rt && rt->kind == tk_routine) ? rt->variant.routine.extra_info : nullptr;
     }
 
     static a_type_ptr return_type(a_routine_ptr r)
     {
-        a_type_ptr rt = r->type ? skip_typerefs(r->type) : nullptr;
+        a_type_ptr rt {r->type ? skip_typerefs(r->type) : nullptr};
         return (rt && rt->kind == tk_routine) ? rt->variant.routine.return_type : nullptr;
     }
 
     // The body of a routine in a verified file, or null.
     a_statement_ptr verified_body(a_routine_ptr r)
     {
-        a_scope_ptr sp = body_scope(r);
+        a_scope_ptr sp {body_scope(r)};
         if (sp == nullptr || sp->assoc_block == nullptr)
         {
             return nullptr;
@@ -1166,16 +1167,16 @@ private:
     {
         if (!signature_checked_.insert(r).second)
         {
-            return signature_ok_.count(r) != 0;
+            return signature_ok_.count(r) != 0U;
         }
-        bool ok = true;
+        bool ok {true};
         // Attributes are held to the allow-list only on what this run verifies: a callee declared in a system
         // header keeps whatever it carries.
         // Decision 0047 item 3: a routine trusted from vlibc is read like the program's own (its markers, by library position), though the platform's
         // declaration (C) may be the one `decl_position` names.
-        const bool ours =
-            in_verified_file(r->source_corresp.decl_position) || verified_body(r) != nullptr || lib_trust(r).ok;
-        a_routine_type_supplement_ptr x = routine_supplement(r);
+        const bool ours {in_verified_file(r->source_corresp.decl_position) || verified_body(r) != nullptr ||
+                         lib_trust(r).ok};
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
         if (x == nullptr)
         {
             reject(Diag::unsupported_declaration, at, "a function whose type cannot be read");
@@ -1197,7 +1198,7 @@ private:
             ok = false;
         }
         // decision 0037 item 3: a pointer result; decision 0044 item 4: a struct result
-        VType ret = signature_vtype(return_type(r));
+        VType ret {signature_vtype(return_type(r))};
         if (!ret.ok)
         {
             reject_type(ret, at);
@@ -1206,9 +1207,9 @@ private:
         std::vector<a_type_qualifier_set> var_quals; // as in function_of
         if (a_scope_ptr bs = body_scope(r))
         {
-            for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next)
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
             {
-                var_quals.push_back(v->type != nullptr ? f_get_type_qualifiers(v->type, TRUE) : 0);
+                var_quals.push_back(v->type != nullptr ? f_get_type_qualifiers(v->type, TRUE) : 0U);
             }
         }
         // Decision 0040 item 3: `owning` on a `void *` or a pointer to function is reported as such, and the type is not reported again.
@@ -1233,12 +1234,12 @@ private:
                 ok = false;
             }
         }
-        size_t pk = 0;
-        for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++pk)
+        size_t pk {0U};
+        for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next, ++pk)
         {
             // decision 0037 item 2: a pointer parameter; 0044 item 3: a struct
-            VType pt = signature_vtype(p->type, true, p->qualifiers | (pk < var_quals.size() ? var_quals[pk] : 0));
-            if (pt.ok && (p->qualifiers & TQ_VOLATILE) != 0)
+            VType pt {signature_vtype(p->type, true, p->qualifiers | (pk < var_quals.size() ? var_quals[pk] : 0U))};
+            if (pt.ok && (p->qualifiers & TQ_VOLATILE) != 0U)
             {
                 pt.ok = false;
                 pt.name = "volatile " + pt.name;
@@ -1249,7 +1250,7 @@ private:
                 {
                     pt.name = "void";
                 }
-                if (owning_reported.count(pk) == 0)
+                if (owning_reported.count(pk) == 0U)
                 {
                     reject_type(pt, at);
                 }
@@ -1274,7 +1275,7 @@ private:
     // ---- `[[cerastes::owning]]` on parameters (decisions 0029 item 1, 0040 item 3; P52) --------------------------------------------------
     struct OwningParam
     {
-        int index = 0;         // the parameter (0-based)
+        int index {0};         // the parameter (0-based)
         a_source_position pos; // the attribute (its first node, in source order)
     };
     // the owning parameters of the routines whose signatures were read
@@ -1283,9 +1284,9 @@ private:
     // signatures were read, in index order.  `function_of` sets `vir::Param::init` from it before the contract is read.
     struct MarkerParam
     {
-        int index = 0;
+        int index {0};
         a_source_position pos; // the attribute (its first node, in source order)
-        vir::InitMarker kind = vir::InitMarker::None;
+        vir::InitMarker kind {vir::InitMarker::None};
     };
     std::map<a_routine_ptr, std::vector<MarkerParam>> markers_;
     static const char* marker_name(Annot k)
@@ -1309,8 +1310,9 @@ private:
     }
     bool read_marker(a_routine_ptr r, a_routine_type_supplement_ptr x, Annot kind, std::set<size_t>* reported_types)
     {
-        const std::string an = std::string("cerastes::") + marker_name(kind); // the attribute as a message spells it
-        const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+        const std::string an {std::string("cerastes::") + marker_name(kind)}; // the attribute as a message spells it
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
         cx_.contract = cx_.annotation = false; // a report at a macro's use, not at the macro body in <cerastes.h>
         struct Restore
         {
@@ -1325,7 +1327,7 @@ private:
         // Decision 0047 item 3: a routine trusted from vlibc reads the markers vlibc wrote, by their library positions: the platform's declarations carry
         // none (so the all-or-none rule of the redeclarations is over vlibc's declarations alone) and a `void *` pointee is the heap shapes' (the routine
         // never reaches check_signature).  A program's own marker on a library routine is check_reserved_library's.
-        const bool lib = lib_trust(r).ok;
+        const bool lib {lib_trust(r).ok};
         std::vector<std::vector<an_attribute_ptr>> nodes; // per parameter, without repeats
         // The lists of one declaration's parameters may hold copies of one spelling's node (the routine's type, the definition's declarator, the
         // definition's variables): a spelling is one node, found by its position.
@@ -1341,7 +1343,7 @@ private:
             }
             if (nodes.size() <= k)
             {
-                nodes.resize(k + 1);
+                nodes.resize(k + 1U);
             }
             for (an_attribute_ptr o : nodes[k])
             {
@@ -1362,7 +1364,7 @@ private:
             }
             if (names.size() <= k)
             {
-                names.resize(k + 1);
+                names.resize(k + 1U);
             }
             if (names[k].empty())
             {
@@ -1371,15 +1373,15 @@ private:
         };
         auto gather = [&](a_param_type_ptr list)
         {
-            size_t k = 0;
-            for (a_param_type_ptr p = list; p != nullptr; p = p->next, ++k)
+            size_t k {0U};
+            for (a_param_type_ptr p {list}; p != nullptr; p = p->next, ++k)
             {
                 if (nodes.size() <= k)
                 {
-                    nodes.resize(k + 1);
+                    nodes.resize(k + 1U);
                 }
                 note_name(k, p->name);
-                for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {p->attributes}; a != nullptr; a = a->next)
                 {
                     add_node(k, a);
                 }
@@ -1388,7 +1390,7 @@ private:
         gather(x->param_type_list);
         if (r->declared_type != nullptr && r->declared_type != r->type)
         { // the definition's own declarator (GENERATE_SOURCE_SEQUENCE_LISTS)
-            a_type_ptr dt = skip_typerefs(r->declared_type);
+            a_type_ptr dt {skip_typerefs(r->declared_type)};
             if (dt != nullptr && dt->kind == tk_routine && dt->variant.routine.extra_info != nullptr)
             {
                 gather(dt->variant.routine.extra_info->param_type_list);
@@ -1396,21 +1398,21 @@ private:
         }
         if (a_scope_ptr bs = body_scope(r))
         {
-            size_t k = 0;
-            for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next, ++k)
+            size_t k {0U};
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next, ++k)
             {
                 if (!v->is_parameter || v->is_this_parameter || v->variant.assoc_param_type == nullptr)
                 {
                     continue;
                 }
                 note_name(k, v->source_corresp.name);
-                for (an_attribute_ptr a = v->variant.assoc_param_type->attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {v->variant.assoc_param_type->attributes}; a != nullptr; a = a->next)
                 {
                     add_node(k, a);
                 }
             }
         }
-        bool any = false;
+        bool any {false};
         for (const auto& n : nodes)
         {
             any = any || !n.empty();
@@ -1424,21 +1426,21 @@ private:
         struct Decl
         {
             a_source_position pos;
-            a_type_ptr type = nullptr;
+            a_type_ptr type {nullptr};
         };
         std::vector<Decl> decls;
-        if (r->source_corresp.decl_position.seq != 0)
+        if (r->source_corresp.decl_position.seq != 0U)
         {
             decls.push_back(Decl {r->source_corresp.decl_position, r->type});
         }
         if (ents_ != nullptr)
         {
-            auto sd = ents_->secondary_decls.find(r);
+            auto sd {ents_->secondary_decls.find(r)};
             if (sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
                 {
-                    if (q.position.seq != 0)
+                    if (q.position.seq != 0U)
                     {
                         decls.push_back(Decl {q.position, q.declared_type});
                     }
@@ -1454,9 +1456,9 @@ private:
         // position is the primary itself.
         if (r->declared_type == nullptr)
         {
-            for (size_t i = 1; i < decls.size(); ++i)
+            for (size_t i {1U}; i < decls.size(); ++i)
             {
-                if (!before(decls[0].pos, decls[i].pos) && !before(decls[i].pos, decls[0].pos))
+                if (!before(decls[0U].pos, decls[i].pos) && !before(decls[i].pos, decls[0U].pos))
                 {
                     decls.erase(decls.begin() + static_cast<long>(i));
                     break;
@@ -1478,9 +1480,9 @@ private:
                              return before(a.pos, b.pos);
                          });
         // Two declarations that sit at one position (both written by one macro invocation) cannot be told apart.
-        for (size_t i = 1; i < decls.size(); ++i)
+        for (size_t i {1U}; i < decls.size(); ++i)
         {
-            if (!before(decls[i - 1].pos, decls[i].pos))
+            if (!before(decls[i - 1U].pos, decls[i].pos))
             {
                 reject(Diag::unsupported_annotation, decls[i].pos,
                        "\"" + an + "\" on a parameter of declarations of `" + rname(r) +
@@ -1490,18 +1492,18 @@ private:
         }
         auto where = [&](const a_source_position& p)
         {
-            const DiagPos d = diag_position(p);
+            const DiagPos d {diag_position(p)};
             return d.known ? d.file + ":" + std::to_string(d.line) : std::string("an unknown position");
         };
-        bool ok = true;
+        bool ok {true};
         std::vector<a_param_type_ptr> plist;
-        for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next)
+        for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next)
         {
             plist.push_back(p);
         }
-        for (size_t k = 0; k < nodes.size(); ++k)
+        for (size_t k {0U}; k < nodes.size(); ++k)
         {
-            auto& ns = nodes[k];
+            auto& ns {nodes[k]};
             if (ns.empty())
             {
                 continue;
@@ -1512,39 +1514,39 @@ private:
                           return a->position.seq != b->position.seq ? a->position.seq < b->position.seq
                                                                     : a->position.column < b->position.column;
                       });
-            const std::string pname =
-                k < names.size() && !names[k].empty() ? "\"" + names[k] + "\"" : std::to_string(k + 1);
-            bool bad = false;
+            const std::string pname {k < names.size() && !names[k].empty() ? "\"" + names[k] + "\""
+                                                                           : std::to_string(k + 1U)};
+            bool bad {false};
             // The type: a pointer to an object (a pointer to a bool, an integer, an enumeration or a pointer is checked by the parameter's own type).
             if (k < plist.size() && plist[k]->type != nullptr)
             {
-                a_type_ptr pt = skip_typerefs(plist[k]->type);
+                a_type_ptr pt {skip_typerefs(plist[k]->type)};
                 if (pt == nullptr || pt->kind != tk_pointer || pt->variant.pointer.is_reference)
                 {
-                    reject(Diag::unsupported_annotation, ns[0]->position,
+                    reject(Diag::unsupported_annotation, ns[0U]->position,
                            "\"" + an + "\" on parameter " + pname + " (it is not a pointer)");
                     bad = true;
                 }
                 else
                 {
-                    a_type_ptr pe =
-                        pt->variant.pointer.type != nullptr ? skip_typerefs(pt->variant.pointer.type) : nullptr;
+                    a_type_ptr pe {pt->variant.pointer.type != nullptr ? skip_typerefs(pt->variant.pointer.type)
+                                                                       : nullptr};
                     if (pt->variant.pointer.type != nullptr &&
-                        (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0)
+                        (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0U)
                     {
                         if (kind == Annot::owning)
                         {
-                            reject(Diag::unsupported_annotation, ns[0]->position,
+                            reject(Diag::unsupported_annotation, ns[0U]->position,
                                    "\"cerastes::owning\" on parameter " + pname +
                                        " (a pointer to a `const` object: a function that only reads `*" +
-                                       (pname.empty() || pname[0] != '"' ? std::string("p")
-                                                                         : pname.substr(1, pname.size() - 2)) +
+                                       (pname.empty() || pname[0U] != '"' ? std::string("p")
+                                                                          : pname.substr(1U, pname.size() - 2U)) +
                                        "` takes `reads`, decision 0040 item 2)");
                         }
                         else
                         {
                             reject(
-                                Diag::unsupported_annotation, ns[0]->position,
+                                Diag::unsupported_annotation, ns[0U]->position,
                                 "\"" + an + "\" on parameter " + pname +
                                     " (a pointer to a `const` object: nothing could initialize it, decision 0042 item 4)");
                         }
@@ -1552,14 +1554,14 @@ private:
                     }
                     else if (pe != nullptr && pe->kind == tk_routine)
                     {
-                        reject(Diag::unsupported_annotation, ns[0]->position,
+                        reject(Diag::unsupported_annotation, ns[0U]->position,
                                "\"" + an + "\" on parameter " + pname + " (a pointer to a function: M4.7)");
                         reported_types->insert(k);
                         bad = true;
                     }
                     else if (pe != nullptr && pe->kind == tk_void && !lib)
                     {
-                        reject(Diag::unsupported_annotation, ns[0]->position,
+                        reject(Diag::unsupported_annotation, ns[0U]->position,
                                "\"" + an + "\" on parameter " + pname +
                                    " (a `void *`: a pointer to an untyped object)");
                         reported_types->insert(k);
@@ -1579,31 +1581,31 @@ private:
             }
             // Per declaration: at most one node, and all or none.  A node a typedef'd function type carries is the declaration's that names the typedef (by
             // its type); any other lies after the declaration it belongs to and before the next (by line and column).
-            std::vector<int> count(std::max<size_t>(decls.size(), 1), 0);
+            std::vector<int> count(std::max<size_t>(decls.size(), 1U), 0);
             for (an_attribute_ptr a : ns)
             {
                 // A node that a typedef'd function type carries belongs to every declaration that names the typedef (found by its type).
-                bool by_type = false;
-                for (size_t i = 0; i < decls.size(); ++i)
+                bool by_type {false};
+                for (size_t i {0U}; i < decls.size(); ++i)
                 {
-                    a_type_ptr t = decls[i].type;
+                    a_type_ptr t {decls[i].type};
                     if (t == nullptr || t->kind != tk_typeref)
                     {
                         continue;
                     }
-                    a_type_ptr rt = skip_typerefs(t);
+                    a_type_ptr rt {skip_typerefs(t)};
                     if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr)
                     {
                         continue;
                     }
-                    size_t j = 0;
-                    bool found = false;
-                    for (a_param_type_ptr pp = rt->variant.routine.extra_info->param_type_list; pp != nullptr && !found;
+                    size_t j {0U};
+                    bool found {false};
+                    for (a_param_type_ptr pp {rt->variant.routine.extra_info->param_type_list}; pp != nullptr && !found;
                          pp = pp->next, ++j)
                     {
                         if (j == k)
                         {
-                            for (an_attribute_ptr o = pp->attributes; o != nullptr; o = o->next)
+                            for (an_attribute_ptr o {pp->attributes}; o != nullptr; o = o->next)
                             {
                                 if (is_registered_cerastes(o) && classify(o) == kind &&
                                     same_spelling(o->position, a->position))
@@ -1623,8 +1625,8 @@ private:
                 {
                     continue;
                 }
-                size_t d = 0; // any other node lies after the declaration it belongs to and before the next
-                for (size_t i = 0; i < decls.size(); ++i)
+                size_t d {0U}; // any other node lies after the declaration it belongs to and before the next
+                for (size_t i {0U}; i < decls.size(); ++i)
                 {
                     if (!before(a->position, decls[i].pos))
                     {
@@ -1637,11 +1639,12 @@ private:
                     bad = true;
                 }
             }
-            if (decls.size() > 1)
+            if (decls.size() > 1U)
             {
                 // the first declaration that has it, and the first that has not
-                size_t with = decls.size(), without = decls.size();
-                for (size_t i = 0; i < decls.size(); ++i)
+                size_t with {decls.size()};
+                size_t without {decls.size()};
+                for (size_t i {0U}; i < decls.size(); ++i)
                 {
                     if (count[i] > 0 && with == decls.size())
                     {
@@ -1667,12 +1670,12 @@ private:
             }
             else if (kind == Annot::owning)
             {
-                owning_[r].push_back(OwningParam {static_cast<int>(k), ns[0]->position});
+                owning_[r].push_back(OwningParam {static_cast<int>(k), ns[0U]->position});
             }
             else
             {
                 markers_[r].push_back(
-                    MarkerParam {static_cast<int>(k), ns[0]->position,
+                    MarkerParam {static_cast<int>(k), ns[0U]->position,
                                  kind == Annot::must_init ? vir::InitMarker::MustInit : vir::InitMarker::RefToUninit});
             }
         }
@@ -1682,26 +1685,27 @@ private:
     // Both initialization markers on one parameter are redundant (`must_init` implies `ref_to_uninit`, P4222; decision 0042 item 4).  False when it rejected.
     bool check_marker_pairs(a_routine_ptr r, a_routine_type_supplement_ptr x)
     {
-        auto it = markers_.find(r);
+        auto it {markers_.find(r)};
         if (it == markers_.end())
         {
             return true;
         }
-        const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
         cx_.contract = cx_.annotation = false;
-        bool ok = true;
-        const auto& ms = it->second;
-        for (size_t i = 0; i < ms.size(); ++i)
+        bool ok {true};
+        const auto& ms {it->second};
+        for (size_t i {0U}; i < ms.size(); ++i)
         {
-            for (size_t j = i + 1; j < ms.size(); ++j)
+            for (size_t j {i + 1U}; j < ms.size(); ++j)
             {
                 if (ms[i].index != ms[j].index || ms[i].kind == ms[j].kind)
                 {
                     continue;
                 }
-                std::string pname = std::to_string(ms[i].index + 1);
-                int n = 0;
-                for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++n)
+                std::string pname {std::to_string(ms[i].index + 1)};
+                int n {0};
+                for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next, ++n)
                 {
                     if (n == ms[i].index && p->name != nullptr && *p->name != '\0')
                     {
@@ -1725,23 +1729,24 @@ private:
     // apply_owning may have refused the atom or the parameter), so the "needs an atom" errors are not added to it.
     void check_marker_atoms(a_routine_ptr r, vir::Function* f, bool contract_rejected)
     {
-        auto it = markers_.find(r);
+        auto it {markers_.find(r)};
         if (it == markers_.end())
         {
             return;
         }
-        const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
         cx_.contract = cx_.annotation = false;
-        const std::vector<vir::AtomSite> sites = vir::contract_atoms(*f);
+        const std::vector<vir::AtomSite> sites {vir::contract_atoms(*f)};
         for (const MarkerParam& m : it->second)
         {
-            const auto k = static_cast<size_t>(m.index);
+            const auto k {static_cast<size_t>(m.index)};
             if (k >= f->params.size() || !f->params[k].type.is_ptr())
             {
                 continue;
             }
-            const std::string pname = f->params[k].name.empty() ? "arg" + std::to_string(k + 1) : f->params[k].name;
-            const std::string an = std::string("cerastes::") + marker_name(m.kind);
+            const std::string pname {f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name};
+            const std::string an {std::string("cerastes::") + marker_name(m.kind)};
             if (m.kind == vir::InitMarker::MustInit && f->noreturn)
             {
                 reject(Diag::unsupported_annotation, m.pos,
@@ -1750,8 +1755,10 @@ private:
                            "` would never be checked to have a value");
                 continue;
             }
-            bool owns_in = false, owns_out = false, reads_beside = false;
-            bool member_beside = false;
+            bool owns_in {false};
+            bool owns_out {false};
+            bool reads_beside {false};
+            bool member_beside {false};
             for (const vir::AtomSite& st : sites)
             {
                 if (st.atom->a == nullptr)
@@ -1765,7 +1772,7 @@ private:
                 {
                     continue;
                 }
-                const Expr* root = vir::place_root(st.atom->a);
+                const Expr* root {vir::place_root(st.atom->a)};
                 if (root->kind != Expr::Kind::Formal || root->index != m.index)
                 {
                     continue;
@@ -1842,25 +1849,25 @@ private:
         {
             return false;
         }
-        const vir::Param& pr = cx_.fn->params[static_cast<size_t>(pf->index)];
+        const vir::Param& pr {cx_.fn->params[static_cast<size_t>(pf->index)]};
         if (pr.init == vir::InitMarker::None)
         {
             return false;
         }
-        const bool in_ensures = cx_.annot == Annot::ensures;
+        const bool in_ensures {cx_.annot == Annot::ensures};
         if (!(is_old || cx_.annot != Annot::ensures || pr.init == vir::InitMarker::RefToUninit))
         {
             return false;
         }
-        const std::string pname =
-            pr.name.empty() ? "arg" + std::to_string(static_cast<size_t>(pf->index) + 1) : pr.name;
-        const char* an = marker_name(pr.init);
-        const std::string place = member_place.empty() ? "`*" + pname + "`" : "`" + member_place + "`";
-        const std::string shown = member_place.empty() ? "*" + pname : member_place;
-        const std::string what = is_old                          ? "a read of `old(" + shown + ")`"
-                                 : cx_.annot == Annot::decreases ? "a `decreases(" + shown + ")`"
-                                 : in_ensures                    ? "a postcondition that reads " + place
-                                                                 : "a precondition that reads " + place;
+        const std::string pname {pr.name.empty() ? "arg" + std::to_string(static_cast<size_t>(pf->index) + 1U)
+                                                 : pr.name};
+        const char* an {marker_name(pr.init)};
+        const std::string place {member_place.empty() ? "`*" + pname + "`" : "`" + member_place + "`"};
+        const std::string shown {member_place.empty() ? "*" + pname : member_place};
+        const std::string what {is_old                          ? "a read of `old(" + shown + ")`"
+                                : cx_.annot == Annot::decreases ? "a `decreases(" + shown + ")`"
+                                : in_ensures                    ? "a postcondition that reads " + place
+                                                                : "a precondition that reads " + place};
         reject(Diag::unsupported_annotation, at,
                what + ", which `cerastes::" + an + "` on `" + pname + "` says may hold no value " +
                    (in_ensures && !is_old ? "on return (only `must_init` promises one)" : "on entry") +
@@ -1877,9 +1884,10 @@ private:
     // drops that atom's flags (`result_init`).  Both need a pointer result.
     void apply_function_markers(a_routine_ptr r, vir::Function* f)
     {
-        const an_attribute_ptr none = nullptr;
-        an_attribute_ptr owning = none, uninit = none;
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+        const an_attribute_ptr none {nullptr};
+        an_attribute_ptr owning {none};
+        an_attribute_ptr uninit {none};
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
         {
             if (!is_registered_cerastes(a) || !written_by_program(a->position))
             {
@@ -1898,7 +1906,8 @@ private:
         {
             return;
         }
-        const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
         cx_.contract = cx_.annotation = false;
         struct Restore
         {
@@ -1965,21 +1974,22 @@ private:
         };
         if (owning != nullptr)
         {
-            const std::vector<vir::AtomSite> have = result_sites();
-            bool merge = false, bad = false;
+            const std::vector<vir::AtomSite> have {result_sites()};
+            bool merge {false};
+            bool bad {false};
             for (const vir::AtomSite& st : have)
             {
                 // the explicit clause is `r == NULL || owns_block(r)` (the guard: `r == NULL` being false)
-                if (st.guards.size() == 1 && !st.guards[0].holds)
+                if (st.guards.size() == 1U && !st.guards[0U].holds)
                 {
-                    const Expr* c = st.guards[0].cond;
+                    const Expr* c {st.guards[0U].cond};
                     while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt))
                     {
                         c = c->a;
                     }
-                    const Expr* l =
-                        c != nullptr && c->kind == Expr::Kind::Binary && c->bop == vir::BinaryOp::Eq ? c->a : nullptr;
-                    const Expr* rr = l != nullptr ? c->b : nullptr;
+                    const Expr* l {
+                        c != nullptr && c->kind == Expr::Kind::Binary && c->bop == vir::BinaryOp::Eq ? c->a : nullptr};
+                    const Expr* rr {l != nullptr ? c->b : nullptr};
                     if (l != nullptr && l->kind == Expr::Kind::Null)
                     {
                         std::swap(l, rr);
@@ -2008,11 +2018,11 @@ private:
             }
             if (!merge)
             {
-                const SrcLoc l = loc_of(owning->position);
-                const Expr* res = b_.result(*f, l);
+                const SrcLoc l {loc_of(owning->position)};
+                const Expr* res {b_.result(*f, l)};
                 b_.text(res, "the result");
-                const Expr* eq = b_.binary(vir::BinaryOp::Eq, res, b_.null_const(f->ret, l), l);
-                const Expr* atom = b_.atom(vir::AtomKind::OwnsBlock, b_.result(*f, l), -1, l);
+                const Expr* eq {b_.binary(vir::BinaryOp::Eq, res, b_.null_const(f->ret, l), l)};
+                const Expr* atom {b_.atom(vir::AtomKind::OwnsBlock, b_.result(*f, l), -1, l)};
                 atom_pos_[atom] = owning->position;
                 f->ensures_.insert(f->ensures_.begin(), vir::Clause {b_.binary(vir::BinaryOp::LOr, eq, atom, l), l});
             }
@@ -2037,7 +2047,7 @@ private:
                 }
                 if (x->kind == Expr::Kind::Deref)
                 {
-                    const Expr* root = vir::place_root(x->a);
+                    const Expr* root {vir::place_root(x->a)};
                     if (root != nullptr && root->kind == Expr::Kind::Result)
                     {
                         return x;
@@ -2076,30 +2086,33 @@ private:
     void apply_owning(a_routine_ptr r, vir::Function* f)
     {
         apply_function_markers(r, f);
-        auto it = owning_.find(r);
+        auto it {owning_.find(r)};
         if (it == owning_.end())
         {
             return;
         }
-        const bool saved_contract = cx_.contract, saved_annotation = cx_.annotation;
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
         cx_.contract = cx_.annotation = false;
-        std::vector<vir::Clause> add_requires, add_ensures;
-        const std::vector<vir::AtomSite> sites = vir::contract_atoms(*f);
+        std::vector<vir::Clause> add_requires;
+        std::vector<vir::Clause> add_ensures;
+        const std::vector<vir::AtomSite> sites {vir::contract_atoms(*f)};
         for (const OwningParam& o : it->second)
         {
-            const auto k = static_cast<size_t>(o.index);
+            const auto k {static_cast<size_t>(o.index)};
             if (k >= f->params.size() || !f->params[k].type.is_ptr())
             {
                 continue; // the signature was rejected
             }
-            const std::string pname = f->params[k].name.empty() ? "arg" + std::to_string(k + 1) : f->params[k].name;
-            for (int list = 0; list < 2; ++list)
+            const std::string pname {f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name};
+            for (int list {0}; list < 2; ++list)
             {
                 if (list == 1 && f->noreturn)
                 {
                     continue; // a function declared not to return has no `ensures` (decision 0015 item 4)
                 }
-                bool merge = false, bad = false;
+                bool merge {false};
+                bool bad {false};
                 for (const vir::AtomSite& st : sites)
                 {
                     if (st.in_ensures != (list == 1) || st.atom->a == nullptr)
@@ -2111,7 +2124,7 @@ private:
                     {
                         continue;
                     }
-                    const Expr* oroot = vir::place_root(st.atom->a);
+                    const Expr* oroot {vir::place_root(st.atom->a)};
                     if (oroot->kind != Expr::Kind::Formal || oroot->index != o.index)
                     {
                         continue;
@@ -2144,13 +2157,13 @@ private:
                 {
                     continue;
                 }
-                const SrcLoc l = loc_of(o.pos);
-                const Expr* pf = b_.formal(*f, o.index, l);
+                const SrcLoc l {loc_of(o.pos)};
+                const Expr* pf {b_.formal(*f, o.index, l)};
                 b_.text(pf, pname);
-                const Expr* eq = b_.binary(vir::BinaryOp::Eq, pf, b_.null_const(f->params[k].type, l), l);
-                const Expr* pf2 = b_.formal(*f, o.index, l);
+                const Expr* eq {b_.binary(vir::BinaryOp::Eq, pf, b_.null_const(f->params[k].type, l), l)};
+                const Expr* pf2 {b_.formal(*f, o.index, l)};
                 b_.text(pf2, pname);
-                const Expr* atom = b_.atom(vir::AtomKind::Owns, pf2, -1, l);
+                const Expr* atom {b_.atom(vir::AtomKind::Owns, pf2, -1, l)};
                 atom_pos_[atom] = o.pos;
                 (list == 0 ? add_requires : add_ensures)
                     .push_back(vir::Clause {b_.binary(vir::BinaryOp::LOr, eq, atom, l), l});
@@ -2167,12 +2180,12 @@ private:
     // (`callee_for_call`); creating it here does not by itself make it verified.
     vir::Function* function_of(a_routine_ptr r, bool has_body_here, const a_source_position& at)
     {
-        auto it = fns_.find(r);
+        auto it {fns_.find(r)};
         if (it != fns_.end())
         {
             return it->second;
         }
-        if (reserved_rejected_.count(r) != 0)
+        if (reserved_rejected_.count(r) != 0U)
         { // rejected for its reserved name (check_reserved_library, lib_trust): never encoded
             fns_[r] = nullptr;
             return nullptr;
@@ -2180,11 +2193,11 @@ private:
         // Decision 0046: a bodiless routine whose contract is written in a library file is trusted when vlibc's rules hold (lib_trust), and then
         // its location, its parameters' and its method's reason are vlibc's declaration; one that fails them, or whose reserved name was given
         // a contract by the program, is dropped after the rejection.
-        const LibTrust* lib = nullptr;
+        const LibTrust* lib {nullptr};
         if (!has_body_here)
         {
-            const LibTrust& lt = lib_trust(r);
-            if ((lt.has && !lt.ok) || reserved_rejected_.count(r) != 0)
+            const LibTrust& lt {lib_trust(r)};
+            if ((lt.has && !lt.ok) || reserved_rejected_.count(r) != 0U)
             {
                 fns_[r] = nullptr;
                 return nullptr;
@@ -2199,20 +2212,20 @@ private:
             fns_[r] = nullptr;
             return nullptr;
         }
-        VType ret = signature_vtype(return_type(r));
-        a_routine_type_supplement_ptr x = routine_supplement(r);
-        const a_source_position decl = lib != nullptr ? lib->decl : r->source_corresp.decl_position;
-        SrcLoc end = loc_of(decl);
+        VType ret {signature_vtype(return_type(r))};
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
+        const a_source_position decl {lib != nullptr ? lib->decl : r->source_corresp.decl_position};
+        SrcLoc end {loc_of(decl)};
         if (has_body_here)
         {
-            a_scope_ptr sp = body_scope(r);
+            a_scope_ptr sp {body_scope(r)};
             if (sp && sp->assoc_block && sp->assoc_block->kind == stmk_block &&
                 sp->assoc_block->variant.block.extra_info)
             {
                 end = loc_of(sp->assoc_block->variant.block.extra_info->final_position);
             }
         }
-        vir::Function* f = prog_.add_function(rname(r), ret.t, loc_of(decl), end);
+        vir::Function* f {prog_.add_function(rname(r), ret.t, loc_of(decl), end)};
         fns_[r] = f;
         restrict_at_[f] = at;
         std::vector<int> restricted;
@@ -2222,17 +2235,17 @@ private:
         {
             if (a_scope_ptr bs = body_scope(r))
             {
-                for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next)
+                for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
                 {
-                    var_quals.push_back(v->type != nullptr ? f_get_type_qualifiers(v->type, TRUE) : 0);
+                    var_quals.push_back(v->type != nullptr ? f_get_type_qualifiers(v->type, TRUE) : 0U);
                 }
             }
         }
-        size_t pk = 0;
-        for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next, ++pk)
+        size_t pk {0U};
+        for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next, ++pk)
         {
-            VType pt = signature_vtype(p->type, true, p->qualifiers | (pk < var_quals.size() ? var_quals[pk] : 0));
-            const int k = f->add_param(p->name ? p->name : "", pt.t, loc_of(decl));
+            VType pt {signature_vtype(p->type, true, p->qualifiers | (pk < var_quals.size() ? var_quals[pk] : 0U))};
+            const int k {f->add_param(p->name ? p->name : "", pt.t, loc_of(decl))};
             f->params[static_cast<size_t>(k)].c_type_name = pt.name;
             const_cast<vir::Var*>(f->param_var(k))->c_type_name = pt.name;
             if (pt.t.is_struct())
@@ -2250,7 +2263,7 @@ private:
         // and "never returns" is vlibc's own `ensures(false)`.
         f->noreturn = x->does_not_return != 0 && lib == nullptr;
         // Decision 0042 item 4: the initialization markers, set before the contract is read so that a written read of the pointee is rejected there.
-        if (auto mk = markers_.find(r); mk != markers_.end())
+        if (auto mk {markers_.find(r)}; mk != markers_.end())
         {
             for (const MarkerParam& m : mk->second)
             {
@@ -2272,14 +2285,14 @@ private:
                                                    : "declared here, defined in another unit")
                                     : "trusted, never verified: declared in a system file";
         }
-        const size_t rejected_before = rejected_.size();
+        const size_t rejected_before {rejected_.size()};
         encode_contract(r, f);
         check_marker_atoms(r, f, rejected_.size() != rejected_before);
         // Decision 0037 item 2: `restrict` on a pointer parameter is accepted only when the contract owns its pointee and returns it.
         for (int k : restricted)
         {
-            int other = -1;
-            if (const std::string hazard = vir::restrict_hazard(*f, k); !hazard.empty())
+            int other {-1};
+            if (const std::string hazard {vir::restrict_hazard(*f, k)}; !hazard.empty())
             { // decision 0043 item 10 (audit B2)
                 reject(Diag::unsupported_annotation, at,
                        "a `restrict` parameter `" +
@@ -2332,8 +2345,8 @@ private:
         }
         if (x->kind == Expr::Kind::Cond && x->b != nullptr && x->c != nullptr && x->type.is_int())
         {
-            const Expr* t = contract_truth(x->b);
-            const Expr* f = t != nullptr ? contract_truth(x->c) : nullptr;
+            const Expr* t {contract_truth(x->b)};
+            const Expr* f {t != nullptr ? contract_truth(x->c) : nullptr};
             if (f != nullptr)
             {
                 return b_.cond(x->a, t, f, x->loc);
@@ -2396,13 +2409,13 @@ private:
 
     void encode_contract(a_routine_ptr r, vir::Function* f)
     {
-        Ctx saved = std::move(cx_);
+        Ctx saved {std::move(cx_)};
         cx_ = Ctx();
         cx_.routine = r;
         cx_.fn = f;
         for (an_attribute_ptr a : contracts_of(r))
         {
-            const Annot k = classify(a);
+            const Annot k {classify(a)};
             cx_.contract = true;
             cx_.annot = k;
             cx_.binder_present = has_binder(a);
@@ -2422,8 +2435,9 @@ private:
                 encode_measure(a, f->decreases_);
                 continue;
             }
-            an_expr_node_ptr arg = nullptr;
-            int exprs = 0, others = 0;
+            an_expr_node_ptr arg {nullptr};
+            int exprs {0};
+            int others {0};
             for (const AnnotArg& g : arguments_of(a))
             {
                 if (g.kind == AnnotArg::Kind::expression)
@@ -2449,7 +2463,7 @@ private:
                 continue;
             }
             truth_context(arg); // decision 0023 item 5: `requires(x | 4)`, a clause of `ensures`
-            const Expr* c = clause_bool(expr(arg), arg->position);
+            const Expr* c {clause_bool(expr(arg), arg->position)};
             if (c == nullptr)
             {
                 continue;
@@ -2466,10 +2480,10 @@ private:
     // expression, none of type bool (decision 0013 item 1).
     void encode_measure(an_attribute_ptr a, std::vector<vir::Clause>& out)
     {
-        int n = 0;
-        bool ok = true;
+        int n {0};
+        bool ok {true};
         std::vector<vir::Clause> parts;
-        const SrcLoc where = loc_of(a->position);
+        const SrcLoc where {loc_of(a->position)};
         for (const AnnotArg& g : arguments_of(a))
         {
             if (g.kind != AnnotArg::Kind::expression || g.expr == nullptr)
@@ -2479,7 +2493,7 @@ private:
                 continue;
             }
             ++n;
-            const Expr* x = expr(g.expr);
+            const Expr* x {expr(g.expr)};
             if (x == nullptr)
             {
                 ok = false;
@@ -2524,7 +2538,7 @@ private:
 
     static const char* template_args_reason(a_template_arg_ptr list, std::set<a_type_ptr>& seen, int depth)
     {
-        for (a_template_arg_ptr a = list; a != nullptr; a = a->next)
+        for (a_template_arg_ptr a {list}; a != nullptr; a = a->next)
         {
             if (a->kind == tak_nontype)
             {
@@ -2553,7 +2567,7 @@ private:
         {
             return nullptr;
         }
-        a_class_type_supplement_ptr x = cls->variant.class_struct_union.extra_info;
+        a_class_type_supplement_ptr x {cls->variant.class_struct_union.extra_info};
         return x != nullptr ? template_args_reason(x->template_arg_list, seen, depth) : nullptr;
     }
 
@@ -2573,7 +2587,7 @@ private:
     static const char* typeref_chain_reason(a_type_ptr t, std::set<a_type_ptr>& seen, int depth,
                                             a_type_ptr* where = nullptr)
     {
-        int guard = 0;
+        int guard {0};
         for (; t != nullptr && t->kind == tk_typeref && guard < 64; ++guard)
         {
             if (a_typeref_type_supplement_ptr x = t->variant.typeref.extra_info)
@@ -2611,8 +2625,8 @@ private:
     // ---- constants --------------------------------------------------------------------------------------------
     const Expr* literal(a_constant_ptr c, const VType& t, const a_source_position& p)
     {
-        a_number_buffer buf = decimal_str_for_integer_constant(c);
-        const std::string text = buf.as_temp_characters();
+        a_number_buffer buf {decimal_str_for_integer_constant(c)};
+        const std::string text {buf.as_temp_characters()};
         if (t.t.is_bool())
         {
             return b_.bool_const(text != "0", loc_of(p));
@@ -2623,8 +2637,8 @@ private:
     // EDG's value of an integer constant as the decimal text VIR holds ("0"/"1" for a bool).
     static std::string constant_text(a_constant_ptr c, const vir::Type& t)
     {
-        a_number_buffer buf = decimal_str_for_integer_constant(c);
-        const std::string text = buf.as_temp_characters();
+        a_number_buffer buf {decimal_str_for_integer_constant(c)};
+        const std::string text {buf.as_temp_characters()};
         if (t.is_bool())
         {
             return text == "0" ? "0" : "1";
@@ -2644,7 +2658,7 @@ private:
             // A named constant of an enumeration whose front-end value is not one of its values (`const enum color DEF = (enum
             // color)4;`): its initializer's conversion fails in every method's prologue first (decision 0018 item 5).  The use is
             // that conversion again, of a literal of the underlying type, so no Const lies outside its type's values.
-            const vir::Type u = vir::Type::integer(prog_.int_type_of(t.int_type->bits, t.int_type->is_signed));
+            const vir::Type u {vir::Type::integer(prog_.int_type_of(t.int_type->bits, t.int_type->is_signed))};
             return b_.convert(t, b_.int_const(u, value, loc_of(p)), false, loc_of(p));
         }
         return b_.int_const(t, value, loc_of(p));
@@ -2661,13 +2675,13 @@ private:
         {
             return v;
         }
-        const vir::dec::Range r = vir::dec::range_of(*t.int_type);
+        const vir::dec::Range r {vir::dec::range_of(*t.int_type)};
         // a + 1 for a non-negative decimal
         auto inc = [](const std::string& a)
         {
-            std::string s = a;
-            size_t i = s.size();
-            while (i > 0)
+            std::string s {a};
+            size_t i {s.size()};
+            while (i > 0U)
             {
                 --i;
                 if (s[i] == '9')
@@ -2686,7 +2700,7 @@ private:
         { // at the minimum: +1
             if (vir::dec::negative(r.lo))
             {
-                return vir::dec::neg(vir::dec::dec1(r.lo.substr(1)));
+                return vir::dec::neg(vir::dec::dec1(r.lo.substr(1U)));
             }
             return inc(v);
         }
@@ -2696,7 +2710,7 @@ private:
         }
         if (vir::dec::negative(v))
         {
-            return "-" + inc(v.substr(1));
+            return "-" + inc(v.substr(1U));
         }
         return vir::dec::dec1(v);
     }
@@ -2707,22 +2721,22 @@ private:
 
     const Expr* constant(an_expr_node_ptr e)
     {
-        a_constant_ptr c = e->variant.constant.ptr;
+        a_constant_ptr c {e->variant.constant.ptr};
         // A folded constant is the operand as written (`c == DEF` with a `const enum color DEF`: the implicit conversion is inside
         // its `expr` chain), so a parent's allowance of an implicit conversion out of an enumeration (decision 0018 item 6) passes
         // to its original expression.
-        if (c != nullptr && enum_conv_ok_.count(e) != 0 && !is_enumerator(c) &&
+        if (c != nullptr && enum_conv_ok_.count(e) != 0U && !is_enumerator(c) &&
             (c->expr != nullptr || c->local_expr_ref))
         {
             allow_enum_conversion(expr_node_from_constant(c));
         }
-        const Expr* x = constant_value(c, e->position);
+        const Expr* x {constant_value(c, e->position)};
         // The front end folds the conversion of an enumerator into the node: an `enk_constant` of type `int` naming the enumerator
         // constant, whose own type is the enumeration (C++, the unnamed enum of `B = A + 1`).  That is decision 0018 item 6 (iv):
         // the literal of the enumeration converted implicitly to the node's type.
         if (x != nullptr && is_enumerator(c) && e->type != nullptr)
         {
-            VType nt = vtype(e->type);
+            VType nt {vtype(e->type)};
             if (nt.ok && !nt.t.is_bool() && nt.t != x->type)
             {
                 if (il_header.source_language == sl_C)
@@ -2770,7 +2784,7 @@ private:
         // expression is not encoded (a null constant has no obligation), so the casts it holds are never met.
         if (is_pointer_type(c->type))
         {
-            VType pt = vtype(c->type, true);
+            VType pt {vtype(c->type, true)};
             if (!pt.ok)
             {
                 // A pointer type this version rejects (`int **`, a pointer to a struct): it arose in a declaration, a `&` or a conversion that
@@ -2793,7 +2807,7 @@ private:
         // constant of enumeration type (a folded `(enum color)1`) goes the normal way, and its cast is a checked conversion.
         if (is_enumerator(c))
         {
-            if (c->source_corresp.decl_position.seq == 0 || !in_verified_file(c->source_corresp.decl_position))
+            if (c->source_corresp.decl_position.seq == 0U || !in_verified_file(c->source_corresp.decl_position))
             {
                 reject(
                     Diag::unsupported_expression, pos,
@@ -2803,8 +2817,8 @@ private:
             // The enumeration of the enumerator (defence in depth): its type in C++ and for a fixed C enumeration, else the type
             // it is affiliated with (il_def.h:10159-10166, valid when enum_type is FALSE: C's `int` of an unfixed enumeration).  It must
             // have passed its checks (decision 0018 items 2-3, 10); none found is a rejection.
-            a_type_ptr ct = c->type != nullptr ? skip_typerefs(c->type) : nullptr;
-            a_type_ptr et_enum = nullptr;
+            a_type_ptr ct {c->type != nullptr ? skip_typerefs(c->type) : nullptr};
+            a_type_ptr et_enum {nullptr};
             if (ct != nullptr && ct->kind == tk_integer)
             {
                 et_enum = ct->variant.integer.enum_type ? ct : ct->variant.integer.enum_info.affiliated_type;
@@ -2819,7 +2833,7 @@ private:
                        "an enumerator whose enumeration this version cannot find (decision 0018 item 9)");
                 return nullptr;
             }
-            const EnumInfo& ei = enum_info(et_enum);
+            const EnumInfo& ei {enum_info(et_enum)};
             if (!ei.ok)
             {
                 if (!ei.silent)
@@ -2840,13 +2854,13 @@ private:
         {
             return nullptr;
         }
-        an_expr_node_ptr original = (c->expr != nullptr || c->local_expr_ref) ? expr_node_from_constant(c) : nullptr;
-        const bool hook = verify_config().hook == "constant_without_expr";
+        an_expr_node_ptr original {(c->expr != nullptr || c->local_expr_ref) ? expr_node_from_constant(c) : nullptr};
+        const bool hook {verify_config().hook == "constant_without_expr"};
         if (original != nullptr && !hook)
         {
             {
                 // Decision 0020 item 5: a side effect in an unevaluated operand does not happen (`sizeof(x++)`).
-                const char* what = "";
+                const char* what {""};
                 if (an_expr_node_ptr fx = unevaluated_side_effect(original, &what))
                 {
                     reject(Diag::side_effect_not_evaluated, fx->position, what);
@@ -2865,7 +2879,7 @@ private:
             // Encode what was written, so that the checks of items 3-8 apply as written; a call in it ran at compile
             // time and is rejected by `call`.
             ++cx_.const_depth;
-            const Expr* x = expr(original);
+            const Expr* x {expr(original)};
             --cx_.const_depth;
             if (x == nullptr)
             {
@@ -2890,13 +2904,13 @@ private:
             // Decision 0024 item 5: a character literal above the range of its type (`'\xff'`) has no `expr`, no `orig_type` and a
             // negative value the front end sign-extended; only an `int` (C) or a plain `char`/`wchar_t` (C++) constant of this shape is
             // one (any other, an enumeration-typed copy of an enumerator, takes the literal path as before).
-            const bool c_mode = il_header.source_language == sl_C;
-            const bool char_shaped = !t.t.is_bool() && !is_enum_type(t.t) &&
-                                     (c_mode ? t.name == "int" : (t.name == "char" || t.name == "wchar_t"));
+            const bool c_mode {il_header.source_language == sl_C};
+            const bool char_shaped {!t.t.is_bool() && !is_enum_type(t.t) &&
+                                    (c_mode ? t.name == "int" : (t.name == "char" || t.name == "wchar_t"))};
             if (char_shaped && c->expr == nullptr && !c->local_expr_ref && c->orig_type == nullptr)
             {
-                a_number_buffer buf = decimal_str_for_integer_constant(c);
-                const std::string text = buf.as_temp_characters();
+                a_number_buffer buf {decimal_str_for_integer_constant(c)};
+                const std::string text {buf.as_temp_characters()};
                 if (vir::dec::negative(text))
                 {
                     return wrapped_character_literal(text, c->character_kind == chk_wchar_t, pos, c_mode);
@@ -2912,24 +2926,24 @@ private:
     const Expr* wrapped_character_literal(const std::string& text, bool wchar_kind, const a_source_position& pos,
                                           bool c_mode)
     {
-        const bool wide = wchar_kind || vir::dec::cmp(text, "-128") < 0;
-        const int n = wide ? 32 : 8;
+        const bool wide {wchar_kind || vir::dec::cmp(text, "-128") < 0};
+        const int n {wide ? 32 : 8};
         errno = 0;
-        char* end = nullptr;
-        const long long v = std::strtoll(text.c_str(), &end, 10);
+        char* end {nullptr};
+        const long long v {std::strtoll(text.c_str(), &end, 10)};
         if (errno != 0 || end == nullptr || *end != '\0' || v >= 0 || v < -(1LL << (n - 1)))
         {
             reject(Diag::unsupported_expression, pos,
                    "a character literal whose value this version cannot read (decision 0024 item 5)");
             return nullptr;
         }
-        const SrcLoc l = loc_of(pos);
-        const vir::Type code_type =
-            vir::Type::integer(prog_.int_type(wide ? "unsigned int" : "unsigned char", n, false));
-        const vir::Type char_type = vir::Type::integer(prog_.int_type(wide ? "wchar_t" : "char", n, true));
-        const Expr* code = b_.spelled(b_.int_const(code_type, std::to_string(v + (1LL << n)), l),
-                                      wide ? "unsigned int" : "unsigned char");
-        const Expr* x = b_.spelled(b_.convert(char_type, code, false, l), wide ? "wchar_t" : "char");
+        const SrcLoc l {loc_of(pos)};
+        const vir::Type code_type {
+            vir::Type::integer(prog_.int_type(wide ? "unsigned int" : "unsigned char", n, false))};
+        const vir::Type char_type {vir::Type::integer(prog_.int_type(wide ? "wchar_t" : "char", n, true))};
+        const Expr* code {b_.spelled(b_.int_const(code_type, std::to_string(v + (1LL << n)), l),
+                                     wide ? "unsigned int" : "unsigned char")};
+        const Expr* x {b_.spelled(b_.convert(char_type, code, false, l), wide ? "wchar_t" : "char")};
         if (c_mode)
         {
             x = b_.spelled(b_.convert(vir::Type::integer(prog_.int_type_of(prog_.c_int_bits(), true)), x, false, l),
@@ -2942,10 +2956,10 @@ private:
     // expression operand) is, or contains, an array, a `_BitInt`, a vector or a class instance with a non-type argument.
     bool reject_computed_sizeof_operand(an_expr_node_ptr node, const a_source_position& at)
     {
-        const auto& si = node->variant.sizeof_info;
-        a_type_ptr t = si.is_type ? si.variant.type : (si.variant.expr != nullptr ? si.variant.expr->type : nullptr);
+        const auto& si {node->variant.sizeof_info};
+        a_type_ptr t {si.is_type ? si.variant.type : (si.variant.expr != nullptr ? si.variant.expr->type : nullptr)};
         std::set<a_type_ptr> seen;
-        const char* why = computed_type_reason(t, seen);
+        const char* why {computed_type_reason(t, seen)};
         if (why == nullptr)
         {
             return false;
@@ -2962,10 +2976,10 @@ private:
     // it counts as in one (fail closed, like in_verified_file).
     static bool static_assertion_in_verified_file(a_static_assertion_ptr sa)
     {
-        bool known = false;
+        bool known {false};
         auto check = [&](const a_source_position& p)
         {
-            if (p.seq == 0)
+            if (p.seq == 0U)
             {
                 return false;
             }
@@ -2976,10 +2990,10 @@ private:
         {
             return true;
         }
-        a_constant_ptr c = sa->condition;
+        a_constant_ptr c {sa->condition};
         if (c != nullptr && (c->expr != nullptr || c->local_expr_ref))
         {
-            an_expr_node_ptr o = expr_node_from_constant(c);
+            an_expr_node_ptr o {expr_node_from_constant(c)};
             if (o != nullptr && check(o->position))
             {
                 return true;
@@ -2991,13 +3005,13 @@ private:
     // An entity declared in a system file, or with no position (a builtin): its value is the front end's alone.
     static bool declared_in_system(const a_source_position& p)
     {
-        return p.seq == 0 || !in_verified_file(p);
+        return p.seq == 0U || !in_verified_file(p);
     }
 
     struct SkipScan
     {
-        bool skip = false;     // the assertion needs the front end alone: not encoded, silently (item 3)
-        bool rejected = false; // a type computed from a constant was met (item 6), and diagnosed
+        bool skip {false};     // the assertion needs the front end alone: not encoded, silently (item 3)
+        bool rejected {false}; // a type computed from a constant was met (item 6), and diagnosed
     };
 
     void scan_type(a_type_ptr t, const a_source_position& at, SkipScan& out)
@@ -3049,7 +3063,7 @@ private:
         {
             case enk_constant:
             {
-                a_constant_ptr c = e->variant.constant.ptr;
+                a_constant_ptr c {e->variant.constant.ptr};
                 if (c == nullptr)
                 {
                     return;
@@ -3067,7 +3081,7 @@ private:
                 {
                     return;
                 }
-                an_expr_node_ptr o = expr_node_from_constant(c);
+                an_expr_node_ptr o {expr_node_from_constant(c)};
                 if (o != nullptr && o != e)
                 {
                     scan_for_skip(o, out, depth + 1);
@@ -3076,7 +3090,7 @@ private:
             }
             case enk_variable:
             {
-                a_variable_ptr v = e->variant.variable.ptr;
+                a_variable_ptr v {e->variant.variable.ptr};
                 if (v == nullptr || !declared_in_system(v->source_corresp.decl_position))
                 {
                     return;
@@ -3094,7 +3108,7 @@ private:
             case enk_alignof:
             case enk_datasizeof:
             {
-                const auto& si = e->variant.sizeof_info;
+                const auto& si {e->variant.sizeof_info};
                 scan_type(si.is_type ? si.variant.type : (si.variant.expr != nullptr ? si.variant.expr->type : nullptr),
                           e->position, out);
                 return;
@@ -3104,7 +3118,7 @@ private:
                 return;
             case enk_builtin_operation:
                 out.skip = true;
-                for (an_expr_node_ptr o = e->variant.builtin_operation.operands; o != nullptr; o = o->next)
+                for (an_expr_node_ptr o {e->variant.builtin_operation.operands}; o != nullptr; o = o->next)
                 {
                     scan_for_skip(o, out, depth + 1);
                 }
@@ -3115,7 +3129,7 @@ private:
                 return;
             case enk_operation:
             {
-                const an_expr_operator_kind k = e->variant.operation.kind;
+                const an_expr_operator_kind k {e->variant.operation.kind};
                 if (k == eok_noexcept)
                 {
                     return;
@@ -3132,7 +3146,7 @@ private:
                         }
                     }
                 }
-                for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+                for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
                 {
                     scan_for_skip(o, out, depth + 1);
                 }
@@ -3154,7 +3168,7 @@ private:
     // the prologue or of the function.  `skipped`: nothing to check or the front end's alone (item 3); `failed`: diagnosed.
     SaResult static_assertion_condition(a_static_assertion_ptr sa, const Expr** out)
     {
-        a_constant_ptr c = sa->condition;
+        a_constant_ptr c {sa->condition};
         if (c == nullptr)
         {
             reject(Diag::unsupported_declaration, sa->position,
@@ -3175,7 +3189,7 @@ private:
         if (c->expr == nullptr && !c->local_expr_ref && c->kind == ck_integer)
         {
             // A lone literal or enumerator has nothing to check, except a character literal that does not fit its type (item 5).
-            a_number_buffer buf = decimal_str_for_integer_constant(c);
+            a_number_buffer buf {decimal_str_for_integer_constant(c)};
             if (is_enumerator(c) || !vir::dec::negative(std::string(buf.as_temp_characters())))
             {
                 return SaResult::skipped;
@@ -3210,10 +3224,10 @@ private:
         cx_.case_value = true;
         cx_.case_var.clear();
         ++cx_.const_depth; // a constant expression: no calls (`call` rejects them)
-        const Expr* x = constant_initializer(c, sa->position);
+        const Expr* x {constant_initializer(c, sa->position)};
         --cx_.const_depth;
         cx_.case_value = false;
-        const std::string named_var = cx_.case_var;
+        const std::string named_var {cx_.case_var};
         if (x == nullptr)
         {
             return SaResult::failed;
@@ -3241,12 +3255,12 @@ private:
     {
         cx_ = Ctx();
         cx_.stmt_pos = sa->position;
-        const Expr* cond = nullptr;
+        const Expr* cond {nullptr};
         if (static_assertion_condition(sa, &cond) != SaResult::encoded)
         {
             return;
         }
-        vir::NamedConst* n = prog_.add_static_assertion(loc_of(sa->position), cond);
+        vir::NamedConst* n {prog_.add_static_assertion(loc_of(sa->position), cond)};
         if (verify_config().hook == "perturb_folded")
         {
             n->value = "0";
@@ -3262,15 +3276,15 @@ private:
             return;
         }
         block_sa_seen_.insert(sa); // every one the encoder is given, before it is encoded, skipped or diagnosed
-        const a_source_position saved = cx_.stmt_pos;
-        if (sa->position.seq != 0)
+        const a_source_position saved {cx_.stmt_pos};
+        if (sa->position.seq != 0U)
         {
             cx_.stmt_pos = sa->position;
         }
-        const Expr* cond = nullptr;
+        const Expr* cond {nullptr};
         if (static_assertion_condition(sa, &cond) == SaResult::encoded)
         {
-            vir::NamedConst* n = cx_.fn->add_local_static_assertion(loc_of(sa->position), cond);
+            vir::NamedConst* n {cx_.fn->add_local_static_assertion(loc_of(sa->position), cond)};
             if (verify_config().hook == "perturb_folded")
             {
                 n->value = "0";
@@ -3283,7 +3297,7 @@ private:
     static std::vector<an_expr_node_ptr> operands_of(an_expr_node_ptr e)
     {
         std::vector<an_expr_node_ptr> out;
-        for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+        for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
         {
             out.push_back(o);
         }
@@ -3346,16 +3360,16 @@ private:
 
     const Expr* variable(an_expr_node_ptr e)
     {
-        a_variable_ptr v = e->variant.variable.ptr;
+        a_variable_ptr v {e->variant.variable.ptr};
         if (v != nullptr)
         {
-            const char* vn = v->source_corresp.name;
+            const char* vn {v->source_corresp.name};
             if (cx_.case_value && cx_.case_var.empty())
             {
                 cx_.case_var = vn ? vn : "?";
             }
             // A named constant (decision 0017 item 3) is its value: a literal of its type at the use, also in a contract.
-            auto nc = named_.find(v);
+            auto nc {named_.find(v)};
             if (nc != named_.end())
             {
                 return value_literal(nc->second.type, nc->second.value, e->position);
@@ -3366,7 +3380,7 @@ private:
                        "a constant named in its own initializer");
                 return nullptr;
             }
-            if (rejected_globals_.count(v) != 0)
+            if (rejected_globals_.count(v) != 0U)
             {
                 return nullptr; // diagnosed at its declaration
             }
@@ -3380,16 +3394,16 @@ private:
             reject(Diag::unsupported_expression, e->position, "a variable reference that cannot be read");
             return nullptr;
         }
-        if (cx_.rejected_vars.count(v) != 0)
+        if (cx_.rejected_vars.count(v) != 0U)
         {
             return nullptr; // diagnosed at its declaration
         }
-        auto it = cx_.vars.find(v);
+        auto it {cx_.vars.find(v)};
         if (it == cx_.vars.end())
         {
-            const char* n = v->source_corresp.name;
-            const a_source_position dp = v->source_corresp.decl_position;
-            if (v->source_corresp.enclosing_routine == nullptr && dp.seq != 0 && !in_verified_file(dp))
+            const char* n {v->source_corresp.name};
+            const a_source_position dp {v->source_corresp.decl_position};
+            if (v->source_corresp.enclosing_routine == nullptr && dp.seq != 0U && !in_verified_file(dp))
             {
                 reject(Diag::unsupported_expression, e->position,
                        std::string("a global declared in a system file (`") + (n ? n : "?") +
@@ -3403,9 +3417,9 @@ private:
             }
             return nullptr;
         }
-        if (cx_.case_value && il_header.source_language != sl_C && cx_.declaring != v && cx_.pending.count(v) == 0)
+        if (cx_.case_value && il_header.source_language != sl_C && cx_.declaring != v && cx_.pending.count(v) == 0U)
         {
-            bool failed = false;
+            bool failed {false};
             if (const Expr* x = local_const_use(v, e->position, &failed))
             {
                 return x;
@@ -3415,7 +3429,7 @@ private:
                 return nullptr; // diagnosed
             }
         }
-        if (cx_.declaring == v || cx_.pending.count(v) != 0)
+        if (cx_.declaring == v || cx_.pending.count(v) != 0U)
         {
             reject(Diag::unsupported_declaration, v->source_corresp.decl_position,
                    "a local variable used in its own initializer");
@@ -3429,7 +3443,7 @@ private:
                        "any other use of a struct as a value is M8, decision 0044 item 15)");
             return nullptr;
         }
-        const Expr* local = b_.local(it->second, loc_of(e->position));
+        const Expr* local {b_.local(it->second, loc_of(e->position))};
         if (it->second->type.is_ptr())
         {
             b_.text(local, it->second->name); // for the messages of decision 0032 item 6
@@ -3456,7 +3470,7 @@ private:
                        "any other use of a struct as a value is M8, decision 0044 item 15)");
             return nullptr;
         }
-        const SrcLoc l = loc_of(e->position);
+        const SrcLoc l {loc_of(e->position)};
         return b_.deref(b_.global_addr(g, l), l);
     }
 
@@ -3465,7 +3479,7 @@ private:
     // with `*failed` false when `v` is not such a local (the use stays a local read, which the case label then rejects).
     const Expr* local_const_use(a_variable_ptr v, const a_source_position& pos, bool* failed)
     {
-        if (v->address_taken && (cx_.local_const_inits.count(v) != 0 || cx_.local_consts.count(v) != 0))
+        if (v->address_taken && (cx_.local_const_inits.count(v) != 0U || cx_.local_consts.count(v) != 0U))
         {
             // A constant a case value names is checked as written in the prologue and its uses are literals; a cell of the same name could
             // be written through its address (decision 0032 item 4), so the two are not combined.
@@ -3473,24 +3487,24 @@ private:
             *failed = true;
             return nullptr;
         }
-        auto done = cx_.local_consts.find(v);
+        auto done {cx_.local_consts.find(v)};
         if (done != cx_.local_consts.end())
         {
             return value_literal(done->second.type, done->second.value, pos);
         }
-        auto in = cx_.local_const_inits.find(v);
+        auto in {cx_.local_const_inits.find(v)};
         if (in == cx_.local_const_inits.end() || cx_.fn == nullptr)
         {
             return nullptr;
         }
-        const Ctx::ConstInit init = in->second;
+        const Ctx::ConstInit init {in->second};
         VType t;
         if (!value_type(v->type, init.at, &t))
         {
             *failed = true;
             return nullptr;
         }
-        const Expr* x = constant_initializer(init.c, init.at);
+        const Expr* x {constant_initializer(init.c, init.at)};
         if (x == nullptr)
         {
             *failed = true;
@@ -3502,8 +3516,8 @@ private:
             *failed = true;
             return nullptr;
         }
-        const std::string value = constant_text(init.c, t.t);
-        const char* nm = v->source_corresp.name;
+        const std::string value {constant_text(init.c, t.t)};
+        const char* nm {v->source_corresp.name};
         cx_.fn->add_local_const(nm ? nm : "", t.t, loc_of(init.at), x, maybe_perturb(t.t, value));
         cx_.local_consts[v] = Ctx::ConstValue {t.t, value};
         return value_literal(t.t, value, pos);
@@ -3512,7 +3526,7 @@ private:
     // The kinds of constants decision 0017 item 1 names: const-qualified (before typedefs are skipped) or constexpr.
     static bool is_const_object(a_variable_ptr v)
     {
-        return (f_get_type_qualifiers(v->type, TRUE) & TQ_CONST) != 0 || v->is_constexpr;
+        return (f_get_type_qualifiers(v->type, TRUE) & TQ_CONST) != 0U || v->is_constexpr;
     }
 
     // Classifies and encodes the file-scope variables of verified files (decision 0017 items 1, 2, 4): each is a named constant
@@ -3526,8 +3540,8 @@ private:
             {
                 continue;
             }
-            const a_source_position p = v->source_corresp.decl_position;
-            if (p.seq == 0 || !in_verified_file(p))
+            const a_source_position p {v->source_corresp.decl_position};
+            if (p.seq == 0U || !in_verified_file(p))
             {
                 continue;
             }
@@ -3538,7 +3552,7 @@ private:
                          {
                              return a->source_corresp.decl_position.seq < b->source_corresp.decl_position.seq;
                          });
-        const bool c_mode = il_header.source_language == sl_C;
+        const bool c_mode {il_header.source_language == sl_C};
         // The variables and the enumerators with a written initializer (decision 0018 item 10), in source order: the prologue
         // checks them in this order (decision 0017 item 4).
         struct Item
@@ -3546,7 +3560,7 @@ private:
             unsigned long seq;
             a_variable_ptr v;
             a_constant_ptr c;
-            a_static_assertion_ptr sa = nullptr;
+            a_static_assertion_ptr sa {nullptr};
         };
         std::vector<Item> items;
         for (a_variable_ptr v : vars)
@@ -3601,9 +3615,9 @@ private:
     // One file-scope variable of a verified file: a named constant or a rejection at its declaration (decision 0017).
     void encode_named_variable(a_variable_ptr v, bool c_mode)
     {
-        const a_source_position p = v->source_corresp.decl_position;
-        const char* nm = v->source_corresp.name;
-        const std::string name = nm ? nm : "?";
+        const a_source_position p {v->source_corresp.decl_position};
+        const char* nm {v->source_corresp.name};
+        const std::string name {nm ? nm : "?"};
         cx_ = Ctx();
         cx_.stmt_pos = p;
         auto refuse = [&](const std::string& why)
@@ -3614,7 +3628,7 @@ private:
         {
             // Attributes are held to the allow-list like a local's or a parameter's (0011 item 7): `loader_uninitialized` and
             // `section` change what the object holds, an unknown one may.
-            const auto before = reported_count();
+            const auto before {reported_count()};
             check_attributes(v->source_corresp.attributes);
             if (reported_count() != before)
             {
@@ -3629,8 +3643,8 @@ private:
         }
         // The type first, so that the message names the real reason (an array of const is not "not const").
         // decision 0041: a mutable global is a block of the program, a pointer one included
-        const bool mutable_obj = !is_const_object(v);
-        VType vt = global_vtype(v, mutable_obj);
+        const bool mutable_obj {!is_const_object(v)};
+        VType vt {global_vtype(v, mutable_obj)};
         if (!vt.ok && !mutable_obj && is_pointer_type(v->type) && !vt.silent)
         {
             vt.name = render_type(skip_typerefs(v->type)) + " (a pointer global variable)";
@@ -3666,8 +3680,8 @@ private:
             refuse("a weak constant (another unit may replace its value)");
             return;
         }
-        const Expr* init = nullptr;
-        std::string value = "0";
+        const Expr* init {nullptr};
+        std::string value {"0"};
         if (v->init_kind == initk_static && v->initializer.constant != nullptr &&
             v->initializer.constant->kind == ck_integer)
         {
@@ -3741,8 +3755,8 @@ private:
     // a rejection at the declaration, when it is not one (uses are not diagnosed again).
     vir::Global* make_global(a_variable_ptr v, const VType& vt, vir::Function* owner)
     {
-        const a_source_position p = v->source_corresp.decl_position;
-        const char* nm = v->source_corresp.name;
+        const a_source_position p {v->source_corresp.decl_position};
+        const char* nm {v->source_corresp.name};
         auto refuse = [&](const std::string& why) -> vir::Global*
         {
             reject(Diag::unsupported_declaration, p, why);
@@ -3752,8 +3766,8 @@ private:
         if (v->source_corresp.is_class_member)
         {
             // The class is reported once, at its definition (struct_info); a static member of a rejected class adds no second report.
-            a_scope_ptr ps = v->source_corresp.parent_scope;
-            a_type_ptr oc = ps != nullptr && ps->kind == sck_class_struct_union ? ps->variant.assoc_type : nullptr;
+            a_scope_ptr ps {v->source_corresp.parent_scope};
+            a_type_ptr oc {ps != nullptr && ps->kind == sck_class_struct_union ? ps->variant.assoc_type : nullptr};
             if (oc != nullptr && is_struct_kind(oc) && !struct_info(oc).ok && struct_info(oc).silent)
             {
                 rejected_globals_.insert(v);
@@ -3783,7 +3797,7 @@ private:
             }
             if (ents_ != nullptr)
             {
-                auto sd = ents_->variable_secondary_decls.find(v);
+                auto sd {ents_->variable_secondary_decls.find(v)};
                 if (sd != ents_->variable_secondary_decls.end())
                 {
                     for (const a_source_position& q : sd->second)
@@ -3797,7 +3811,7 @@ private:
                 }
             }
         }
-        vir::Global* g = prog_.add_global(nm ? nm : "?", vt.t, loc_of(p), owner);
+        vir::Global* g {prog_.add_global(nm ? nm : "?", vt.t, loc_of(p), owner)};
         g->c_type_name = vt.name;
         gmap_[v] = g;
         return g;
@@ -3808,8 +3822,8 @@ private:
     void encode_mutable_global(a_variable_ptr v, bool c_mode, const VType& vt)
     {
         (void)c_mode;
-        const a_source_position p = v->source_corresp.decl_position;
-        vir::Global* g = make_global(v, vt, nullptr);
+        const a_source_position p {v->source_corresp.decl_position};
+        vir::Global* g {make_global(v, vt, nullptr)};
         if (g == nullptr)
         {
             return;
@@ -3845,7 +3859,7 @@ private:
     // constant's own type), a type that is not the variable's type must differ by qualifiers added at the pointee's top level (decision 0040 item 2).
     vir::Global* address_target(a_constant_ptr c, const a_source_position& pos, bool check_pointee)
     {
-        const auto& ad = c->variant.address;
+        const auto& ad {c->variant.address};
         if (ad.kind == abk_routine)
         {
             reject(Diag::unsupported_expression, pos, "the address of a function (M4.7)");
@@ -3861,8 +3875,8 @@ private:
             reject(Diag::unsupported_expression, pos, "an address constant that is not the address of a variable");
             return nullptr;
         }
-        a_variable_ptr var = ad.variant.variable;
-        vir::Global* g = global_of(var);
+        a_variable_ptr var {ad.variant.variable};
+        vir::Global* g {global_of(var)};
         if (g == nullptr && var->is_compound_literal)
         { // P67 H5: `int *gp = &(int){5};` at file scope makes an unnamed static variable
             reject(
@@ -3872,11 +3886,11 @@ private:
         }
         if (g == nullptr)
         {
-            if (rejected_globals_.count(var) != 0)
+            if (rejected_globals_.count(var) != 0U)
             {
                 return nullptr; // diagnosed at its declaration
             }
-            if (named_.count(var) != 0)
+            if (named_.count(var) != 0U)
             {
                 reject(Diag::unsupported_expression, pos,
                        "the address of a `const` object (const objects as cells come with M4.6, decision 0041 item 2)");
@@ -3904,17 +3918,17 @@ private:
         }
         if (check_pointee)
         {
-            a_type_ptr ct = c->type != nullptr ? skip_typerefs(c->type) : nullptr;
-            a_type_ptr pt = (ct != nullptr && ct->kind == tk_pointer && !ct->variant.pointer.is_reference)
-                                ? ct->variant.pointer.type
-                                : nullptr;
-            bool ok = false;
+            a_type_ptr ct {c->type != nullptr ? skip_typerefs(c->type) : nullptr};
+            a_type_ptr pt {(ct != nullptr && ct->kind == tk_pointer && !ct->variant.pointer.is_reference)
+                               ? ct->variant.pointer.type
+                               : nullptr};
+            bool ok {false};
             if (pt != nullptr && var->type != nullptr &&
                 f_identical_types(pt, var->type, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0)
             {
-                const a_type_qualifier_set tq = f_get_type_qualifiers(pt, TRUE);
-                const a_type_qualifier_set fq = f_get_type_qualifiers(var->type, TRUE);
-                ok = (fq & ~tq) == 0;
+                const a_type_qualifier_set tq {f_get_type_qualifiers(pt, TRUE)};
+                const a_type_qualifier_set fq {f_get_type_qualifiers(var->type, TRUE)};
+                ok = (fq & ~tq) == 0U;
             }
             if (!ok)
             {
@@ -3936,12 +3950,12 @@ private:
         {
             return nullptr;
         }
-        an_expr_node_ptr original = (c->expr != nullptr || c->local_expr_ref) ? expr_node_from_constant(c) : nullptr;
+        an_expr_node_ptr original {(c->expr != nullptr || c->local_expr_ref) ? expr_node_from_constant(c) : nullptr};
         if (original != nullptr)
         {
             ++cx_.const_depth; // calls in it ran at compile time: rejected by `call`
             ++cx_.addr_const;
-            const Expr* x = expr(original);
+            const Expr* x {expr(original)};
             --cx_.addr_const;
             --cx_.const_depth;
             if (x == nullptr)
@@ -3956,12 +3970,12 @@ private:
             }
             return x;
         }
-        vir::Global* g = address_target(c, pos, true);
+        vir::Global* g {address_target(c, pos, true)};
         if (g == nullptr)
         {
             return nullptr;
         }
-        const Expr* a = b_.global_addr(g, loc_of(pos));
+        const Expr* a {b_.global_addr(g, loc_of(pos))};
         if (a->type != t.t)
         {
             reject(Diag::unsupported_expression, pos,
@@ -3974,8 +3988,8 @@ private:
     // The initial value of a mutable global or `static` local (decision 0041 items 3 and 5).  False after a rejection at its declaration.
     bool read_global_init(a_variable_ptr v, vir::Global* g, a_constant_ptr c, bool dynamic, bool c_mode)
     {
-        const a_source_position p = v->source_corresp.decl_position;
-        const bool local = g->owner != nullptr;
+        const a_source_position p {v->source_corresp.decl_position};
+        const bool local {g->owner != nullptr};
         auto refuse = [&](const std::string& why)
         {
             reject(Diag::unsupported_declaration, p, why);
@@ -3993,7 +4007,7 @@ private:
         {
             return read_struct_global_init(v, g, c, c_mode);
         }
-        const vir::Type t = g->type;
+        const vir::Type t {g->type};
         if (t.is_ptr())
         {
             if (c == nullptr)
@@ -4010,7 +4024,7 @@ private:
             }
             else if (c->kind == ck_address)
             {
-                vir::Global* target = address_target(c, p, true);
+                vir::Global* target {address_target(c, p, true)};
                 if (target == nullptr)
                 {
                     rejected_globals_.insert(v);
@@ -4056,7 +4070,7 @@ private:
                 }
                 // a constant expression: no calls (`call` rejects them, also those the front end folded, P63 H7)
                 ++cx_.const_depth;
-                const Expr* init = constant_initializer(c, p);
+                const Expr* init {constant_initializer(c, p)};
                 --cx_.const_depth;
                 if (init == nullptr)
                 {
@@ -4102,20 +4116,20 @@ private:
     // values are known.  False after a rejection at its declaration.
     bool read_struct_global_init(a_variable_ptr v, vir::Global* g, a_constant_ptr c, bool c_mode)
     {
-        const a_source_position p = v->source_corresp.decl_position;
-        const bool local = g->owner != nullptr;
+        const a_source_position p {v->source_corresp.decl_position};
+        const bool local {g->owner != nullptr};
         auto refuse = [&](const std::string& why)
         {
             reject(Diag::unsupported_declaration, p, why);
             rejected_globals_.insert(v);
             return false;
         };
-        const vir::StructType& st = *g->type.struct_type;
-        const std::vector<vir::StructLeaf> leaves = vir::struct_leaves(st);
+        const vir::StructType& st {*g->type.struct_type};
+        const std::vector<vir::StructLeaf> leaves {vir::struct_leaves(st)};
         g->init_kind = vir::Global::Init::Value;
         g->leaves.assign(leaves.size(), vir::GlobalLeaf());
         std::map<std::vector<int>, size_t> index;
-        for (size_t k = 0; k < leaves.size(); ++k)
+        for (size_t k {0U}; k < leaves.size(); ++k)
         {
             index[leaves[k].path] = k;
             // an unmentioned leaf is zero or null
@@ -4161,15 +4175,15 @@ private:
         }
         for (const InitElem& el : elems)
         {
-            const size_t k = index[el.path];
-            vir::GlobalLeaf& leaf = g->leaves[k];
-            const vir::Type lt = leaves[k].type;
+            const size_t k {index[el.path]};
+            vir::GlobalLeaf& leaf {g->leaves[k]};
+            const vir::Type lt {leaves[k].type};
             leaf.loc = loc_of(el.at);
             if (el.e != nullptr || el.c == nullptr)
             {
                 return refuse("an initializer element that is not a constant (dynamic initialization)");
             }
-            a_constant_ptr ec = el.c;
+            a_constant_ptr ec {el.c};
             if (lt.is_ptr())
             {
                 if (ec->kind == ck_integer && is_pointer_type(ec->type))
@@ -4182,7 +4196,7 @@ private:
                 }
                 else if (ec->kind == ck_address)
                 {
-                    vir::Global* target = address_target(ec, el.at, true);
+                    vir::Global* target {address_target(ec, el.at, true)};
                     if (target == nullptr)
                     {
                         rejected_globals_.insert(v);
@@ -4224,7 +4238,7 @@ private:
                 }
                 // a constant expression: no calls (`call` rejects them, also those the front end folded, P63 H7)
                 ++cx_.const_depth;
-                const Expr* init = constant_initializer(ec, el.at);
+                const Expr* init {constant_initializer(ec, el.at)};
                 --cx_.const_depth;
                 if (init == nullptr)
                 {
@@ -4272,14 +4286,14 @@ private:
         std::set<vir::Global*> done;
         while (!work.empty())
         {
-            vir::Global* t = work.back();
+            vir::Global* t {work.back()};
             work.pop_back();
             if (!done.insert(t).second)
             {
                 continue;
             }
             make_unknown(t);
-            auto it = addr_init_.find(t);
+            auto it {addr_init_.find(t)};
             if (it != addr_init_.end())
             {
                 work.insert(work.end(), it->second.begin(), it->second.end());
@@ -4299,7 +4313,7 @@ private:
             cx_.rejected_vars.insert(v);
             return;
         }
-        VType vt = global_vtype(v, true);
+        VType vt {global_vtype(v, true)};
         if (!vt.ok || vt.t.is_void())
         {
             if (vt.ok)
@@ -4310,15 +4324,15 @@ private:
             cx_.rejected_vars.insert(v);
             return;
         }
-        vir::Global* g = make_global(v, vt, cx_.fn);
+        vir::Global* g {make_global(v, vt, cx_.fn)};
         if (g == nullptr)
         {
             cx_.rejected_vars.insert(v);
             return;
         }
-        a_constant_ptr c = nullptr;
-        bool dynamic = false;
-        bool bad = false;
+        a_constant_ptr c {nullptr};
+        bool dynamic {false};
+        bool bad {false};
         switch (v->init_kind)
         {
             case initk_none:
@@ -4330,10 +4344,10 @@ private:
                 break;
             case initk_function_local:
             { // P63 H6: the entry of the scope's `local_static_variable_inits`
-                a_local_static_variable_init_ptr li = nullptr;
+                a_local_static_variable_init_ptr li {nullptr};
                 if (ents_ != nullptr)
                 {
-                    auto it = ents_->static_local_inits.find(v);
+                    auto it {ents_->static_local_inits.find(v)};
                     if (it != ents_->static_local_inits.end())
                     {
                         li = it->second;
@@ -4384,12 +4398,12 @@ private:
                 return;
             }
         }
-        Ctx saved = std::move(cx_);
+        Ctx saved {std::move(cx_)};
         cx_ = Ctx();
         cx_.fn = saved.fn;
         cx_.routine = saved.routine;
         cx_.stmt_pos = at;
-        const bool ok = read_global_init(v, g, c, dynamic, il_header.source_language == sl_C);
+        const bool ok {read_global_init(v, g, c, dynamic, il_header.source_language == sl_C)};
         cx_ = std::move(saved);
         if (!ok)
         {
@@ -4411,22 +4425,22 @@ private:
             {
                 continue;
             }
-            for (size_t k = 0; k < f->params.size(); ++k)
+            for (size_t k {0U}; k < f->params.size(); ++k)
             {
                 if (!f->params[k].is_restrict)
                 {
                     continue;
                 }
-                const std::string hazard = vir::restrict_hazard(*f, static_cast<int>(k));
+                const std::string hazard {vir::restrict_hazard(*f, static_cast<int>(k))};
                 if (hazard.empty())
                 {
                     continue;
                 }
-                auto at = restrict_at_.find(f);
+                auto at {restrict_at_.find(f)};
                 reject(Diag::unsupported_annotation,
                        at != restrict_at_.end() ? at->second : r->source_corresp.decl_position,
                        "a `restrict` parameter `" +
-                           (f->params[k].name.empty() ? "arg" + std::to_string(k + 1) : f->params[k].name) + "`: " +
+                           (f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name) + "`: " +
                            hazard + " (decision 0043 item 10: `restrict` stays rejected here until M8 models it)");
             }
         }
@@ -4465,7 +4479,7 @@ private:
         std::map<vir::Function*, std::set<int>> need; // by function, the ids of the statics (ordered by id)
         for (const auto& [owner, gs] : by_owner)
         {
-            auto ro = routine_of.find(owner);
+            auto ro {routine_of.find(owner)};
             if (ro == routine_of.end())
             {
                 continue;
@@ -4474,7 +4488,7 @@ private:
             std::vector<a_routine_ptr> todo {ro->second};
             while (!todo.empty())
             {
-                a_routine_ptr r = todo.back();
+                a_routine_ptr r {todo.back()};
                 todo.pop_back();
                 for (a_routine_ptr c : callers[r])
                 {
@@ -4486,7 +4500,7 @@ private:
             }
             for (a_routine_ptr r : seen)
             {
-                auto fi = fns_.find(r);
+                auto fi {fns_.find(r)};
                 if (fi == fns_.end() || fi->second == nullptr || fi->second == prog_.entry())
                 {
                     continue;
@@ -4499,11 +4513,11 @@ private:
         }
         for (auto& [f, ids] : need)
         {
-            int n = vir::requires_atom_count(*f);
+            int n {vir::requires_atom_count(*f)};
             for (int id : ids)
             {
-                const vir::Global* g = &prog_.globals()[static_cast<size_t>(id)];
-                const SrcLoc l = f->loc;
+                const vir::Global* g {&prog_.globals()[static_cast<size_t>(id)]};
+                const SrcLoc l {f->loc};
                 f->requires_.push_back(
                     vir::Clause {b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l});
                 if (!f->noreturn)
@@ -4520,7 +4534,7 @@ private:
     // M4.5f1 encodes those bodies with the permissions a global needs (decision 0041 item 12; audit round 2, SF2).  Named constants stay allowed.
     static Encoder*& spec_scan_self()
     {
-        static Encoder* p = nullptr;
+        static Encoder* p {nullptr};
         return p;
     }
     static void spec_scan_statement(a_statement_ptr s, an_expr_or_stmt_traversal_block_ptr)
@@ -4529,13 +4543,13 @@ private:
         {
             return;
         }
-        for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next)
+        for (an_il_entity_list_entry_ptr en {s->variant.decl.entities}; en != nullptr; en = en->next)
         {
             if (en->entity.kind != iek_variable)
             {
                 continue;
             }
-            a_variable_ptr v = reinterpret_cast<a_variable_ptr>(en->entity.ptr);
+            a_variable_ptr v {reinterpret_cast<a_variable_ptr>(en->entity.ptr)};
             if (v->storage_class == sc_static && v->source_corresp.enclosing_routine != nullptr)
             {
                 spec_scan_self()->reject(
@@ -4543,7 +4557,7 @@ private:
                     "a `static` local variable in a pure or predicate function (decision 0041 item 12)");
             }
             // Decision 0042 item 3 ("never ignored"): the body is not encoded, so a marker on a local would be accepted without a word.
-            for (an_attribute_ptr a = v->source_corresp.attributes; a != nullptr; a = a->next)
+            for (an_attribute_ptr a {v->source_corresp.attributes}; a != nullptr; a = a->next)
             {
                 if (is_registered_cerastes(a) && classify(a) == Annot::uninit)
                 {
@@ -4575,14 +4589,14 @@ private:
     }
     static an_attribute_ptr first_param_marker(a_type_ptr t)
     {
-        a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+        a_type_ptr rt {t != nullptr ? skip_typerefs(t) : nullptr};
         if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr)
         {
             return nullptr;
         }
-        for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+        for (a_param_type_ptr p {rt->variant.routine.extra_info->param_type_list}; p != nullptr; p = p->next)
         {
-            for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next)
+            for (an_attribute_ptr a {p->attributes}; a != nullptr; a = a->next)
             {
                 if (is_registered_cerastes(a) && is_param_marker(classify(a)))
                 {
@@ -4598,14 +4612,14 @@ private:
     // A pure function or predicate that takes or returns a struct by value (decision 0044 items 3 and 4: M4.5f1 encodes the bodies of specification functions).
     void reject_struct_value_in_spec_signature(a_routine_ptr r)
     {
-        bool by_value = false;
-        if (a_type_ptr rt = return_type(r); rt != nullptr && is_struct_kind(skip_typerefs(rt)))
+        bool by_value {false};
+        if (a_type_ptr rt {return_type(r)}; rt != nullptr && is_struct_kind(skip_typerefs(rt)))
         {
             by_value = true;
         }
         if (a_routine_type_supplement_ptr x = routine_supplement(r))
         {
-            for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next)
+            for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next)
             {
                 if (p->type != nullptr && is_struct_kind(skip_typerefs(p->type)))
                 {
@@ -4628,7 +4642,7 @@ private:
         found.push_back(first_param_marker(r->declared_type));
         if (ents_ != nullptr)
         {
-            auto sd = ents_->secondary_decls.find(r);
+            auto sd {ents_->secondary_decls.find(r)};
             if (sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
@@ -4639,13 +4653,13 @@ private:
         }
         if (a_scope_ptr bs = body_scope(r))
         {
-            for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next)
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
             {
                 if (!v->is_parameter || v->is_this_parameter || v->variant.assoc_param_type == nullptr)
                 {
                     continue;
                 }
-                for (an_attribute_ptr a = v->variant.assoc_param_type->attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {v->variant.assoc_param_type->attributes}; a != nullptr; a = a->next)
                 {
                     if (is_registered_cerastes(a) && is_param_marker(classify(a)))
                     {
@@ -4676,14 +4690,14 @@ private:
         {
             return;
         }
-        auto sd = ents_->secondary_decls.find(r);
+        auto sd {ents_->secondary_decls.find(r)};
         if (sd == ents_->secondary_decls.end())
         {
             return;
         }
         for (const IlEntities::SecondaryDecl& q : sd->second)
         {
-            if (q.position.seq == 0 || !in_verified_file(q.position))
+            if (q.position.seq == 0U || !in_verified_file(q.position))
             {
                 continue;
             }
@@ -4692,7 +4706,7 @@ private:
                 // vlibc's own declaration: its markers are lib_trust's and the heap shapes' (decision 0047 item 3)
                 continue;
             }
-            an_attribute_ptr a = first_param_marker(q.declared_type);
+            an_attribute_ptr a {first_param_marker(q.declared_type)};
             if (a == nullptr)
             {
                 continue;
@@ -4708,7 +4722,7 @@ private:
 
     void reject_globals_in_spec_body(a_routine_ptr r)
     {
-        a_scope_ptr sp = body_scope(r);
+        a_scope_ptr sp {body_scope(r)};
         if (sp == nullptr || sp->assoc_block == nullptr)
         {
             return;
@@ -4731,8 +4745,8 @@ private:
     // expression and has nothing to check.
     void encode_named_enumerator(a_constant_ptr c)
     {
-        const a_source_position p = c->source_corresp.decl_position;
-        const char* nm = c->source_corresp.name;
+        const a_source_position p {c->source_corresp.decl_position};
+        const char* nm {c->source_corresp.name};
         cx_ = Ctx();
         cx_.stmt_pos = p;
         if (c->expr == nullptr && !c->local_expr_ref)
@@ -4742,12 +4756,12 @@ private:
             // without an initializer is not told apart from it here, but `has_written_initializer` does.)
             if (c->kind == ck_integer && has_written_initializer(c))
             {
-                a_number_buffer buf = decimal_str_for_integer_constant(c);
-                const std::string text = buf.as_temp_characters();
+                a_number_buffer buf {decimal_str_for_integer_constant(c)};
+                const std::string text {buf.as_temp_characters()};
                 if (vir::dec::negative(text))
                 {
-                    const Expr* init = wrapped_character_literal(text, c->character_kind == chk_wchar_t, p,
-                                                                 il_header.source_language == sl_C);
+                    const Expr* init {wrapped_character_literal(text, c->character_kind == chk_wchar_t, p,
+                                                                il_header.source_language == sl_C)};
                     if (init != nullptr)
                     {
                         prog_.add_named_const(nm ? nm : "?", init->type, loc_of(p), init,
@@ -4757,7 +4771,7 @@ private:
             }
             return;
         }
-        an_expr_node_ptr original = expr_node_from_constant(c);
+        an_expr_node_ptr original {expr_node_from_constant(c)};
         if (original == nullptr)
         {
             reject(Diag::unsupported_declaration, p, "an enumerator whose initializer is not recorded");
@@ -4785,7 +4799,7 @@ private:
             return;
         }
         ++cx_.const_depth; // a constant expression: no calls (`call` rejects them)
-        const Expr* init = expr(original);
+        const Expr* init {expr(original)};
         --cx_.const_depth;
         if (init == nullptr)
         {
@@ -4796,7 +4810,7 @@ private:
             reject(Diag::unsupported_expression, p, "an enumerator initializer that is not an integer");
             return;
         }
-        const std::string value = constant_text(c, init->type);
+        const std::string value {constant_text(c, init->type)};
         prog_.add_named_const(nm ? nm : "?", init->type, loc_of(p), init, maybe_perturb(init->type, value));
     }
 
@@ -4816,23 +4830,23 @@ private:
             reject(Diag::unsupported_expression, e->position, "a parameter reference outside a contract");
             return nullptr;
         }
-        const ParamRef r = interpret_param_ref(e, cx_.annot, cx_.binder_present, 0);
-        if (r.kind == ParamRef::Kind::param && r.num >= 1 && r.num <= cx_.fn->params.size())
+        const ParamRef r {interpret_param_ref(e, cx_.annot, cx_.binder_present, 0)};
+        if (r.kind == ParamRef::Kind::param && r.num >= 1U && r.num <= cx_.fn->params.size())
         {
-            const int k = static_cast<int>(r.num) - 1;
-            const Expr* formal = b_.formal(*cx_.fn, k, loc_of(e->position));
+            const int k {static_cast<int>(r.num) - 1};
+            const Expr* formal {b_.formal(*cx_.fn, k, loc_of(e->position))};
             if (formal->type.is_struct())
             {
                 if (!cx_.struct_param_ok)
                 {
                     return reject_whole_struct_param(e->position);
                 }
-                const std::string& n = cx_.fn->params[static_cast<size_t>(k)].name;
+                const std::string& n {cx_.fn->params[static_cast<size_t>(k)].name};
                 b_.text(formal, n.empty() ? "arg" + std::to_string(k + 1) : n); // for the messages of a member (`s.x`)
             }
             if (formal->type.is_ptr())
             { // for the messages of decision 0037 (`p`, `*p`, `owns(*p)`)
-                const std::string& n = cx_.fn->params[static_cast<size_t>(k)].name;
+                const std::string& n {cx_.fn->params[static_cast<size_t>(k)].name};
                 b_.text(formal, n.empty() ? "arg" + std::to_string(k + 1) : n);
             }
             return formal;
@@ -4845,7 +4859,7 @@ private:
                        "\"cerastes::old\" applied to the result (it has no value on entry, decision 0040 item 4)");
                 return nullptr;
             }
-            const Expr* res = b_.result(*cx_.fn, loc_of(e->position));
+            const Expr* res {b_.result(*cx_.fn, loc_of(e->position))};
             if (res->type.is_struct() && !cx_.struct_param_ok)
             {
                 return reject_whole_struct_param(e->position);
@@ -4869,8 +4883,8 @@ private:
         {
             return nullptr;
         }
-        const DiagPos use = position_for(e->position);
-        const DiagPos own = diag_position(pos_or(e->position));
+        const DiagPos use {position_for(e->position)};
+        const DiagPos own {diag_position(pos_or(e->position))};
         if (!use.known || !own.known || (use.file == own.file && use.line == own.line))
         {
             return x;
@@ -4897,11 +4911,11 @@ private:
                    "an expression with a side effect would be encoded twice (decision 0020 item 10)");
             return nullptr;
         }
-        const bool macro_node =
-            !cx_.contract && !cx_.annotation && e->kind == enk_operation && e->position.orig_seq != 0;
-        const bool saved = cx_.use_own;
+        const bool macro_node {!cx_.contract && !cx_.annotation && e->kind == enk_operation &&
+                               e->position.orig_seq != 0U};
+        const bool saved {cx_.use_own};
         cx_.use_own = macro_node;
-        const Expr* x = expr_node(e);
+        const Expr* x {expr_node(e)};
         cx_.use_own = saved;
         return macro_node ? macro_site(e, x) : x;
     }
@@ -4932,8 +4946,8 @@ private:
 
     const Expr* binary_arith(an_expr_node_ptr e, vir::BinaryOp op)
     {
-        auto ops = operands_of(e);
-        if (!operand_count(e, 2, ops))
+        auto ops {operands_of(e)};
+        if (!operand_count(e, 2U, ops))
         {
             return nullptr;
         }
@@ -4945,14 +4959,14 @@ private:
             }
         }
         else if (reject_two_enumerations(
-                     e, ops[0], ops[1],
+                     e, ops[0U], ops[1U],
                      "arithmetic on values of two different enumerations (decision 0025 item 6): convert both sides "
                      "explicitly, for example `(int)RED + (int)NA`"))
         {
             return nullptr; // R8
         }
-        const Expr* a = expr(ops[0]);
-        const Expr* c = expr(ops[1]);
+        const Expr* a {expr(ops[0U])};
+        const Expr* c {expr(ops[1U])};
         if (a == nullptr || c == nullptr)
         {
             return nullptr;
@@ -4976,16 +4990,16 @@ private:
         {
             return false;
         }
-        a_type_ptr tx = x->type != nullptr ? skip_typerefs(x->type) : nullptr;
-        a_type_ptr ty = y->type != nullptr ? skip_typerefs(y->type) : nullptr;
-        for (int guard = 0; guard < 16; ++guard)
+        a_type_ptr tx {x->type != nullptr ? skip_typerefs(x->type) : nullptr};
+        a_type_ptr ty {y->type != nullptr ? skip_typerefs(y->type) : nullptr};
+        for (int guard {0}; guard < 16; ++guard)
         {
             if (tx == nullptr || ty == nullptr || tx->kind != tk_pointer || ty->kind != tk_pointer)
             {
                 return false;
             }
-            a_type_ptr px = tx->variant.pointer.type;
-            a_type_ptr py = ty->variant.pointer.type;
+            a_type_ptr px {tx->variant.pointer.type};
+            a_type_ptr py {ty->variant.pointer.type};
             if (px == nullptr || py == nullptr)
             {
                 return false;
@@ -5002,15 +5016,15 @@ private:
 
     const Expr* comparison(an_expr_node_ptr e, vir::BinaryOp op)
     {
-        auto ops = operands_of(e);
-        if (!operand_count(e, 2, ops))
+        auto ops {operands_of(e)};
+        if (!operand_count(e, 2U, ops))
         {
             return nullptr;
         }
         if (op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne)
         { // decision 0018 item 6 (i)
-            allow_enum_conversion(ops[0]);
-            allow_enum_conversion(ops[1]);
+            allow_enum_conversion(ops[0U]);
+            allow_enum_conversion(ops[1U]);
         }
         if ((op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne) && detect_tautological_compare(e, ops))
         {
@@ -5042,9 +5056,9 @@ private:
         else
         {
             // Decision 0019 item 10: an order of two values of one enumeration (or of its enumerators).
-            const Expr* ea = nullptr;
-            const Expr* ec = nullptr;
-            const int r = ordered_enumeration_operands(e, ops, &ea, &ec);
+            const Expr* ea {nullptr};
+            const Expr* ec {nullptr};
+            const int r {ordered_enumeration_operands(e, ops, &ea, &ec)};
             if (r < 0)
             {
                 return nullptr;
@@ -5054,8 +5068,8 @@ private:
                 return logical_result(e, b_.binary(op, ea, ec, loc_of(e->position)));
             }
         }
-        const Expr* a = expr(ops[0]);
-        const Expr* c = expr(ops[1]);
+        const Expr* a {expr(ops[0U])};
+        const Expr* c {expr(ops[1U])};
         if (a == nullptr || c == nullptr)
         {
             return nullptr;
@@ -5063,7 +5077,7 @@ private:
         if (is_enum_type(a->type) || is_enum_type(c->type))
         {
             // Raw enumeration operands (decision 0018 items 6-7): the same enumeration on both sides; an order only for a scoped one.
-            const bool ordering = op != vir::BinaryOp::Eq && op != vir::BinaryOp::Ne;
+            const bool ordering {op != vir::BinaryOp::Eq && op != vir::BinaryOp::Ne};
             if (a->type != c->type)
             {
                 reject(Diag::unsupported_expression, e->position,
@@ -5077,7 +5091,7 @@ private:
                 return nullptr;
             }
         }
-        if (cx_.contract && (a->type.is_ptr() && c->type.is_ptr()) && pointee_qualifiers_differ(ops[0], ops[1]))
+        if (cx_.contract && (a->type.is_ptr() && c->type.is_ptr()) && pointee_qualifiers_differ(ops[0U], ops[1U]))
         {
             // Decision 0040 item 2 (audit round 2, B1): a trusted contract may not state an equality of pointers whose pointees differ in qualifiers.
             reject(
@@ -5088,7 +5102,7 @@ private:
         if (a->type.is_ptr() || c->type.is_ptr())
         {
             // Decision 0032 item 7: two pointers of one type (a null constant takes the other side's) compared for equality.
-            const bool equality = op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne;
+            const bool equality {op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne};
             if (!equality)
             {
                 reject(Diag::unsupported_expression, e->position, "an ordering comparison of pointers");
@@ -5112,8 +5126,8 @@ private:
 
     const Expr* logical(an_expr_node_ptr e, vir::BinaryOp op)
     {
-        auto ops = operands_of(e);
-        if (!operand_count(e, 2, ops))
+        auto ops {operands_of(e)};
+        if (!operand_count(e, 2U, ops))
         {
             return nullptr;
         }
@@ -5121,15 +5135,15 @@ private:
         {
             return nullptr; // decision 0025 item 6, R1
         }
-        truth_context(ops[0]);
-        truth_context(ops[1]);
+        truth_context(ops[0U]);
+        truth_context(ops[1U]);
         if (detect_constant_logical_operand(e, ops) ||
             detect_overlapping_comparisons(e, ops, op == vir::BinaryOp::LAnd))
         {
             return nullptr; // R9, R11
         }
-        const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
-        const Expr* c = as_bool(expr(ops[1]), ops[1]->position);
+        const Expr* a {as_bool(expr(ops[0U]), ops[0U]->position)};
+        const Expr* c {as_bool(expr(ops[1U]), ops[1U]->position)};
         if (a == nullptr || c == nullptr)
         {
             return nullptr;
@@ -5141,20 +5155,20 @@ private:
     // function template, whose argument is a reference to the (lvalue) operand.
     const Expr* old_call(an_expr_node_ptr e, an_expr_node_ptr call)
     {
-        a_routine_ptr callee = direct_callee(call);
-        auto ops = operands_of(call);
-        if (callee == nullptr || ops.size() != 2)
+        a_routine_ptr callee {direct_callee(call)};
+        auto ops {operands_of(call)};
+        if (callee == nullptr || ops.size() != 2U)
         {
             reject(Diag::unsupported_expression, e->position, "\"cerastes::old\" with other than one argument");
             return nullptr;
         }
-        an_expr_node_ptr arg = ops[1];
+        an_expr_node_ptr arg {ops[1U]};
         if (arg->kind != enk_operation || arg->variant.operation.kind != eok_reference_to)
         {
             reject(Diag::unsupported_expression, e->position, "\"cerastes::old\" of anything but a parameter");
             return nullptr;
         }
-        an_expr_node_ptr inner = arg->variant.operation.operands;
+        an_expr_node_ptr inner {arg->variant.operation.operands};
         while (inner != nullptr && inner->kind == enk_operation && inner->variant.operation.kind == eok_lvalue_adjust)
         {
             inner = inner->variant.operation.operands;
@@ -5170,7 +5184,7 @@ private:
                 return nullptr;
             }
             ++cx_.old_depth;
-            const Expr* a = contract_field_chain(inner);
+            const Expr* a {contract_field_chain(inner)};
             --cx_.old_depth;
             return a == nullptr ? nullptr : finish(e, b_.old(a, loc_of(e->position)));
         }
@@ -5178,7 +5192,7 @@ private:
         if (is_member_node(inner))
         {
             ++cx_.old_depth;
-            const Expr* a = contract_place_address(inner);
+            const Expr* a {contract_place_address(inner)};
             --cx_.old_depth;
             if (a == nullptr)
             {
@@ -5188,7 +5202,7 @@ private:
             {
                 return nullptr;
             }
-            const Expr* rd = b_.deref(a, loc_of(e->position));
+            const Expr* rd {b_.deref(a, loc_of(e->position))};
             return finish(e, b_.old(rd, loc_of(e->position)));
         }
         // `old(*p)` of a pointer parameter (decision 0037 item 5): the cell's value on entry; `old(**pp)`, `old(*gp)`, `old(*p->q)`, `old(*s.q)` (decision 0045
@@ -5196,9 +5210,9 @@ private:
         if (inner != nullptr && inner->kind == enk_operation && inner->variant.operation.kind == eok_indirect &&
             inner->variant.operation.operands != nullptr && inner->variant.operation.operands->next == nullptr)
         {
-            an_expr_node_ptr pn = peel_place(inner->variant.operation.operands);
+            an_expr_node_ptr pn {peel_place(inner->variant.operation.operands)};
             ++cx_.old_depth;
-            const Expr* pf = place_pointer(pn, e->position);
+            const Expr* pf {place_pointer(pn, e->position)};
             --cx_.old_depth;
             if (pf == nullptr)
             {
@@ -5222,7 +5236,7 @@ private:
         {
             if (vir::Global* g = global_of(inner->variant.variable.ptr))
             {
-                const SrcLoc l = loc_of(e->position);
+                const SrcLoc l {loc_of(e->position)};
                 return b_.old(b_.deref(b_.global_addr(g, l), l), l);
             }
         }
@@ -5233,7 +5247,7 @@ private:
             return nullptr;
         }
         ++cx_.old_depth;
-        const Expr* x = expr(inner);
+        const Expr* x {expr(inner)};
         --cx_.old_depth;
         if (x == nullptr)
         {
@@ -5246,11 +5260,11 @@ private:
     // and its own conversions (the default argument promotion of a `char`, `bool` or `short` place in C, the qualifier added by `const T*`).
     static an_expr_node_ptr peel_place(an_expr_node_ptr e)
     {
-        for (int guard = 0; e != nullptr && e->kind == enk_operation && guard < 16; ++guard)
+        for (int guard {0}; e != nullptr && e->kind == enk_operation && guard < 16; ++guard)
         {
-            const an_expr_operator_kind k = e->variant.operation.kind;
-            const bool wrapper =
-                k == eok_reference_to || k == eok_lvalue_adjust || (k == eok_cast && e->compiler_generated);
+            const an_expr_operator_kind k {e->variant.operation.kind};
+            const bool wrapper {k == eok_reference_to || k == eok_lvalue_adjust ||
+                                (k == eok_cast && e->compiler_generated)};
             if (!wrapper || e->variant.operation.operands == nullptr || e->variant.operation.operands->next != nullptr)
             {
                 break;
@@ -5278,7 +5292,7 @@ private:
         {
             return nullptr;
         }
-        const Expr* x = expr(n);
+        const Expr* x {expr(n)};
         if (x == nullptr)
         {
             return nullptr;
@@ -5288,7 +5302,7 @@ private:
             reject(Diag::unsupported_expression, at, "a place of a contract that is not reached through a pointer");
             return nullptr;
         }
-        const Expr* root = vir::place_root(x);
+        const Expr* root {vir::place_root(x)};
         if (root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::GlobalAddr ||
             root->kind == Expr::Kind::Result)
         {
@@ -5317,7 +5331,7 @@ private:
     // read, the members are MemberAddr steps (P70 H3: `dot_field(indirect(X), m)` and `points_to_field(X, m)` are one place).  Null (reported) otherwise.
     // `old(*p).x` is rejected with a pointer to `old(p->x)`.
     // the IL type of the pointer the last contract_place_address started its member chain from (the `const` rule)
-    a_type_ptr place_base_type_ = nullptr;
+    a_type_ptr place_base_type_ {nullptr};
     // (function, root and steps) whose `owns` of a member of a const struct was reported
     std::set<std::pair<const vir::Function*, std::string>> const_member_owns_reported_;
     const Expr* contract_place_address(an_expr_node_ptr n, int depth = 0)
@@ -5327,7 +5341,7 @@ private:
         {
             return nullptr;
         }
-        const a_source_position at = n->position;
+        const a_source_position at {n->position};
         auto no_place = [&]()
         {
             reject(
@@ -5348,7 +5362,7 @@ private:
             return param_reference(n);
         }
         if (n->kind == enk_variable && n->variant.variable.ptr != nullptr &&
-            rejected_globals_.count(n->variant.variable.ptr) == 0)
+            rejected_globals_.count(n->variant.variable.ptr) == 0U)
         {
             if (vir::Global* gl = global_of(n->variant.variable.ptr))
             { // `g.x`, `g.t.y` of a struct global (decision 0044 item 8): the member chain over `&g`
@@ -5378,25 +5392,25 @@ private:
         {
             return no_place();
         }
-        const an_expr_operator_kind k = n->variant.operation.kind;
-        auto ops = operands_of(n);
+        const an_expr_operator_kind k {n->variant.operation.kind};
+        auto ops {operands_of(n)};
         if (k == eok_ref_indirect)
         {
             return old_member(); // C++: `old(*p).x` is dot_field(ref_indirect(call(old, ...)))
         }
         if (k == eok_indirect)
         {
-            if (ops.size() != 1)
+            if (ops.size() != 1U)
             {
                 return no_place();
             }
-            an_expr_node_ptr in = peel_place(ops[0]);
+            an_expr_node_ptr in {peel_place(ops[0U])};
             if (in->kind == enk_operation &&
                 (in->variant.operation.kind == eok_cast || in->variant.operation.kind == eok_call))
             {
                 return old_member(); // C: `*(T *)cerastes_old_(...)`
             }
-            const Expr* pf = place_pointer(in, at);
+            const Expr* pf {place_pointer(in, at)};
             if (pf == nullptr)
             {
                 return nullptr;
@@ -5412,31 +5426,31 @@ private:
         }
         if (k == eok_points_to_field)
         {
-            if (ops.size() != 2)
+            if (ops.size() != 2U)
             {
                 return no_place();
             }
-            an_expr_node_ptr in = peel_place(ops[0]);
+            an_expr_node_ptr in {peel_place(ops[0U])};
             if (in->kind == enk_operation && in->variant.operation.kind == eok_cast)
             {
                 return old_member();
             }
-            const Expr* pf = place_pointer(in, at);
+            const Expr* pf {place_pointer(in, at)};
             if (pf == nullptr)
             {
                 return nullptr;
             }
             place_base_type_ = in->type;
-            return spell_loaded_place(member_of(pf, ops[1], at));
+            return spell_loaded_place(member_of(pf, ops[1U], at));
         }
         if (k == eok_dot_field)
         {
-            if (ops.size() != 2)
+            if (ops.size() != 2U)
             {
                 return no_place();
             }
-            const Expr* base = contract_place_address(ops[0], depth + 1);
-            return spell_loaded_place(member_of(base, ops[1], at));
+            const Expr* base {contract_place_address(ops[0U], depth + 1)};
+            return spell_loaded_place(member_of(base, ops[1U], at));
         }
         return no_place();
     }
@@ -5450,7 +5464,7 @@ private:
         {
             return nullptr;
         }
-        an_expr_node_ptr in = peel_place(n->variant.operation.operands);
+        an_expr_node_ptr in {peel_place(n->variant.operation.operands)};
         return (in != nullptr && in->kind == enk_variable && in->variant.variable.ptr != nullptr)
                    ? global_of(in->variant.variable.ptr)
                    : nullptr;
@@ -5483,32 +5497,32 @@ private:
         {
             return nullptr;
         }
-        a_constant_ptr c = n->variant.constant.ptr;
+        a_constant_ptr c {n->variant.constant.ptr};
         if (c->kind != ck_address || c->variant.address.kind != abk_variable ||
             c->variant.address.variant.variable == nullptr)
         {
             return nullptr;
         }
-        a_subobject_path_ptr sp = c->variant.address.subobject_path;
+        a_subobject_path_ptr sp {c->variant.address.subobject_path};
         if (sp == nullptr)
         {
             return nullptr;
         }
-        vir::Global* g = global_of(c->variant.address.variant.variable);
+        vir::Global* g {global_of(c->variant.address.variant.variable)};
         if (g == nullptr || !g->type.is_struct())
         {
             return nullptr;
         }
-        const vir::StructType* st = g->type.struct_type;
+        const vir::StructType* st {g->type.struct_type};
         for (; sp != nullptr; sp = sp->next)
         {
             if (sp->is_offset || sp->is_base_class || sp->variant.field == nullptr || st == nullptr)
             {
                 return nullptr;
             }
-            const char* fname = sp->variant.field->source_corresp.name;
-            int k = -1;
-            for (size_t i = 0; fname != nullptr && i < st->members.size(); ++i)
+            const char* fname {sp->variant.field->source_corresp.name};
+            int k {-1};
+            for (size_t i {0U}; fname != nullptr && i < st->members.size(); ++i)
             {
                 if (st->members[i].name == fname)
                 {
@@ -5520,7 +5534,7 @@ private:
                 return nullptr;
             }
             path->push_back(k);
-            const vir::Type& mt = st->members[static_cast<size_t>(k)].type;
+            const vir::Type& mt {st->members[static_cast<size_t>(k)].type};
             st = mt.is_struct() ? mt.struct_type : nullptr;
         }
         return g;
@@ -5533,7 +5547,7 @@ private:
         {
             return nullptr;
         }
-        a_constant_ptr c = n->variant.constant.ptr;
+        a_constant_ptr c {n->variant.constant.ptr};
         if (c->kind != ck_address || c->variant.address.kind != abk_variable ||
             c->variant.address.variant.variable == nullptr)
         {
@@ -5563,7 +5577,7 @@ private:
                 {
                     return "";
                 }
-                const std::string b = val_text(*x.a);
+                const std::string b {val_text(*x.a)};
                 return b.empty() ? b : b + "." + x.a->type.struct_type->members[static_cast<size_t>(x.index)].name;
             }
             case Expr::Kind::Deref:
@@ -5582,26 +5596,26 @@ private:
                 return a.var != nullptr ? a.var->name : "";
             case Expr::Kind::MemberAddr:
             {
-                const Expr* b = a.a;
+                const Expr* b {a.a};
                 if (b == nullptr || !b->type.is_ptr() || b->type.pointee == nullptr || !b->type.pointee->is_struct() ||
                     b->type.pointee->struct_type == nullptr || a.index < 0 ||
                     static_cast<size_t>(a.index) >= b->type.pointee->struct_type->members.size())
                 {
                     return "";
                 }
-                const std::string& m = b->type.pointee->struct_type->members[static_cast<size_t>(a.index)].name;
+                const std::string& m {b->type.pointee->struct_type->members[static_cast<size_t>(a.index)].name};
                 if (b->kind == Expr::Kind::MemberAddr || b->kind == Expr::Kind::GlobalAddr ||
                     b->kind == Expr::Kind::AddrOf)
                 {
-                    const std::string o = obj_text(*b);
+                    const std::string o {obj_text(*b)};
                     return o.empty() ? o : o + "." + m;
                 }
-                std::string v = val_text(*b);
+                std::string v {val_text(*b)};
                 if (v.empty())
                 {
                     return v;
                 }
-                if (v[0] == '*')
+                if (v[0U] == '*')
                 {
                     v = "(" + v + ")";
                 }
@@ -5609,7 +5623,7 @@ private:
             }
             default:
             {
-                const std::string v = val_text(a);
+                const std::string v {val_text(a)};
                 return v.empty() ? v : "*" + v;
             }
         }
@@ -5626,12 +5640,12 @@ private:
     // "global", "parameter" or "place `**pp`" for the messages of finish_atoms: today's two words for a place without steps, the place's spelling otherwise.
     static std::string atom_word(const Expr& atom)
     {
-        const vir::PlaceKey k = vir::atom_place(atom);
+        const vir::PlaceKey k {vir::atom_place(atom)};
         if (k.valid() && k.via.empty())
         {
             return vir::is_global_site_key(k.root) ? "global" : "parameter";
         }
-        const std::string t = atom_text(atom);
+        const std::string t {atom_text(atom)};
         return t.empty() ? "place" : "place `" + t + "`";
     }
 
@@ -5645,15 +5659,15 @@ private:
         }
         std::vector<int> steps;
         vir::place_root(m, &steps);
-        bool loaded = false;
+        bool loaded {false};
         for (int st : steps)
         {
             loaded = loaded || st == vir::kLoadStep || vir::is_field_step(st);
         }
-        const std::string t = loaded ? obj_text(*m) : std::string();
+        const std::string t {loaded ? obj_text(*m) : std::string()};
         if (!t.empty())
         {
-            Expr* e = const_cast<Expr*>(m);
+            Expr* e {const_cast<Expr*>(m)};
             e->c_text = "&" + t;
             e->user_spelling = true;
         }
@@ -5674,15 +5688,15 @@ private:
     // The routine is one of the functions <cerastes.h> declares (decision 0047, audit N6: `owns_block` and `zeroed` are entities, not names).
     static bool declared_in_cerastes_header(a_routine_ptr r)
     {
-        a_routine_ptr root = root_routine(r);
-        const a_source_position p = (root != nullptr ? root : r)->source_corresp.decl_position;
-        const std::string& h = verify_config().cerastes_header;
-        return p.seq != 0 && !h.empty() && physical_path(p) == h;
+        a_routine_ptr root {root_routine(r)};
+        const a_source_position p {(root != nullptr ? root : r)->source_corresp.decl_position};
+        const std::string& h {verify_config().cerastes_header};
+        return p.seq != 0U && !h.empty() && physical_path(p) == h;
     }
 
     static SpecFn spec_fn(a_routine_ptr r)
     {
-        const std::string n = rname(r);
+        const std::string n {rname(r)};
         if ((n == "cerastes::owns_block" || n == "cerastes_owns_block" || n == "cerastes_zeroed") &&
             !declared_in_cerastes_header(r))
         {
@@ -5756,7 +5770,7 @@ private:
                        "\") in a termination measure (a measure holds no permission atom, decision 0038 item 10)");
             return nullptr;
         }
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" with other than one argument");
             return nullptr;
@@ -5766,15 +5780,15 @@ private:
             reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" under \"old\"");
             return nullptr;
         }
-        an_expr_node_ptr a = peel_place(ops[1]);
-        an_expr_node_ptr pn = nullptr; // the pointer node: `p` of `owns(*p)`, the pointer itself for `live`
+        an_expr_node_ptr a {peel_place(ops[1U])};
+        an_expr_node_ptr pn {nullptr}; // the pointer node: `p` of `owns(*p)`, the pointer itself for `live`
         // `owns(g)` / `reads(g)` of a mutable global (decision 0041 item 7); `live(&g)` is never written, a global's liveness is not in doubt.
         if (fn != SpecFn::live)
         {
             if (vir::Global* g = global_place(a))
             {
-                const vir::AtomKind gk = fn == SpecFn::owns ? vir::AtomKind::Owns : vir::AtomKind::Reads;
-                const Expr* atom = b_.global_atom(gk, b_.global_addr(g, loc_of(e->position)), -1, loc_of(e->position));
+                const vir::AtomKind gk {fn == SpecFn::owns ? vir::AtomKind::Owns : vir::AtomKind::Reads};
+                const Expr* atom {b_.global_atom(gk, b_.global_addr(g, loc_of(e->position)), -1, loc_of(e->position))};
                 atom_pos_[atom] = e->position;
                 return atom;
             }
@@ -5791,12 +5805,12 @@ private:
         {
             // `owns(p->x)`, `reads(p->t)`, `owns(p->t.x)`, `owns((*p).x)` (decision 0043 item 9): an atom on a member place of a pointer parameter; and, decision
             // 0045, of a place reached through loads (`owns(p->q->x)`, `owns((*ps)->data)`, `owns(sgp->x)`, `owns(s.q->x)`).
-            const Expr* addr = contract_place_address(a);
+            const Expr* addr {contract_place_address(a)};
             if (addr == nullptr)
             {
                 return nullptr;
             }
-            const Expr* rootE = vir::place_root(addr);
+            const Expr* rootE {vir::place_root(addr)};
             if (rootE->kind == Expr::Kind::Result)
             {
                 reject(
@@ -5813,16 +5827,16 @@ private:
             }
             if (fn == SpecFn::owns)
             { // decision 0040 item 2 / 0043 item 2: no write permission to a const object
-                a_type_ptr rt = place_base_type_ != nullptr ? skip_typerefs(place_base_type_) : nullptr;
+                a_type_ptr rt {place_base_type_ != nullptr ? skip_typerefs(place_base_type_) : nullptr};
                 if (rt != nullptr && rt->kind == tk_pointer && rt->variant.pointer.type != nullptr &&
-                    (f_get_type_qualifiers(rt->variant.pointer.type, TRUE) & TQ_CONST) != 0)
+                    (f_get_type_qualifiers(rt->variant.pointer.type, TRUE) & TQ_CONST) != 0U)
                 {
                     std::vector<int> steps;
                     vir::place_root(addr, &steps);
-                    std::string key =
+                    std::string key {
                         std::to_string(rootE->kind == Expr::Kind::Formal
                                            ? rootE->index
-                                           : 1000000 + (rootE->global != nullptr ? rootE->global->id : 0));
+                                           : 1000000 + (rootE->global != nullptr ? rootE->global->id : 0))};
                     for (int st : steps)
                     {
                         key += "," + std::to_string(st);
@@ -5838,8 +5852,8 @@ private:
                     return nullptr;
                 }
             }
-            const vir::AtomKind kind = fn == SpecFn::owns ? vir::AtomKind::Owns : vir::AtomKind::Reads;
-            const Expr* atom = b_.atom(kind, addr, -1, loc_of(e->position));
+            const vir::AtomKind kind {fn == SpecFn::owns ? vir::AtomKind::Owns : vir::AtomKind::Reads};
+            const Expr* atom {b_.atom(kind, addr, -1, loc_of(e->position))};
             atom_pos_[atom] = e->position;
             return atom;
         }
@@ -5873,12 +5887,12 @@ private:
             }
         }
         // Decision 0045 item 2: the pointer is a contract read of the place grammar (`p`, `*pp`, `gp`, `p->q`, `s.q`); each load in it is an ordinary read.
-        const Expr* pf = place_pointer(pn, e->position);
+        const Expr* pf {place_pointer(pn, e->position)};
         if (pf == nullptr)
         {
             return nullptr;
         }
-        const Expr* rootE = vir::place_root(pf);
+        const Expr* rootE {vir::place_root(pf)};
         if (rootE->kind == Expr::Kind::Result)
         {
             reject(
@@ -5890,9 +5904,9 @@ private:
         if (fn == SpecFn::owns && pn->type != nullptr)
         { // decision 0040 item 2 (re-audit of B1): a contract may not give write permission to a const place
             // the pointer's own type: its pointee is the place, whose qualifier is the innermost level (P70 H5)
-            a_type_ptr pt = skip_typerefs(pn->type);
+            a_type_ptr pt {skip_typerefs(pn->type)};
             if (pt != nullptr && pt->kind == tk_pointer && pt->variant.pointer.type != nullptr &&
-                (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0)
+                (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0U)
             {
                 reject(Diag::unsupported_annotation, e->position,
                        "\"" + name + "\" of a `const` place (a function that only reads `" + obj_text(*pf) +
@@ -5900,10 +5914,10 @@ private:
                 return nullptr;
             }
         }
-        const vir::AtomKind kind = fn == SpecFn::owns    ? vir::AtomKind::Owns
-                                   : fn == SpecFn::reads ? vir::AtomKind::Reads
-                                                         : vir::AtomKind::Live;
-        const Expr* atom = b_.atom(kind, pf, -1, loc_of(e->position));
+        const vir::AtomKind kind {fn == SpecFn::owns    ? vir::AtomKind::Owns
+                                  : fn == SpecFn::reads ? vir::AtomKind::Reads
+                                                        : vir::AtomKind::Live};
+        const Expr* atom {b_.atom(kind, pf, -1, loc_of(e->position))};
         atom_pos_[atom] = e->position;
         return atom;
     }
@@ -5913,12 +5927,12 @@ private:
     const Expr* invariant_atom(an_expr_node_ptr e, SpecFn fn, const std::string& name,
                                const std::vector<an_expr_node_ptr>& ops)
     {
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" with other than one argument");
             return nullptr;
         }
-        an_expr_node_ptr a = peel_place(ops[1]);
+        an_expr_node_ptr a {peel_place(ops[1U])};
         if (global_place(a) != nullptr ||
             (fn == SpecFn::live && (global_of_address_of(a) != nullptr || global_of_address_constant(a) != nullptr)))
         {
@@ -5931,7 +5945,7 @@ private:
         // The atom's pointer (decision 0040 item 5, 0045 item 10): `q` of `owns(*q)` or the pointer of `live` (a pointer variable, a cell included, read at each
         // iteration's start), `*pp` of `owns(**pp)`, `p->q` of `owns(*p->q)`, `s.q` of `owns(*s.q)`, `gp` of `owns(*gp)`; or the address of a member place
         // (`owns(q->x)`, `owns(p->q->x)`, struct places `owns(q->t)`, question 99).  Each load in it is an ordinary read of the invariant.
-        const Expr* x = nullptr;
+        const Expr* x {nullptr};
         if (fn != SpecFn::live && is_member_node(a))
         {
             x = place_address(a);
@@ -5964,13 +5978,14 @@ private:
             return nullptr;
         }
         std::vector<int> steps;
-        const Expr* root = vir::place_root(x, &steps);
-        const bool stepped = !steps.empty();
+        const Expr* root {vir::place_root(x, &steps)};
+        const bool stepped {!steps.empty()};
         // A pointer variable (the cell variable's own value is a load of the cell), or a place reached from one, from a local struct's pointer member or from a
         // global's pointer value; a local object's own member (`owns(s.x)`) and a global itself are held by the automatic places already.
-        const bool ok =
-            (root->kind == Expr::Kind::Local && root->type.is_ptr()) || (root->kind == Expr::Kind::Local && stepped) ||
-            ((root->kind == Expr::Kind::AddrOf || root->kind == Expr::Kind::GlobalAddr) && vir::steps_have_load(steps));
+        const bool ok {(root->kind == Expr::Kind::Local && root->type.is_ptr()) ||
+                       (root->kind == Expr::Kind::Local && stepped) ||
+                       ((root->kind == Expr::Kind::AddrOf || root->kind == Expr::Kind::GlobalAddr) &&
+                        vir::steps_have_load(steps))};
         if (!ok)
         {
             reject(
@@ -5980,10 +5995,10 @@ private:
             return nullptr;
         }
         spell_loaded_place(x);
-        const vir::AtomKind kind = fn == SpecFn::owns    ? vir::AtomKind::Owns
-                                   : fn == SpecFn::reads ? vir::AtomKind::Reads
-                                                         : vir::AtomKind::Live;
-        const Expr* atom = b_.atom(kind, x, -1, loc_of(e->position));
+        const vir::AtomKind kind {fn == SpecFn::owns    ? vir::AtomKind::Owns
+                                  : fn == SpecFn::reads ? vir::AtomKind::Reads
+                                                        : vir::AtomKind::Live};
+        const Expr* atom {b_.atom(kind, x, -1, loc_of(e->position))};
         atom_pos_[atom] = e->position;
         return atom;
     }
@@ -6023,7 +6038,7 @@ private:
         {
             return true;
         }
-        const std::vector<vir::AtomSite> sites = vir::loop_atoms(tmp);
+        const std::vector<vir::AtomSite> sites {vir::loop_atoms(tmp)};
         std::set<const Expr*> placed;
         for (const vir::AtomSite& st : sites)
         {
@@ -6035,13 +6050,13 @@ private:
         };
         auto pos_of = [&](const Expr* atom)
         {
-            auto it = atom_pos_.find(atom);
+            auto it {atom_pos_.find(atom)};
             return it != atom_pos_.end() ? it->second : cx_.stmt_pos;
         };
-        bool ok = true;
+        bool ok {true};
         for (const Expr* a : all)
         {
-            if (placed.count(a) == 0)
+            if (placed.count(a) == 0U)
             {
                 reject(
                     Diag::unsupported_annotation, pos_of(a),
@@ -6051,12 +6066,12 @@ private:
                 ok = false;
             }
         }
-        for (size_t k = 0; k < sites.size(); ++k)
+        for (size_t k {0U}; k < sites.size(); ++k)
         {
-            for (size_t j = 0; j < k; ++j)
+            for (size_t j {0U}; j < k; ++j)
             {
-                const Expr& a = *sites[k].atom;
-                const Expr& b = *sites[j].atom;
+                const Expr& a {*sites[k].atom};
+                const Expr& b {*sites[j].atom};
                 if (a.atom == b.atom && a.a != nullptr && b.a != nullptr && a.a->kind == Expr::Kind::Local &&
                     b.a->kind == Expr::Kind::Local && a.a->var == b.a->var)
                 {
@@ -6084,25 +6099,25 @@ private:
     // dereference, `call` the call of `cerastes_old_`.
     const Expr* old_c(an_expr_node_ptr ind, an_expr_node_ptr call)
     {
-        auto ops = operands_of(call);
+        auto ops {operands_of(call)};
         // The nodes the macro makes carry the macro body's position: report at the operand (the user's place) instead.
-        const a_source_position where = ops.size() == 2 ? peel_place(ops[1])->position : cx_.stmt_pos;
+        const a_source_position where {ops.size() == 2U ? peel_place(ops[1U])->position : cx_.stmt_pos};
         if (cx_.annot != Annot::ensures)
         {
             reject(Diag::old_outside_ensures, where, "");
             return nullptr;
         }
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             reject(Diag::unsupported_expression, where, "\"cerastes_old\" with other than one argument");
             return nullptr;
         }
-        an_expr_node_ptr x = peel_place(ops[1]);
-        const SrcLoc l = loc_of(where);
+        an_expr_node_ptr x {peel_place(ops[1U])};
+        const SrcLoc l {loc_of(where)};
         // The place's address (decision 0045 item 3, P70 H1): C23 folds the macro's `&*X` to `X`, C++20 keeps `address_of(indirect(X))`; `&x` of a parameter and
         // of every place that is not an `indirect` (`&p->x`, `&s.q`, `&g`) is `address_of(place)` in both.  So `address_of(Y)` names the place `Y`, and any other
         // pointer tree `X` the place `*X`, whose loads are read in the ENTRY state (the whole path is under `old`).
-        an_expr_node_ptr in = nullptr; // the operand of an `address_of`: the place itself
+        an_expr_node_ptr in {nullptr}; // the operand of an `address_of`: the place itself
         if (x->kind == enk_operation && x->variant.operation.kind == eok_address_of &&
             x->variant.operation.operands != nullptr && x->variant.operation.operands->next == nullptr)
         {
@@ -6111,7 +6126,7 @@ private:
         if (in != nullptr && in->kind == enk_param_ref)
         { // `old(x)` of a parameter
             ++cx_.old_depth;
-            const Expr* pf = param_reference(in);
+            const Expr* pf {param_reference(in)};
             --cx_.old_depth;
             return pf == nullptr ? nullptr : finish(ind, b_.old(pf, l));
         }
@@ -6127,13 +6142,13 @@ private:
                     return nullptr;
                 }
                 ++cx_.old_depth;
-                const Expr* a = contract_field_chain(in);
+                const Expr* a {contract_field_chain(in)};
                 --cx_.old_depth;
                 return a == nullptr ? nullptr : finish(ind, b_.old(a, l));
             }
             // `cerastes_old(p->x)` (decision 0043 item 9), `old(p->q->x)`, `old((*pp)->x)` (decision 0045): the address of a member place.
             ++cx_.old_depth;
-            const Expr* a = contract_place_address(in);
+            const Expr* a {contract_place_address(in)};
             --cx_.old_depth;
             if (a == nullptr)
             {
@@ -6145,7 +6160,7 @@ private:
             }
             return finish(ind, b_.old(b_.deref(a, l), l));
         }
-        an_expr_node_ptr pointer = nullptr; // `X`: the place is `*X`
+        an_expr_node_ptr pointer {nullptr}; // `X`: the place is `*X`
         if (in != nullptr && is_indirect_node(in) && in->variant.operation.operands != nullptr &&
             in->variant.operation.operands->next == nullptr)
         {
@@ -6162,7 +6177,7 @@ private:
                 std::vector<int> mp;
                 if (vir::Global* gm = global_member_of_address_constant(x, &mp))
                 {
-                    const Expr* a = b_.global_addr(gm, l);
+                    const Expr* a {b_.global_addr(gm, l)};
                     for (int k : mp)
                     {
                         a = b_.member_addr(a, k, l);
@@ -6177,7 +6192,7 @@ private:
                     return finish(ind, b_.old(b_.deref(a, l), l));
                 }
             }
-            vir::Global* g = global_of_address_constant(x);
+            vir::Global* g {global_of_address_constant(x)};
             if (g == nullptr)
             {
                 g = global_of_address_of(x);
@@ -6192,7 +6207,7 @@ private:
             return nullptr;
         }
         ++cx_.old_depth;
-        const Expr* pf = place_pointer(pointer, where);
+        const Expr* pf {place_pointer(pointer, where)};
         --cx_.old_depth;
         if (pf == nullptr)
         {
@@ -6224,27 +6239,27 @@ private:
         }
         // C's `cerastes_old(e)`: `*(T *)cerastes_old_(...)`.
         {
-            an_expr_node_ptr c = ops[0];
+            an_expr_node_ptr c {ops[0U]};
             if (c->kind == enk_operation && c->variant.operation.kind == eok_cast &&
                 c->variant.operation.operands != nullptr && c->variant.operation.operands->next == nullptr)
             {
-                an_expr_node_ptr call_node = c->variant.operation.operands;
-                a_routine_ptr callee = direct_callee(call_node);
+                an_expr_node_ptr call_node {c->variant.operation.operands};
+                a_routine_ptr callee {direct_callee(call_node)};
                 if (callee != nullptr && spec_fn(callee) == SpecFn::old_c)
                 {
                     return old_c(ind, call_node);
                 }
             }
         }
-        an_expr_node_ptr pn = peel_place(ops[0]);
+        an_expr_node_ptr pn {peel_place(ops[0U])};
         if (vir::Global* g = global_of_address_of(pn))
         { // `*&g` is `g` (decision 0041 item 6)
-            const SrcLoc l = loc_of(ind->position);
+            const SrcLoc l {loc_of(ind->position)};
             return finish(ind, b_.deref(b_.global_addr(g, l), l));
         }
         // Decision 0045 item 2: the pointer is any contract read of the place grammar (a parameter, `*pp`, `p->q`, `gp`, `s.q`, the result), every inner load
         // an ordinary contract read of its own; `*result` is a value (decision 0040 item 4), `param_reference` refuses it under `old`.
-        const Expr* pf = place_pointer(pn, ind->position);
+        const Expr* pf {place_pointer(pn, ind->position)};
         if (pf == nullptr)
         {
             return nullptr;
@@ -6296,9 +6311,9 @@ private:
         {
             collect(c.expr);
         }
-        const std::vector<vir::AtomSite> sites = vir::contract_atoms(*f);
+        const std::vector<vir::AtomSite> sites {vir::contract_atoms(*f)};
         // decision 0047 item 4: no ghost amount, no partner
-        const std::vector<vir::AtomSite> block_sites = vir::contract_block_atoms(*f);
+        const std::vector<vir::AtomSite> block_sites {vir::contract_block_atoms(*f)};
         std::set<const Expr*> placed;
         for (const vir::AtomSite& st : sites)
         {
@@ -6310,7 +6325,7 @@ private:
         }
         auto pos_of = [&](const Expr* atom)
         {
-            auto it = atom_pos_.find(atom);
+            auto it {atom_pos_.find(atom)};
             return it != atom_pos_.end() ? it->second : cx_.stmt_pos;
         };
         auto spelling = [](const Expr* atom)
@@ -6330,7 +6345,7 @@ private:
         };
         for (const Expr* a : all)
         {
-            if (placed.count(a) == 0)
+            if (placed.count(a) == 0U)
             {
                 reject(
                     Diag::unsupported_annotation, pos_of(a),
@@ -6360,27 +6375,28 @@ private:
         }
         // Decision 0043 item 9 (audit B1): in one clause list two atoms on one root whose paths are related by prefix but different (`owns(*p) &&
         // owns(p->x)`, `owns(p->t) && reads(p->t.x)`) would ask twice for one cell: rejected.  Two atoms on one place stay allowed or rejected as before.
-        for (int list = 0; list < 2; ++list)
+        for (int list {0}; list < 2; ++list)
         {
-            for (size_t i = 0; i < sites.size(); ++i)
+            for (size_t i {0U}; i < sites.size(); ++i)
             {
-                for (size_t j = 0; j < i; ++j)
+                for (size_t j {0U}; j < i; ++j)
                 {
                     if (sites[i].in_ensures != (list == 1) || sites[j].in_ensures != (list == 1))
                     {
                         continue;
                     }
-                    const vir::PlaceKey a = vir::atom_place(*sites[i].atom), b = vir::atom_place(*sites[j].atom);
+                    const vir::PlaceKey a {vir::atom_place(*sites[i].atom)};
+                    const vir::PlaceKey b {vir::atom_place(*sites[j].atom)};
                     // Decision 0045 item 2: only places of one root and the same steps can share a cell by prefix; `owns(*pp) && owns(**pp)` names a pointer cell and the
                     // object it points to, which never overlap (different fields), and overlap across loads is per path.
                     if (!a.valid() || a.root != b.root || a.via != b.via || a.path == b.path)
                     {
                         continue;
                     }
-                    const bool a_in_b =
-                        a.path.size() < b.path.size() && std::equal(a.path.begin(), a.path.end(), b.path.begin());
-                    const bool b_in_a =
-                        b.path.size() < a.path.size() && std::equal(b.path.begin(), b.path.end(), a.path.begin());
+                    const bool a_in_b {a.path.size() < b.path.size() &&
+                                       std::equal(a.path.begin(), a.path.end(), b.path.begin())};
+                    const bool b_in_a {b.path.size() < a.path.size() &&
+                                       std::equal(b.path.begin(), b.path.end(), a.path.begin())};
                     if (a_in_b || b_in_a)
                     {
                         reject(
@@ -6401,7 +6417,7 @@ private:
             {
                 continue;
             }
-            int partner = -1;
+            int partner {-1};
             for (const vir::AtomSite* o : req)
             {
                 if (o->atom->atom == st.atom->atom && vir::atom_place(*o->atom).valid() &&
@@ -6429,16 +6445,16 @@ private:
             const_cast<Expr*>(st.atom)->amount = partner;
         }
         // Decision 0047 item 4: the rules of the `owns_block` atoms (check_program repeats them).  The operand's key is the parameter's index, or the result's.
-        for (size_t i = 0; i < block_sites.size(); ++i)
+        for (size_t i {0U}; i < block_sites.size(); ++i)
         {
-            const vir::AtomSite& b = block_sites[i];
-            const int key = vir::atom_place(*b.atom).root;
+            const vir::AtomSite& b {block_sites[i]};
+            const int key {vir::atom_place(*b.atom).root};
             if (key == vir::kNoPlaceKey)
             {
                 continue;
             }
-            bool dup = false;
-            for (size_t j = 0; j < i; ++j)
+            bool dup {false};
+            for (size_t j {0U}; j < i; ++j)
             {
                 if (block_sites[j].in_ensures == b.in_ensures && vir::atom_place(*block_sites[j].atom).root == key)
                 {
@@ -6480,7 +6496,7 @@ private:
                 }
                 return false;
             };
-            bool guarded_by_heap = false;
+            bool guarded_by_heap {false};
             for (const vir::AtomGuard& g : b.guards)
             {
                 guarded_by_heap = guarded_by_heap || heap_guard(g.cond);
@@ -6493,10 +6509,10 @@ private:
                     "(a guard over the heap is M4.5d2b, decision 0047 item 4)");
                 continue;
             }
-            bool beside = false;
+            bool beside {false};
             for (const vir::AtomSite& o : sites)
             {
-                const vir::PlaceKey ok = vir::atom_place(*o.atom);
+                const vir::PlaceKey ok {vir::atom_place(*o.atom)};
                 if (ok.root == key && ok.via.empty())
                 {
                     beside = true;
@@ -6512,7 +6528,7 @@ private:
             }
             if (b.in_ensures && key >= 0)
             {
-                bool taken = false;
+                bool taken {false};
                 for (const vir::AtomSite& r : block_sites)
                 {
                     if (!r.in_ensures && vir::atom_place(*r.atom).root == key)
@@ -6539,9 +6555,9 @@ private:
         {
             return false;
         }
-        const a_type_qualifier_set tq = f_get_type_qualifiers(to, TRUE);
-        const a_type_qualifier_set fq = f_get_type_qualifiers(from, TRUE);
-        if ((fq & ~tq) != 0)
+        const a_type_qualifier_set tq {f_get_type_qualifiers(to, TRUE)};
+        const a_type_qualifier_set fq {f_get_type_qualifiers(from, TRUE)};
+        if ((fq & ~tq) != 0U)
         {
             return false;
         }
@@ -6549,14 +6565,14 @@ private:
         {
             *below = true;
         }
-        a_type_ptr t = skip_typerefs(to);
-        a_type_ptr f = skip_typerefs(from);
+        a_type_ptr t {skip_typerefs(to)};
+        a_type_ptr f {skip_typerefs(from)};
         if (t == nullptr || f == nullptr)
         {
             return false;
         }
-        const bool tp = t->kind == tk_pointer && !t->variant.pointer.is_reference;
-        const bool fp = f->kind == tk_pointer && !f->variant.pointer.is_reference;
+        const bool tp {t->kind == tk_pointer && !t->variant.pointer.is_reference};
+        const bool fp {f->kind == tk_pointer && !f->variant.pointer.is_reference};
         if (tp != fp)
         {
             return false;
@@ -6573,14 +6589,14 @@ private:
     // qualifiers to the pointee (`int *` to `const int *`).  Everything else, compiler-generated or written, is rejected.
     const Expr* pointer_conversion(an_expr_node_ptr e, an_expr_node_ptr operand)
     {
-        const bool to_ptr = is_pointer_type(e->type);
-        const bool from_ptr = is_pointer_type(operand->type);
+        const bool to_ptr {is_pointer_type(e->type)};
+        const bool from_ptr {is_pointer_type(operand->type)};
         // Decision 0047 item 2: the direct operand is a call of an allocation routine (a vlibc contract of shape (A)): a typed view.
         if (to_ptr && from_ptr && !cx_.contract && !cx_.annotation && cx_.const_depth == 0)
         {
-            if (a_routine_ptr ar = direct_callee(operand); ar != nullptr)
+            if (a_routine_ptr ar {direct_callee(operand)}; ar != nullptr)
             {
-                if (const HeapShape* hs = heap_shape_of(ar); hs != nullptr && hs->allocation)
+                if (const HeapShape* hs {heap_shape_of(ar)}; hs != nullptr && hs->allocation)
                 {
                     return allocation_view(e, operand, ar, *hs);
                 }
@@ -6591,7 +6607,7 @@ private:
         if (to_ptr && from_ptr && !cx_.contract && !cx_.annotation && cx_.const_depth == 0 &&
             is_void_pointer_type(operand->type))
         {
-            if (a_routine_ptr ar = direct_callee(operand);
+            if (a_routine_ptr ar {direct_callee(operand)};
                 ar != nullptr && verified_body(ar) == nullptr && !lib_trust(ar).has && !routine_has_contract(ar))
             {
                 if (callee_for_call(ar, operand->position) == nullptr)
@@ -6608,12 +6624,12 @@ private:
         if (to_ptr && !from_ptr)
         {
             // An integer constant zero becoming a pointer.
-            an_expr_node_ptr c = operand;
+            an_expr_node_ptr c {operand};
             if (c->kind == enk_constant && c->variant.constant.ptr != nullptr &&
                 c->variant.constant.ptr->kind == ck_integer && decimal_value(c->variant.constant.ptr) == "0" &&
                 !is_pointer_type(c->variant.constant.ptr->type))
             {
-                a_type_ptr ot = skip_typerefs(c->variant.constant.ptr->type);
+                a_type_ptr ot {skip_typerefs(c->variant.constant.ptr->type)};
                 if (ot != nullptr && ot->kind == tk_integer && !ot->variant.integer.enum_type)
                 {
                     return b_.null_const(to.t, loc_of(e->position));
@@ -6622,8 +6638,8 @@ private:
         }
         else if (to_ptr && from_ptr)
         {
-            a_type_ptr tp = skip_typerefs(e->type)->variant.pointer.type;
-            a_type_ptr fp = skip_typerefs(operand->type)->variant.pointer.type;
+            a_type_ptr tp {skip_typerefs(e->type)->variant.pointer.type};
+            a_type_ptr fp {skip_typerefs(operand->type)->variant.pointer.type};
             VType from;
             if (tp != nullptr && fp != nullptr && value_type(operand->type, operand->position, &from, true))
             {
@@ -6633,9 +6649,9 @@ private:
                 // would verify (every compiler accepts the explicit cast).
                 if (f_identical_types(tp, fp, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0)
                 {
-                    const a_type_qualifier_set tq = f_get_type_qualifiers(tp, TRUE);
-                    const a_type_qualifier_set fq = f_get_type_qualifiers(fp, TRUE);
-                    if ((fq & ~tq) == 0)
+                    const a_type_qualifier_set tq {f_get_type_qualifiers(tp, TRUE)};
+                    const a_type_qualifier_set fq {f_get_type_qualifiers(fp, TRUE)};
+                    if ((fq & ~tq) == 0U)
                     {
                         // decision 0040 item 2 (re-audit of B1): a contract may not add or drop a pointee qualifier, in
                         // any conversion
@@ -6647,7 +6663,7 @@ private:
                                 "`const` object with a writable one (decision 0040 item 2)");
                             return nullptr;
                         }
-                        const Expr* x = expr(operand);
+                        const Expr* x {expr(operand)};
                         if (x == nullptr)
                         {
                             return nullptr;
@@ -6661,7 +6677,7 @@ private:
                         return x; // the same VIR type: qualifiers are not part of it
                     }
                 }
-                bool below = false;
+                bool below {false};
                 if (qualifiers_only_added(tp, fp, 0, &below) && below)
                 {
                     if (il_header.source_language == sl_C)
@@ -6685,10 +6701,10 @@ private:
         {
             auto struct_pointer = [](a_type_ptr t)
             {
-                a_type_ptr u = t != nullptr ? skip_typerefs(t) : nullptr;
-                a_type_ptr pt = u != nullptr && u->kind == tk_pointer && !u->variant.pointer.is_reference
-                                    ? u->variant.pointer.type
-                                    : nullptr;
+                a_type_ptr u {t != nullptr ? skip_typerefs(t) : nullptr};
+                a_type_ptr pt {u != nullptr && u->kind == tk_pointer && !u->variant.pointer.is_reference
+                                   ? u->variant.pointer.type
+                                   : nullptr};
                 return is_struct_kind(pt != nullptr ? skip_typerefs(pt) : nullptr);
             };
             if (struct_pointer(e->type) || struct_pointer(operand->type))
@@ -6706,14 +6722,14 @@ private:
 
     const Expr* conversion(an_expr_node_ptr e)
     {
-        auto ops = operands_of(e);
-        if (!operand_count(e, 1, ops))
+        auto ops {operands_of(e)};
+        if (!operand_count(e, 1U, ops))
         {
             return nullptr;
         }
-        if (is_pointer_type(e->type) || is_pointer_type(ops[0]->type))
+        if (is_pointer_type(e->type) || is_pointer_type(ops[0U]->type))
         {
-            return pointer_conversion(e, ops[0]);
+            return pointer_conversion(e, ops[0U]);
         }
         VType to;
         if (!value_type(e->type, e->position, &to))
@@ -6721,16 +6737,16 @@ private:
             return nullptr;
         }
         VType from;
-        if (!value_type(ops[0]->type, ops[0]->position, &from))
+        if (!value_type(ops[0U]->type, ops[0U]->position, &from))
         {
             return nullptr;
         }
         if (to.t.is_bool() && !from.t.is_bool())
         {
             // decision 0025 item 6, R7: a conversion to bool is a truth context
-            truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) == 0);
+            truth_context(ops[0U], /*conversion_to_bool=*/truth_operands_.count(e) == 0U);
         }
-        const Expr* x = expr(ops[0]);
+        const Expr* x {expr(ops[0U])};
         if (x == nullptr)
         {
             return nullptr;
@@ -6741,7 +6757,7 @@ private:
                    "a conversion whose operand has another type than the IL says");
             return nullptr;
         }
-        const SrcLoc l = loc_of(e->position);
+        const SrcLoc l {loc_of(e->position)};
         if (to.t.is_bool())
         {
             return from.t.is_bool() ? x : b_.to_bool(x, l);
@@ -6760,8 +6776,8 @@ private:
         {
             return x;
         }
-        if (is_enum_type(from.t) && !is_enum_type(to.t) && e->compiler_generated && enum_conv_ok_.count(e) == 0 &&
-            !is_enumerator_node(ops[0]))
+        if (is_enum_type(from.t) && !is_enum_type(to.t) && e->compiler_generated && enum_conv_ok_.count(e) == 0U &&
+            !is_enumerator_node(ops[0U]))
         {
             // An implicit conversion out of an enumeration means the same in C and C++ only where a parent allowed it (decision 0018
             // item 6); C promotes to unsigned int where C++ promotes to int, so everywhere else it is rejected.
@@ -6776,15 +6792,15 @@ private:
 
     const Expr* call(an_expr_node_ptr e)
     {
-        a_routine_ptr callee = direct_callee(e);
-        auto ops = operands_of(e);
+        a_routine_ptr callee {direct_callee(e)};
+        auto ops {operands_of(e)};
         if (callee == nullptr || ops.empty())
         {
             reject(Diag::unsupported_expression, e->position,
                    "a call that does not name a function (through a pointer, or a member)");
             return nullptr;
         }
-        const std::string name = rname(callee);
+        const std::string name {rname(callee)};
         if (cx_.const_depth > 0)
         {
             reject(Diag::unsupported_expression, e->position,
@@ -6795,7 +6811,7 @@ private:
         {
             // Decision 0037 item 5: the permission atoms, by entity, in both spellings (spec_atom refuses them outside a contract, decision 0038
             // item 10); before 0006's rejection of every other call.
-            const SpecFn fn = spec_fn(callee);
+            const SpecFn fn {spec_fn(callee)};
             if (fn == SpecFn::owns || fn == SpecFn::reads || fn == SpecFn::live)
             {
                 return spec_atom(e, fn, name, ops);
@@ -6833,12 +6849,12 @@ private:
         {
             return heap_call(e, callee, *hs, ops); // decision 0047 item 2
         }
-        vir::Function* f = callee_for_call(callee, e->position);
+        vir::Function* f {callee_for_call(callee, e->position)};
         if (f == nullptr)
         {
             return nullptr;
         }
-        if (f->ret.is_struct() && cx_.struct_call_ok.count(e) == 0)
+        if (f->ret.is_struct() && cx_.struct_call_ok.count(e) == 0U)
         { // decision 0044 item 2: only a consumer that takes a struct value may call it
             reject(
                 Diag::unsupported_expression, e->position,
@@ -6851,31 +6867,31 @@ private:
         {
             edges_[cx_.routine].insert(callee); // the call graph (0013)
         }
-        if (ops.size() - 1 != f->params.size())
+        if (ops.size() - 1U != f->params.size())
         {
             reject(Diag::unsupported_expression, e->position,
                    "a call whose arguments do not match the declaration of \"" + name + "\"");
             return nullptr;
         }
         std::vector<const Expr*> args;
-        bool ok = true;
+        bool ok {true};
         // Decision 0044 item 5: a struct assignment as an argument beside another argument that names the assigned object (`h2(s, s = t)`) is an unsequenced
         // modification (0039 item 3's static rule); any other struct assignment used as a value is M8 (struct_value_node).
-        for (size_t i = 1; i < ops.size(); ++i)
+        for (size_t i {1U}; i < ops.size(); ++i)
         {
-            an_expr_node_ptr a = peel_value(ops[i]);
+            an_expr_node_ptr a {peel_value(ops[i])};
             if (a == nullptr || a->kind != enk_operation || a->variant.operation.kind != eok_assign ||
                 !is_struct_kind(a->type != nullptr ? skip_typerefs(a->type) : nullptr))
             {
                 continue;
             }
-            auto aops = operands_of(a);
-            a_variable_ptr v = aops.empty() ? nullptr : place_variable(aops[0]);
+            auto aops {operands_of(a)};
+            a_variable_ptr v {aops.empty() ? nullptr : place_variable(aops[0U])};
             if (v == nullptr)
             {
                 continue;
             }
-            for (size_t j = 1; j < ops.size(); ++j)
+            for (size_t j {1U}; j < ops.size(); ++j)
             {
                 if (j != i && mentions_variable(ops[j], v))
                 {
@@ -6886,12 +6902,12 @@ private:
                 }
             }
         }
-        for (size_t i = 1; i < ops.size(); ++i)
+        for (size_t i {1U}; i < ops.size(); ++i)
         {
             allow_enum_conversion(ops[i]); // decision 0018 item 6 (iii)
-            const vir::Type& pty = f->params[i - 1].type;
+            const vir::Type& pty {f->params[i - 1U].type};
             // decision 0044 item 5: a struct argument passes its leaves
-            const Expr* a = pty.is_struct() ? struct_value(ops[i], pty) : expr(ops[i]);
+            const Expr* a {pty.is_struct() ? struct_value(ops[i], pty) : expr(ops[i])};
             if (a == nullptr)
             {
                 ok = false;
@@ -6918,8 +6934,8 @@ private:
             reject_strict_uninit_result(f, e->position);
             return nullptr;
         }
-        const Expr* c = b_.call(f, std::move(args), loc_of(e->position));
-        VType nt = signature_vtype(e->type);
+        const Expr* c {b_.call(f, std::move(args), loc_of(e->position))};
+        VType nt {signature_vtype(e->type)};
         if (!nt.ok || nt.t != f->ret)
         {
             reject(Diag::unsupported_expression, e->position, "a call whose type is not the declared result type");
@@ -6934,21 +6950,21 @@ private:
     void strict_init_arguments(const vir::Function* callee, const std::vector<const Expr*>& args,
                                const std::string& cname, const a_source_position& at)
     {
-        for (size_t k = 0; k < args.size() && k < callee->params.size(); ++k)
+        for (size_t k {0U}; k < args.size() && k < callee->params.size(); ++k)
         {
             if (callee->params[k].init == vir::InitMarker::None)
             {
                 continue;
             }
-            const Expr* a = args[k];
+            const Expr* a {args[k]};
             while (a != nullptr && a->kind == Expr::Kind::ReportAt)
             {
                 a = a->a;
             }
-            const std::string pn =
-                callee->params[k].name.empty() ? "arg" + std::to_string(k + 1) : callee->params[k].name;
+            const std::string pn {callee->params[k].name.empty() ? "arg" + std::to_string(k + 1U)
+                                                                 : callee->params[k].name};
             if (a != nullptr && a->kind == Expr::Kind::AddrOf && a->var != nullptr &&
-                cx_.uninit_marked.count(a->var) != 0)
+                cx_.uninit_marked.count(a->var) != 0U)
             {
                 continue;
             }
@@ -6960,9 +6976,9 @@ private:
                 cx_.strict_pass.push_back(Ctx::StrictPass {a->var->param_index, at, cname, pn});
                 continue;
             }
-            std::string text = a != nullptr && !a->c_text.empty()            ? "`" + a->c_text + "`"
-                               : a != nullptr && a->kind == Expr::Kind::Null ? "a null pointer"
-                                                                             : "an argument";
+            std::string text {a != nullptr && !a->c_text.empty()            ? "`" + a->c_text + "`"
+                              : a != nullptr && a->kind == Expr::Kind::Null ? "a null pointer"
+                                                                            : "an argument"};
             std::string why;
             if (a != nullptr && a->kind == Expr::Kind::AddrOf)
             {
@@ -6992,16 +7008,16 @@ private:
         {
             return;
         }
-        const std::set<int> assigned = vir::assigned_params(*f);
+        const std::set<int> assigned {vir::assigned_params(*f)};
         for (const Ctx::StrictPass& sp : cx_.strict_pass)
         {
-            const auto k = static_cast<size_t>(sp.param);
-            const bool taken = f->param_var(sp.param)->address_taken;
-            if (assigned.count(sp.param) == 0 && !taken)
+            const auto k {static_cast<size_t>(sp.param)};
+            const bool taken {f->param_var(sp.param)->address_taken};
+            if (assigned.count(sp.param) == 0U && !taken)
             {
                 continue;
             }
-            const std::string pn = f->params[k].name.empty() ? "arg" + std::to_string(k + 1) : f->params[k].name;
+            const std::string pn {f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name};
             reject(Diag::uninit_ref_initialized, sp.at,
                    "the call to `" + sp.callee + "` passes the parameter `" + pn + "` on to its parameter `" +
                        sp.callee_param + "`, but the function " +
@@ -7026,18 +7042,18 @@ private:
                    "a member access on something that is not a struct or a pointer to a verified struct");
             return nullptr;
         }
-        const int k = member_index(*base->type.pointee->struct_type, fnode, at);
+        const int k {member_index(*base->type.pointee->struct_type, fnode, at)};
         return k < 0 ? nullptr : b_.member_addr(base, k, loc_of(at));
     }
 
     // The index of the member `fnode` names in `st`, or -1 (reported).
     int member_index(const vir::StructType& st, an_expr_node_ptr fnode, const a_source_position& at)
     {
-        a_field_ptr f = fnode != nullptr && fnode->kind == enk_field ? fnode->variant.field.ptr : nullptr;
-        const char* name = f != nullptr ? f->source_corresp.name : nullptr;
+        a_field_ptr f {fnode != nullptr && fnode->kind == enk_field ? fnode->variant.field.ptr : nullptr};
+        const char* name {f != nullptr ? f->source_corresp.name : nullptr};
         if (name != nullptr)
         {
-            for (size_t k = 0; k < st.members.size(); ++k)
+            for (size_t k {0U}; k < st.members.size(); ++k)
             {
                 if (st.members[k].name == name)
                 {
@@ -7053,7 +7069,7 @@ private:
     // The node an lvalue adjustment hides (`g(*p)` of a `const S *` passes `lvalue_adjust(indirect(p))`, P67).
     static an_expr_node_ptr peel_value(an_expr_node_ptr e)
     {
-        for (int guard = 0;
+        for (int guard {0};
              e != nullptr && e->kind == enk_operation && e->variant.operation.kind == eok_lvalue_adjust && guard < 16;
              ++guard)
         {
@@ -7090,7 +7106,7 @@ private:
     // `f().t.y`: a chain of `.` over a struct value.
     static bool member_chain_over_value(an_expr_node_ptr n)
     {
-        for (int guard = 0; guard < 32; ++guard)
+        for (int guard {0}; guard < 32; ++guard)
         {
             n = peel_value(n);
             if (n == nullptr)
@@ -7101,19 +7117,19 @@ private:
             {
                 return is_value_root(n);
             }
-            auto ops = operands_of(n);
-            if (ops.size() != 2)
+            auto ops {operands_of(n)};
+            if (ops.size() != 2U)
             {
                 return false;
             }
-            n = ops[0];
+            n = ops[0U];
         }
         return false;
     }
     // The variable a place `v`, `v.m`, `v.t.m` names, or null.
     static a_variable_ptr place_variable(an_expr_node_ptr n)
     {
-        for (int guard = 0; guard < 32; ++guard)
+        for (int guard {0}; guard < 32; ++guard)
         {
             n = peel_value(n);
             if (n == nullptr)
@@ -7128,12 +7144,12 @@ private:
             {
                 return nullptr;
             }
-            auto ops = operands_of(n);
-            if (ops.size() != 2)
+            auto ops {operands_of(n)};
+            if (ops.size() != 2U)
             {
                 return nullptr;
             }
-            n = ops[0];
+            n = ops[0U];
         }
         return nullptr;
     }
@@ -7151,7 +7167,7 @@ private:
         {
             return false;
         }
-        for (an_expr_node_ptr o = n->variant.operation.operands; o != nullptr; o = o->next)
+        for (an_expr_node_ptr o {n->variant.operation.operands}; o != nullptr; o = o->next)
         {
             if (mentions_variable(o, v, depth + 1))
             {
@@ -7167,7 +7183,7 @@ private:
         {
             return false;
         }
-        const an_expr_operator_kind k = n->variant.operation.kind;
+        const an_expr_operator_kind k {n->variant.operation.kind};
         return k == eok_cast || k == eok_comma || k == eok_question || is_assignment_kind(k);
     }
     void reject_other_struct_value(an_expr_node_ptr n)
@@ -7180,7 +7196,7 @@ private:
     // The struct VIR type of a node, or null (reported).
     bool struct_type_of(an_expr_node_ptr n, vir::Type* out)
     {
-        VType vt = struct_vtype(n->type);
+        VType vt {struct_vtype(n->type)};
         if (!vt.ok || !vt.t.is_struct())
         {
             if (!vt.silent)
@@ -7201,7 +7217,7 @@ private:
         {
             return nullptr;
         }
-        const Expr* r = struct_value_node(n);
+        const Expr* r {struct_value_node(n)};
         if (r == nullptr)
         {
             return nullptr;
@@ -7217,7 +7233,7 @@ private:
 
     const Expr* struct_value_node(an_expr_node_ptr n)
     {
-        const bool is_call = n->kind == enk_operation && n->variant.operation.kind == eok_call;
+        const bool is_call {n->kind == enk_operation && n->variant.operation.kind == eok_call};
         // a call says why itself (a call in an annotation, a call folded to a constant); a folded `S{1, 2}.x` is read
         // as written (P67 H2)
         if (!is_call && cx_.contract)
@@ -7242,7 +7258,7 @@ private:
         }
         if (n->kind == enk_constant)
         {
-            a_constant_ptr c = n->variant.constant.ptr;
+            a_constant_ptr c {n->variant.constant.ptr};
             vir::Type st;
             if (c == nullptr || c->kind != ck_aggregate || !struct_type_of(n, &st))
             {
@@ -7259,10 +7275,10 @@ private:
             cx_.struct_call_ok.insert(n);
             return expr(n);
         }
-        const bool object =
-            n->kind == enk_variable || (n->kind == enk_operation && (n->variant.operation.kind == eok_indirect ||
-                                                                     n->variant.operation.kind == eok_points_to_field ||
-                                                                     n->variant.operation.kind == eok_dot_field));
+        const bool object {n->kind == enk_variable ||
+                           (n->kind == enk_operation && (n->variant.operation.kind == eok_indirect ||
+                                                         n->variant.operation.kind == eok_points_to_field ||
+                                                         n->variant.operation.kind == eok_dot_field))};
         if (object)
         {
             return object_value(n);
@@ -7289,8 +7305,8 @@ private:
                 "a struct passed, returned or copied by value whose object has a side effect or a call in its address (it would be evaluated once per member: M8, decision 0044 item 5)");
             return nullptr;
         }
-        const SrcLoc l = loc_of(n->position);
-        const Expr* a = place_address(n);
+        const SrcLoc l {loc_of(n->position)};
+        const Expr* a {place_address(n)};
         if (a == nullptr)
         {
             return nullptr;
@@ -7301,7 +7317,7 @@ private:
                    "a struct value whose object is not of the struct type the IL says");
             return nullptr;
         }
-        const Expr* root = vir::member_root(a);
+        const Expr* root {vir::member_root(a)};
         if (root->kind != Expr::Kind::AddrOf && root->kind != Expr::Kind::Local && root->kind != Expr::Kind::GlobalAddr)
         {
             reject(
@@ -7320,13 +7336,13 @@ private:
     // `f().x`, `f().t.y`, `S{1, 2}.t`: a Field chain over a call or a temporary.
     const Expr* value_member(an_expr_node_ptr n)
     {
-        auto ops = operands_of(n);
-        if (ops.size() != 2)
+        auto ops {operands_of(n)};
+        if (ops.size() != 2U)
         {
             reject(Diag::unsupported_expression, n->position, "an operation with an unexpected number of operands");
             return nullptr;
         }
-        const Expr* base = struct_value_node(peel_value(ops[0]));
+        const Expr* base {struct_value_node(peel_value(ops[0U]))};
         if (base == nullptr)
         {
             return nullptr;
@@ -7336,14 +7352,14 @@ private:
             reject(Diag::unsupported_expression, n->position, "a member of a value that is not a struct");
             return nullptr;
         }
-        const int k = member_index(*base->type.struct_type, ops[1], n->position);
+        const int k {member_index(*base->type.struct_type, ops[1U], n->position)};
         return k < 0 ? nullptr : b_.field(base, k, loc_of(n->position));
     }
 
     // A C++ temporary `S{...}`, `S()` or `S{}` (P67): the Aggregate of its elements.  A compound literal is M4.5c2a's later step.
     const Expr* temp_value(an_expr_node_ptr n)
     {
-        a_dynamic_init_ptr d = n->variant.init.dynamic_init;
+        a_dynamic_init_ptr d {n->variant.init.dynamic_init};
         vir::Type st;
         if (!struct_type_of(n, &st))
         {
@@ -7368,7 +7384,7 @@ private:
     // The value of a scalar compound literal `(int){5}`: its converted element (zero for `(int){}`).
     const Expr* scalar_literal_value(a_dynamic_init_ptr d, const VType& vt, const a_source_position& at)
     {
-        const Expr* x = nullptr;
+        const Expr* x {nullptr};
         switch (d->kind)
         {
             case dik_zero:
@@ -7407,7 +7423,7 @@ private:
     // A `temp_init` read as a value: a scalar compound literal is its element; a struct temporary is taken only where a struct value is (struct_value_node).
     const Expr* temp_init_value(an_expr_node_ptr e)
     {
-        a_dynamic_init_ptr d = e->variant.init.dynamic_init;
+        a_dynamic_init_ptr d {e->variant.init.dynamic_init};
         if (d != nullptr && d->is_compound_literal &&
             !is_struct_kind(e->type != nullptr ? skip_typerefs(e->type) : nullptr))
         {
@@ -7416,7 +7432,7 @@ private:
                 reject(Diag::unsupported_expression, e->position, "an array compound literal (M4.5e1)");
                 return nullptr;
             }
-            VType vt = vtype(e->type, true);
+            VType vt {vtype(e->type, true)};
             if (!vt.ok || vt.t.is_void())
             {
                 reject_type(vt, e->position);
@@ -7437,24 +7453,24 @@ private:
     {
         *handled = false;
         std::vector<an_expr_node_ptr> fields; // `.m` selections, outermost first
-        an_expr_node_ptr r = peel_value(o);
-        for (int guard = 0; guard < 32 && is_dot_node(r); ++guard)
+        an_expr_node_ptr r {peel_value(o)};
+        for (int guard {0}; guard < 32 && is_dot_node(r); ++guard)
         {
-            auto ops = operands_of(r);
-            if (ops.size() != 2)
+            auto ops {operands_of(r)};
+            if (ops.size() != 2U)
             {
                 return nullptr;
             }
-            fields.push_back(ops[1]);
-            r = peel_value(ops[0]);
+            fields.push_back(ops[1U]);
+            r = peel_value(ops[0U]);
         }
         if (!is_compound_temp(r))
         {
             return nullptr;
         }
         *handled = true;
-        const a_source_position at = e->position;
-        const SrcLoc l = loc_of(at);
+        const a_source_position at {e->position};
+        const SrcLoc l {loc_of(at)};
         if (il_header.source_language != sl_C)
         {
             reject(
@@ -7476,7 +7492,7 @@ private:
                 "the address of a compound literal in a loop's condition or a `for` step (it is evaluated again without entering its block: M8, decision 0044 item 7)");
             return nullptr;
         }
-        if ((f_get_type_qualifiers(r->type, TRUE) & TQ_CONST) != 0)
+        if ((f_get_type_qualifiers(r->type, TRUE) & TQ_CONST) != 0U)
         {
             reject(
                 Diag::unsupported_expression, at,
@@ -7509,30 +7525,30 @@ private:
                 return nullptr;
             }
         }
-        a_dynamic_init_ptr d = r->variant.init.dynamic_init;
-        const Expr* value =
-            vt.t.is_struct() ? value_from_init(d, vt.t, r->position) : scalar_literal_value(d, vt, r->position);
+        a_dynamic_init_ptr d {r->variant.init.dynamic_init};
+        const Expr* value {vt.t.is_struct() ? value_from_init(d, vt.t, r->position)
+                                            : scalar_literal_value(d, vt, r->position)};
         if (value == nullptr)
         {
             return nullptr;
         }
         // messages spell the literal, never an internal name (invariant 7)
-        vir::Var* cl = cx_.fn->new_local("(" + vt.name + "){...}", vt.t, l);
+        vir::Var* cl {cx_.fn->new_local("(" + vt.name + "){...}", vt.t, l)};
         cl->c_type_name = vt.name;
         cl->compound_literal = true;
         cx_.fn->mark_address_taken(cl);
         cx_.literal_pending.push_back(cl);
-        const Expr* store = b_.store_expr(b_.addr_of(cl, l), value, l);
-        const Expr* result = b_.addr_of(cl, l);
-        vir::Type cur = vt.t;
-        for (auto it = fields.rbegin(); it != fields.rend(); ++it)
+        const Expr* store {b_.store_expr(b_.addr_of(cl, l), value, l)};
+        const Expr* result {b_.addr_of(cl, l)};
+        vir::Type cur {vt.t};
+        for (auto it {fields.rbegin()}; it != fields.rend(); ++it)
         { // `.m` selections, innermost first
             if (!cur.is_struct())
             {
                 reject(Diag::unsupported_expression, at, "a member of a compound literal that is not a struct");
                 return nullptr;
             }
-            const int k = member_index(*cur.struct_type, *it, at);
+            const int k {member_index(*cur.struct_type, *it, at)};
             if (k < 0)
             {
                 return nullptr;
@@ -7574,12 +7590,12 @@ private:
     static bool qualified_aggregate(a_constant_ptr c)
     {
         return c != nullptr && c->type != nullptr &&
-               (f_get_type_qualifiers(c->type, TRUE) & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0;
+               (f_get_type_qualifiers(c->type, TRUE) & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0U;
     }
 
     const Expr* aggregate_value(const vir::Type& st, a_constant_ptr agg, const a_source_position& at)
     {
-        const SrcLoc l = loc_of(at);
+        const SrcLoc l {loc_of(at)};
         std::vector<InitElem> elems;
         if (qualified_aggregate(agg))
         {
@@ -7590,7 +7606,7 @@ private:
         }
         if (agg != nullptr)
         {
-            bool compound = false;
+            bool compound {false};
             // a compound literal's list is a list like any other (decision 0044 item 7)
             agg = unfold_aggregate(agg, &compound);
             if (agg->kind != ck_aggregate)
@@ -7610,7 +7626,7 @@ private:
                 return nullptr;
             }
         }
-        const bool c_mode = il_header.source_language == sl_C;
+        const bool c_mode {il_header.source_language == sl_C};
         if (c_mode)
         {
             std::set<std::vector<int>> seen;
@@ -7624,8 +7640,8 @@ private:
                 }
             }
         }
-        size_t dynamic = 0;
-        bool effect = false;
+        size_t dynamic {0U};
+        bool effect {false};
         for (const InitElem& el : elems)
         {
             if (el.e != nullptr)
@@ -7639,7 +7655,7 @@ private:
         }
         // In C the elements are the unsequenced operands of one expression (decision 0044 items 5 and 7: every element first), so 0039's rule judges them
         // (`(struct S){x++, x}` is `x++ + x`); in C++ the order is left to right, which the unsequenced siblings do not model: M8.
-        if (!c_mode && dynamic >= 2 && effect)
+        if (!c_mode && dynamic >= 2U && effect)
         {
             reject(
                 Diag::unsupported_expression, at,
@@ -7649,7 +7665,7 @@ private:
         std::map<std::vector<int>, const Expr*> by_leaf;
         for (const InitElem& el : elems)
         {
-            const Expr* x = init_element_value(*st.struct_type, el);
+            const Expr* x {init_element_value(*st.struct_type, el)};
             if (x == nullptr)
             {
                 return nullptr;
@@ -7659,13 +7675,13 @@ private:
         std::vector<const Expr*> args;
         for (const vir::StructLeaf& lf : vir::struct_leaves(*st.struct_type))
         {
-            auto it = by_leaf.find(lf.path);
+            auto it {by_leaf.find(lf.path)};
             if (it != by_leaf.end())
             {
                 args.push_back(it->second);
                 continue;
             }
-            const Expr* z = zero_leaf(lf.type, at); // a leaf the list does not mention is zero (decision 0043 item 6)
+            const Expr* z {zero_leaf(lf.type, at)}; // a leaf the list does not mention is zero (decision 0043 item 6)
             if (z == nullptr)
             {
                 return nullptr;
@@ -7692,8 +7708,8 @@ private:
         }
         if (e->kind == enk_variable && e->variant.variable.ptr != nullptr)
         {
-            a_variable_ptr v = e->variant.variable.ptr;
-            if (cx_.rejected_vars.count(v) != 0 || rejected_globals_.count(v) != 0)
+            a_variable_ptr v {e->variant.variable.ptr};
+            if (cx_.rejected_vars.count(v) != 0U || rejected_globals_.count(v) != 0U)
             {
                 return nullptr; // diagnosed at its declaration
             }
@@ -7716,10 +7732,10 @@ private:
                 }
                 return b_.global_addr(gl, loc_of(e->position));
             }
-            auto it = cx_.vars.find(v);
+            auto it {cx_.vars.find(v)};
             if (it == cx_.vars.end())
             {
-                const char* n = v->source_corresp.name;
+                const char* n {v->source_corresp.name};
                 reject(Diag::unsupported_expression, e->position,
                        std::string("a member of \"") + (n ? n : "?") +
                            "\", which is not a struct local, a global or a pointer of this function");
@@ -7732,7 +7748,7 @@ private:
                 return nullptr;
             }
             // A struct local's own initializer may read its members (`struct S s = {1, s.x};`: an uninitialized member in C; C++ has stored the earlier ones).
-            if (cx_.pending.count(v) != 0)
+            if (cx_.pending.count(v) != 0U)
             {
                 reject(Diag::unsupported_declaration, v->source_corresp.decl_position,
                        "a local variable used in its own initializer");
@@ -7742,15 +7758,15 @@ private:
         }
         if (e->kind == enk_operation)
         {
-            const an_expr_operator_kind k = e->variant.operation.kind;
-            auto ops = operands_of(e);
+            const an_expr_operator_kind k {e->variant.operation.kind};
+            auto ops {operands_of(e)};
             if (k == eok_indirect)
             { // `*p` of a pointer to a struct: the place is the pointer's value
-                if (!operand_count(e, 1, ops))
+                if (!operand_count(e, 1U, ops))
                 {
                     return nullptr;
                 }
-                const Expr* a = expr(ops[0]);
+                const Expr* a {expr(ops[0U])};
                 if (a == nullptr)
                 {
                     return nullptr;
@@ -7765,19 +7781,19 @@ private:
             }
             if (k == eok_dot_field)
             { // `e.m`
-                if (!operand_count(e, 2, ops))
+                if (!operand_count(e, 2U, ops))
                 {
                     return nullptr;
                 }
-                return member_of(place_address(ops[0]), ops[1], e->position);
+                return member_of(place_address(ops[0U]), ops[1U], e->position);
             }
             if (k == eok_points_to_field)
             { // `p->m`
-                if (!operand_count(e, 2, ops))
+                if (!operand_count(e, 2U, ops))
                 {
                     return nullptr;
                 }
-                return member_of(expr(ops[0]), ops[1], e->position);
+                return member_of(expr(ops[0U]), ops[1U], e->position);
             }
         }
         if (is_compound_temp(peel_value(e)))
@@ -7806,7 +7822,7 @@ private:
     // `param_ref` whose type is a struct (decision 0044 items 3 and 4).
     bool contract_value_root(an_expr_node_ptr n)
     {
-        for (int guard = 0; guard < 32; ++guard)
+        for (int guard {0}; guard < 32; ++guard)
         {
             n = peel_place(n);
             if (n == nullptr)
@@ -7821,12 +7837,12 @@ private:
             {
                 return false;
             }
-            auto ops = operands_of(n);
-            if (ops.size() != 2)
+            auto ops {operands_of(n)};
+            if (ops.size() != 2U)
             {
                 return false;
             }
-            n = ops[0];
+            n = ops[0U];
         }
         return false;
     }
@@ -7850,18 +7866,18 @@ private:
                 return nullptr;
             }
             cx_.struct_param_ok = true;
-            const Expr* x = param_reference(n);
+            const Expr* x {param_reference(n)};
             cx_.struct_param_ok = false;
             return x;
         }
-        auto ops = operands_of(n);
-        if (!is_dot_node(n) || ops.size() != 2)
+        auto ops {operands_of(n)};
+        if (!is_dot_node(n) || ops.size() != 2U)
         {
             reject(Diag::unsupported_annotation, n->position,
                    "a member of something other than a struct parameter or the result");
             return nullptr;
         }
-        const Expr* base = contract_field_chain(ops[0]);
+        const Expr* base {contract_field_chain(ops[0U])};
         if (base == nullptr)
         {
             return nullptr;
@@ -7871,7 +7887,7 @@ private:
             reject(Diag::unsupported_annotation, n->position, "a member of something that is not a struct value");
             return nullptr;
         }
-        const int k = member_index(*base->type.struct_type, ops[1], n->position);
+        const int k {member_index(*base->type.struct_type, ops[1U], n->position)};
         return k < 0 ? nullptr : b_.field(base, k, loc_of(n->position));
     }
 
@@ -7892,10 +7908,10 @@ private:
         }
         if (contract_value_root(e))
         { // `s.x` of a by-value parameter, `r.x` of a struct result (decision 0044 items 3 and 4)
-            const Expr* x = contract_field_chain(e);
+            const Expr* x {contract_field_chain(e)};
             return x == nullptr ? nullptr : finish(e, x);
         }
-        const Expr* a = contract_place_address(e);
+        const Expr* a {contract_place_address(e)};
         if (a == nullptr)
         {
             return nullptr;
@@ -7916,11 +7932,11 @@ private:
         }
         if (e->variant.operation.kind == eok_dot_field)
         { // `f().x`, `S{1, 2}.t.y`: a member of a struct value (decision 0044 item 5)
-            auto mops = operands_of(e);
-            an_expr_node_ptr b = mops.empty() ? nullptr : peel_value(mops[0]);
+            auto mops {operands_of(e)};
+            an_expr_node_ptr b {mops.empty() ? nullptr : peel_value(mops[0U])};
             if (member_chain_over_value(e))
             {
-                const Expr* x = value_member(e);
+                const Expr* x {value_member(e)};
                 if (x == nullptr)
                 {
                     return nullptr;
@@ -7957,7 +7973,7 @@ private:
                 "a struct member that is itself a struct, used as a value (a nested struct is reached through its leaves; whole-struct copies are assignments and initializers)");
             return nullptr;
         }
-        const Expr* a = place_address(e);
+        const Expr* a {place_address(e)};
         if (a == nullptr)
         {
             return nullptr;
@@ -7968,21 +7984,21 @@ private:
     // `&x` of a local scalar (decision 0032 item 4).  The unevaluated operand of `sizeof` never gets here: its value is the folded literal.
     const Expr* address_of(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (!operand_count(e, 1, ops))
+        if (!operand_count(e, 1U, ops))
         {
             return nullptr;
         }
-        an_expr_node_ptr o = ops[0];
+        an_expr_node_ptr o {ops[0U]};
         // `&g` of a mutable global or `static` local (decision 0041 item 6): `GlobalAddr`, a pointer value with no obligation, also in a contract (item 7)
         // and inside the original expression of a folded address constant.
         if (o->kind == enk_variable && o->variant.variable.ptr != nullptr)
         {
-            a_variable_ptr gv = o->variant.variable.ptr;
-            if (rejected_globals_.count(gv) != 0)
+            a_variable_ptr gv {o->variant.variable.ptr};
+            if (rejected_globals_.count(gv) != 0U)
             {
                 return nullptr; // diagnosed at its declaration
             }
-            if (named_.count(gv) != 0)
+            if (named_.count(gv) != 0U)
             {
                 reject(Diag::unsupported_expression, e->position,
                        "the address of a `const` object (const objects as cells come with M4.6, decision 0041 item 2)");
@@ -8010,8 +8026,8 @@ private:
             return nullptr;
         }
         {
-            bool handled = false;
-            const Expr* lit = literal_address(e, o, &handled); // `&(T){...}`, `&(T){...}.m` (decision 0044 item 7)
+            bool handled {false};
+            const Expr* lit {literal_address(e, o, &handled)}; // `&(T){...}`, `&(T){...}.m` (decision 0044 item 7)
             if (handled)
             {
                 return lit == nullptr ? nullptr : finish(e, lit);
@@ -8019,7 +8035,7 @@ private:
         }
         if (is_member_node(o))
         { // `&s.x`, `&p->x`, `&s.t`: the member-address chain as a pointer value (decision 0043 item 5)
-            const Expr* a = place_address(o);
+            const Expr* a {place_address(o)};
             if (a != nullptr && in_own_initializer(a))
             {
                 return nullptr;
@@ -8039,19 +8055,19 @@ private:
                    "taking the address of anything but a local variable or a member of a struct");
             return nullptr;
         }
-        a_variable_ptr v = o->variant.variable.ptr;
-        if (cx_.rejected_vars.count(v) != 0)
+        a_variable_ptr v {o->variant.variable.ptr};
+        if (cx_.rejected_vars.count(v) != 0U)
         {
             return nullptr; // diagnosed at its declaration
         }
-        auto it = cx_.vars.find(v);
+        auto it {cx_.vars.find(v)};
         if (it == cx_.vars.end())
         {
             reject(Diag::unsupported_expression, e->position,
                    "taking the address of a variable that is not a local of this function");
             return nullptr;
         }
-        if (cx_.declaring == v || cx_.pending.count(v) != 0)
+        if (cx_.declaring == v || cx_.pending.count(v) != 0U)
         {
             reject(Diag::unsupported_declaration, v->source_corresp.decl_position,
                    "a local variable used in its own initializer");
@@ -8079,7 +8095,7 @@ private:
     // `*p` as a read (decision 0032 item 6).  A write goes through assign_target; an lvalue `*p` anywhere else (`&*p`, `(*p).f`) is not accepted.
     const Expr* indirect_read(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (!operand_count(e, 1, ops))
+        if (!operand_count(e, 1U, ops))
         {
             return nullptr;
         }
@@ -8101,7 +8117,7 @@ private:
         }
         // `**pp` in an invariant or a measure (decision 0045 item 10): the inner read is an ordinary read of the clause, framed through the automatic places' chains
         // like P69's `p->q->x` (decision 0044 item 12's argument).
-        const Expr* a = expr(ops[0]);
+        const Expr* a {expr(ops[0U])};
         if (a == nullptr)
         {
             return nullptr;
@@ -8125,8 +8141,8 @@ private:
 
     const Expr* operation(an_expr_node_ptr e)
     {
-        const an_expr_operator_kind k = e->variant.operation.kind;
-        auto ops = operands_of(e);
+        const an_expr_operator_kind k {e->variant.operation.kind};
+        auto ops {operands_of(e)};
         switch (k)
         {
             case eok_add:
@@ -8162,11 +8178,11 @@ private:
             case eok_negate:
             case eok_unary_plus:
             {
-                if (!operand_count(e, 1, ops))
+                if (!operand_count(e, 1U, ops))
                 {
                     return nullptr;
                 }
-                const Expr* a = expr(ops[0]);
+                const Expr* a {expr(ops[0U])};
                 if (a == nullptr)
                 {
                     return nullptr;
@@ -8182,12 +8198,12 @@ private:
             }
             case eok_not:
             {
-                if (!operand_count(e, 1, ops))
+                if (!operand_count(e, 1U, ops))
                 {
                     return nullptr;
                 }
-                truth_context(ops[0]);
-                const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
+                truth_context(ops[0U]);
+                const Expr* a {as_bool(expr(ops[0U]), ops[0U]->position)};
                 if (a == nullptr)
                 {
                     return nullptr;
@@ -8196,25 +8212,25 @@ private:
             }
             case eok_question:
             {
-                if (!operand_count(e, 3, ops))
+                if (!operand_count(e, 3U, ops))
                 {
                     return nullptr;
                 }
-                if (detect_bitwise_condition(ops[0]))
+                if (detect_bitwise_condition(ops[0U]))
                 {
                     return nullptr; // decision 0023 item 5
                 }
                 if (reject_two_enumerations(
-                        e, ops[1], ops[2],
+                        e, ops[1U], ops[2U],
                         "a conditional expression whose arms are values of two different enumerations (decision 0025 item 6): "
                         "convert both arms explicitly, for example `x ? (int)RED : (int)NA`"))
                 {
                     return nullptr;
                 }
-                truth_context(ops[0]);
-                const Expr* c = as_bool(expr(ops[0]), ops[0]->position);
-                const Expr* a = expr(ops[1]);
-                const Expr* d = expr(ops[2]);
+                truth_context(ops[0U]);
+                const Expr* c {as_bool(expr(ops[0U]), ops[0U]->position)};
+                const Expr* a {expr(ops[1U])};
+                const Expr* d {expr(ops[2U])};
                 if (c == nullptr || a == nullptr || d == nullptr)
                 {
                     return nullptr;
@@ -8255,13 +8271,13 @@ private:
                 return conversion(e);
             case eok_bool_cast:
             {
-                if (!operand_count(e, 1, ops))
+                if (!operand_count(e, 1U, ops))
                 {
                     return nullptr;
                 }
                 // a condition's own bool conversion is no conversion
-                truth_context(ops[0], /*conversion_to_bool=*/truth_operands_.count(e) == 0);
-                const Expr* a = as_bool(expr(ops[0]), ops[0]->position);
+                truth_context(ops[0U], /*conversion_to_bool=*/truth_operands_.count(e) == 0U);
+                const Expr* a {as_bool(expr(ops[0U]), ops[0U]->position)};
                 return logical_result(e, a);
             }
             case eok_call:
@@ -8280,13 +8296,13 @@ private:
             case eok_points_to_field:
                 return member_read(e);
             case eok_ref_indirect:
-                if (cx_.contract && ops.size() == 1 && ops[0]->kind == enk_operation &&
-                    ops[0]->variant.operation.kind == eok_call)
+                if (cx_.contract && ops.size() == 1U && ops[0U]->kind == enk_operation &&
+                    ops[0U]->variant.operation.kind == eok_call)
                 {
-                    a_routine_ptr callee = direct_callee(ops[0]);
+                    a_routine_ptr callee {direct_callee(ops[0U])};
                     if (callee != nullptr && rname(callee) == "cerastes::old")
                     {
-                        return old_call(e, ops[0]);
+                        return old_call(e, ops[0U]);
                     }
                 }
                 break;
@@ -8308,7 +8324,7 @@ private:
     // (decision 0032 item 8); unknown for a block the compiler made.
     SrcLoc end_of(const a_source_position& p)
     {
-        return p.seq != 0 ? loc_of(p) : SrcLoc();
+        return p.seq != 0U ? loc_of(p) : SrcLoc();
     }
     SrcLoc block_end(a_statement_ptr s)
     {
@@ -8337,7 +8353,7 @@ private:
     // without braces keeps none.
     const Stmt* cell_block(Out&& v, const a_source_position& p, a_statement_ptr sub, bool loop_body = false)
     {
-        const Stmt* decl = nullptr;
+        const Stmt* decl {nullptr};
         for (const Stmt* x : v)
         {
             if (x->kind == Stmt::Kind::Decl && x->var != nullptr && x->var->address_taken)
@@ -8350,7 +8366,7 @@ private:
         {
             if (loop_body && sub != nullptr && sub->kind == stmk_block && !sub->compiler_generated)
             {
-                SrcLoc brace = block_end(sub);
+                SrcLoc brace {block_end(sub)};
                 if (brace.known())
                 {
                     return block_of(std::move(v), p, std::move(brace));
@@ -8358,7 +8374,7 @@ private:
             }
             return block_of(std::move(v), p);
         }
-        SrcLoc end = sub != nullptr ? end_of(sub->end_position) : SrcLoc();
+        SrcLoc end {sub != nullptr ? end_of(sub->end_position) : SrcLoc()};
         if (!end.known())
         {
             reject_loc(Diag::unsupported_statement, decl->loc,
@@ -8375,7 +8391,7 @@ private:
     // `_Noreturn` on a function the user declared first cannot be told apart; that is the user's contract (0011 items 5-6).
     bool user_declared_noreturn(a_routine_ptr r)
     {
-        a_routine_type_supplement_ptr x = routine_supplement(r);
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
         if (x == nullptr || !x->does_not_return)
         {
             return false;
@@ -8385,15 +8401,15 @@ private:
             // "does not return" of a C library function is vlibc's (decision 0046 item 5), never the program's
             return false;
         }
-        const a_source_position decl = r->source_corresp.decl_position;
-        if (decl.seq == 0 || physical_path(decl).empty() || !in_verified_file(decl))
+        const a_source_position decl {r->source_corresp.decl_position};
+        if (decl.seq == 0U || physical_path(decl).empty() || !in_verified_file(decl))
         {
             return false;
         }
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
         {
             if (a->kind == ak_noreturn &&
-                (a->position.seq == 0 || physical_path(a->position).empty() || !in_verified_file(a->position)))
+                (a->position.seq == 0U || physical_path(a->position).empty() || !in_verified_file(a->position)))
             {
                 return false;
             }
@@ -8408,7 +8424,7 @@ private:
     // function (C23 7.1.3 reserves the name only as an identifier with external linkage).
     static bool is_library_routine(a_routine_ptr r)
     {
-        const char* n = r->source_corresp.name;
+        const char* n {r->source_corresp.name};
         if (n == nullptr || r->source_corresp.is_class_member)
         {
             return false;
@@ -8435,7 +8451,7 @@ private:
         {
             return false;
         }
-        a_scope_ptr ps = r->source_corresp.parent_scope;
+        a_scope_ptr ps {r->source_corresp.parent_scope};
         return ps == nullptr || !(ps->kind == sck_namespace || ps->kind == sck_namespace_extension ||
                                   ps->kind == sck_namespace_reactivation || ps->kind == sck_class_struct_union ||
                                   ps->kind == sck_class_reactivation);
@@ -8464,7 +8480,7 @@ private:
         a_source_position at {};
         auto consider = [&](const a_source_position& p)
         {
-            if (written_by_program(p) && (at.seq == 0 || p.seq < at.seq || (p.seq == at.seq && p.column < at.column)))
+            if (written_by_program(p) && (at.seq == 0U || p.seq < at.seq || (p.seq == at.seq && p.column < at.column)))
             {
                 at = p;
             }
@@ -8472,7 +8488,7 @@ private:
         consider(r->source_corresp.decl_position);
         if (ents_ != nullptr)
         {
-            if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+            if (auto sd {ents_->secondary_decls.find(r)}; sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
                 {
@@ -8480,7 +8496,7 @@ private:
                 }
             }
         }
-        if (at.seq == 0)
+        if (at.seq == 0U)
         {
             return;
         }
@@ -8499,7 +8515,7 @@ private:
         a_source_position at {};
         auto consider = [&](const a_source_position& p)
         {
-            if (at.seq == 0 && in_verified_file(p))
+            if (at.seq == 0U && in_verified_file(p))
             {
                 at = p;
             }
@@ -8507,7 +8523,7 @@ private:
         consider(v->source_corresp.decl_position);
         if (ents_ != nullptr)
         {
-            if (auto sd = ents_->variable_secondary_decls.find(v); sd != ents_->variable_secondary_decls.end())
+            if (auto sd {ents_->variable_secondary_decls.find(v)}; sd != ents_->variable_secondary_decls.end())
             {
                 for (const a_source_position& p : sd->second)
                 {
@@ -8515,7 +8531,7 @@ private:
                 }
             }
         }
-        if (at.seq == 0)
+        if (at.seq == 0U)
         {
             return;
         }
@@ -8528,7 +8544,7 @@ private:
     // Where a program wrote an attribute or a body: a placed position in a verified file that is not a library file.
     static bool written_by_program(const a_source_position& p)
     {
-        return p.seq != 0 && in_verified_file(p) && !in_library_file(p);
+        return p.seq != 0U && in_verified_file(p) && !in_library_file(p);
     }
 
     // What a call of a bodiless routine would reach other than its declared function (decision 0046 item 8): an asm label (also
@@ -8537,7 +8553,7 @@ private:
     // what no such entry shows: an asm label, `#pragma redefine_extname`, `#pragma weak`, and an entry written in a library or system file.
     static bool shown_by_program_entry(a_routine_ptr r, std::initializer_list<int> kinds)
     {
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
         {
             for (int k : kinds)
             {
@@ -8577,7 +8593,7 @@ private:
     {
         if (ents_ != nullptr)
         {
-            auto sd = ents_->secondary_decls.find(r);
+            auto sd {ents_->secondary_decls.find(r)};
             if (sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
@@ -8596,8 +8612,8 @@ private:
     // (`ok`; the rejection was reported when not), the tag's text for the emitted method and the declaration that carries the contract.
     struct LibTrust
     {
-        bool has = false;
-        bool ok = false;
+        bool has {false};
+        bool ok {false};
         std::string reason;
         a_source_position decl {};
     };
@@ -8620,7 +8636,7 @@ private:
     static bool file_lines(const std::string& path, std::vector<std::string>* out)
     {
         static std::map<std::string, std::vector<std::string>> cache;
-        auto it = cache.find(path);
+        auto it {cache.find(path)};
         if (it == cache.end())
         {
             std::ifstream in(path, std::ios::binary);
@@ -8647,13 +8663,13 @@ private:
     // The physical file and 1-based line of sequence number `seq` (what `#line` could not change).
     static bool physical_place(a_seq_number seq, std::string* path, unsigned long* line)
     {
-        if (seq == 0)
+        if (seq == 0U)
         {
             return false;
         }
-        a_source_file_ptr f = nullptr;
-        a_line_number ln = 0;
-        a_boolean at_end = FALSE;
+        a_source_file_ptr f {nullptr};
+        a_line_number ln {0U};
+        a_boolean at_end {FALSE};
         conv_seq_to_physical_file_and_line(seq, &f, &ln, &at_end);
         if (f == nullptr || f->full_name == nullptr)
         {
@@ -8666,12 +8682,13 @@ private:
 
     static std::string trimmed(const std::string& s)
     {
-        size_t b = 0, e = s.size();
+        size_t b {0U};
+        size_t e {s.size()};
         while (b < e && (s[b] == ' ' || s[b] == '\t'))
         {
             ++b;
         }
-        while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t'))
+        while (e > b && (s[e - 1U] == ' ' || s[e - 1U] == '\t'))
         {
             --e;
         }
@@ -8681,43 +8698,43 @@ private:
     // `// cerastes:trusted-contract vlibc: <name> <reason>`: true with the name and the reason.
     static bool parse_tag(const std::string& line, std::string* name, std::string* reason)
     {
-        std::string s = trimmed(line);
-        if (s.compare(0, 2, "//") != 0)
+        std::string s {trimmed(line)};
+        if (s.compare(0U, 2U, "//") != 0)
         {
             return false;
         }
-        s = trimmed(s.substr(2));
-        static const char kTag[] = "cerastes:trusted-contract";
-        if (s.compare(0, sizeof kTag - 1, kTag) != 0)
+        s = trimmed(s.substr(2U));
+        static const char kTag[] {"cerastes:trusted-contract"};
+        if (s.compare(0U, sizeof kTag - 1U, kTag) != 0)
         {
             return false;
         }
-        s = s.substr(sizeof kTag - 1);
-        if (s.empty() || (s[0] != ' ' && s[0] != '\t'))
-        {
-            return false;
-        }
-        s = trimmed(s);
-        if (s.compare(0, 6, "vlibc:") != 0)
-        {
-            return false;
-        }
-        s = s.substr(6);
-        if (s.empty() || (s[0] != ' ' && s[0] != '\t'))
+        s = s.substr(sizeof kTag - 1U);
+        if (s.empty() || (s[0U] != ' ' && s[0U] != '\t'))
         {
             return false;
         }
         s = trimmed(s);
-        size_t e = 0;
+        if (s.compare(0U, 6U, "vlibc:") != 0)
+        {
+            return false;
+        }
+        s = s.substr(6U);
+        if (s.empty() || (s[0U] != ' ' && s[0U] != '\t'))
+        {
+            return false;
+        }
+        s = trimmed(s);
+        size_t e {0U};
         while (e < s.size() && (std::isalnum(static_cast<unsigned char>(s[e])) || s[e] == '_'))
         {
             ++e;
         }
-        if (e == 0)
+        if (e == 0U)
         {
             return false;
         }
-        *name = s.substr(0, e);
+        *name = s.substr(0U, e);
         *reason = trimmed(s.substr(e));
         return !reason->empty() && (e == s.size() || s[e] == ' ' || s[e] == '\t');
     }
@@ -8727,18 +8744,18 @@ private:
     static bool find_tag(const std::vector<std::string>& lines, unsigned long line, std::string* name,
                          std::string* reason)
     {
-        if (line < 2 || line - 1 > lines.size())
+        if (line < 2U || line - 1U > lines.size())
         {
             return false;
         }
-        for (unsigned long i = line - 1, steps = 0; i > 0 && steps < 8; --i, ++steps)
+        for (unsigned long i {line - 1U}, steps {0U}; i > 0U && steps < 8U; --i, ++steps)
         { // lines[i - 1] is 1-based line i
-            const std::string s = trimmed(lines[i - 1]);
+            const std::string s {trimmed(lines[i - 1U])};
             if (s.empty())
             {
                 return false;
             }
-            if (s.compare(0, 2, "//") == 0)
+            if (s.compare(0U, 2U, "//") == 0)
             {
                 return parse_tag(s, name, reason);
             }
@@ -8755,38 +8772,38 @@ private:
     static bool attribute_identifiers(const a_source_position& pos, std::set<std::string>* ids)
     {
         std::string path;
-        unsigned long line = 0;
+        unsigned long line {0U};
         std::vector<std::string> lines;
-        if (!physical_place(pos.seq, &path, &line) || !file_lines(path, &lines) || line == 0 || line > lines.size() ||
+        if (!physical_place(pos.seq, &path, &line) || !file_lines(path, &lines) || line == 0U || line > lines.size() ||
             pos.column == 0)
         {
             return false;
         }
-        int depth = 0;
-        bool opened = false;
-        for (unsigned long l = line - 1; l < lines.size() && l < line - 1 + 40; ++l)
+        int depth {0};
+        bool opened {false};
+        for (unsigned long l {line - 1U}; l < lines.size() && l < line - 1U + 40U; ++l)
         {
-            const std::string& s = lines[l];
-            size_t i = l == line - 1 ? pos.column - 1 : 0;
+            const std::string& s {lines[l]};
+            size_t i {static_cast<size_t>(l == line - 1U ? pos.column - 1 : 0)};
             if (i > s.size())
             {
                 return false;
             }
             // The column must be where the attribute's own text starts (a tab or a wide character could move it): otherwise the text read is not the contract's.
-            if (l == line - 1 && s.compare(i, 9, "CERASTES_") != 0 && s.compare(i, 2, "[[") != 0)
+            if (l == line - 1U && s.compare(i, 9U, "CERASTES_") != 0 && s.compare(i, 2U, "[[") != 0)
             {
                 return false;
             }
             for (; i < s.size(); ++i)
             {
-                const char c = s[i];
-                if (c == '/' && i + 1 < s.size() && s[i + 1] == '/')
+                const char c {s[i]};
+                if (c == '/' && i + 1U < s.size() && s[i + 1U] == '/')
                 {
                     break; // a comment to the end of the line
                 }
                 if (c == '"' || c == '\'')
                 { // a literal: its text names nothing
-                    const char q = c;
+                    const char q {c};
                     for (++i; i < s.size() && s[i] != q; ++i)
                     {
                         if (s[i] == '\\')
@@ -8798,8 +8815,8 @@ private:
                 }
                 if (std::isdigit(static_cast<unsigned char>(c)))
                 { // a number (`0x1f`, `1e5`) names nothing
-                    while (i + 1 < s.size() && (std::isalnum(static_cast<unsigned char>(s[i + 1])) || s[i + 1] == '_' ||
-                                                s[i + 1] == '.' || s[i + 1] == '\''))
+                    while (i + 1U < s.size() && (std::isalnum(static_cast<unsigned char>(s[i + 1U])) ||
+                                                 s[i + 1U] == '_' || s[i + 1U] == '.' || s[i + 1U] == '\''))
                     {
                         ++i;
                     }
@@ -8807,13 +8824,13 @@ private:
                 }
                 if (std::isalpha(static_cast<unsigned char>(c)) || c == '_')
                 {
-                    size_t e = i;
+                    size_t e {i};
                     while (e < s.size() && (std::isalnum(static_cast<unsigned char>(s[e])) || s[e] == '_'))
                     {
                         ++e;
                     }
                     ids->insert(s.substr(i, e - i));
-                    i = e - 1;
+                    i = e - 1U;
                     continue;
                 }
                 if (c == '(' || c == '[')
@@ -8843,13 +8860,13 @@ private:
         {
             return "";
         }
-        const char* t = m->text;
-        t += std::strncmp(t, "#undef", 6) == 0 ? 6 : std::strncmp(t, "#define", 7) == 0 ? 7 : 0;
+        const char* t {m->text};
+        t += std::strncmp(t, "#undef", 6U) == 0 ? 6 : std::strncmp(t, "#define", 7U) == 0 ? 7 : 0;
         while (*t == ' ' || *t == '\t')
         {
             ++t;
         }
-        const char* e = t;
+        const char* e {t};
         while (std::isalnum(static_cast<unsigned char>(*e)) || *e == '_')
         {
             ++e;
@@ -8867,15 +8884,15 @@ private:
             lib_internal_error(a->position, "the source text of a contract in a library file cannot be read");
             return false;
         }
-        bool intact = true;
-        for (a_macro_ptr m = il_header.macros; m != nullptr; m = m->next)
+        bool intact {true};
+        for (a_macro_ptr m {il_header.macros}; m != nullptr; m = m->next)
         {
             if (m->is_predefined && !m->is_undef)
             {
                 continue; // the compiler's own definition
             }
-            const std::string n = macro_directive_name(m);
-            if (n.empty() || ids.count(n) == 0)
+            const std::string n {macro_directive_name(m)};
+            if (n.empty() || ids.count(n) == 0U)
             {
                 continue;
             }
@@ -8912,20 +8929,20 @@ private:
             }
             out.push_back(a);
         };
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
         {
             add(a);
         }
         auto params = [&](a_type_ptr t)
         {
-            a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+            a_type_ptr rt {t != nullptr ? skip_typerefs(t) : nullptr};
             if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr)
             {
                 return;
             }
-            for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+            for (a_param_type_ptr p {rt->variant.routine.extra_info->param_type_list}; p != nullptr; p = p->next)
             {
-                for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {p->attributes}; a != nullptr; a = a->next)
                 {
                     add(a);
                 }
@@ -8935,12 +8952,12 @@ private:
         params(r->declared_type);
         if (ents_ != nullptr)
         {
-            if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+            if (auto sd {ents_->secondary_decls.find(r)}; sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
                 {
                     params(q.declared_type);
-                    for (an_attribute_ptr a = q.attributes; a != nullptr; a = a->next)
+                    for (an_attribute_ptr a {q.attributes}; a != nullptr; a = a->next)
                     {
                         add(a);
                     }
@@ -8958,15 +8975,15 @@ private:
     // Anything else is an internal error (exit status 3).  The routine is then never read by check_signature or function_of: a call is a typed view (`void*` to `T*`).
     struct HeapShape
     {
-        bool allocation = true; // (A); else (D)
-        bool zeroed = false;    // (A): `zeroed(B)` beside the block (calloc)
+        bool allocation {true}; // (A); else (D)
+        bool zeroed {false};    // (A): `zeroed(B)` beside the block (calloc)
         // (A): `ref_to_uninit` on the routine (malloc: the block's contents are indeterminate)
-        bool result_uninit = false;
+        bool result_uninit {false};
         std::vector<int> size_params; // (A): the 0-based parameters whose product is the size S
         std::string reason;           // vlibc's tag: "vlibc: <name> <reason>"
         a_source_position pos {};     // vlibc's declaration
         // the routine's name class (decision 0050 item 3): a standard name or a `vlibc_` name
-        vir::Allocator allocator = vir::Allocator::Platform;
+        vir::Allocator allocator {vir::Allocator::Platform};
     };
     std::map<a_routine_ptr, HeapShape> heap_shapes_;
 
@@ -8974,10 +8991,10 @@ private:
     static bool is_void_pointer_type(a_type_ptr t)
     {
         t = t != nullptr ? skip_typerefs(t) : nullptr;
-        int depth = 0;
+        int depth {0};
         while (t != nullptr && t->kind == tk_pointer && !t->variant.pointer.is_reference && depth < 16)
         {
-            a_type_ptr e = t->variant.pointer.type != nullptr ? skip_typerefs(t->variant.pointer.type) : nullptr;
+            a_type_ptr e {t->variant.pointer.type != nullptr ? skip_typerefs(t->variant.pointer.type) : nullptr};
             if (e != nullptr && e->kind == tk_void)
             {
                 return true;
@@ -8994,10 +9011,10 @@ private:
         {
             return true;
         }
-        a_routine_type_supplement_ptr x = routine_supplement(r);
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
         if (x != nullptr)
         {
-            for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next)
+            for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next)
             {
                 if (is_void_pointer_type(p->type))
                 {
@@ -9011,10 +9028,10 @@ private:
     // The nodes of an expression that change no value (the front end's implicit conversions, its bool conversion of a condition, an lvalue wrapper).
     static an_expr_node_ptr heap_peel(an_expr_node_ptr e)
     {
-        for (int guard = 0; e != nullptr && e->kind == enk_operation && guard < 16; ++guard)
+        for (int guard {0}; e != nullptr && e->kind == enk_operation && guard < 16; ++guard)
         {
-            const an_expr_operator_kind k = e->variant.operation.kind;
-            an_expr_node_ptr o = e->variant.operation.operands;
+            const an_expr_operator_kind k {e->variant.operation.kind};
+            an_expr_node_ptr o {e->variant.operation.operands};
             if (o == nullptr || o->next != nullptr)
             {
                 break;
@@ -9039,7 +9056,7 @@ private:
         {
             return false;
         }
-        a_constant_ptr c = e->variant.constant.ptr;
+        a_constant_ptr c {e->variant.constant.ptr};
         return c->kind == ck_integer && decimal_value(c) == "0";
     }
 
@@ -9051,7 +9068,7 @@ private:
         {
             return {};
         }
-        std::vector<an_expr_node_ptr> ops = operands_of(e);
+        std::vector<an_expr_node_ptr> ops {operands_of(e)};
         return ops.size() == n ? ops : std::vector<an_expr_node_ptr>();
     }
 
@@ -9059,13 +9076,13 @@ private:
     static std::vector<an_expr_node_ptr> heap_call(an_expr_node_ptr e, const char* name, size_t n)
     {
         e = heap_peel(e);
-        a_routine_ptr callee = direct_callee(e);
+        a_routine_ptr callee {direct_callee(e)};
         if (callee == nullptr || rname(callee) != name || !declared_in_cerastes_header(callee))
         {
             return {};
         }
-        std::vector<an_expr_node_ptr> ops = operands_of(e);
-        if (ops.size() != n + 1)
+        std::vector<an_expr_node_ptr> ops {operands_of(e)};
+        if (ops.size() != n + 1U)
         {
             return {};
         }
@@ -9081,7 +9098,7 @@ private:
         {
             return ParamRef::Kind::unmapped;
         }
-        const ParamRef r = interpret_param_ref(e, annot, binder, 0);
+        const ParamRef r {interpret_param_ref(e, annot, binder, 0)};
         *num = r.num;
         return r.kind;
     }
@@ -9089,15 +9106,15 @@ private:
     // `B == NULL` (either order) where B is the result binder (`binder`) or parameter `param` (1-based, for a `requires`).
     bool heap_null_test(an_expr_node_ptr e, Annot annot, bool binder, unsigned param)
     {
-        const std::vector<an_expr_node_ptr> ops = heap_operation(e, eok_eq, 2);
+        const std::vector<an_expr_node_ptr> ops {heap_operation(e, eok_eq, 2U)};
         if (ops.empty())
         {
             return false;
         }
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
-            unsigned num = 0;
-            const ParamRef::Kind k = heap_param_ref(ops[static_cast<size_t>(i)], annot, binder, &num);
+            unsigned num {0U};
+            const ParamRef::Kind k {heap_param_ref(ops[static_cast<size_t>(i)], annot, binder, &num)};
             if (!heap_is_null(ops[static_cast<size_t>(1 - i)]))
             {
                 continue;
@@ -9113,30 +9130,31 @@ private:
     // The size of an allocation: a parameter, or the product of two (0-based indices in `*out`).
     bool heap_size(an_expr_node_ptr e, size_t nparams, std::vector<int>* out)
     {
-        unsigned num = 0;
+        unsigned num {0U};
         if (heap_param_ref(e, Annot::ensures, true, &num) == ParamRef::Kind::param)
         {
-            if (num < 1 || num > nparams)
+            if (num < 1U || num > nparams)
             {
                 return false;
             }
             out->push_back(static_cast<int>(num) - 1);
             return true;
         }
-        const std::vector<an_expr_node_ptr> m = heap_operation(e, eok_multiply, 2);
+        const std::vector<an_expr_node_ptr> m {heap_operation(e, eok_multiply, 2U)};
         if (m.empty())
         {
             return false;
         }
-        return heap_size(m[0], nparams, out) && out->size() == 1 && heap_size(m[1], nparams, out) && out->size() == 2;
+        return heap_size(m[0U], nparams, out) && out->size() == 1U && heap_size(m[1U], nparams, out) &&
+               out->size() == 2U;
     }
 
     // Reads the shape of the vlibc-trusted routine `r` whose signature mentions `void *`; an internal error (exit status 3) when it has neither.
     void recognize_heap_shape(a_routine_ptr r)
     {
-        const LibTrust& lt = lib_trust(r);
-        const std::string name = r->source_corresp.name != nullptr ? r->source_corresp.name : "?";
-        bool failed = false;
+        const LibTrust& lt {lib_trust(r)};
+        const std::string name {r->source_corresp.name != nullptr ? r->source_corresp.name : "?"};
+        bool failed {false};
         auto fail = [&](const std::string& why)
         {
             if (!failed)
@@ -9150,7 +9168,7 @@ private:
             }
             failed = true;
         };
-        a_routine_type_supplement_ptr x = routine_supplement(r);
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
         if (x == nullptr)
         {
             return fail("its type cannot be read");
@@ -9160,7 +9178,7 @@ private:
             return fail("a variadic or unprototyped declaration");
         }
         std::vector<a_param_type_ptr> params;
-        for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next)
+        for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next)
         {
             params.push_back(p);
         }
@@ -9173,14 +9191,14 @@ private:
                 return; // reported by read_marker
             }
         }
-        bool result_uninit = false;
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+        bool result_uninit {false};
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
         {
             if (!is_registered_cerastes(a) || !in_library_file(a->position))
             {
                 continue;
             }
-            const Annot k = classify(a);
+            const Annot k {classify(a)};
             if (k == Annot::ref_to_uninit)
             {
                 result_uninit = true;
@@ -9190,7 +9208,8 @@ private:
                 return fail("`" + std::string(a->name) + "` on the routine");
             }
         }
-        std::vector<an_attribute_ptr> requires_, ensures_;
+        std::vector<an_attribute_ptr> requires_;
+        std::vector<an_attribute_ptr> ensures_;
         for (an_attribute_ptr a : contracts_of(r))
         {
             if (classify(a) == Annot::requires_)
@@ -9208,7 +9227,7 @@ private:
         }
         auto only_expression = [&](an_attribute_ptr a, an_expr_node_ptr* out)
         {
-            int exprs = 0;
+            int exprs {0};
             for (const AnnotArg& g : arguments_of(a))
             {
                 if (g.kind == AnnotArg::Kind::expression)
@@ -9227,50 +9246,50 @@ private:
         sh.pos = lt.decl;
         sh.reason = lt.reason;
         sh.allocator = vlibc_own_name(name.c_str()) ? vir::Allocator::Vlibc : vir::Allocator::Platform;
-        a_type_ptr ret = return_type(r);
-        a_type_ptr ret_s = ret != nullptr ? skip_typerefs(ret) : nullptr;
+        a_type_ptr ret {return_type(r)};
+        a_type_ptr ret_s {ret != nullptr ? skip_typerefs(ret) : nullptr};
         if (is_void_pointer_type(ret) && ret_s != nullptr && ret_s->kind == tk_pointer &&
             ret_s->variant.pointer.type != nullptr && skip_typerefs(ret_s->variant.pointer.type)->kind == tk_void)
         {
             // (A)
             for (a_param_type_ptr p : params)
             {
-                a_type_ptr pt = p->type != nullptr ? skip_typerefs(p->type) : nullptr;
+                a_type_ptr pt {p->type != nullptr ? skip_typerefs(p->type) : nullptr};
                 if (pt == nullptr || pt->kind != tk_integer || pt->variant.integer.enum_type)
                 {
                     return fail("a parameter that is not an integer");
                 }
             }
-            if (auto mk = markers_.find(r); mk != markers_.end() && !mk->second.empty())
+            if (auto mk {markers_.find(r)}; mk != markers_.end() && !mk->second.empty())
             {
                 return fail("a marker on a parameter of an allocation");
             }
-            if (!requires_.empty() || ensures_.size() != 1)
+            if (!requires_.empty() || ensures_.size() != 1U)
             {
                 return fail("an allocation has no `requires` and exactly one `ensures`");
             }
-            an_attribute_ptr en = ensures_[0];
-            an_expr_node_ptr e = nullptr;
+            an_attribute_ptr en {ensures_[0U]};
+            an_expr_node_ptr e {nullptr};
             if (!only_expression(en, &e) || !has_binder(en))
             {
                 return fail("the `ensures` has no result name");
             }
-            const std::vector<an_expr_node_ptr> lor = heap_operation(e, eok_lor, 2);
-            if (lor.empty() || !heap_null_test(lor[0], Annot::ensures, true, 0))
+            const std::vector<an_expr_node_ptr> lor {heap_operation(e, eok_lor, 2U)};
+            if (lor.empty() || !heap_null_test(lor[0U], Annot::ensures, true, 0U))
             {
                 return fail("the `ensures` is not `r == NULL || ...`");
             }
-            std::vector<an_expr_node_ptr> owns = heap_call(lor[1], "cerastes_owns_block", 2);
+            std::vector<an_expr_node_ptr> owns {heap_call(lor[1U], "cerastes_owns_block", 2U)};
             if (owns.empty())
             {
-                const std::vector<an_expr_node_ptr> land = heap_operation(lor[1], eok_land, 2);
+                const std::vector<an_expr_node_ptr> land {heap_operation(lor[1U], eok_land, 2U)};
                 if (!land.empty())
                 {
-                    owns = heap_call(land[0], "cerastes_owns_block", 2);
-                    const std::vector<an_expr_node_ptr> zr = heap_call(land[1], "cerastes_zeroed", 1);
-                    unsigned num = 0;
+                    owns = heap_call(land[0U], "cerastes_owns_block", 2U);
+                    const std::vector<an_expr_node_ptr> zr {heap_call(land[1U], "cerastes_zeroed", 1U)};
+                    unsigned num {0U};
                     if (owns.empty() || zr.empty() ||
-                        heap_param_ref(zr[0], Annot::ensures, true, &num) != ParamRef::Kind::binder)
+                        heap_param_ref(zr[0U], Annot::ensures, true, &num) != ParamRef::Kind::binder)
                     {
                         return fail(
                             "the `ensures` after `r == NULL ||` is not `owns_block(r, size)` or `owns_block(r, size) && zeroed(r)`");
@@ -9278,13 +9297,13 @@ private:
                     sh.zeroed = true;
                 }
             }
-            unsigned num = 0;
-            if (owns.empty() || heap_param_ref(owns[0], Annot::ensures, true, &num) != ParamRef::Kind::binder)
+            unsigned num {0U};
+            if (owns.empty() || heap_param_ref(owns[0U], Annot::ensures, true, &num) != ParamRef::Kind::binder)
             {
                 return fail(
                     "the `ensures` after `r == NULL ||` is not `owns_block(r, size)` or `owns_block(r, size) && zeroed(r)`");
             }
-            if (!heap_size(owns[1], params.size(), &sh.size_params))
+            if (!heap_size(owns[1U], params.size(), &sh.size_params))
             {
                 return fail("the size is not a parameter or the product of two");
             }
@@ -9305,31 +9324,31 @@ private:
             {
                 return fail("`ref_to_uninit` on the routine of a deallocation");
             }
-            if (params.size() != 1 || !is_void_pointer_type(params[0]->type) || !ensures_.empty() ||
-                requires_.size() != 1)
+            if (params.size() != 1U || !is_void_pointer_type(params[0U]->type) || !ensures_.empty() ||
+                requires_.size() != 1U)
             {
                 return fail("a deallocation has one `void *` parameter, one `requires` and no `ensures`");
             }
-            auto mk = markers_.find(r);
-            if (mk == markers_.end() || mk->second.size() != 1 || mk->second[0].index != 0 ||
-                mk->second[0].kind != vir::InitMarker::RefToUninit)
+            auto mk {markers_.find(r)};
+            if (mk == markers_.end() || mk->second.size() != 1U || mk->second[0U].index != 0 ||
+                mk->second[0U].kind != vir::InitMarker::RefToUninit)
             {
                 return fail("the parameter is not marked `ref_to_uninit`");
             }
-            an_expr_node_ptr e = nullptr;
-            if (!only_expression(requires_[0], &e) || has_binder(requires_[0]))
+            an_expr_node_ptr e {nullptr};
+            if (!only_expression(requires_[0U], &e) || has_binder(requires_[0U]))
             {
                 return fail("the `requires` is not `p == NULL || owns_block(p)`");
             }
-            const std::vector<an_expr_node_ptr> lor = heap_operation(e, eok_lor, 2);
-            if (lor.empty() || !heap_null_test(lor[0], Annot::requires_, false, 1))
+            const std::vector<an_expr_node_ptr> lor {heap_operation(e, eok_lor, 2U)};
+            if (lor.empty() || !heap_null_test(lor[0U], Annot::requires_, false, 1U))
             {
                 return fail("the `requires` is not `p == NULL || owns_block(p)`");
             }
-            const std::vector<an_expr_node_ptr> owns = heap_call(lor[1], "cerastes_owns_block", 1);
-            unsigned num = 0;
-            if (owns.empty() || heap_param_ref(owns[0], Annot::requires_, false, &num) != ParamRef::Kind::param ||
-                num != 1)
+            const std::vector<an_expr_node_ptr> owns {heap_call(lor[1U], "cerastes_owns_block", 1U)};
+            unsigned num {0U};
+            if (owns.empty() || heap_param_ref(owns[0U], Annot::requires_, false, &num) != ParamRef::Kind::param ||
+                num != 1U)
             {
                 return fail("the `requires` is not `p == NULL || owns_block(p)`");
             }
@@ -9349,7 +9368,7 @@ private:
     // each failure once.  The memoized result is read by function_of and callee_for_call.
     const LibTrust& lib_trust(a_routine_ptr r)
     {
-        auto it = lib_trust_.find(r);
+        auto it {lib_trust_.find(r)};
         if (it != lib_trust_.end())
         {
             return it->second;
@@ -9358,7 +9377,7 @@ private:
         // A routine with a body in a verified file (a library file's `inline` helper included) is verified like user code, its contract checked and
         // used as written: trust and the reserved-name rule of a contract in a library file are for routines without one (decision 0046 items 3-4).
         std::vector<an_attribute_ptr> lib_attrs;
-        bool elsewhere = false; // a requires/ensures/decreases not written in a library file
+        bool elsewhere {false}; // a requires/ensures/decreases not written in a library file
         for (an_attribute_ptr a : contracts_of(r))
         {
             if (in_library_file(a->position))
@@ -9380,8 +9399,8 @@ private:
         {
             return lib_trust_.emplace(r, t).first->second;
         }
-        const a_source_position at = lib_attrs[0]->position;
-        const std::string name = r->source_corresp.name != nullptr ? r->source_corresp.name : "?";
+        const a_source_position at {lib_attrs[0U]->position};
+        const std::string name {r->source_corresp.name != nullptr ? r->source_corresp.name : "?"};
         // A reserved name that has internal linkage here (`static void exit(int);` before the header: the header's declaration inherits it) is the
         // program's own function, and vlibc's contract would attach to it (C23 7.1.3), with a body or without.  Any other library routine with a
         // body is verified like user code (items 3-4).
@@ -9394,7 +9413,7 @@ private:
             auto earliest = [&](const a_source_position& p)
             {
                 if (written_by_program(p) &&
-                    (own.seq == 0 || p.seq < own.seq || (p.seq == own.seq && p.column < own.column)))
+                    (own.seq == 0U || p.seq < own.seq || (p.seq == own.seq && p.column < own.column)))
                 {
                     own = p;
                 }
@@ -9402,7 +9421,7 @@ private:
             earliest(r->source_corresp.decl_position);
             if (ents_ != nullptr)
             {
-                if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+                if (auto sd {ents_->secondary_decls.find(r)}; sd != ents_->secondary_decls.end())
                 {
                     for (const IlEntities::SecondaryDecl& q : sd->second)
                     {
@@ -9411,7 +9430,7 @@ private:
                 }
             }
             reject(
-                Diag::annotation_reserved_library, own.seq != 0 ? own : at,
+                Diag::annotation_reserved_library, own.seq != 0U ? own : at,
                 vlibc_own_name(name.c_str())
                     ? "`" + name +
                           "` is declared `static` by the program, so vlibc's contract on it would attach to the program's own function (vlibc's own function has external linkage: decision 0048 item 5)"
@@ -9426,8 +9445,8 @@ private:
             return lib_trust_.emplace(r, t).first->second;
         }
         t.has = true;
-        a_scope_ptr bsp = body_scope(r);
-        const bool has_body = bsp != nullptr && bsp->assoc_block != nullptr;
+        a_scope_ptr bsp {body_scope(r)};
+        const bool has_body {bsp != nullptr && bsp->assoc_block != nullptr};
         // Trust needs C language linkage too (item 4): with the platform's header skipped by a guard macro, vlibc's declaration is the first one and has C++ linkage.
         if (!is_library_routine(r) || r->source_corresp.name_linkage != nlk_external)
         {
@@ -9436,12 +9455,12 @@ private:
                 "a contract in vlibc's headers on `" + name +
                     "`, which vlibc does not cover or which has no C language linkage (a macro may have renamed it, or the platform's declaration was skipped)");
         }
-        else if (elsewhere || has_body || reserved_rejected_.count(r) != 0)
+        else if (elsewhere || has_body || reserved_rejected_.count(r) != 0U)
         {
             // The program's own contract or definition on the library's routine is reported by check_reserved_library; nothing is trusted beside it.
             // Anything else that keeps trust away (a contract positioned in neither a library nor a program file, a body in a library file) must say so
             // here: a caller that gets no function after "a rejection" assumes there was one.
-            if (reserved_rejected_.count(r) == 0)
+            if (reserved_rejected_.count(r) == 0U)
             {
                 reject(
                     Diag::annotation_reserved_library, at,
@@ -9455,13 +9474,13 @@ private:
             std::vector<a_source_position> decls;
             if (ents_ != nullptr)
             {
-                auto sd = ents_->secondary_decls.find(r);
+                auto sd {ents_->secondary_decls.find(r)};
                 if (sd != ents_->secondary_decls.end())
                 {
                     for (const IlEntities::SecondaryDecl& q : sd->second)
                     {
-                        bool holds = false;
-                        for (an_attribute_ptr x = q.attributes; x != nullptr; x = x->next)
+                        bool holds {false};
+                        for (an_attribute_ptr x {q.attributes}; x != nullptr; x = x->next)
                         {
                             for (an_attribute_ptr a : lib_attrs)
                             {
@@ -9472,13 +9491,13 @@ private:
                             }
                         }
                         // A marker on a parameter lives in the declaration's own parameter list (P52).
-                        if (a_type_ptr dt = q.declared_type != nullptr ? skip_typerefs(q.declared_type) : nullptr;
+                        if (a_type_ptr dt {q.declared_type != nullptr ? skip_typerefs(q.declared_type) : nullptr};
                             dt != nullptr && dt->kind == tk_routine && dt->variant.routine.extra_info != nullptr)
                         {
-                            for (a_param_type_ptr pp = dt->variant.routine.extra_info->param_type_list; pp != nullptr;
+                            for (a_param_type_ptr pp {dt->variant.routine.extra_info->param_type_list}; pp != nullptr;
                                  pp = pp->next)
                             {
-                                for (an_attribute_ptr x = pp->attributes; x != nullptr; x = x->next)
+                                for (an_attribute_ptr x {pp->attributes}; x != nullptr; x = x->next)
                                 {
                                     for (an_attribute_ptr a : lib_attrs)
                                     {
@@ -9502,35 +9521,37 @@ private:
                 lib_internal_error(at,
                                    "no declaration of `" + name + "` carries its contract written in a library file");
             }
-            else if (decls.size() != 1)
+            else if (decls.size() != 1U)
             {
                 lib_internal_error(at, "the contract of `" + name +
                                            "` in a library file is spread over several declarations");
             }
             else
             {
-                std::string path, tag_name, reason;
-                unsigned long line = 0;
+                std::string path;
+                std::string tag_name;
+                std::string reason;
+                unsigned long line {0U};
                 std::vector<std::string> lines;
-                if (!physical_place(decls[0].seq, &path, &line) || !file_lines(path, &lines) ||
+                if (!physical_place(decls[0U].seq, &path, &line) || !file_lines(path, &lines) ||
                     !find_tag(lines, line, &tag_name, &reason))
                 {
                     lib_internal_error(
-                        decls[0],
+                        decls[0U],
                         "the declaration of `" + name +
                             "` in a library file has no `cerastes:trusted-contract vlibc:` tag on the line above it");
                 }
                 else if (tag_name != name)
                 {
-                    lib_internal_error(decls[0],
+                    lib_internal_error(decls[0U],
                                        "the tag above the declaration of `" + name + "` names `" + tag_name + "`");
                 }
                 else
                 {
-                    bool intact = true;
-                    if (const std::string bad = vlibc_class_problem(name.c_str()); !bad.empty())
+                    bool intact {true};
+                    if (const std::string bad {vlibc_class_problem(name.c_str())}; !bad.empty())
                     {
-                        lib_internal_error(decls[0], bad);
+                        lib_internal_error(decls[0U], bad);
                         intact = false;
                     }
                     // A marker's text is its macro or attribute name, which are protected names (is_protected_macro_name): only contracts carry other identifiers.
@@ -9545,7 +9566,7 @@ private:
                     {
                         t.ok = true;
                         t.reason = "vlibc: " + tag_name + " " + reason;
-                        t.decl = decls[0];
+                        t.decl = decls[0U];
                     }
                 }
             }
@@ -9562,8 +9583,8 @@ private:
         {
             return false;
         }
-        const std::string n = r->source_corresp.name;
-        bool any = false;
+        const std::string n {r->source_corresp.name};
+        bool any {false};
         auto reject_lib = [&](const a_source_position& p, const std::string& what)
         {
             if (vlibc_own_name(n.c_str())) // decision 0050 item 8: vlibc's own function, not C23 7.1.3's reservation
@@ -9580,7 +9601,7 @@ private:
             }
             any = true;
         };
-        for (an_attribute_ptr a = r->source_corresp.attributes; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
         {
             if (!written_by_program(a->position))
             {
@@ -9597,14 +9618,14 @@ private:
         }
         auto marks = [&](a_type_ptr t)
         {
-            a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+            a_type_ptr rt {t != nullptr ? skip_typerefs(t) : nullptr};
             if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr)
             {
                 return;
             }
-            for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+            for (a_param_type_ptr p {rt->variant.routine.extra_info->param_type_list}; p != nullptr; p = p->next)
             {
-                for (an_attribute_ptr a = p->attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {p->attributes}; a != nullptr; a = a->next)
                 {
                     if (is_registered_cerastes(a) && written_by_program(a->position))
                     {
@@ -9616,11 +9637,11 @@ private:
         };
         marks(r->type);
         marks(r->declared_type);
-        bool platform_decl =
-            r->source_corresp.decl_position.seq == 0 || !written_by_program(r->source_corresp.decl_position);
+        bool platform_decl {r->source_corresp.decl_position.seq == 0U ||
+                            !written_by_program(r->source_corresp.decl_position)};
         if (ents_ != nullptr)
         {
-            auto sd = ents_->secondary_decls.find(r);
+            auto sd {ents_->secondary_decls.find(r)};
             if (sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
@@ -9632,13 +9653,13 @@ private:
         }
         if (a_scope_ptr bs = body_scope(r))
         {
-            for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next)
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
             {
                 if (!v->is_parameter || v->is_this_parameter || v->variant.assoc_param_type == nullptr)
                 {
                     continue;
                 }
-                for (an_attribute_ptr a = v->variant.assoc_param_type->attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {v->variant.assoc_param_type->attributes}; a != nullptr; a = a->next)
                 {
                     if (is_registered_cerastes(a) && written_by_program(a->position))
                     {
@@ -9652,7 +9673,7 @@ private:
                 reject_lib(r->source_corresp.decl_position, "define it");
             }
         }
-        a_routine_type_supplement_ptr x = routine_supplement(r);
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
         if (x != nullptr && x->does_not_return && !platform_decl)
         {
             reject_lib(r->source_corresp.decl_position, "declare it `noreturn` (`_Noreturn`)");
@@ -9668,16 +9689,16 @@ private:
     // is declared here or not and called or not, is held to the allow-list unless it is written in a system file (check_attributes skips those).
     void check_routine_attributes(a_routine_ptr r)
     {
-        a_routine_type_supplement_ptr rx = routine_supplement(r);
+        a_routine_type_supplement_ptr rx {routine_supplement(r)};
         check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return, true);
         auto params = [&](a_type_ptr t)
         {
-            a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+            a_type_ptr rt {t != nullptr ? skip_typerefs(t) : nullptr};
             if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr)
             {
                 return;
             }
-            for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+            for (a_param_type_ptr p {rt->variant.routine.extra_info->param_type_list}; p != nullptr; p = p->next)
             {
                 check_attributes(p->attributes, false, true);
             }
@@ -9686,7 +9707,7 @@ private:
         params(r->declared_type);
         if (ents_ != nullptr)
         {
-            auto sd = ents_->secondary_decls.find(r);
+            auto sd {ents_->secondary_decls.find(r)};
             if (sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
@@ -9698,7 +9719,7 @@ private:
         }
         if (a_scope_ptr bs = body_scope(r))
         {
-            for (a_variable_ptr v = bs->variant.routine.parameters; v != nullptr; v = v->next)
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
             {
                 if (v->is_parameter && !v->is_this_parameter && v->variant.assoc_param_type != nullptr)
                 {
@@ -9711,7 +9732,7 @@ private:
     // Item 8 at a call of a bodiless routine whose contract is used: reports and returns true when the call may reach other code.
     bool reject_redirected_call(a_routine_ptr callee, const a_source_position& at)
     {
-        const char* why = redirection(callee);
+        const char* why {redirection(callee)};
         if (why == nullptr)
         {
             return false;
@@ -9729,7 +9750,7 @@ private:
     // ---- the heap's typed views (decision 0047 item 2) ----------------------------------------------------------------------------------
     const HeapShape* heap_shape_of(a_routine_ptr r) const
     {
-        auto it = heap_shapes_.find(r);
+        auto it {heap_shapes_.find(r)};
         return it == heap_shapes_.end() ? nullptr : &it->second;
     }
 
@@ -9737,11 +9758,11 @@ private:
     // rejection, lib_trust's verdict and 0046 item 8's redirections.  False after a rejection.
     bool heap_routine_usable(a_routine_ptr r, const a_source_position& at)
     {
-        if (reserved_rejected_.count(r) != 0)
+        if (reserved_rejected_.count(r) != 0U)
         {
             return false;
         }
-        const LibTrust& lt = lib_trust(r);
+        const LibTrust& lt {lib_trust(r)};
         if (!lt.has || !lt.ok)
         {
             return false; // rejected there
@@ -9760,15 +9781,15 @@ private:
     // `T *` for the zero test of one leaf of calloc's block: the leaf at `path` of the struct (or the object itself) under the result.
     const Expr* heap_zero_clause(vir::Function* f, const std::vector<int>& path, const vir::Type& leaf, const SrcLoc& l)
     {
-        const Expr* addr = b_.result(*f, l);
+        const Expr* addr {b_.result(*f, l)};
         for (int k : path)
         {
             addr = b_.member_addr(addr, k, l);
         }
-        const Expr* value = b_.deref(addr, l);
-        const Expr* zero = leaf.is_bool()  ? b_.bool_const(false, l)
-                           : leaf.is_ptr() ? b_.null_const(leaf, l)
-                                           : b_.int_const(leaf, "0", l);
+        const Expr* value {b_.deref(addr, l)};
+        const Expr* zero {leaf.is_bool()  ? b_.bool_const(false, l)
+                          : leaf.is_ptr() ? b_.null_const(leaf, l)
+                                          : b_.int_const(leaf, "0", l)};
         return b_.binary(vir::BinaryOp::Eq, value, zero, l);
     }
 
@@ -9783,9 +9804,9 @@ private:
                 return v.fn;
             }
         }
-        const SrcLoc l = loc_of(sh.pos);
-        const vir::Type pty = prog_.pointer_to(pointee);
-        vir::Function* f = prog_.add_function(rname(r), sh.allocation ? pty : vir::Type::void_type(), l, l);
+        const SrcLoc l {loc_of(sh.pos)};
+        const vir::Type pty {prog_.pointer_to(pointee)};
+        vir::Function* f {prog_.add_function(rname(r), sh.allocation ? pty : vir::Type::void_type(), l, l)};
         f->allocator = sh.allocator;
         f->trusted_reason = sh.reason + "; typed view: one " + pointee.str() + " (" +
                             std::to_string(static_cast<unsigned long long>(size_of_type(skip_typerefs(edg_pointee)))) +
@@ -9793,10 +9814,10 @@ private:
         if (sh.allocation)
         {
             // ensures r == NULL || owns_block(r) [&& every leaf is zero]
-            const Expr* res = b_.result(*f, l);
+            const Expr* res {b_.result(*f, l)};
             b_.text(res, "r");
-            const Expr* isnull = b_.binary(vir::BinaryOp::Eq, res, b_.null_const(pty, l), l);
-            const Expr* rhs = b_.atom(vir::AtomKind::OwnsBlock, b_.result(*f, l), -1, l);
+            const Expr* isnull {b_.binary(vir::BinaryOp::Eq, res, b_.null_const(pty, l), l)};
+            const Expr* rhs {b_.atom(vir::AtomKind::OwnsBlock, b_.result(*f, l), -1, l)};
             if (sh.zeroed)
             {
                 if (pointee.is_struct())
@@ -9820,13 +9841,13 @@ private:
         else
         {
             // requires p == NULL || owns_block(p); the parameter is `ref_to_uninit`: free takes the storage whatever it holds
-            const int k = f->add_param("ptr", pty, l);
+            const int k {f->add_param("ptr", pty, l)};
             f->params[static_cast<size_t>(k)].c_type_name = pty.str();
             f->params[static_cast<size_t>(k)].init = vir::InitMarker::RefToUninit;
-            const Expr* p0 = b_.formal(*f, k, l);
+            const Expr* p0 {b_.formal(*f, k, l)};
             b_.text(p0, "ptr");
-            const Expr* isnull = b_.binary(vir::BinaryOp::Eq, p0, b_.null_const(pty, l), l);
-            const Expr* p1 = b_.formal(*f, k, l);
+            const Expr* isnull {b_.binary(vir::BinaryOp::Eq, p0, b_.null_const(pty, l), l)};
+            const Expr* p1 {b_.formal(*f, k, l)};
             b_.text(p1, "ptr");
             f->requires_.push_back(vir::Clause {
                 b_.binary(vir::BinaryOp::LOr, isnull, b_.atom(vir::AtomKind::OwnsBlock, p1, -1, l), l), l});
@@ -9838,19 +9859,19 @@ private:
 
     static bool pointee_qualified(a_type_ptr pointer_type)
     {
-        a_type_ptr t = pointer_type != nullptr ? skip_typerefs(pointer_type) : nullptr;
+        a_type_ptr t {pointer_type != nullptr ? skip_typerefs(pointer_type) : nullptr};
         if (t == nullptr || t->kind != tk_pointer || t->variant.pointer.type == nullptr)
         {
             return false;
         }
-        return (f_get_type_qualifiers(t->variant.pointer.type, TRUE) & (TQ_CONST | TQ_VOLATILE)) != 0;
+        return (f_get_type_qualifiers(t->variant.pointer.type, TRUE) & (TQ_CONST | TQ_VOLATILE)) != 0U;
     }
 
     // The conversion `cast` (to `T *`) of the direct call `call` of the allocation routine `r`: the call of the view for `T`.  The size arguments must be
     // integer constants whose product is `sizeof(T)`.
     const Expr* allocation_view(an_expr_node_ptr cast, an_expr_node_ptr call, a_routine_ptr r, const HeapShape& sh)
     {
-        const std::string name = rname(r);
+        const std::string name {rname(r)};
         if (!heap_routine_usable(r, call->position))
         {
             return nullptr;
@@ -9866,8 +9887,8 @@ private:
                     "an object in vlibc's allocation has no lifetime by the standard's letter; a typed view of it needs placement `new` (M7; C programs are supported; decision 0050 item 7)");
             return nullptr;
         }
-        a_type_ptr ct = skip_typerefs(cast->type);
-        a_type_ptr pt = ct->variant.pointer.type != nullptr ? skip_typerefs(ct->variant.pointer.type) : nullptr;
+        a_type_ptr ct {skip_typerefs(cast->type)};
+        a_type_ptr pt {ct->variant.pointer.type != nullptr ? skip_typerefs(ct->variant.pointer.type) : nullptr};
         if (pt == nullptr || pt->kind == tk_void)
         {
             reject(
@@ -9899,21 +9920,21 @@ private:
         // The size: the product of the size parameters' arguments, each an integer constant the front end folded, equal to sizeof(T).  Every argument is
         // also encoded through its original expression (as any folded constant is), so its own checks stay (0022's no-wrap check, 0020 item 5, 0024); its value
         // is discarded (audit S1).
-        const std::vector<an_expr_node_ptr> ops = operands_of(call);
+        const std::vector<an_expr_node_ptr> ops {operands_of(call)};
         std::vector<const Expr*> checked;
-        for (size_t i = 1; i < ops.size(); ++i)
+        for (size_t i {1U}; i < ops.size(); ++i)
         {
-            const Expr* a = expr(ops[i]);
+            const Expr* a {expr(ops[i])};
             if (a == nullptr)
             {
                 return nullptr;
             }
             checked.push_back(a);
         }
-        unsigned long long product = 1;
+        unsigned long long product {1U};
         for (int k : sh.size_params)
         {
-            const size_t at = static_cast<size_t>(k) + 1;
+            const size_t at {static_cast<size_t>(k) + 1U};
             if (at >= ops.size() || ops[at]->kind != enk_constant || ops[at]->variant.constant.ptr == nullptr ||
                 ops[at]->variant.constant.ptr->kind != ck_integer)
             {
@@ -9922,9 +9943,9 @@ private:
                            "` is supported for one object, `sizeof(T)` bytes, until M4.5e2 (decision 0047 item 2)");
                 return nullptr;
             }
-            const std::string d = decimal_value(ops[at]->variant.constant.ptr);
-            unsigned long long v = 0;
-            bool bad = d.empty() || d.size() > 19;
+            const std::string d {decimal_value(ops[at]->variant.constant.ptr)};
+            unsigned long long v {0U};
+            bool bad {d.empty() || d.size() > 19U};
             for (char c : d)
             {
                 bad = bad || c < '0' || c > '9';
@@ -9940,7 +9961,7 @@ private:
                 return nullptr;
             }
         }
-        const unsigned long long want = static_cast<unsigned long long>(size_of_type(pt));
+        const unsigned long long want {static_cast<unsigned long long>(size_of_type(pt))};
         if (product != want)
         {
             reject(Diag::unsupported_expression, call->position,
@@ -9949,14 +9970,14 @@ private:
                        " bytes): only `sizeof(T)` bytes for a `T *` is supported until M4.5e2 (decision 0047 item 2)");
             return nullptr;
         }
-        vir::Function* v = heap_view(r, sh, *to.t.pointee, pt);
+        vir::Function* v {heap_view(r, sh, *to.t.pointee, pt)};
         if (verify_config().strict_init && v->result_init == vir::InitMarker::RefToUninit)
         { // decision 0047 item 8 (audit S6)
             reject_strict_uninit_result(v, call->position);
             return nullptr;
         }
-        const Expr* c = b_.call(v, {}, loc_of(call->position));
-        for (auto it = checked.rbegin(); it != checked.rend(); ++it)
+        const Expr* c {b_.call(v, {}, loc_of(call->position))};
+        for (auto it {checked.rbegin()}; it != checked.rend(); ++it)
         {
             if ((*it)->kind != Expr::Kind::Const)
             {
@@ -9982,7 +10003,7 @@ private:
     const Expr* heap_call(an_expr_node_ptr e, a_routine_ptr callee, const HeapShape& sh,
                           const std::vector<an_expr_node_ptr>& ops)
     {
-        const std::string name = rname(callee);
+        const std::string name {rname(callee)};
         if (!heap_routine_usable(callee, e->position))
         {
             return nullptr; // decision 0047 item 2 (audit B2): lib_trust's verdict, the reserved-name rule, 0046 item 8
@@ -9997,18 +10018,18 @@ private:
                        name + "(sizeof(T))` (decision 0047 item 11; `void *` objects: M4.7, M8)");
             return nullptr;
         }
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             reject(Diag::unsupported_expression, e->position,
                    "a call whose arguments do not match the declaration of \"" + name + "\"");
             return nullptr;
         }
-        an_expr_node_ptr arg = ops[1];
+        an_expr_node_ptr arg {ops[1U]};
         // The front end folds `(void *)&g` (the address of a global or a static object) into a constant of its own; the conversion is in its original expression.
         if (arg->kind == enk_constant && arg->variant.constant.ptr != nullptr &&
             arg->variant.constant.ptr->kind == ck_address)
         {
-            if (an_expr_node_ptr orig = expr_node_from_constant(arg->variant.constant.ptr); orig != nullptr)
+            if (an_expr_node_ptr orig {expr_node_from_constant(arg->variant.constant.ptr)}; orig != nullptr)
             {
                 arg = orig;
             }
@@ -10024,9 +10045,9 @@ private:
                     "pointer's static type (decision 0047 item 2, 0028 item 6)");
             return nullptr;
         }
-        an_expr_node_ptr operand = arg->variant.operation.operands;
-        a_type_ptr ot = skip_typerefs(operand->type);
-        a_type_ptr pt = ot->variant.pointer.type != nullptr ? skip_typerefs(ot->variant.pointer.type) : nullptr;
+        an_expr_node_ptr operand {arg->variant.operation.operands};
+        a_type_ptr ot {skip_typerefs(operand->type)};
+        a_type_ptr pt {ot->variant.pointer.type != nullptr ? skip_typerefs(ot->variant.pointer.type) : nullptr};
         if (pt == nullptr || pt->kind == tk_void)
         {
             reject(
@@ -10048,7 +10069,7 @@ private:
         {
             return nullptr;
         }
-        const Expr* a = expr(operand);
+        const Expr* a {expr(operand)};
         if (a == nullptr)
         {
             return nullptr;
@@ -10059,7 +10080,7 @@ private:
                    "a conversion whose operand has another type than the IL says");
             return nullptr;
         }
-        vir::Function* v = heap_view(callee, sh, *from.t.pointee, pt);
+        vir::Function* v {heap_view(callee, sh, *from.t.pointee, pt)};
         return b_.call(v, {a}, loc_of(e->position));
     }
 
@@ -10079,7 +10100,7 @@ private:
                        "\") in a termination measure (a measure holds no permission atom, decision 0038 item 10)");
             return nullptr;
         }
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             reject(
                 Diag::unsupported_annotation, e->position,
@@ -10093,7 +10114,7 @@ private:
                    "\"" + name + "\" under \"old\" (decision 0047 item 4: M4.5d2b)");
             return nullptr;
         }
-        an_expr_node_ptr a = peel_place(ops[1]);
+        an_expr_node_ptr a {peel_place(ops[1U])};
         if (a == nullptr || a->kind != enk_param_ref)
         {
             reject(
@@ -10103,7 +10124,7 @@ private:
                     "(decision 0047 item 4)");
             return nullptr;
         }
-        const Expr* p = expr(a);
+        const Expr* p {expr(a)};
         if (p == nullptr)
         {
             return nullptr;
@@ -10123,7 +10144,7 @@ private:
                     "\" of a pointer to a `const` object (a function that only reads it takes `reads`, decision 0040 item 2)");
             return nullptr;
         }
-        const Expr* atom = b_.atom(vir::AtomKind::OwnsBlock, p, -1, loc_of(e->position));
+        const Expr* atom {b_.atom(vir::AtomKind::OwnsBlock, p, -1, loc_of(e->position))};
         atom_pos_[atom] = e->position;
         return atom;
     }
@@ -10133,7 +10154,7 @@ private:
     {
         auto marked = [&](an_attribute_ptr list)
         {
-            for (an_attribute_ptr a = list; a != nullptr; a = a->next)
+            for (an_attribute_ptr a {list}; a != nullptr; a = a->next)
             {
                 if (is_registered_cerastes(a) && is_param_marker(classify(a)))
                 {
@@ -10144,12 +10165,12 @@ private:
         };
         auto params = [&](a_type_ptr t)
         {
-            a_type_ptr rt = t != nullptr ? skip_typerefs(t) : nullptr;
+            a_type_ptr rt {t != nullptr ? skip_typerefs(t) : nullptr};
             if (rt == nullptr || rt->kind != tk_routine || rt->variant.routine.extra_info == nullptr)
             {
                 return false;
             }
-            for (a_param_type_ptr p = rt->variant.routine.extra_info->param_type_list; p != nullptr; p = p->next)
+            for (a_param_type_ptr p {rt->variant.routine.extra_info->param_type_list}; p != nullptr; p = p->next)
             {
                 if (marked(p->attributes))
                 {
@@ -10164,7 +10185,7 @@ private:
         }
         if (ents_ != nullptr)
         {
-            if (auto sd = ents_->secondary_decls.find(r); sd != ents_->secondary_decls.end())
+            if (auto sd {ents_->secondary_decls.find(r)}; sd != ents_->secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
                 {
@@ -10182,10 +10203,10 @@ private:
     // program declared, or an `owning` parameter.  Shared by callee_for_call and the run loop's skip of contract-less library routines (decision 0050 item 6).
     bool routine_has_contract(a_routine_ptr r)
     {
-        bool has_contract = false;
+        bool has_contract {false};
         for (an_attribute_ptr a : contracts_of(r))
         {
-            const Annot k = classify(a);
+            const Annot k {classify(a)};
             if (k == Annot::requires_ || k == Annot::ensures)
             {
                 has_contract = true;
@@ -10202,9 +10223,9 @@ private:
         // An owning parameter is a contract (decision 0040 item 3: it stands for `p == NULL || owns(*p)` in both lists).
         if (a_routine_type_supplement_ptr cx = routine_supplement(r))
         {
-            for (a_param_type_ptr p = cx->param_type_list; p != nullptr && !has_contract; p = p->next)
+            for (a_param_type_ptr p {cx->param_type_list}; p != nullptr && !has_contract; p = p->next)
             {
-                for (an_attribute_ptr at = p->attributes; at != nullptr; at = at->next)
+                for (an_attribute_ptr at {p->attributes}; at != nullptr; at = at->next)
                 {
                     if (classify(at) == Annot::owning)
                     {
@@ -10224,7 +10245,7 @@ private:
             reject(Diag::unsupported_expression, at, "a call of \"main\"");
             return nullptr;
         }
-        auto it = fns_.find(callee);
+        auto it {fns_.find(callee)};
         if (it != fns_.end() && it->second != nullptr)
         {
             // A function made early (the run loop forces one for a struct parameter or a marker) is a contract all the same: item 8 holds at every call.
@@ -10234,22 +10255,22 @@ private:
             }
             return it->second;
         }
-        if (reserved_rejected_.count(callee) != 0)
+        if (reserved_rejected_.count(callee) != 0U)
         {
             return nullptr; // rejected for its reserved name
         }
-        const bool has_body_here = verified_body(callee) != nullptr;
+        const bool has_body_here {verified_body(callee) != nullptr};
         if (has_body_here)
         {
             // Defined in a verified file: created when its turn comes; created here if the call is first.
-            vir::Function* f = function_of(callee, true, at);
+            vir::Function* f {function_of(callee, true, at)};
             return f;
         }
-        if (reserved_rejected_.count(callee) != 0)
+        if (reserved_rejected_.count(callee) != 0U)
         {
             return nullptr; // the program's contract, mark or definition on the library's routine was rejected
         }
-        if (const LibTrust& lib = lib_trust(callee); lib.has)
+        if (const LibTrust& lib {lib_trust(callee)}; lib.has)
         {
             if (!lib.ok)
             {
@@ -10281,15 +10302,15 @@ private:
 
     void annotation_statement(an_attribute_ptr a, a_statement_ptr s, Out& out)
     {
-        const Annot k = classify(a);
+        const Annot k {classify(a)};
         if (k != Annot::check)
         {
             reject(Diag::unsupported_statement, s->position,
                    "\"cerastes::" + std::string(a->name ? a->name : "?") + "\" here");
             return;
         }
-        an_expr_node_ptr arg = nullptr;
-        int exprs = 0;
+        an_expr_node_ptr arg {nullptr};
+        int exprs {0};
         for (const AnnotArg& g : arguments_of(a))
         {
             if (g.kind == AnnotArg::Kind::expression)
@@ -10306,7 +10327,7 @@ private:
         cx_.annotation = true;
         cx_.check_clause = true;
         truth_context(arg); // decision 0023 item 5: `check(x | 4)`
-        const Expr* c = clause_bool(expr(arg), arg->position);
+        const Expr* c {clause_bool(expr(arg), arg->position)};
         cx_.check_clause = false;
         cx_.annotation = false;
         if (c != nullptr)
@@ -10320,21 +10341,21 @@ private:
     bool encode_loop_clauses(a_statement_ptr s, std::vector<vir::Clause>& invariants, std::vector<vir::Clause>& measure,
                              bool require_measure = true, bool atoms_ok = true)
     {
-        bool ok = true;
-        bool has_decreases = false;
-        for (an_attribute_ptr a = s->attributes; a != nullptr; a = a->next)
+        bool ok {true};
+        bool has_decreases {false};
+        for (an_attribute_ptr a {s->attributes}; a != nullptr; a = a->next)
         {
             if (!is_registered_cerastes(a))
             {
                 continue;
             }
-            const Annot k = classify(a);
+            const Annot k {classify(a)};
             if (k == Annot::decreases)
             {
                 has_decreases = true;
                 cx_.annotation = true;
                 cx_.loop_clause = true; // decision 0038 item 6: a loop measure may read memory
-                const size_t before = measure.size();
+                const size_t before {measure.size()};
                 encode_measure(a, measure);
                 cx_.loop_clause = false;
                 cx_.annotation = false;
@@ -10351,8 +10372,8 @@ private:
                 ok = false;
                 continue;
             }
-            an_expr_node_ptr arg = nullptr;
-            int exprs = 0;
+            an_expr_node_ptr arg {nullptr};
+            int exprs {0};
             for (const AnnotArg& g : arguments_of(a))
             {
                 if (g.kind == AnnotArg::Kind::expression)
@@ -10373,8 +10394,8 @@ private:
             cx_.loop_invariant = true;
             cx_.invariant_atoms_ok = atoms_ok;
             truth_context(arg); // decision 0023 item 5: `invariant(x | 4)`
-            const Expr* c = clause_bool(expr(arg), arg->position);
-            const SrcLoc clause_loc = loc_of(a->position);
+            const Expr* c {clause_bool(expr(arg), arg->position)};
+            const SrcLoc clause_loc {loc_of(a->position)};
             cx_.loop_invariant = false;
             cx_.invariant_atoms_ok = false;
             cx_.loop_clause = false;
@@ -10405,9 +10426,9 @@ private:
     // A declaration: the variable and its type; the initializer comes with the `stmk_init` (P11).
     void declaration(a_statement_ptr s, Out& out)
     {
-        for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next)
+        for (an_il_entity_list_entry_ptr en {s->variant.decl.entities}; en != nullptr; en = en->next)
         {
-            const a_tagged_pointer& t = en->entity;
+            const a_tagged_pointer& t {en->entity};
             if (t.kind == iek_static_assertion)
             { // decision 0024 item 2: checked as written, in the prologue
                 encode_block_static_assertion(reinterpret_cast<a_static_assertion_ptr>(t.ptr));
@@ -10415,7 +10436,7 @@ private:
             }
             if (t.kind == iek_type)
             {
-                a_type_ptr ty = reinterpret_cast<a_type_ptr>(t.ptr);
+                a_type_ptr ty {reinterpret_cast<a_type_ptr>(t.ptr)};
                 if (ty->kind == tk_typeref)
                 {
                     continue; // a typedef
@@ -10430,8 +10451,8 @@ private:
                 reject(Diag::unsupported_declaration, s->position, "this kind of declaration");
                 continue;
             }
-            a_variable_ptr v = reinterpret_cast<a_variable_ptr>(t.ptr);
-            const a_source_position at = v->source_corresp.decl_position;
+            a_variable_ptr v {reinterpret_cast<a_variable_ptr>(t.ptr)};
+            const a_source_position at {v->source_corresp.decl_position};
             check_attributes(v->source_corresp.attributes);
             reject_asm_label_declaration(v); // a block-scope `extern int x __asm__("_exit");` (decision 0046 item 8)
             // Decision 0041 item 12 (P63 A6): a `static` local of an accepted type is a block of the program; its declaration emits nothing.
@@ -10449,8 +10470,8 @@ private:
                 cx_.rejected_vars.insert(v);
                 continue;
             }
-            const bool vla = v->is_vla || v->has_variably_modified_type;
-            VType vt = vtype_object(v->type);
+            const bool vla {v->is_vla || v->has_variably_modified_type};
+            VType vt {vtype_object(v->type)};
             if (!vt.ok || vt.t.is_void())
             {
                 if (vt.ok)
@@ -10469,7 +10490,7 @@ private:
             {
                 // Decision 0043 item 4: a struct local is a block of its struct type (always a cell).  A `const` one waits for M4.6; an initializer is expanded
                 // into leaf stores (item 6).
-                if ((f_get_type_qualifiers(v->type, TRUE) & TQ_CONST) != 0)
+                if ((f_get_type_qualifiers(v->type, TRUE) & TQ_CONST) != 0U)
                 {
                     reject(Diag::unsupported_declaration, at,
                            "a `const` struct local (const objects come with M4.6, decision 0043 item 2)");
@@ -10485,10 +10506,10 @@ private:
             }
             // Decision 0042 item 3: `[[cerastes::uninit]]` on a definition without an initializer; it changes nothing in VIR.  Under `--strict-init`
             // (item 8) a definition without an initializer and without the marker is rejected.
-            bool marked = false;
+            bool marked {false};
             {
-                int count = 0;
-                for (an_attribute_ptr a = v->source_corresp.attributes; a != nullptr; a = a->next)
+                int count {0};
+                for (an_attribute_ptr a {v->source_corresp.attributes}; a != nullptr; a = a->next)
                 {
                     if (!is_registered_cerastes(a) || classify(a) != Annot::uninit)
                     {
@@ -10510,7 +10531,7 @@ private:
                 }
                 if (!marked && v->init_kind == initk_none && verify_config().strict_init && !is_const_object(v))
                 {
-                    const std::string n = v->source_corresp.name ? v->source_corresp.name : "?";
+                    const std::string n {v->source_corresp.name ? v->source_corresp.name : "?"};
                     reject(
                         Diag::uninit_unmarked, at,
                         "the local variable `" + n +
@@ -10527,8 +10548,8 @@ private:
                 cx_.rejected_vars.insert(v);
                 continue;
             }
-            const char* nm = v->source_corresp.name;
-            vir::Var* var = cx_.fn->new_local(nm ? nm : "", vt.t, loc_of(at));
+            const char* nm {v->source_corresp.name};
+            vir::Var* var {cx_.fn->new_local(nm ? nm : "", vt.t, loc_of(at))};
             var->c_type_name = vt.name;
             cx_.vars[v] = var;
             if (marked)
@@ -10574,7 +10595,7 @@ private:
                      const a_source_position& at, Out& out)
     {
         cx_.declaring = v;
-        const Expr* x = nullptr;
+        const Expr* x {nullptr};
         if (init_expr != nullptr)
         {
             allow_enum_conversion(init_expr); // decision 0018 item 6 (iii)
@@ -10612,7 +10633,7 @@ private:
         node.position = at;
         // A whole initializer (decision 0018 item 6 (iii)): the mark is on this stack node only, and goes before it does.
         allow_enum_conversion(&node);
-        const Expr* x = constant(&node);
+        const Expr* x {constant(&node)};
         enum_conv_ok_.erase(&node);
         return x;
     }
@@ -10626,12 +10647,12 @@ private:
         {
             return false;
         }
-        const Expr* root = vir::member_root(addr);
+        const Expr* root {vir::member_root(addr)};
         if (root == nullptr || root->kind != Expr::Kind::AddrOf || root->var == nullptr)
         {
             return false;
         }
-        auto it = cx_.vars.find(cx_.declaring);
+        auto it {cx_.vars.find(cx_.declaring)};
         if (it == cx_.vars.end() || it->second != root->var)
         {
             return false;
@@ -10644,7 +10665,7 @@ private:
     // The chain `&root->m1->...->mn` for the member path `path` (each member address built over the same root node).
     const Expr* leaf_address(const Expr* root, const std::vector<int>& path, const SrcLoc& l)
     {
-        const Expr* a = root;
+        const Expr* a {root};
         for (int k : path)
         {
             a = b_.member_addr(a, k, l);
@@ -10655,7 +10676,7 @@ private:
     // The value an unmentioned leaf has: zero, `false` or null, as for an object with static storage (item 6).
     const Expr* zero_leaf(const vir::Type& t, const a_source_position& at)
     {
-        const SrcLoc l = loc_of(at);
+        const SrcLoc l {loc_of(at)};
         if (t.is_bool())
         {
             return b_.bool_const(false, l);
@@ -10678,8 +10699,8 @@ private:
     struct InitElem
     {
         std::vector<int> path;
-        a_constant_ptr c = nullptr;
-        an_expr_node_ptr e = nullptr;
+        a_constant_ptr c {nullptr};
+        an_expr_node_ptr e {nullptr};
         a_source_position at {};
     };
 
@@ -10688,26 +10709,26 @@ private:
     bool collect_init_elems(const vir::StructType& st, std::vector<int>& prefix, a_constant_ptr agg,
                             std::vector<InitElem>& out, const a_source_position& at, bool elided = false)
     {
-        size_t cursor = 0;
-        bool ok = true;
-        bool after_designator = false;
+        size_t cursor {0U};
+        bool ok {true};
+        bool after_designator {false};
         // the member the previous element initialized (a designator must not go back: out of declaration order, both
         // modes)
-        long last_member = -1;
-        for (a_constant_ptr c = agg->variant.aggregate.first_constant; c != nullptr; c = c->next)
+        long last_member {-1};
+        for (a_constant_ptr c {agg->variant.aggregate.first_constant}; c != nullptr; c = c->next)
         {
-            const a_source_position cp =
-                c->source_corresp.decl_position.seq != 0 ? c->source_corresp.decl_position : at;
+            const a_source_position cp {c->source_corresp.decl_position.seq != 0U ? c->source_corresp.decl_position
+                                                                                  : at};
             if (c->kind == ck_designator)
             {
-                a_field_ptr f = c->variant.designator.is_field_designator && !c->variant.designator.is_generic
-                                    ? c->variant.designator.variant.field
-                                    : nullptr;
-                const char* name = f != nullptr ? f->source_corresp.name : nullptr;
-                bool found = false;
+                a_field_ptr f {c->variant.designator.is_field_designator && !c->variant.designator.is_generic
+                                   ? c->variant.designator.variant.field
+                                   : nullptr};
+                const char* name {f != nullptr ? f->source_corresp.name : nullptr};
+                bool found {false};
                 if (name != nullptr)
                 {
-                    for (size_t k = 0; k < st.members.size(); ++k)
+                    for (size_t k {0U}; k < st.members.size(); ++k)
                     {
                         if (st.members[k].name == name)
                         {
@@ -10739,17 +10760,17 @@ private:
                        "an initializer list with more elements than the struct has members");
                 return false;
             }
-            const vir::Type& mt = st.members[cursor].type;
+            const vir::Type& mt {st.members[cursor].type};
             prefix.push_back(static_cast<int>(cursor));
             last_member = static_cast<long>(cursor);
-            const bool by_designator = after_designator;
+            const bool by_designator {after_designator};
             after_designator = false;
             if (mt.is_struct())
             {
                 if (c->kind == ck_aggregate)
                 {
                     // Brace elision over a nested struct (`struct T t = {1, 2, 3};`: -Wmissing-braces) is rejected, except C's universal `{0}` (a lone zero).
-                    const bool elision = !c->explicit_braces_on_aggregate && !by_designator;
+                    const bool elision {!c->explicit_braces_on_aggregate && !by_designator};
                     if (elision && !(agg->variant.aggregate.first_constant == c && c->next == nullptr))
                     {
                         // the folded form of a struct temporary in an initializer's call: no braces flags at any level
@@ -10794,7 +10815,7 @@ private:
                 el.at = cp;
                 if (c->kind == ck_dynamic_init)
                 {
-                    a_dynamic_init_ptr dyn = c->variant.dynamic_init.ptr;
+                    a_dynamic_init_ptr dyn {c->variant.dynamic_init.ptr};
                     if (dyn == nullptr || dyn->kind != dik_expression)
                     {
                         reject(Diag::unsupported_declaration, cp, "an initializer element this version cannot read");
@@ -10848,12 +10869,12 @@ private:
             return;
         }
         // The source: an lvalue of the structure's type (decision 0043 item 7); a `?:`, comma, assignment, call or compound literal is a struct value.
-        an_expr_node_ptr sn = src_node;
+        an_expr_node_ptr sn {src_node};
         // `u = mk().t;` and `struct T u = mk().t;`: a member of a call or a temporary is a struct value, not an object (decision 0044 items 2 and 5).
-        const bool over_value = sn != nullptr && is_dot_node(peel_value(sn)) && member_chain_over_value(sn);
-        const bool lvalue_shape = !over_value && sn != nullptr &&
-                                  (sn->kind == enk_variable || is_member_node(sn) ||
-                                   (sn->kind == enk_operation && sn->variant.operation.kind == eok_indirect));
+        const bool over_value {sn != nullptr && is_dot_node(peel_value(sn)) && member_chain_over_value(sn)};
+        const bool lvalue_shape {!over_value && sn != nullptr &&
+                                 (sn->kind == enk_variable || is_member_node(sn) ||
+                                  (sn->kind == enk_operation && sn->variant.operation.kind == eok_indirect))};
         if (!lvalue_shape)
         {
             // Decision 0044 item 5: a call, or in C++ `S{...}` / `S()` / a braced list, is a struct value: one struct Store of it (the value's leaves, after it exists).
@@ -10872,10 +10893,10 @@ private:
                 "a struct copied from a struct value that is not a variable, `*p`, a member, a call or (C++) `S{...}`, `S()` (decision 0044 item 5)");
             return;
         }
-        const bool d_effect = dest_node != nullptr && first_effect(dest_node) != nullptr;
-        const bool s_effect = first_effect(sn) != nullptr;
-        const SrcLoc l = loc_of(at);
-        const Expr* src = place_address(sn);
+        const bool d_effect {dest_node != nullptr && first_effect(dest_node) != nullptr};
+        const bool s_effect {first_effect(sn) != nullptr};
+        const SrcLoc l {loc_of(at)};
+        const Expr* src {place_address(sn)};
         if (src == nullptr)
         {
             return;
@@ -10890,7 +10911,7 @@ private:
         }
         auto simple_root = [&](const Expr* a)
         {
-            const Expr* r = vir::member_root(a);
+            const Expr* r {vir::member_root(a)};
             return r->kind == Expr::Kind::AddrOf || r->kind == Expr::Kind::Local || r->kind == Expr::Kind::GlobalAddr;
         };
         if ((d_effect || s_effect) && !(simple_root(dest) && simple_root(src)))
@@ -10903,29 +10924,29 @@ private:
         auto stable = [&](const Expr* a)
         {
             std::vector<int> path;
-            const Expr* root = vir::member_root(a, &path);
+            const Expr* root {vir::member_root(a, &path)};
             if (root->kind != Expr::Kind::AddrOf && root->kind != Expr::Kind::Local &&
                 root->kind != Expr::Kind::GlobalAddr)
             {
-                vir::Var* t = cx_.fn->new_local("copy_base", root->type, l);
+                vir::Var* t {cx_.fn->new_local("copy_base", root->type, l)};
                 out.push_back(b_.decl(t, root, l));
-                const Expr* lt = b_.local(t, l);
+                const Expr* lt {b_.local(t, l)};
                 b_.text(lt, root->c_text.empty() ? "<pointer>" : root->c_text);
                 root = lt;
             }
             return leaf_address(root, path, l);
         };
-        const Expr* s_place = stable(src);
-        const Expr* d_place = stable(dest);
-        const std::vector<vir::StructLeaf> leaves = vir::struct_leaves(*src->type.pointee->struct_type);
+        const Expr* s_place {stable(src)};
+        const Expr* d_place {stable(dest)};
+        const std::vector<vir::StructLeaf> leaves {vir::struct_leaves(*src->type.pointee->struct_type)};
         std::vector<vir::Var*> tmps;
         for (const vir::StructLeaf& lf : leaves)
         {
-            vir::Var* t = cx_.fn->new_local("copy_" + std::to_string(tmps.size()), lf.type, l);
+            vir::Var* t {cx_.fn->new_local("copy_" + std::to_string(tmps.size()), lf.type, l)};
             tmps.push_back(t);
             out.push_back(b_.decl(t, b_.deref(leaf_address(s_place, lf.path, l), l), l));
         }
-        for (size_t i = 0; i < leaves.size(); ++i)
+        for (size_t i {0U}; i < leaves.size(); ++i)
         {
             out.push_back(b_.store(leaf_address(d_place, leaves[i].path, l), b_.local(tmps[i], l), l));
         }
@@ -10949,7 +10970,7 @@ private:
                 "a struct assigned a value from a call or temporary, with a side effect or a call in the destination (`get()->t = f();`: the destination is evaluated once per member and C leaves its order against the call open: M8, decision 0044 item 5)");
             return;
         }
-        const Expr* root = vir::member_root(dest);
+        const Expr* root {vir::member_root(dest)};
         if (root->kind != Expr::Kind::AddrOf && root->kind != Expr::Kind::Local && root->kind != Expr::Kind::GlobalAddr)
         {
             reject(
@@ -10960,7 +10981,7 @@ private:
         // C++ `t = {1, 2};` is a call of `operator=` with a braced list (P67: a `temp_init` that is neither a cast nor
         // a functional notation)
         {
-            an_expr_node_ptr vn = peel_value(value_node);
+            an_expr_node_ptr vn {peel_value(value_node)};
             if (vn != nullptr && vn->kind == enk_temp_init && vn->variant.init.dynamic_init != nullptr &&
                 !vn->variant.init.dynamic_init->is_explicit_cast &&
                 !vn->variant.init.dynamic_init->is_compound_literal && il_header.source_language != sl_C)
@@ -10971,7 +10992,7 @@ private:
                 return;
             }
         }
-        const Expr* v = struct_value(value_node, *dest->type.pointee);
+        const Expr* v {struct_value(value_node, *dest->type.pointee)};
         if (v == nullptr)
         {
             return;
@@ -10982,7 +11003,7 @@ private:
     // An assignment `lhs = rhs` of two structures as an expression statement (item 7).
     void struct_assignment_statement(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, Out& out)
     {
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             return;
         }
@@ -11006,12 +11027,12 @@ private:
                    "an assignment in an annotation, or in an expression the compiler folded to a constant");
             return;
         }
-        const Expr* dest = place_address(ops[0]);
+        const Expr* dest {place_address(ops[0U])};
         if (dest == nullptr)
         {
             return;
         }
-        copy_struct(dest, ops[0], ops[1], e->position, out);
+        copy_struct(dest, ops[0U], ops[1U], e->position, out);
     }
 
     // C++ may have folded a whole list into constants (`S s = {.x = (s.y = 5)};` is `{5, 0}`): EDG keeps the dynamic initializer it folded under the aggregate's
@@ -11028,10 +11049,10 @@ private:
         {
             return agg;
         }
-        an_expr_node_ptr orig = (agg->expr != nullptr || agg->local_expr_ref) ? expr_node_from_constant(agg) : nullptr;
+        an_expr_node_ptr orig {(agg->expr != nullptr || agg->local_expr_ref) ? expr_node_from_constant(agg) : nullptr};
         if (orig != nullptr && orig->kind == enk_initializer && orig->variant.initializer.dyn_init != nullptr)
         {
-            a_dynamic_init_ptr od = orig->variant.initializer.dyn_init;
+            a_dynamic_init_ptr od {orig->variant.initializer.dyn_init};
             if ((od->kind == dik_nonconstant_aggregate || od->kind == dik_constant) &&
                 od->variant.constant.ptr != nullptr && od->variant.constant.ptr->kind == ck_aggregate)
             {
@@ -11050,8 +11071,8 @@ private:
     // The value of one element of an initializer list (a constant is read like a scalar initializer under the front end's fold), of its member's type.
     const Expr* init_element_value(const vir::StructType& st, const InitElem& el)
     {
-        const vir::Type lt = vir::struct_member_type(st, el.path);
-        const Expr* x = nullptr;
+        const vir::Type lt {vir::struct_member_type(st, el.path)};
+        const Expr* x {nullptr};
         if (el.e != nullptr)
         {
             allow_enum_conversion(el.e); // decision 0018 item 6 (iii)
@@ -11089,15 +11110,15 @@ private:
                 c.declaring = nullptr;
             }
         } reset {cx_};
-        const vir::StructType& st = *var->type.struct_type;
-        const SrcLoc l = loc_of(at);
-        const Expr* root = b_.addr_of(var, l);
+        const vir::StructType& st {*var->type.struct_type};
+        const SrcLoc l {loc_of(at)};
+        const Expr* root {b_.addr_of(var, l)};
         if (d != nullptr && d->kind == dik_expression)
         { // `struct S t = s;`, `= *p`: a copy
             copy_struct(root, nullptr, d->variant.expression, at, out);
             return;
         }
-        a_constant_ptr agg = nullptr;
+        a_constant_ptr agg {nullptr};
         if (d != nullptr && (d->kind == dik_constant || d->kind == dik_nonconstant_aggregate))
         {
             agg = d->variant.constant.ptr;
@@ -11114,7 +11135,7 @@ private:
         }
         // A compound literal `S s = (S){...}` is its braced list (C23 6.5.2.5; C++ folds a constant one to a plain list, P67 H2): the same stores (decision 0044 item 7).
         {
-            bool compound = false;
+            bool compound {false};
             agg = unfold_aggregate(agg, &compound);
             if (qualified_aggregate(agg))
             {
@@ -11154,7 +11175,7 @@ private:
                 return;
             }
         }
-        const bool c_mode = il_header.source_language == sl_C;
+        const bool c_mode {il_header.source_language == sl_C};
         // A subobject initialized twice (C, audit B4): the overridden initializer is unevaluated in C23 and evaluated by EDG.  C++ refuses it itself; the zero
         // fillers of a C++20 designated list (P65 H1) are never a duplicate.
         if (c_mode)
@@ -11170,8 +11191,8 @@ private:
                 }
             }
         }
-        size_t dynamic = 0;
-        bool effect = false;
+        size_t dynamic {0U};
+        bool effect {false};
         for (const InitElem& el : elems)
         {
             if (el.e != nullptr)
@@ -11183,7 +11204,7 @@ private:
                 }
             }
         }
-        if (c_mode && dynamic >= 2 && effect)
+        if (c_mode && dynamic >= 2U && effect)
         {
             reject(Diag::unsequenced_calls, at,
                    "two elements of an initializer list, one of them with a side effect, whose order C leaves open");
@@ -11192,8 +11213,8 @@ private:
         // Evaluate: every element's value (a constant is read like a scalar initializer, under the front end's fold), then the stores.
         struct Ev
         {
-            const Expr* value = nullptr;
-            vir::Var* tmp = nullptr;
+            const Expr* value {nullptr};
+            vir::Var* tmp {nullptr};
         };
         std::vector<Ev> ev(elems.size());
         std::set<std::vector<int>> set_leaves;
@@ -11201,12 +11222,12 @@ private:
         {
             return init_element_value(st, el);
         };
-        bool ok = true;
+        bool ok {true};
         if (c_mode)
         {
-            for (size_t i = 0; i < elems.size(); ++i)
+            for (size_t i {0U}; i < elems.size(); ++i)
             {
-                const Expr* x = element_value(elems[i]);
+                const Expr* x {element_value(elems[i])};
                 if (x == nullptr)
                 {
                     ok = false;
@@ -11226,9 +11247,9 @@ private:
             {
                 return;
             }
-            for (size_t i = 0; i < elems.size(); ++i)
+            for (size_t i {0U}; i < elems.size(); ++i)
             {
-                const SrcLoc el = loc_of(elems[i].at);
+                const SrcLoc el {loc_of(elems[i].at)};
                 out.push_back(b_.store(leaf_address(root, elems[i].path, el),
                                        ev[i].tmp != nullptr ? b_.local(ev[i].tmp, el) : ev[i].value, el));
                 set_leaves.insert(elems[i].path);
@@ -11236,15 +11257,15 @@ private:
         }
         else
         {
-            for (size_t i = 0; i < elems.size(); ++i)
+            for (size_t i {0U}; i < elems.size(); ++i)
             {
-                const Expr* x = element_value(elems[i]);
+                const Expr* x {element_value(elems[i])};
                 if (x == nullptr)
                 {
                     ok = false;
                     continue;
                 }
-                const SrcLoc el = loc_of(elems[i].at);
+                const SrcLoc el {loc_of(elems[i].at)};
                 out.push_back(b_.store(leaf_address(root, elems[i].path, el), x, el));
                 set_leaves.insert(elems[i].path);
             }
@@ -11256,11 +11277,11 @@ private:
         // The leaves the list does not mention are zero (recursively through nested structs, P65 N9).
         for (const vir::StructLeaf& lf : vir::struct_leaves(st))
         {
-            if (set_leaves.count(lf.path) != 0)
+            if (set_leaves.count(lf.path) != 0U)
             {
                 continue;
             }
-            const Expr* z = zero_leaf(lf.type, at);
+            const Expr* z {zero_leaf(lf.type, at)};
             if (z == nullptr)
             {
                 return;
@@ -11271,20 +11292,20 @@ private:
 
     void init_statement(a_statement_ptr s, Out& out)
     {
-        a_dynamic_init_ptr d = s->variant.dynamic_init;
+        a_dynamic_init_ptr d {s->variant.dynamic_init};
         if (d == nullptr || d->variable == nullptr)
         {
             reject(Diag::unsupported_declaration, s->position, "an initialization that is not of a local variable");
             return;
         }
-        a_variable_ptr v = d->variable;
-        auto it = cx_.vars.find(v);
-        if (it == cx_.vars.end() || cx_.pending.count(v) == 0)
+        a_variable_ptr v {d->variable};
+        auto it {cx_.vars.find(v)};
+        if (it == cx_.vars.end() || cx_.pending.count(v) == 0U)
         {
             return; // rejected at its declaration
         }
-        const a_source_position at =
-            v->source_corresp.decl_position.seq ? v->source_corresp.decl_position : s->position;
+        const a_source_position at {v->source_corresp.decl_position.seq ? v->source_corresp.decl_position
+                                                                        : s->position};
         if (it->second->type.is_struct())
         { // decision 0043 item 6
             struct_initializer(v, it->second, d, nullptr, s->position.seq ? s->position : at, out);
@@ -11328,12 +11349,12 @@ private:
             }
             return nullptr;
         }
-        if (cx_.rejected_vars.count(e->variant.variable.ptr) != 0 ||
-            rejected_globals_.count(e->variant.variable.ptr) != 0)
+        if (cx_.rejected_vars.count(e->variant.variable.ptr) != 0U ||
+            rejected_globals_.count(e->variant.variable.ptr) != 0U)
         {
             return nullptr;
         }
-        auto it = cx_.vars.find(e->variant.variable.ptr);
+        auto it {cx_.vars.find(e->variant.variable.ptr)};
         if (it == cx_.vars.end())
         {
             reject(Diag::unsupported_expression, e->position,
@@ -11341,7 +11362,7 @@ private:
             return nullptr;
         }
         // As variable() (0012 item 3): `int y = (y = 1);` stays rejected now that an assignment may be nested.
-        if (cx_.declaring == e->variant.variable.ptr || cx_.pending.count(e->variant.variable.ptr) != 0)
+        if (cx_.declaring == e->variant.variable.ptr || cx_.pending.count(e->variant.variable.ptr) != 0U)
         {
             reject(Diag::unsupported_declaration, e->variant.variable.ptr->source_corresp.decl_position,
                    "a local variable used in its own initializer");
@@ -11381,12 +11402,12 @@ private:
     // What an assignment-like node says, checked the same way at statement level and as a value.
     struct AssignParts
     {
-        vir::Var* v = nullptr;      // the local written (null for a write through a pointer)
-        const Expr* addr = nullptr; // a write through a pointer (decision 0032): the pointer, `*addr` is written
-        vir::Type target = vir::Type::void_type(); // the type of what is written
-        const Expr* x = nullptr;               // `=` and compound: the (converted) right-hand side; null for `++`/`--`
-        vir::BinaryOp op = vir::BinaryOp::Add; // compound assignment
-        bool increment = false;                // `++`/`--`
+        vir::Var* v {nullptr};      // the local written (null for a write through a pointer)
+        const Expr* addr {nullptr}; // a write through a pointer (decision 0032): the pointer, `*addr` is written
+        vir::Type target {vir::Type::void_type()}; // the type of what is written
+        const Expr* x {nullptr};               // `=` and compound: the (converted) right-hand side; null for `++`/`--`
+        vir::BinaryOp op {vir::BinaryOp::Add}; // compound assignment
+        bool increment {false};                // `++`/`--`
     };
     enum class AssignRes
     {
@@ -11402,7 +11423,7 @@ private:
     // `orig_seq != 0` test of macro_node.
     static an_expr_node_ptr peel_generated_conversions(an_expr_node_ptr e)
     {
-        for (int guard = 0; e != nullptr && guard < 16 && e->kind == enk_operation && e->compiler_generated &&
+        for (int guard {0}; e != nullptr && guard < 16 && e->kind == enk_operation && e->compiler_generated &&
                             (e->variant.operation.kind == eok_cast || e->variant.operation.kind == eok_bool_cast) &&
                             e->variant.operation.operands != nullptr && e->variant.operation.operands->next == nullptr;
              ++guard)
@@ -11418,12 +11439,12 @@ private:
     // True when it rejected: `x = x`, and (decision 0023 item 5) `x &= x` and `x |= x`; clang is silent on `x ^= x`.
     bool check_self_assignment(an_expr_node_ptr assign, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             return false;
         }
-        an_expr_node_ptr l = peel_generated_conversions(ops[0]);
-        an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+        an_expr_node_ptr l {peel_generated_conversions(ops[0U])};
+        an_expr_node_ptr r {peel_generated_conversions(ops[1U])};
         if (l == nullptr || r == nullptr || l->kind != enk_variable || r->kind != enk_variable)
         {
             return false;
@@ -11448,12 +11469,12 @@ private:
     {
         if (lhs->kind == enk_operation && lhs->variant.operation.kind == eok_indirect)
         {
-            auto lops = operands_of(lhs);
-            if (!operand_count(lhs, 1, lops))
+            auto lops {operands_of(lhs)};
+            if (!operand_count(lhs, 1U, lops))
             {
                 return false;
             }
-            p->addr = expr(lops[0]);
+            p->addr = expr(lops[0U]);
             if (p->addr == nullptr)
             {
                 return false;
@@ -11533,18 +11554,18 @@ private:
 
     AssignRes assignment_parts(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, AssignParts* p)
     {
-        const an_expr_operator_kind k = e->variant.operation.kind;
-        const SrcLoc l = loc_of(e->position);
+        const an_expr_operator_kind k {e->variant.operation.kind};
+        const SrcLoc l {loc_of(e->position)};
         if (k == eok_assign)
         {
-            if (ops.size() != 2)
+            if (ops.size() != 2U)
             {
                 return AssignRes::malformed;
             }
             check_self_assignment(e, ops);
-            const bool target_ok = assign_target(ops[0], p);
-            allow_enum_conversion(ops[1]); // decision 0018 item 6 (iii)
-            p->x = expr(ops[1]);
+            const bool target_ok {assign_target(ops[0U], p)};
+            allow_enum_conversion(ops[1U]); // decision 0018 item 6 (iii)
+            p->x = expr(ops[1U]);
             if (!target_ok || p->x == nullptr)
             {
                 return AssignRes::rejected;
@@ -11559,11 +11580,11 @@ private:
         }
         if (is_incdec_kind(k))
         {
-            if (ops.size() != 1)
+            if (ops.size() != 1U)
             {
                 return AssignRes::malformed;
             }
-            if (!assign_target(ops[0], p))
+            if (!assign_target(ops[0U], p))
             {
                 return AssignRes::rejected;
             }
@@ -11587,12 +11608,12 @@ private:
             return AssignRes::ok;
         }
         // A compound assignment.
-        if (ops.size() != 2)
+        if (ops.size() != 2U)
         {
             return AssignRes::malformed;
         }
-        const bool target_ok = assign_target(ops[0], p);
-        p->x = expr(ops[1]);
+        const bool target_ok {assign_target(ops[0U], p)};
+        p->x = expr(ops[1U]);
         if (!target_ok || p->x == nullptr)
         {
             return AssignRes::rejected;
@@ -11612,7 +11633,7 @@ private:
         if (p->x->type.is_bool())
         {
             // `i += flag`: the bool is promoted to int first.
-            const vir::IntType* i = prog_.int_type("int", prog_.c_int_bits(), true);
+            const vir::IntType* i {prog_.int_type("int", prog_.c_int_bits(), true)};
             p->x = b_.bool_to_int(vir::Type::integer(i), p->x, l);
         }
         // An exhaustive switch: a kind that is not listed is rejected here and never read as `>>=`.  The bitwise forms (decision 0023
@@ -11668,12 +11689,12 @@ private:
         {
             // C++ may read `int y = (y = 1);` as a constant initializer: the own-initializer rule (0012 item 3) still gives its
             // diagnostic, as in C.
-            if (!ops.empty() && ops[0]->kind == enk_variable && ops[0]->variant.variable.ptr != nullptr &&
-                (cx_.declaring == ops[0]->variant.variable.ptr ||
-                 cx_.pending.count(ops[0]->variant.variable.ptr) != 0) &&
-                cx_.vars.count(ops[0]->variant.variable.ptr) != 0)
+            if (!ops.empty() && ops[0U]->kind == enk_variable && ops[0U]->variant.variable.ptr != nullptr &&
+                (cx_.declaring == ops[0U]->variant.variable.ptr ||
+                 cx_.pending.count(ops[0U]->variant.variable.ptr) != 0U) &&
+                cx_.vars.count(ops[0U]->variant.variable.ptr) != 0U)
             {
-                lvalue_var(ops[0]);
+                lvalue_var(ops[0U]);
                 return nullptr;
             }
             reject(
@@ -11682,7 +11703,7 @@ private:
                 "(`0 && (x = 1)` and `1 || x++` are never evaluated)");
             return nullptr;
         }
-        const an_expr_operator_kind k = e->variant.operation.kind;
+        const an_expr_operator_kind k {e->variant.operation.kind};
         if (k == eok_assign && is_struct_kind(e->type != nullptr ? skip_typerefs(e->type) : nullptr))
         {
             reject(
@@ -11691,7 +11712,7 @@ private:
             return nullptr;
         }
         AssignParts a;
-        const AssignRes res = assignment_parts(e, ops, &a);
+        const AssignRes res {assignment_parts(e, ops, &a)};
         if (res == AssignRes::malformed)
         {
             operand_count(e, is_incdec_kind(k) ? 1 : 2, ops);
@@ -11701,8 +11722,8 @@ private:
         {
             return nullptr;
         }
-        const SrcLoc l = loc_of(e->position);
-        const bool post = k == eok_post_incr || k == eok_post_decr;
+        const SrcLoc l {loc_of(e->position)};
+        const bool post {k == eok_post_incr || k == eok_post_decr};
         const Expr* r;
         if (a.addr != nullptr) // a write through a pointer used as a value (decision 0039 item 2)
         {
@@ -11725,7 +11746,7 @@ private:
     // statements instead (expression_statement).
     const Expr* comma_value(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (!operand_count(e, 2, ops))
+        if (!operand_count(e, 2U, ops))
         {
             return nullptr;
         }
@@ -11735,12 +11756,12 @@ private:
                    "the comma operator in an annotation, or in an expression the compiler folded to a constant");
             return nullptr;
         }
-        if (comma_left_without_effect(ops[0]))
+        if (comma_left_without_effect(ops[0U]))
         {
             reject(Diag::comma_without_effect, e->position, "");
         }
-        an_expr_node_ptr left = ops[0];
-        bool voided = false;
+        an_expr_node_ptr left {ops[0U]};
+        bool voided {false};
         while (is_void_cast(left))
         {
             left = left->variant.operation.operands;
@@ -11755,8 +11776,8 @@ private:
                 reject(Diag::value_not_used, d->position, "");
             }
         }
-        const Expr* a = expr(left);
-        const Expr* b = expr(ops[1]);
+        const Expr* a {expr(left)};
+        const Expr* b {expr(ops[1U])};
         if (a == nullptr || b == nullptr)
         {
             return nullptr;
@@ -11830,11 +11851,11 @@ private:
     {
         for (const vir::SequenceProblem& sp : vir::sequence_problems(*f))
         {
-            auto pos = cx_.assign_positions.find(sp.at);
-            const a_source_position at = pos != cx_.assign_positions.end() ? pos->second : cx_.stmt_pos;
+            auto pos {cx_.assign_positions.find(sp.at)};
+            const a_source_position at {pos != cx_.assign_positions.end() ? pos->second : cx_.stmt_pos};
             // C++17 builds the temporary of `s = S{s.x++, 0}` before the trivial `operator=`: defined, and rejected here only because the aggregate's elements are
             // unsequenced siblings of the store's leaves (M8, decision 0044 item 5).
-            const bool cxx_temp = il_header.source_language != sl_C && in_struct_store_value(f->body, sp.at);
+            const bool cxx_temp {il_header.source_language != sl_C && in_struct_store_value(f->body, sp.at)};
             reject_args(
                 Diag::unsequenced_modification, at,
                 {sp.variable,
@@ -11859,14 +11880,14 @@ private:
     // A folded constant's original expression, looked through recursively; the node itself when it is not a folded constant.
     static an_expr_node_ptr folded_original(an_expr_node_ptr e)
     {
-        for (int guard = 0; guard < 16 && e != nullptr && e->kind == enk_constant; ++guard)
+        for (int guard {0}; guard < 16 && e != nullptr && e->kind == enk_constant; ++guard)
         {
-            a_constant_ptr c = e->variant.constant.ptr;
+            a_constant_ptr c {e->variant.constant.ptr};
             if (c == nullptr || c->expr == nullptr || c->local_expr_ref)
             {
                 break;
             }
-            an_expr_node_ptr o = expr_node_from_constant(c);
+            an_expr_node_ptr o {expr_node_from_constant(c)};
             if (o == nullptr || o == e)
             {
                 break;
@@ -11884,7 +11905,7 @@ private:
         {
             return false;
         }
-        a_constant_ptr c = e->variant.constant.ptr;
+        a_constant_ptr c {e->variant.constant.ptr};
         if (c->local_expr_ref)
         {
             return false;
@@ -11893,11 +11914,11 @@ private:
         {
             return true;
         }
-        an_expr_node_ptr o = expr_node_from_constant(c);
+        an_expr_node_ptr o {expr_node_from_constant(c)};
         while (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_cast &&
-               operands_of(o).size() == 1 && has_type_kind(o->type, tk_integer))
+               operands_of(o).size() == 1U && has_type_kind(o->type, tk_integer))
         {
-            o = operands_of(o)[0];
+            o = operands_of(o)[0U];
         }
         return o != nullptr && o != e && o->kind == enk_constant && o->variant.constant.ptr != nullptr &&
                o->variant.constant.ptr->expr == nullptr && !o->variant.constant.ptr->local_expr_ref &&
@@ -11912,8 +11933,8 @@ private:
         {
             return false;
         }
-        const a_source_position decl = r->source_corresp.decl_position;
-        if (decl.seq == 0 || in_verified_file(decl) || r->source_corresp.is_class_member)
+        const a_source_position decl {r->source_corresp.decl_position};
+        if (decl.seq == 0U || in_verified_file(decl) || r->source_corresp.is_class_member)
         {
             return false;
         }
@@ -11921,14 +11942,14 @@ private:
         {
             return false;
         }
-        a_routine_type_supplement_ptr x = routine_supplement(r);
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
         return x != nullptr && x->does_not_return && has_type_kind(return_type(r), tk_void);
     }
 
     // `(void)0` as the macro writes it (`void(0)` in glibc's C++ form is the same node).
     static bool is_void_zero(an_expr_node_ptr e)
     {
-        return is_operation(e, eok_cast, 1) && has_type_kind(e->type, tk_void) && is_plain_zero(operands_of(e)[0]);
+        return is_operation(e, eok_cast, 1U) && has_type_kind(e->type, tk_void) && is_plain_zero(operands_of(e)[0U]);
     }
 
     // `e` of `assert(e)` when `s` is exactly one of the two system expansions, otherwise null; anything else stays rejected as before.
@@ -11949,16 +11970,16 @@ private:
     // condition tests.
     static an_expr_node_ptr glibc_assert_condition(an_expr_node_ptr s)
     {
-        if (!is_operation(s, eok_question, 3) || !has_type_kind(s->type, tk_void))
+        if (!is_operation(s, eok_question, 3U) || !has_type_kind(s->type, tk_void))
         {
             return nullptr;
         }
-        auto q = operands_of(s);
-        if (!is_void_zero(q[1]))
+        auto q {operands_of(s)};
+        if (!is_void_zero(q[1U]))
         {
             return nullptr;
         }
-        an_expr_node_ptr failure = q[2];
+        an_expr_node_ptr failure {q[2U]};
         if (failure == nullptr || failure->kind != enk_operation || failure->variant.operation.kind != eok_call)
         {
             return nullptr;
@@ -11967,52 +11988,53 @@ private:
         {
             return nullptr;
         }
-        an_expr_node_ptr cond = q[0];
-        if (is_operation(cond, eok_comma, 2))
+        an_expr_node_ptr cond {q[0U]};
+        if (is_operation(cond, eok_comma, 2U))
         {
-            auto c = operands_of(cond);
-            if (!is_operation(c[0], eok_cast, 1) || !has_type_kind(c[0]->type, tk_void))
+            auto c {operands_of(cond)};
+            if (!is_operation(c[0U], eok_cast, 1U) || !has_type_kind(c[0U]->type, tk_void))
             {
                 return nullptr;
             }
             // the macro's `sizeof (__assert_single_arg (e))`: a folded constant whose original expression is the `sizeof`.  Any
             // other constant there, `(void)(INT_MAX + 1)` among them, is code the matcher would not encode (audit, S5).
-            an_expr_node_ptr size = operands_of(c[0])[0];
+            an_expr_node_ptr size {operands_of(c[0U])[0U]};
             if (size == nullptr || size->kind != enk_constant || !has_type_kind(size->type, tk_integer))
             {
                 return nullptr;
             }
-            a_constant_ptr k = size->variant.constant.ptr;
+            a_constant_ptr k {size->variant.constant.ptr};
             if (k == nullptr || k->expr == nullptr || k->local_expr_ref)
             {
                 return nullptr;
             }
-            an_expr_node_ptr original = expr_node_from_constant(k);
+            an_expr_node_ptr original {expr_node_from_constant(k)};
             if (original == nullptr || original->kind != enk_sizeof)
             {
                 return nullptr;
             }
             // ... and its operand is the macro's call of glibc's `__assert_single_arg` (decision 0031 item 10, 0046): a hand-written `sizeof (x++)` is not
             // the macro's, and a call of another function there is not either.
-            const auto& si = original->variant.sizeof_info;
+            const auto& si {original->variant.sizeof_info};
             if (si.is_type || si.variant.expr == nullptr || si.variant.expr->kind != enk_operation ||
                 si.variant.expr->variant.operation.kind != eok_call)
             {
                 return nullptr;
             }
-            a_routine_ptr single = direct_callee(si.variant.expr);
+            a_routine_ptr single {direct_callee(si.variant.expr)};
             if (single == nullptr || single->source_corresp.name == nullptr ||
                 std::strcmp(single->source_corresp.name, "__assert_single_arg") != 0 ||
-                single->source_corresp.decl_position.seq == 0 || in_verified_file(single->source_corresp.decl_position))
+                single->source_corresp.decl_position.seq == 0U ||
+                in_verified_file(single->source_corresp.decl_position))
             {
                 return nullptr;
             }
-            return c[1];
+            return c[1U];
         }
-        if (is_operation(cond, eok_bool_cast, 1) ||
-            (is_operation(cond, eok_cast, 1) && is_bool_type(skip_typerefs(cond->type))))
+        if (is_operation(cond, eok_bool_cast, 1U) ||
+            (is_operation(cond, eok_cast, 1U) && is_bool_type(skip_typerefs(cond->type))))
         {
-            return operands_of(cond)[0];
+            return operands_of(cond)[0U];
         }
         return cond;
     }
@@ -12022,45 +12044,45 @@ private:
     // (C++ puts a bool conversion on the condition); otherwise null.
     static an_expr_node_ptr sdk_assert_condition(an_expr_node_ptr s)
     {
-        if (!is_operation(s, eok_question, 3) || !has_type_kind(s->type, tk_void))
+        if (!is_operation(s, eok_question, 3U) || !has_type_kind(s->type, tk_void))
         {
             return nullptr;
         }
-        auto q = operands_of(s);
-        an_expr_node_ptr cond = q[0];
-        if (is_operation(cond, eok_bool_cast, 1))
+        auto q {operands_of(s)};
+        an_expr_node_ptr cond {q[0U]};
+        if (is_operation(cond, eok_bool_cast, 1U))
         {
-            cond = operands_of(cond)[0];
+            cond = operands_of(cond)[0U];
         }
-        if (!is_operation(cond, eok_call, 3))
+        if (!is_operation(cond, eok_call, 3U))
         {
             return nullptr;
         }
-        a_routine_ptr expect = direct_callee(cond);
+        a_routine_ptr expect {direct_callee(cond)};
         if (expect == nullptr || expect->source_corresp.name == nullptr ||
             std::strcmp(expect->source_corresp.name, "__builtin_expect") != 0 || expect->special_kind != sfk_none ||
             expect->variant.builtin_function_kind == bfk_none)
         {
             return nullptr;
         }
-        auto args = operands_of(cond); // [0] is the routine
+        auto args {operands_of(cond)}; // [0] is the routine
         // `assert(0)`: EDG folds `!(0)` (and the `(long)` conversion of it) to a constant whose original expression is the
         // operation (0010 item 12); see through it.  A constant with no original expression there does not match.
-        an_expr_node_ptr first = folded_original(args[1]);
-        if (!is_operation(first, eok_cast, 1) || !has_type_kind(first->type, tk_integer))
+        an_expr_node_ptr first {folded_original(args[1U])};
+        if (!is_operation(first, eok_cast, 1U) || !has_type_kind(first->type, tk_integer))
         {
             return nullptr;
         }
-        an_expr_node_ptr negated = folded_original(operands_of(first)[0]);
-        if (!is_operation(negated, eok_not, 1))
+        an_expr_node_ptr negated {folded_original(operands_of(first)[0U])};
+        if (!is_operation(negated, eok_not, 1U))
         {
             return nullptr;
         }
-        if (!is_plain_zero(args[2]))
+        if (!is_plain_zero(args[2U]))
         {
             return nullptr;
         }
-        an_expr_node_ptr failure = q[1];
+        an_expr_node_ptr failure {q[1U]};
         if (failure == nullptr || failure->kind != enk_operation || failure->variant.operation.kind != eok_call)
         {
             return nullptr;
@@ -12069,11 +12091,11 @@ private:
         {
             return nullptr;
         }
-        if (!is_void_zero(q[2]))
+        if (!is_void_zero(q[2U]))
         {
             return nullptr;
         }
-        return operands_of(negated)[0];
+        return operands_of(negated)[0U];
     }
 
     // A `void` `?:` in statement position (decision 0025 item 3): `c ? v() : w();` is `if (c) v(); else w();`.  Reached from an
@@ -12084,19 +12106,20 @@ private:
     // `?:` nests), as sub_statement builds the arms of an `if`; both arms are always present.
     void void_conditional(an_expr_node_ptr e, const a_source_position& pos, Out& out)
     {
-        auto ops = operands_of(e); // the caller checked the count: condition, then arm, else arm
-        if (detect_bitwise_condition(ops[0]))
+        auto ops {operands_of(e)}; // the caller checked the count: condition, then arm, else arm
+        if (detect_bitwise_condition(ops[0U]))
         {
             return; // decision 0023 item 5: as in operation(), the arms are then not encoded
         }
-        truth_context(ops[0]);
-        const Expr* c = as_bool(expr(ops[0]), ops[0]->position);
-        Out t, f;
-        const a_source_position tp = ops[1]->position.seq ? ops[1]->position : pos;
-        const a_source_position fp = ops[2]->position.seq ? ops[2]->position : pos;
+        truth_context(ops[0U]);
+        const Expr* c {as_bool(expr(ops[0U]), ops[0U]->position)};
+        Out t;
+        Out f;
+        const a_source_position tp {ops[1U]->position.seq ? ops[1U]->position : pos};
+        const a_source_position fp {ops[2U]->position.seq ? ops[2U]->position : pos};
         ++cx_.in_conditional_arm;
-        expression_statement(ops[1], tp, t, /*voided=*/true);
-        expression_statement(ops[2], fp, f, /*voided=*/true);
+        expression_statement(ops[1U], tp, t, /*voided=*/true);
+        expression_statement(ops[2U], fp, f, /*voided=*/true);
         --cx_.in_conditional_arm;
         if (c != nullptr)
         {
@@ -12114,17 +12137,17 @@ private:
         // `(void)e;`
         while (e->kind == enk_operation && e->variant.operation.kind == eok_cast)
         {
-            a_type_ptr to = skip_typerefs(e->type);
+            a_type_ptr to {skip_typerefs(e->type)};
             if (to == nullptr || to->kind != tk_void)
             {
                 break;
             }
-            auto ops = operands_of(e);
-            if (ops.size() != 1)
+            auto ops {operands_of(e)};
+            if (ops.size() != 1U)
             {
                 break;
             }
-            e = ops[0];
+            e = ops[0U];
             voided = true;
         }
         if (an_expr_node_ptr cond = assert_condition(e))
@@ -12145,7 +12168,7 @@ private:
                 return;
             }
             truth_context(cond); // decision 0023 item 5: `assert(x | 4)`
-            const Expr* c = as_bool(expr(cond), cond->position);
+            const Expr* c {as_bool(expr(cond), cond->position)};
             if (c != nullptr)
             {
                 out.push_back(b_.check(c, loc_of(pos), true));
@@ -12159,9 +12182,9 @@ private:
         }
         if (e->kind == enk_operation)
         {
-            const an_expr_operator_kind k = e->variant.operation.kind;
-            auto ops = operands_of(e);
-            const SrcLoc l = loc_of(e->position);
+            const an_expr_operator_kind k {e->variant.operation.kind};
+            auto ops {operands_of(e)};
+            const SrcLoc l {loc_of(e->position)};
             if (k == eok_assign && is_struct_kind(e->type != nullptr ? skip_typerefs(e->type) : nullptr))
             { // a struct copy (decision 0043 item 7)
                 struct_assignment_statement(e, ops, out);
@@ -12172,7 +12195,7 @@ private:
                 // An assignment, compound assignment or `++`/`--` at the top of an expression statement stays a VIR statement (decision
                 // 0020 item 6): code without nested effects builds the VIR it always did.
                 AssignParts a;
-                const AssignRes r = assignment_parts(e, ops, &a);
+                const AssignRes r {assignment_parts(e, ops, &a)};
                 if (r == AssignRes::rejected)
                 {
                     return;
@@ -12215,17 +12238,18 @@ private:
             {
                 case eok_comma:
                 {
-                    if (ops.size() != 2)
+                    if (ops.size() != 2U)
                     {
                         break;
                     }
                     // The shapes the compilers warn about (item 5), once per comma; the operands are still encoded.
-                    if (comma_left_without_effect(ops[0]) || (!voided && discarded_comma_right_without_effect(ops[1])))
+                    if (comma_left_without_effect(ops[0U]) ||
+                        (!voided && discarded_comma_right_without_effect(ops[1U])))
                     {
                         reject(Diag::comma_without_effect, e->position, "");
                     }
-                    expression_statement(ops[0], ops[0]->position.seq ? ops[0]->position : pos, out);
-                    expression_statement(ops[1], ops[1]->position.seq ? ops[1]->position : pos, out, voided);
+                    expression_statement(ops[0U], ops[0U]->position.seq ? ops[0U]->position : pos, out);
+                    expression_statement(ops[1U], ops[1U]->position.seq ? ops[1U]->position : pos, out, voided);
                     return;
                 }
                 default:
@@ -12244,7 +12268,7 @@ private:
         {
             cx_.struct_call_ok.insert(e); // `f();`, `(void)f();` of a struct-returning function (decision 0044 item 5)
         }
-        const Expr* x = expr(e);
+        const Expr* x {expr(e)};
         if (x != nullptr)
         {
             out.push_back(b_.expr_stmt(x, loc_of(pos)));
@@ -12271,54 +12295,54 @@ private:
         {
             return nullptr;
         }
-        auto ops = operands_of(e);
+        auto ops {operands_of(e)};
         switch (e->variant.operation.kind)
         {
             case eok_question:
-                if (ops.size() != 3)
+                if (ops.size() != 3U)
                 {
                     return nullptr;
                 }
-                if (const vir::Var* v = returned_local_address(ops[1], depth + 1))
+                if (const vir::Var* v = returned_local_address(ops[1U], depth + 1))
                 {
                     return v;
                 }
-                return returned_local_address(ops[2], depth + 1);
+                return returned_local_address(ops[2U], depth + 1);
             case eok_comma:
-                return ops.size() == 2 ? returned_local_address(ops[1], depth + 1) : nullptr;
+                return ops.size() == 2U ? returned_local_address(ops[1U], depth + 1) : nullptr;
             case eok_address_of:
             {
-                if (ops.size() != 1)
+                if (ops.size() != 1U)
                 {
                     return nullptr;
                 }
-                an_expr_node_ptr o = ops[0];
+                an_expr_node_ptr o {ops[0U]};
                 while (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_lvalue_adjust &&
                        o->variant.operation.operands != nullptr && o->variant.operation.operands->next == nullptr)
                 {
                     o = o->variant.operation.operands;
                 }
                 // `&s.x`, `&s.t` (decision 0043 item 5, R14): the address of a member of a local struct is inside the local; `&(&s)->x` is `&s`'s value.
-                for (int hops = 0; hops < 16 && o != nullptr && o->kind == enk_operation &&
+                for (int hops {0}; hops < 16 && o != nullptr && o->kind == enk_operation &&
                                    o->variant.operation.kind == eok_dot_field;
                      ++hops)
                 {
-                    auto dops = operands_of(o);
-                    if (dops.size() != 2)
+                    auto dops {operands_of(o)};
+                    if (dops.size() != 2U)
                     {
                         return nullptr;
                     }
-                    o = dops[0];
+                    o = dops[0U];
                 }
                 if (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_points_to_field)
                 {
-                    auto pops = operands_of(o);
-                    return pops.size() == 2 ? returned_local_address(pops[0], depth + 1) : nullptr;
+                    auto pops {operands_of(o)};
+                    return pops.size() == 2U ? returned_local_address(pops[0U], depth + 1) : nullptr;
                 }
                 if (o != nullptr && o->kind == enk_operation && o->variant.operation.kind == eok_indirect)
                 { // `&*q`: q's own value
-                    auto iops = operands_of(o);
-                    return iops.size() == 1 ? returned_local_address(iops[0], depth + 1) : nullptr;
+                    auto iops {operands_of(o)};
+                    return iops.size() == 1U ? returned_local_address(iops[0U], depth + 1) : nullptr;
                 }
                 if (is_compound_temp(o))
                 { // `return &(T){...};`, `return &(T){...}.m;` (decision 0044 item 7)
@@ -12329,12 +12353,12 @@ private:
                 {
                     return nullptr;
                 }
-                a_variable_ptr v = o->variant.variable.ptr;
+                a_variable_ptr v {o->variant.variable.ptr};
                 if (v->storage_class == sc_static || v->storage_class == sc_extern || v->is_thread_local)
                 {
                     return nullptr;
                 }
-                auto it = cx_.vars.find(v);
+                auto it {cx_.vars.find(v)};
                 return it != cx_.vars.end() ? it->second : nullptr;
             }
             default:
@@ -12346,9 +12370,9 @@ private:
     // initialization (P67): a copy of an object, a call, or a braced list.
     void return_struct(a_statement_ptr s, Out& out)
     {
-        vir::Function* f = cx_.fn;
-        const SrcLoc l = s->position.seq != 0 ? loc_of(s->position) : f->end_loc;
-        const Expr* v = nullptr;
+        vir::Function* f {cx_.fn};
+        const SrcLoc l {s->position.seq != 0U ? loc_of(s->position) : f->end_loc};
+        const Expr* v {nullptr};
         if (s->variant.return_dynamic_init != nullptr)
         {
             v = value_from_init(s->variant.return_dynamic_init, f->ret, s->position);
@@ -12375,7 +12399,7 @@ private:
 
     void return_statement(a_statement_ptr s, Out& out)
     {
-        vir::Function* f = cx_.fn;
+        vir::Function* f {cx_.fn};
         if (f->ret.is_struct())
         {
             return_struct(s, out);
@@ -12418,13 +12442,13 @@ private:
             return;
         }
         allow_enum_conversion(s->expr); // decision 0018 item 6 (iii)
-        const Expr* x = expr(s->expr);
+        const Expr* x {expr(s->expr)};
         if (x == nullptr)
         {
             return;
         }
         // `main`'s generated `return 0` has no position: its postconditions are reported at the closing brace.
-        SrcLoc l = s->position.seq != 0 ? loc_of(s->position) : f->end_loc;
+        SrcLoc l {s->position.seq != 0U ? loc_of(s->position) : f->end_loc};
         out.push_back(b_.return_stmt(x, l));
     }
 
@@ -12449,7 +12473,7 @@ private:
     // The label of the `break` of a loop or switch: its next sibling (P13).
     static a_label_ptr break_label_after(a_statement_ptr s, bool is_switch)
     {
-        a_label_ptr l = label_of(s->next);
+        a_label_ptr l {label_of(s->next)};
         return l != nullptr && l->break_label && (l->switch_break_label != 0) == is_switch ? l : nullptr;
     }
 
@@ -12457,7 +12481,7 @@ private:
     // in a generated block or not.
     static a_label_ptr continue_label_of(a_statement_ptr body)
     {
-        a_statement_ptr last = body;
+        a_statement_ptr last {body};
         if (body != nullptr && body->kind == stmk_block)
         {
             last = body->variant.block.statements;
@@ -12466,7 +12490,7 @@ private:
                 last = last->next;
             }
         }
-        a_label_ptr l = label_of(last);
+        a_label_ptr l {label_of(last)};
         return l != nullptr && l->continue_label && !l->break_label ? l : nullptr;
     }
 
@@ -12485,7 +12509,7 @@ private:
 
     int label_id(a_label_ptr l)
     {
-        auto it = cx_.label_ids.find(l);
+        auto it {cx_.label_ids.find(l)};
         if (it != cx_.label_ids.end())
         {
             return it->second;
@@ -12498,9 +12522,9 @@ private:
     {
         for (const vir::GotoProblem& g : vir::goto_problems(*f))
         {
-            auto pos = cx_.goto_positions.find(g.go);
-            const a_source_position at = pos != cx_.goto_positions.end() ? pos->second : cx_.stmt_pos;
-            const std::string to = "a goto to \"" + g.label + "\" that ";
+            auto pos {cx_.goto_positions.find(g.go)};
+            const a_source_position at {pos != cx_.goto_positions.end() ? pos->second : cx_.stmt_pos};
+            const std::string to {"a goto to \"" + g.label + "\" that "};
             switch (g.kind)
             {
                 case vir::GotoProblem::Kind::backward:
@@ -12525,11 +12549,11 @@ private:
     // end puts the label of an enclosing loop or switch (so it is the C jump), and rejected otherwise.
     void jump_statement(a_statement_ptr s, a_label_ptr l, Out& out)
     {
-        const bool is_break = l->break_label;
-        for (auto it = cx_.targets.rbegin(); it != cx_.targets.rend(); ++it)
+        const bool is_break {l->break_label};
+        for (auto it {cx_.targets.rbegin()}; it != cx_.targets.rend(); ++it)
         {
-            const bool hit = is_break ? (it->break_label == l && it->is_switch == (l->switch_break_label != 0))
-                                      : (!it->is_switch && it->continue_label == l);
+            const bool hit {is_break ? (it->break_label == l && it->is_switch == (l->switch_break_label != 0))
+                                     : (!it->is_switch && it->continue_label == l)};
             if (!hit)
             {
                 continue;
@@ -12549,12 +12573,12 @@ private:
         {
             return false;
         }
-        a_constant_ptr c = e->variant.constant.ptr;
+        a_constant_ptr c {e->variant.constant.ptr};
         if (c == nullptr || c->kind != ck_integer)
         {
             return false;
         }
-        a_number_buffer buf = decimal_str_for_integer_constant(c);
+        a_number_buffer buf {decimal_str_for_integer_constant(c)};
         return std::string(buf.as_temp_characters()) == "0";
     }
 
@@ -12575,7 +12599,7 @@ private:
                        e->variant.variable.ptr->source_corresp.enclosing_routine != nullptr;
             case enk_constant:
             {
-                a_constant_ptr c = e->variant.constant.ptr;
+                a_constant_ptr c {e->variant.constant.ptr};
                 if (c == nullptr || (c->expr == nullptr && !c->local_expr_ref))
                 {
                     return false;
@@ -12584,11 +12608,11 @@ private:
                 {
                     return false;
                 }
-                an_expr_node_ptr o = expr_node_from_constant(c);
+                an_expr_node_ptr o {expr_node_from_constant(c)};
                 return o != nullptr && o != e && names_local(o, depth + 1);
             }
             case enk_operation:
-                for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+                for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
                 {
                     if (names_local(o, depth + 1))
                     {
@@ -12615,7 +12639,7 @@ private:
                 return true;
             case enk_constant:
             {
-                a_constant_ptr c = e->variant.constant.ptr;
+                a_constant_ptr c {e->variant.constant.ptr};
                 if (c == nullptr || (c->expr == nullptr && !c->local_expr_ref))
                 {
                     return false;
@@ -12624,11 +12648,11 @@ private:
                 {
                     return false; // an enumerator names no object (decision 0018 item 9): not its initializer
                 }
-                an_expr_node_ptr o = expr_node_from_constant(c);
+                an_expr_node_ptr o {expr_node_from_constant(c)};
                 return o != nullptr && o != e && names_object(o, depth + 1);
             }
             case enk_operation:
-                for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+                for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
                 {
                     if (names_object(o, depth + 1))
                     {
@@ -12680,7 +12704,7 @@ private:
         {
             return false;
         }
-        const an_expr_operator_kind k = e->variant.operation.kind;
+        const an_expr_operator_kind k {e->variant.operation.kind};
         return is_assignment_kind(k) || is_incdec_kind(k) || (with_calls && is_call_kind(k));
     }
 
@@ -12696,7 +12720,7 @@ private:
         {
             return e;
         }
-        for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+        for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
         {
             if (an_expr_node_ptr f = first_effect(o, with_calls, depth + 1))
             {
@@ -12713,7 +12737,7 @@ private:
         {
             return false;
         }
-        a_type_ptr to = skip_typerefs(e->type);
+        a_type_ptr to {skip_typerefs(e->type)};
         return to != nullptr && to->kind == tk_void && e->variant.operation.operands != nullptr &&
                e->variant.operation.operands->next == nullptr;
     }
@@ -12724,7 +12748,7 @@ private:
     // about no compound assignment, `?:` condition, `&&` operand or `!` operand.  The node, or null.
     static an_expr_node_ptr assignment_as_condition_node(an_expr_node_ptr c)
     {
-        for (int guard = 0; c != nullptr && guard < 16 && c->kind == enk_operation && c->compiler_generated &&
+        for (int guard {0}; c != nullptr && guard < 16 && c->kind == enk_operation && c->compiler_generated &&
                             (c->variant.operation.kind == eok_bool_cast || c->variant.operation.kind == eok_cast) &&
                             c->variant.operation.operands != nullptr && c->variant.operation.operands->next == nullptr;
              ++guard)
@@ -12753,7 +12777,7 @@ private:
     // A `void` `?:` (decision 0025 item 3) counts as having an effect, as a `(void)` cast does: no compiler calls a void operand an unused value.
     static bool is_void_conditional(an_expr_node_ptr e)
     {
-        return is_operation(e, eok_question, 3) && has_type_kind(e->type, tk_void);
+        return is_operation(e, eok_question, 3U) && has_type_kind(e->type, tk_void);
     }
     static bool comma_left_without_effect(an_expr_node_ptr l)
     {
@@ -12778,7 +12802,7 @@ private:
     an_expr_node_ptr discarded_value_with_effect(an_expr_node_ptr e, int depth = 0)
     {
         // The front end's own conversions around an operand (C++ converts the operands of `&&`/`||` to bool) are not the user's operator.
-        for (int guard = 0; e != nullptr && guard < 16 && e->kind == enk_operation && e->compiler_generated &&
+        for (int guard {0}; e != nullptr && guard < 16 && e->kind == enk_operation && e->compiler_generated &&
                             (e->variant.operation.kind == eok_bool_cast || e->variant.operation.kind == eok_cast) &&
                             e->variant.operation.operands != nullptr && e->variant.operation.operands->next == nullptr;
              ++guard)
@@ -12789,45 +12813,46 @@ private:
         {
             return nullptr;
         }
-        const an_expr_operator_kind k = e->variant.operation.kind;
+        const an_expr_operator_kind k {e->variant.operation.kind};
         if (is_assignment_kind(k) || is_incdec_kind(k) || is_call_kind(k))
         {
             return nullptr;
         }
-        auto ops = operands_of(e);
+        auto ops {operands_of(e)};
         if (k == eok_comma)
         {
             // A discarded comma (an arm of a discarded `?:`, or the left operand of a comma): its right operand is discarded too, so
             // rule B(2) applies to it and rule C to that operand, recursively.  (Its left operand is checked where it is encoded.)
-            if (ops.size() != 2)
+            if (ops.size() != 2U)
             {
                 return nullptr;
             }
-            if (discarded_comma_right_without_effect(ops[1]))
+            if (discarded_comma_right_without_effect(ops[1U]))
             {
                 reject(Diag::comma_without_effect, e->position, "");
             }
-            return discarded_value_with_effect(ops[1], depth + 1);
+            return discarded_value_with_effect(ops[1U], depth + 1);
         }
-        if (k == eok_question && ops.size() == 3)
+        if (k == eok_question && ops.size() == 3U)
         {
             // Each arm is a discarded position (rules B(2) and C apply to it).  When neither arm has an effect, the effect is in the
             // condition alone and its value is thrown away (`x++ ? 1 : 0;`); `a ? x++ : 0;` and `a ? (x = 1) : (x = 2);` are fine.
-            if (an_expr_node_ptr x = discarded_value_with_effect(ops[1], depth + 1))
+            if (an_expr_node_ptr x = discarded_value_with_effect(ops[1U], depth + 1))
             {
                 return x;
             }
-            if (an_expr_node_ptr x = discarded_value_with_effect(ops[2], depth + 1))
+            if (an_expr_node_ptr x = discarded_value_with_effect(ops[2U], depth + 1))
             {
                 return x;
             }
-            if (first_effect(ops[1]) == nullptr && first_effect(ops[2]) == nullptr && first_effect(ops[0]) != nullptr)
+            if (first_effect(ops[1U]) == nullptr && first_effect(ops[2U]) == nullptr &&
+                first_effect(ops[0U]) != nullptr)
             {
                 return e;
             }
             return nullptr;
         }
-        if ((k == eok_land || k == eok_lor) && ops.size() == 2)
+        if ((k == eok_land || k == eok_lor) && ops.size() == 2U)
         {
             // P37: GCC's C mode warns "value computed is not used" on a discarded `&&`/`||` that has a side effect anywhere in it (also
             // only in the left operand: `x++ && a;`, `g(x) || a;`), unless the right operand is a plain assignment of an integer constant
@@ -12837,20 +12862,20 @@ private:
             {
                 return nullptr;
             }
-            an_expr_node_ptr cur = e;
-            for (int hops = 0; hops < 64; ++hops)
+            an_expr_node_ptr cur {e};
+            for (int hops {0}; hops < 64; ++hops)
             {
-                auto cops = operands_of(cur);
-                if (cops.size() != 2)
+                auto cops {operands_of(cur)};
+                if (cops.size() != 2U)
                 {
                     return cur;
                 }
-                an_expr_node_ptr r = peel_generated_conversions(cops[1]);
+                an_expr_node_ptr r {peel_generated_conversions(cops[1U])};
                 if (r == nullptr || r->kind != enk_operation)
                 {
                     return cur;
                 }
-                const an_expr_operator_kind rk = r->variant.operation.kind;
+                const an_expr_operator_kind rk {r->variant.operation.kind};
                 if (rk == eok_land || rk == eok_lor)
                 {
                     cur = r;
@@ -12863,14 +12888,14 @@ private:
                 // `a && (x = 2);` is fine: C turns `(x = 2) != 0` into the constant 1, which GCC folds away.  A constant zero is not
                 // (`a && (x = 0);`, `a && (x = 1 - 1);`: the folded value decides), unless the target is a bool (P37, audit round 2).  A
                 // non-constant right-hand side is `(x = b) != 0`, whose value is computed and not used.
-                auto ro = operands_of(r);
-                an_expr_node_ptr rhs = ro.size() == 2 ? peel_generated_conversions(ro[1]) : nullptr;
+                auto ro {operands_of(r)};
+                an_expr_node_ptr rhs {ro.size() == 2U ? peel_generated_conversions(ro[1U]) : nullptr};
                 if (rhs != nullptr && rhs->kind == enk_constant && rhs->variant.constant.ptr != nullptr &&
                     rhs->variant.constant.ptr->kind == ck_integer)
                 {
-                    a_type_ptr target = ro[0]->type != nullptr ? skip_typerefs(ro[0]->type) : nullptr;
-                    const bool bool_target =
-                        target != nullptr && target->kind == tk_integer && target->variant.integer.bool_type;
+                    a_type_ptr target {ro[0U]->type != nullptr ? skip_typerefs(ro[0U]->type) : nullptr};
+                    const bool bool_target {target != nullptr && target->kind == tk_integer &&
+                                            target->variant.integer.bool_type};
                     if (bool_target || !is_zero_constant(rhs))
                     {
                         return nullptr;
@@ -12892,7 +12917,7 @@ private:
         }
         if (original->kind == enk_sizeof || original->kind == enk_alignof || original->kind == enk_datasizeof)
         {
-            const auto& si = original->variant.sizeof_info;
+            const auto& si {original->variant.sizeof_info};
             if (si.is_type)
             {
                 return nullptr;
@@ -12926,7 +12951,7 @@ private:
                 {
                     return e;
                 }
-                for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+                for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
                 {
                     if (an_expr_node_ptr f = effect_in_unevaluated(o, depth + 1))
                     {
@@ -12936,12 +12961,12 @@ private:
                 return nullptr;
             case enk_constant:
             {
-                a_constant_ptr c = e->variant.constant.ptr;
+                a_constant_ptr c {e->variant.constant.ptr};
                 if (c == nullptr || (c->expr == nullptr && !c->local_expr_ref))
                 {
                     return nullptr;
                 }
-                an_expr_node_ptr o = expr_node_from_constant(c);
+                an_expr_node_ptr o {expr_node_from_constant(c)};
                 return o != nullptr && o != e ? effect_in_unevaluated(o, depth + 1) : nullptr;
             }
             case enk_sizeof:
@@ -12958,7 +12983,7 @@ private:
     // Whether a type is, through its typeref chain, a `typeof (expression)` type (il_def.h:9712, trk_is_typeof_with_expression).
     static bool is_typeof_expression_type(a_type_ptr t)
     {
-        for (int guard = 0; t != nullptr && t->kind == tk_typeref && guard < 64; ++guard)
+        for (int guard {0}; t != nullptr && t->kind == tk_typeref && guard < 64; ++guard)
         {
             if (is_typeref_kind(t, trk_is_typeof_with_expression))
             {
@@ -12975,7 +13000,7 @@ private:
     // enumerator (decision 0018 item 10; Opus audit, round 3).
     static bool plain_arithmetic_type(a_type_ptr t)
     {
-        for (int guard = 0; t != nullptr && t->kind == tk_typeref && guard < 64; ++guard)
+        for (int guard {0}; t != nullptr && t->kind == tk_typeref && guard < 64; ++guard)
         {
             if (!is_typeref_kind(t, trk_none))
             {
@@ -13016,7 +13041,7 @@ private:
         {
             case enk_constant:
             {
-                a_constant_ptr c = e->variant.constant.ptr;
+                a_constant_ptr c {e->variant.constant.ptr};
                 if (c == nullptr || is_enumerator(c))
                 {
                     return false;
@@ -13029,14 +13054,14 @@ private:
                 {
                     return false;
                 }
-                an_expr_node_ptr o = expr_node_from_constant(c);
+                an_expr_node_ptr o {expr_node_from_constant(c)};
                 return o != nullptr && o != e && typeof_or_sizeof_of_expression(o, depth + 1);
             }
             case enk_sizeof:
             case enk_alignof:
             case enk_datasizeof:
             {
-                const auto& si = e->variant.sizeof_info;
+                const auto& si {e->variant.sizeof_info};
                 if (!si.is_type)
                 {
                     return true;
@@ -13044,7 +13069,7 @@ private:
                 return !plain_arithmetic_type(si.variant.type);
             }
             case enk_operation:
-                for (an_expr_node_ptr o = e->variant.operation.operands; o != nullptr; o = o->next)
+                for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
                 {
                     if (typeof_or_sizeof_of_expression(o, depth + 1))
                     {
@@ -13064,11 +13089,11 @@ private:
     {
         if (s->kind == stmk_decl)
         {
-            for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next)
+            for (an_il_entity_list_entry_ptr en {s->variant.decl.entities}; en != nullptr; en = en->next)
             {
                 if (en->entity.kind == iek_variable)
                 {
-                    a_variable_ptr v = reinterpret_cast<a_variable_ptr>(en->entity.ptr);
+                    a_variable_ptr v {reinterpret_cast<a_variable_ptr>(en->entity.ptr)};
                     if (v->init_kind != initk_none)
                     {
                         return v;
@@ -13079,7 +13104,7 @@ private:
         }
         if (s->kind == stmk_block && s->compiler_generated)
         {
-            for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
+            for (a_statement_ptr c {s->variant.block.statements}; c != nullptr; c = c->next)
             {
                 if (a_variable_ptr v = initialized_variable(c))
                 {
@@ -13099,7 +13124,7 @@ private:
             {
                 return false;
             }
-            for (an_il_entity_list_entry_ptr en = s->variant.decl.entities; en != nullptr; en = en->next)
+            for (an_il_entity_list_entry_ptr en {s->variant.decl.entities}; en != nullptr; en = en->next)
             {
                 if (en->entity.kind != iek_variable)
                 {
@@ -13118,7 +13143,7 @@ private:
             {
                 return false;
             }
-            for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
+            for (a_statement_ptr c {s->variant.block.statements}; c != nullptr; c = c->next)
             {
                 if (!is_uninitialized_declaration(c))
                 {
@@ -13165,13 +13190,13 @@ private:
     const Expr* enum_case_value(a_constant_ptr cv, const a_source_position& pos, const vir::Type& enum_type,
                                 const vir::Type& promoted)
     {
-        const SrcLoc l = loc_of(pos);
-        const bool has_expr = cv->expr != nullptr || cv->local_expr_ref;
+        const SrcLoc l {loc_of(pos)};
+        const bool has_expr {cv->expr != nullptr || cv->local_expr_ref};
         if (is_enumerator(cv) || (!has_expr && cv->kind == ck_integer && cv->type != nullptr))
         {
             // A copy of the enumerator's constant (an enumeration with a fixed type of rank >= int: its case values are enumerator
             // copies, enum-typed with no expression): its value, converted to the promoted type.
-            VType ct = vtype(cv->type);
+            VType ct {vtype(cv->type)};
             if (is_enumerator(cv) ? !ct.ok : !(ct.ok && ct.t == enum_type))
             {
                 reject(Diag::unsupported_statement, pos, "a case value this version cannot read");
@@ -13184,7 +13209,7 @@ private:
                 reject(Diag::unsupported_statement, pos, "a folded constant whose original expression is not recorded");
                 return nullptr;
             }
-            const Expr* x = constant_value(cv, pos);
+            const Expr* x {constant_value(cv, pos)};
             if (x == nullptr)
             {
                 return nullptr;
@@ -13195,18 +13220,18 @@ private:
             }
             return x;
         }
-        an_expr_node_ptr original = has_expr ? expr_node_from_constant(cv) : nullptr;
-        an_expr_node_ptr operand = nullptr;
+        an_expr_node_ptr original {has_expr ? expr_node_from_constant(cv) : nullptr};
+        an_expr_node_ptr operand {nullptr};
         if (original != nullptr && original->kind == enk_operation && original->variant.operation.kind == eok_cast &&
-            operands_of(original).size() == 1)
+            operands_of(original).size() == 1U)
         {
             // A generated cast is the front end's spelling of the conversion to the promoted type: its operand is the case constant.
             // A written one (`case (enum color)2:`) is the user's conversion into the enumeration: encoded as written (checked, its
             // obligation in the prologue), then promoted.
-            VType to = vtype(original->type);
+            VType to {vtype(original->type)};
             if (to.ok && to.t == enum_type)
             {
-                operand = original->compiler_generated ? operands_of(original)[0] : original;
+                operand = original->compiler_generated ? operands_of(original)[0U] : original;
             }
         }
         if (operand == nullptr)
@@ -13215,7 +13240,7 @@ private:
             return nullptr;
         }
         ++cx_.const_depth; // a constant expression: no calls (`call` rejects them)
-        const Expr* x = expr(operand);
+        const Expr* x {expr(operand)};
         --cx_.const_depth;
         if (x == nullptr)
         {
@@ -13243,7 +13268,7 @@ private:
             return;
         }
         detect_empty_body(s->variant.switch_stmt.body_statement); // R13
-        a_statement_ptr body = s->variant.switch_stmt.body_statement;
+        a_statement_ptr body {s->variant.switch_stmt.body_statement};
         // The body is a compound statement; a lone `switch (x) case 1: return 1;` is wrapped in a generated block by the front end.
         if (body == nullptr || body->kind != stmk_block)
         {
@@ -13251,8 +13276,8 @@ private:
             return;
         }
         allow_enum_conversion(s->expr); // decision 0018 item 6 (ii): the controlling expression
-        const Expr* scrut = expr(s->expr);
-        bool ok = scrut != nullptr;
+        const Expr* scrut {expr(s->expr)};
+        bool ok {scrut != nullptr};
         if (ok && !scrut->type.is_int())
         {
             reject(Diag::unsupported_statement, s->expr->position, "a switch on a value that is not an integer");
@@ -13262,9 +13287,9 @@ private:
         // bare enumeration value in C unconverted and casts each case value into the enumeration (P26), which would make `case 4:`
         // a conversion error: such a switch is encoded in the promoted type, the enumeration's compatible type (same bits and
         // signedness; `int` when narrower than int).
-        bool c_enum_switch = false;
-        vir::Type promoted = vir::Type::void_type();
-        vir::Type enum_scrut_type = vir::Type::void_type();
+        bool c_enum_switch {false};
+        vir::Type promoted {vir::Type::void_type()};
+        vir::Type enum_scrut_type {vir::Type::void_type()};
         // Only where C promotes: an enumeration of rank <= int.  One with a fixed base above int (`: long`, `: unsigned long`) is not
         // promoted: its scrutinee stays the enumeration and its case values are encoded the ordinary way (a cast into the
         // enumeration is a checked conversion, never a wrap).
@@ -13273,20 +13298,21 @@ private:
         {
             c_enum_switch = true;
             enum_scrut_type = scrut->type;
-            const vir::IntType* et = scrut->type.int_type;
-            const int cb = prog_.c_int_bits();
-            const bool sgn = et->bits < cb ? true : et->is_signed;
+            const vir::IntType* et {scrut->type.int_type};
+            const int cb {prog_.c_int_bits()};
+            const bool sgn {et->bits < cb ? true : et->is_signed};
             promoted = vir::Type::integer(prog_.int_type(sgn ? "int" : "unsigned int", cb, sgn));
             scrut = b_.convert(promoted, scrut, false, loc_of(s->expr->position));
         }
         // Decision 0019 item 11: a switch over an enumeration (before promotion, in both modes) is held to the two rules of
         // -Wswitch: every case has the value of an enumerator, and without a default every enumerator's value has a case.
-        a_type_ptr sw_enum = ok ? switch_enumeration(s->expr) : nullptr;
+        a_type_ptr sw_enum {ok ? switch_enumeration(s->expr) : nullptr};
         std::string sw_enum_name;
         std::vector<std::pair<std::string, std::string>> sw_enumerators; // (name, value) in declaration order
-        std::set<std::string> sw_enum_values, sw_case_values;
-        bool sw_has_default = false;
-        bool sw_rule1_failed = false;
+        std::set<std::string> sw_enum_values;
+        std::set<std::string> sw_case_values;
+        bool sw_has_default {false};
+        bool sw_rule1_failed {false};
         if (sw_enum != nullptr)
         {
             if (!enum_info(sw_enum).ok)
@@ -13303,22 +13329,22 @@ private:
                         sw_enum = nullptr; // enum_info refuses this: fail closed
                         break;
                     }
-                    const std::string val = decimal_value(k);
+                    const std::string val {decimal_value(k)};
                     sw_enumerators.emplace_back(k->source_corresp.name != nullptr ? k->source_corresp.name : "?", val);
                     sw_enum_values.insert(val);
                 }
             }
         }
-        const int id = b_.jump_id();
+        const int id {b_.jump_id()};
         cx_.targets.push_back(make_target(s, true, id, nullptr));
         Out inner;
-        bool seen_label = false;
-        a_statement_ptr skipped = nullptr; // a declaration of the body that a later label would jump over
-        for (a_statement_ptr c = body->variant.block.statements; c != nullptr; c = c->next)
+        bool seen_label {false};
+        a_statement_ptr skipped {nullptr}; // a declaration of the body that a later label would jump over
+        for (a_statement_ptr c {body->variant.block.statements}; c != nullptr; c = c->next)
         {
             if (c->kind == stmk_switch_case)
             {
-                a_switch_case_entry_ptr en = c->variant.switch_case.extra_info;
+                a_switch_case_entry_ptr en {c->variant.switch_case.extra_info};
                 if (c->variant.switch_case.switch_statement != s || en == nullptr)
                 {
                     reject(Diag::unsupported_statement, c->position, "a case label that this version cannot read");
@@ -13326,7 +13352,7 @@ private:
                     continue;
                 }
                 check_attributes(c->attributes); // held to the allow-list like any statement's (0014 item 11)
-                for (an_attribute_ptr a = c->attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {c->attributes}; a != nullptr; a = a->next)
                 {
                     if (is_registered_cerastes(a))
                     {
@@ -13342,8 +13368,8 @@ private:
                 }
                 if (skipped != nullptr)
                 {
-                    a_variable_ptr v = initialized_variable(skipped);
-                    const DiagPos dp = diag_position(skipped->position);
+                    a_variable_ptr v {initialized_variable(skipped)};
+                    const DiagPos dp {diag_position(skipped->position)};
                     reject(Diag::unsupported_statement, c->position,
                            "a case label that jumps over the declaration of \"" +
                                std::string(v != nullptr && v->source_corresp.name != nullptr ? v->source_corresp.name
@@ -13368,8 +13394,8 @@ private:
                         ok = false;
                         continue;
                     }
-                    const std::string front_value = decimal_value(en->case_value);
-                    if (sw_enum_values.count(front_value) == 0)
+                    const std::string front_value {decimal_value(en->case_value)};
+                    if (sw_enum_values.count(front_value) == 0U)
                     {
                         reject_args(Diag::case_not_in_enumeration, c->position, {front_value, sw_enum_name});
                         sw_rule1_failed = true;
@@ -13379,8 +13405,8 @@ private:
                 }
                 // The value is encoded by its original expression, like every folded constant (0010 item 12): `case 1 << 40` is a
                 // shift error at the label, not the 0 that the front end folded it to.
-                const a_source_position saved_stmt_pos = cx_.stmt_pos;
-                if (c->position.seq != 0)
+                const a_source_position saved_stmt_pos {cx_.stmt_pos};
+                if (c->position.seq != 0U)
                 {
                     cx_.stmt_pos = c->position;
                 }
@@ -13388,7 +13414,7 @@ private:
                 cx_.case_var.clear();
                 // A case value is converted like the controlling expression (decision 0018 item 6 (ii)): `case DEF:` with a `const
                 // enum color DEF` in C++ converts the constant to the promoted type of the condition.
-                const Expr* v = nullptr;
+                const Expr* v {nullptr};
                 if (c_enum_switch)
                 {
                     v = enum_case_value(en->case_value, c->position, enum_scrut_type, promoted);
@@ -13403,7 +13429,7 @@ private:
                     v = constant_value(en->case_value, c->position);
                 }
                 cx_.case_value = false;
-                const std::string named_var = cx_.case_var;
+                const std::string named_var {cx_.case_var};
                 cx_.stmt_pos = saved_stmt_pos;
                 if (v == nullptr)
                 {
@@ -13462,7 +13488,7 @@ private:
         {
             for (const auto& en : sw_enumerators)
             {
-                if (sw_case_values.count(en.second) == 0)
+                if (sw_case_values.count(en.second) == 0U)
                 {
                     reject_args(Diag::enumerator_not_handled, s->position, {en.first, sw_enum_name});
                     sw_rule1_failed = true;
@@ -13484,12 +13510,12 @@ private:
     // Where a statement ends: its end position, else for a `switch` or a loop the closing brace of its body (the position its own `break` exit is reported at).
     SrcLoc statement_end(a_statement_ptr c)
     {
-        SrcLoc end = end_of(c->end_position);
+        SrcLoc end {end_of(c->end_position)};
         if (end.known())
         {
             return end;
         }
-        a_statement_ptr body = nullptr;
+        a_statement_ptr body {nullptr};
         if (c->kind == stmk_switch)
         {
             body = c->variant.switch_stmt.body_statement;
@@ -13509,11 +13535,11 @@ private:
     // the statement (allocated at the block's entry; decision 0044 item 7).  True when there were any.
     bool child_statement(a_statement_ptr c, Out& inner)
     {
-        const size_t mark = cx_.literal_pending.size();
+        const size_t mark {cx_.literal_pending.size()};
         Out mine;
         statement(c, mine);
-        const bool any = cx_.literal_pending.size() > mark;
-        for (size_t i = mark; i < cx_.literal_pending.size(); ++i)
+        const bool any {cx_.literal_pending.size() > mark};
+        for (size_t i {mark}; i < cx_.literal_pending.size(); ++i)
         {
             inner.push_back(b_.decl(cx_.literal_pending[i], nullptr, cx_.literal_pending[i]->loc));
         }
@@ -13531,7 +13557,7 @@ private:
         {
             return;
         }
-        if (s->position.seq != 0)
+        if (s->position.seq != 0U)
         {
             cx_.stmt_pos = s->position;
         }
@@ -13547,8 +13573,8 @@ private:
                 {
                     // Guards (decision 0015 item 2; P20 found neither shape): a flattened block must not hold a user label (its scope
                     // would change), and a block kept as a block must not hold a declaration (a goto past it would not see it).
-                    const bool flattened = s->attributes == nullptr;
-                    for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
+                    const bool flattened {s->attributes == nullptr};
+                    for (a_statement_ptr c {s->variant.block.statements}; c != nullptr; c = c->next)
                     {
                         if (flattened && c->kind == stmk_label && c->variant.label.ptr != nullptr &&
                             !c->variant.label.ptr->break_label && !c->variant.label.ptr->continue_label &&
@@ -13564,17 +13590,17 @@ private:
                         }
                     }
                 }
-                bool hidden = false; // a compound literal's object is declared in this block (decision 0044 item 7)
-                for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
+                bool hidden {false}; // a compound literal's object is declared in this block (decision 0044 item 7)
+                for (a_statement_ptr c {s->variant.block.statements}; c != nullptr; c = c->next)
                 {
                     hidden = child_statement(c, inner) || hidden;
                 }
                 // A generated block that declares variables (a `for` initialization) stays flattened: its variables are in scope for the loop, and the literal's object
                 // is declared in the block the loop is made into.
-                bool declares = false;
+                bool declares {false};
                 if (s->compiler_generated)
                 {
-                    for (a_statement_ptr c = s->variant.block.statements; c != nullptr; c = c->next)
+                    for (a_statement_ptr c {s->variant.block.statements}; c != nullptr; c = c->next)
                     {
                         if (c->kind == stmk_decl || c->kind == stmk_init)
                         {
@@ -13585,22 +13611,22 @@ private:
                 if (hidden && s->compiler_generated && s->attributes == nullptr && !declares)
                 {
                     // C's own block around a control statement holds the literal's object: it stays a block, ending where its statement does.
-                    a_statement_ptr first = s->variant.block.statements;
-                    a_statement_ptr last = first;
+                    a_statement_ptr first {s->variant.block.statements};
+                    a_statement_ptr last {first};
                     while (last != nullptr && last->next != nullptr)
                     {
                         last = last->next;
                     }
-                    SrcLoc end = end_of(s->end_position);
+                    SrcLoc end {end_of(s->end_position)};
                     // the statement the block wraps: not the compiler's break label that follows a `switch` or a loop
                     // (P13)
                     if (!end.known())
                     {
-                        for (a_statement_ptr c = first; c != nullptr; c = c->next)
+                        for (a_statement_ptr c {first}; c != nullptr; c = c->next)
                         {
                             if (c->kind != stmk_label && c->kind != stmk_empty)
                             {
-                                const SrcLoc e = statement_end(c);
+                                const SrcLoc e {statement_end(c)};
                                 if (e.known())
                                 {
                                     end = e;
@@ -13619,9 +13645,9 @@ private:
                             "a compound literal's object in a block without a closing position (decision 0044 item 7)");
                         return;
                     }
-                    out.push_back(block_of(std::move(inner),
-                                           first != nullptr && first->position.seq != 0 ? first->position : s->position,
-                                           std::move(end)));
+                    out.push_back(block_of(
+                        std::move(inner), first != nullptr && first->position.seq != 0U ? first->position : s->position,
+                        std::move(end)));
                 }
                 else if (s->compiler_generated && s->attributes == nullptr)
                 {
@@ -13663,11 +13689,11 @@ private:
                     detect_empty_body(s->variant.if_stmt.then_statement); // R13
                 }
                 check_condition(s->expr);
-                const Expr* c = as_bool(expr(s->expr), s->expr->position);
-                const Stmt* t = sub_statement(s->variant.if_stmt.then_statement, s->position);
-                const Stmt* f = s->variant.if_stmt.else_statement
-                                    ? sub_statement(s->variant.if_stmt.else_statement, s->position)
-                                    : nullptr;
+                const Expr* c {as_bool(expr(s->expr), s->expr->position)};
+                const Stmt* t {sub_statement(s->variant.if_stmt.then_statement, s->position)};
+                const Stmt* f {s->variant.if_stmt.else_statement
+                                   ? sub_statement(s->variant.if_stmt.else_statement, s->position)
+                                   : nullptr};
                 if (c != nullptr)
                 {
                     out.push_back(b_.if_stmt(c, t, f, loc_of(s->position)));
@@ -13681,15 +13707,16 @@ private:
                     rejected_statement(s, "a while statement with a declaration in its condition");
                     return;
                 }
-                std::vector<vir::Clause> inv, measure;
-                const bool inv_ok = encode_loop_clauses(s, inv, measure);
+                std::vector<vir::Clause> inv;
+                std::vector<vir::Clause> measure;
+                const bool inv_ok {encode_loop_clauses(s, inv, measure)};
                 check_condition(s->expr);
                 cx_.in_loop_cond = true;
-                const Expr* c = as_bool(expr(s->expr), s->expr->position);
+                const Expr* c {as_bool(expr(s->expr), s->expr->position)};
                 cx_.in_loop_cond = false;
-                const int id = b_.jump_id();
+                const int id {b_.jump_id()};
                 cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
-                const Stmt* body = sub_statement(s->variant.loop_statement, s->position, /*loop_body=*/true);
+                const Stmt* body {sub_statement(s->variant.loop_statement, s->position, /*loop_body=*/true)};
                 cx_.targets.pop_back();
                 if (c != nullptr && inv_ok)
                 {
@@ -13707,16 +13734,17 @@ private:
                 }
                 // `do { B } while (0)` runs once and needs no measure (0014 item 5).
                 // ... unless the condition names a variable or parameter (0017 item 7): then it is a measured loop in both modes.
-                const bool once = is_zero_constant(s->expr) && !names_object(s->expr);
-                std::vector<vir::Clause> inv, measure;
-                const bool inv_ok = encode_loop_clauses(s, inv, measure, !once, /*atoms_ok=*/!once);
+                const bool once {is_zero_constant(s->expr) && !names_object(s->expr)};
+                std::vector<vir::Clause> inv;
+                std::vector<vir::Clause> measure;
+                const bool inv_ok {encode_loop_clauses(s, inv, measure, !once, /*atoms_ok=*/!once)};
                 check_condition(s->expr);
                 cx_.in_loop_cond = true;
-                const Expr* c = as_bool(expr(s->expr), s->expr->position);
+                const Expr* c {as_bool(expr(s->expr), s->expr->position)};
                 cx_.in_loop_cond = false;
-                const int id = b_.jump_id();
+                const int id {b_.jump_id()};
                 cx_.targets.push_back(make_target(s, false, id, s->variant.loop_statement));
-                const Stmt* body = sub_statement(s->variant.loop_statement, s->position, /*loop_body=*/true);
+                const Stmt* body {sub_statement(s->variant.loop_statement, s->position, /*loop_body=*/true)};
                 cx_.targets.pop_back();
                 if (c != nullptr && inv_ok)
                 {
@@ -13728,7 +13756,7 @@ private:
             }
             case stmk_for:
             {
-                a_for_loop_ptr fl = s->variant.for_loop.extra_info;
+                a_for_loop_ptr fl {s->variant.for_loop.extra_info};
                 if (fl == nullptr)
                 {
                     rejected_statement(s, "a for statement this version cannot read");
@@ -13747,18 +13775,20 @@ private:
                 {
                     statement(fl->initialization, whole);
                 }
-                std::vector<vir::Clause> inv, measure;
-                const bool inv_ok = encode_loop_clauses(s, inv, measure);
+                std::vector<vir::Clause> inv;
+                std::vector<vir::Clause> measure;
+                const bool inv_ok {encode_loop_clauses(s, inv, measure)};
                 if (s->expr != nullptr)
                 {
                     check_condition(s->expr);
                 }
                 cx_.in_loop_cond = true;
-                const Expr* c =
-                    s->expr ? as_bool(expr(s->expr), s->expr->position) : b_.bool_const(true, loc_of(s->position));
+                const Expr* c {s->expr ? as_bool(expr(s->expr), s->expr->position)
+                                       : b_.bool_const(true, loc_of(s->position))};
                 cx_.in_loop_cond = false;
-                Out body, step;
-                const int id = b_.jump_id();
+                Out body;
+                Out step;
+                const int id {b_.jump_id()};
                 cx_.targets.push_back(make_target(s, false, id, s->variant.for_loop.statement));
                 if (s->variant.for_loop.statement != nullptr)
                 {
@@ -13772,9 +13802,9 @@ private:
                     expression_statement(fl->increment, fl->increment->position, step);
                 }
                 cx_.in_for_step = false;
-                const Stmt* step_stmt = step.empty()       ? nullptr
-                                        : step.size() == 1 ? step[0]
-                                                           : block_of(std::move(step), fl->increment->position);
+                const Stmt* step_stmt {step.empty()        ? nullptr
+                                       : step.size() == 1U ? step[0U]
+                                                           : block_of(std::move(step), fl->increment->position)};
                 if (c != nullptr && inv_ok)
                 {
                     whole.push_back(b_.loop(
@@ -13797,7 +13827,7 @@ private:
             }
             case stmk_goto:
             {
-                a_label_ptr l = s->variant.label.ptr;
+                a_label_ptr l {s->variant.label.ptr};
                 // `break` and `continue` are compiler-generated gotos (P13); every other goto is the user's (decision 0015 item 2):
                 // it is checked as a VIR statement once the function is built (goto_problems).  A compiler-generated goto (or label,
                 // below) without break/continue flags is treated as a user one, and goto_problems then fails closed on it.
@@ -13811,7 +13841,7 @@ private:
                 }
                 else
                 {
-                    const Stmt* g = b_.goto_stmt(label_id(l), loc_of(s->position));
+                    const Stmt* g {b_.goto_stmt(label_id(l), loc_of(s->position))};
                     cx_.goto_positions[g] = s->position;
                     out.push_back(g);
                 }
@@ -13824,7 +13854,7 @@ private:
             {
                 // The labels the front end makes for `break` and `continue` follow the goto that names them (P13); the others are
                 // the user's.
-                a_label_ptr l = s->variant.label.ptr;
+                a_label_ptr l {s->variant.label.ptr};
                 if (l == nullptr)
                 {
                     rejected_statement(s, "a label this version cannot read");
@@ -13837,7 +13867,7 @@ private:
                 // Label attributes are on the label entity, not on the statement (P19): held to the allow-list like any other.
                 check_attributes(l->source_corresp.attributes);
                 // EDG rejects a registered cerastes attribute on a label first (#1835); this is defence in depth.
-                for (an_attribute_ptr a = l->source_corresp.attributes; a != nullptr; a = a->next)
+                for (an_attribute_ptr a {l->source_corresp.attributes}; a != nullptr; a = a->next)
                 {
                     if (is_registered_cerastes(a))
                     {
@@ -13845,7 +13875,7 @@ private:
                                "\"cerastes::" + std::string(a->name ? a->name : "?") + "\" on a label");
                     }
                 }
-                const char* nm = l->source_corresp.name;
+                const char* nm {l->source_corresp.name};
                 out.push_back(b_.label_stmt(label_id(l), nm != nullptr ? nm : "?", loc_of(s->position)));
                 return;
             }
@@ -13892,7 +13922,7 @@ private:
     void check_attributes_statement(a_statement_ptr s, Out& out)
     {
         check_attributes(s->attributes);
-        for (an_attribute_ptr a = s->attributes; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {s->attributes}; a != nullptr; a = a->next)
         {
             if (!is_registered_cerastes(a))
             {
@@ -13914,18 +13944,18 @@ private:
     // ---- functions ----------------------------------------------------------------------------------------------
     void encode_body(a_routine_ptr r)
     {
-        vir::Function* f = fns_[r];
+        vir::Function* f {fns_[r]};
         if (f == nullptr)
         {
             return;
         }
-        a_scope_ptr sp = body_scope(r);
+        a_scope_ptr sp {body_scope(r)};
         cx_ = Ctx();
         cx_.routine = r;
         cx_.fn = f;
         cx_.stmt_pos = r->source_corresp.decl_position;
-        int k = 0;
-        for (a_variable_ptr p = sp->variant.routine.parameters; p != nullptr; p = p->next, ++k)
+        int k {0};
+        for (a_variable_ptr p {sp->variant.routine.parameters}; p != nullptr; p = p->next, ++k)
         {
             if (static_cast<size_t>(k) >= f->params.size())
             {
@@ -13947,7 +13977,7 @@ private:
             return;
         }
         Out out;
-        const auto reported_before = reported_count();
+        const auto reported_before {reported_count()};
         statement(sp->assoc_block, out);
         for (a_variable_ptr v : cx_.pending)
         {
@@ -13985,12 +14015,12 @@ private:
         {
             return nullptr;
         }
-        a_type_ptr ct = skip_typerefs(t);
+        a_type_ptr ct {skip_typerefs(t)};
         if (ct == nullptr || ct->kind != tk_integer)
         {
             return nullptr;
         }
-        a_type_ptr et = ct->variant.integer.enum_type ? ct : ct->variant.integer.enum_info.affiliated_type;
+        a_type_ptr et {ct->variant.integer.enum_type ? ct : ct->variant.integer.enum_info.affiliated_type};
         if (et != nullptr)
         {
             et = skip_typerefs(et);
@@ -14003,19 +14033,19 @@ private:
     // and the type of every node passed.  False when it is anything else (fail closed).
     struct EnumOperand
     {
-        an_expr_node_ptr inner = nullptr;    // the value (null when an enumerator)
-        a_constant_ptr enumerator = nullptr; // the enumerator (null otherwise)
-        a_type_ptr entry = nullptr;          // its enumeration
+        an_expr_node_ptr inner {nullptr};    // the value (null when an enumerator)
+        a_constant_ptr enumerator {nullptr}; // the enumerator (null otherwise)
+        a_type_ptr entry {nullptr};          // its enumeration
         std::vector<a_type_ptr> via;         // the types of the implicit conversions passed, outermost first
     };
     static bool enumeration_operand(an_expr_node_ptr n, EnumOperand* out)
     {
         std::vector<a_type_ptr> via;
-        for (int guard = 0; n != nullptr && guard < 16; ++guard)
+        for (int guard {0}; n != nullptr && guard < 16; ++guard)
         {
             if (n->kind == enk_constant)
             {
-                a_constant_ptr c = n->variant.constant.ptr;
+                a_constant_ptr c {n->variant.constant.ptr};
                 if (is_enumerator(c))
                 {
                     via.push_back(n->type);
@@ -14028,7 +14058,7 @@ private:
                 // the enumeration; it is encoded like any constant (its initializer is checked in the prologue, decision 0017).
                 if (n->type != nullptr)
                 {
-                    a_type_ptr nt = skip_typerefs(n->type);
+                    a_type_ptr nt {skip_typerefs(n->type)};
                     if (nt != nullptr && nt->kind == tk_integer && nt->variant.integer.enum_type)
                     {
                         break;
@@ -14038,7 +14068,7 @@ private:
                 // conversion or a constant; a variable's value or any computation is not an enumerator.
                 if (c != nullptr && c->expr != nullptr && !c->local_expr_ref)
                 {
-                    an_expr_node_ptr o = expr_node_from_constant(c);
+                    an_expr_node_ptr o {expr_node_from_constant(c)};
                     if (o != nullptr && o != n &&
                         (o->kind == enk_constant ||
                          (o->kind == enk_operation && o->variant.operation.kind == eok_cast && o->compiler_generated)))
@@ -14052,7 +14082,7 @@ private:
             }
             if (n->kind == enk_operation && n->variant.operation.kind == eok_cast && n->compiler_generated)
             {
-                an_expr_node_ptr o = n->variant.operation.operands;
+                an_expr_node_ptr o {n->variant.operation.operands};
                 if (o == nullptr || o->next != nullptr)
                 {
                     return false;
@@ -14067,7 +14097,7 @@ private:
         {
             return false;
         }
-        a_type_ptr t = n->type != nullptr ? skip_typerefs(n->type) : nullptr;
+        a_type_ptr t {n->type != nullptr ? skip_typerefs(n->type) : nullptr};
         if (t == nullptr || t->kind != tk_integer || !t->variant.integer.enum_type)
         {
             return false;
@@ -14081,7 +14111,7 @@ private:
     // The literal of an enumerator in its enumeration's type.
     const Expr* enumerator_literal(a_constant_ptr c, a_type_ptr entry, const a_source_position& pos)
     {
-        if (c->kind != ck_integer || c->source_corresp.decl_position.seq == 0 ||
+        if (c->kind != ck_integer || c->source_corresp.decl_position.seq == 0U ||
             !in_verified_file(c->source_corresp.decl_position))
         {
             reject(
@@ -14089,7 +14119,7 @@ private:
                 "an enumerator of an enumeration declared in a system file (system files are used only through contracts, decision 0018)");
             return nullptr;
         }
-        const EnumInfo& ei = enum_info(entry);
+        const EnumInfo& ei {enum_info(entry)};
         if (!ei.ok)
         {
             if (!ei.silent)
@@ -14109,8 +14139,9 @@ private:
     int ordered_enumeration_operands(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, const Expr** a,
                                      const Expr** c)
     {
-        EnumOperand lo_, ro_;
-        if (!enumeration_operand(ops[0], &lo_) || !enumeration_operand(ops[1], &ro_))
+        EnumOperand lo_;
+        EnumOperand ro_;
+        if (!enumeration_operand(ops[0U], &lo_) || !enumeration_operand(ops[1U], &ro_))
         {
             return 0;
         }
@@ -14123,7 +14154,7 @@ private:
         {
             return 0;
         }
-        const EnumInfo& ei = enum_info(lo_.entry);
+        const EnumInfo& ei {enum_info(lo_.entry)};
         if (!ei.ok)
         {
             if (!ei.silent)
@@ -14133,18 +14164,18 @@ private:
             return -1;
         }
         // Both operands are converted to one type that holds every value of the enumeration (fail closed on anything else).
-        VType ta = vtype(ops[0]->type);
-        VType tb = vtype(ops[1]->type);
+        VType ta {vtype(ops[0U]->type)};
+        VType tb {vtype(ops[1U]->type)};
         if (!ta.ok || !tb.ok || ta.t != tb.t || !ta.t.is_int())
         {
             return 0;
         }
-        const vir::dec::Range value_range = vir::dec::range_of(*ei.type.int_type);
+        const vir::dec::Range value_range {vir::dec::range_of(*ei.type.int_type)};
         for (const EnumOperand* o : {&lo_, &ro_})
         {
             for (a_type_ptr via : o->via)
             {
-                VType tv = vtype(via);
+                VType tv {vtype(via)};
                 if (!tv.ok || !tv.t.is_int() || !vir::dec::contains(vir::dec::range_of(*tv.t.int_type), value_range))
                 {
                     return 0;
@@ -14155,9 +14186,9 @@ private:
         {
             return 0;
         }
-        const Expr* x[2] = {nullptr, nullptr};
-        const EnumOperand* o[2] = {&lo_, &ro_};
-        for (int i = 0; i < 2; ++i)
+        const Expr* x[2] {nullptr, nullptr};
+        const EnumOperand* o[2] {&lo_, &ro_};
+        for (int i {0}; i < 2; ++i)
         {
             if (o[i]->enumerator != nullptr)
             {
@@ -14188,11 +14219,11 @@ private:
     // folded constant (never an explicit cast, never an enumerator, whose value has no expression).  Null on a malformed node.
     static an_expr_node_ptr peel_implicit(an_expr_node_ptr n)
     {
-        for (int guard = 0; n != nullptr && guard < 16; ++guard)
+        for (int guard {0}; n != nullptr && guard < 16; ++guard)
         {
             if (n->kind == enk_operation && n->variant.operation.kind == eok_cast && n->compiler_generated)
             {
-                an_expr_node_ptr o = n->variant.operation.operands;
+                an_expr_node_ptr o {n->variant.operation.operands};
                 if (o == nullptr || o->next != nullptr)
                 {
                     return nullptr;
@@ -14203,7 +14234,7 @@ private:
                      !is_enumerator(n->variant.constant.ptr) && n->variant.constant.ptr->expr != nullptr &&
                      !n->variant.constant.ptr->local_expr_ref)
             {
-                an_expr_node_ptr o = expr_node_from_constant(n->variant.constant.ptr);
+                an_expr_node_ptr o {expr_node_from_constant(n->variant.constant.ptr)};
                 if (o == nullptr || o == n)
                 {
                     return n;
@@ -14230,7 +14261,7 @@ private:
         {
             return false;
         }
-        VType t = vtype(n->type);
+        VType t {vtype(n->type)};
         if (t.ok && t.t.is_bool())
         {
             return true;
@@ -14254,7 +14285,7 @@ private:
                 return true;
             case eok_question:
             {
-                an_expr_node_ptr c = n->variant.operation.operands;
+                an_expr_node_ptr c {n->variant.operation.operands};
                 if (c == nullptr || c->next == nullptr || c->next->next == nullptr)
                 {
                     return false;
@@ -14263,7 +14294,7 @@ private:
             }
             case eok_comma:
             {
-                an_expr_node_ptr r = n->variant.operation.operands;
+                an_expr_node_ptr r {n->variant.operation.operands};
                 if (r == nullptr || r->next == nullptr)
                 {
                     return false;
@@ -14291,21 +14322,21 @@ private:
         {
             return nullptr;
         }
-        an_expr_node_ptr c = n->variant.operation.operands;
+        an_expr_node_ptr c {n->variant.operation.operands};
         if (c == nullptr || c->next == nullptr || c->next->next == nullptr)
         {
             return nullptr;
         }
-        an_expr_node_ptr arm[2] = {c->next, c->next->next};
+        an_expr_node_ptr arm[2] {c->next, c->next->next};
         EnumOperand eo[2];
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
             if (an_expr_node_ptr inner = enumerator_conditional(arm[i], depth + 1))
             {
                 return inner;
             }
         }
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
             if (enumeration_operand(arm[i], &eo[i]) && eo[i].enumerator != nullptr)
             {
@@ -14369,7 +14400,7 @@ private:
     // As peel_implicit, and the front end's generated conversions to `bool` too (a C++ condition is one).
     static an_expr_node_ptr peel_condition(an_expr_node_ptr n)
     {
-        for (int guard = 0; n != nullptr && guard < 16; ++guard)
+        for (int guard {0}; n != nullptr && guard < 16; ++guard)
         {
             n = peel_implicit(n);
             if (n != nullptr && n->kind == enk_operation && n->variant.operation.kind == eok_bool_cast &&
@@ -14401,18 +14432,18 @@ private:
         {
             return false;
         }
-        const std::string s = decimal_value(c);
-        size_t i = 0;
-        bool neg = false;
+        const std::string s {decimal_value(c)};
+        size_t i {0U};
+        bool neg {false};
         if (i < s.size() && (s[i] == '-' || s[i] == '+'))
         {
             neg = s[i++] == '-';
         }
-        if (i >= s.size() || s.size() - i > 36)
+        if (i >= s.size() || s.size() - i > 36U)
         {
             return false;
         }
-        __int128 v = 0;
+        __int128 v {0};
         for (; i < s.size(); ++i)
         {
             if (s[i] < '0' || s[i] > '9')
@@ -14435,15 +14466,15 @@ private:
     // a `+` or `-`, or a different bitwise operator.
     bool detect_operand_parentheses(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        const an_expr_operator_kind k = e->variant.operation.kind;
+        const an_expr_operator_kind k {e->variant.operation.kind};
         for (an_expr_node_ptr o : ops)
         {
-            an_expr_node_ptr n = written_operation(o);
+            an_expr_node_ptr n {written_operation(o)};
             if (n == nullptr || n->is_parenthesized)
             {
                 continue;
             }
-            const an_expr_operator_kind nk = n->variant.operation.kind;
+            const an_expr_operator_kind nk {n->variant.operation.kind};
             if (is_comparison_kind(nk) || nk == eok_add || nk == eok_subtract ||
                 (is_bitwise_binary_kind(nk) && nk != k))
             {
@@ -14456,17 +14487,17 @@ private:
     // operand is a truth value or, for `|` only, the literal 0 or 1.
     bool detect_logical_not(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        const an_expr_operator_kind k = e->variant.operation.kind;
+        const an_expr_operator_kind k {e->variant.operation.kind};
         if (k != eok_and && k != eok_or)
         {
             return false;
         }
-        an_expr_node_ptr l = written_operation(ops[0]);
+        an_expr_node_ptr l {written_operation(ops[0U])};
         if (l == nullptr || l->variant.operation.kind != eok_not || l->is_parenthesized)
         {
             return false;
         }
-        if (truth_value(ops[1]))
+        if (truth_value(ops[1U]))
         {
             return false;
         }
@@ -14474,18 +14505,18 @@ private:
         {
             // GCC is silent on the literal 0 or 1 (by value, whatever the suffix: `1L`), and every compiler on an explicit cast of a
             // comparison (`!x | (int)(y > 0)`); clang warns about that cast only for `&`.
-            __int128 v = 0;
-            if (constant_int128(integer_constant_operand(ops[1]), &v) && (v == 0 || v == 1))
+            __int128 v {0};
+            if (constant_int128(integer_constant_operand(ops[1U]), &v) && (v == 0 || v == 1))
             {
                 return false;
             }
-            an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+            an_expr_node_ptr r {peel_generated_conversions(ops[1U])};
             if (r != nullptr && r->kind == enk_operation && r->variant.operation.kind == eok_cast &&
                 !r->compiler_generated && r->variant.operation.operands != nullptr &&
                 r->variant.operation.operands->next == nullptr)
             {
                 // GCC exempts the cast of a comparison, `!`, `&&` or `||` by form; `(int)q` of a bool variable still warns (P41 `or_castq`).
-                an_expr_node_ptr o = peel_generated_conversions(r->variant.operation.operands);
+                an_expr_node_ptr o {peel_generated_conversions(r->variant.operation.operands)};
                 if (o != nullptr && o->kind == enk_operation &&
                     (is_comparison_kind(o->variant.operation.kind) || o->variant.operation.kind == eok_not ||
                      o->variant.operation.kind == eok_land || o->variant.operation.kind == eok_lor))
@@ -14500,16 +14531,16 @@ private:
     // side effect.
     bool detect_bitwise_instead_of_logical(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        const an_expr_operator_kind k = e->variant.operation.kind;
+        const an_expr_operator_kind k {e->variant.operation.kind};
         if (k != eok_and && k != eok_or)
         {
             return false;
         }
-        if (!truth_value(ops[0]) || !truth_value(ops[1]))
+        if (!truth_value(ops[0U]) || !truth_value(ops[1U]))
         {
             return false;
         }
-        if (first_effect(ops[0]) == nullptr || first_effect(ops[1]) == nullptr)
+        if (first_effect(ops[0U]) == nullptr || first_effect(ops[1U]) == nullptr)
         {
             return false;
         }
@@ -14523,9 +14554,10 @@ private:
         {
             return false;
         }
-        __int128 a = 0, n = 0;
-        if (!constant_int128(integer_constant_operand(ops[0]), &a) ||
-            !constant_int128(integer_constant_operand(ops[1]), &n))
+        __int128 a {0};
+        __int128 n {0};
+        if (!constant_int128(integer_constant_operand(ops[0U]), &a) ||
+            !constant_int128(integer_constant_operand(ops[1U]), &n))
         {
             return false;
         }
@@ -14545,22 +14577,22 @@ private:
     // one.  An explicit cast of the operand is a barrier (peel_implicit stops at it).
     bool detect_complement_of_truth_value(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (truth_value(ops[0]))
+        if (truth_value(ops[0U]))
         {
             return detect(Diag::complement_of_truth_value, e);
         }
-        an_expr_node_ptr n = written_operation(ops[0]);
+        an_expr_node_ptr n {written_operation(ops[0U])};
         if (n == nullptr)
         {
             return false;
         }
-        auto nops = operands_of(n);
-        const an_expr_operator_kind nk = n->variant.operation.kind;
-        if (is_bitwise_binary_kind(nk) && nops.size() == 2 && truth_value(nops[0]) && truth_value(nops[1]))
+        auto nops {operands_of(n)};
+        const an_expr_operator_kind nk {n->variant.operation.kind};
+        if (is_bitwise_binary_kind(nk) && nops.size() == 2U && truth_value(nops[0U]) && truth_value(nops[1U]))
         {
             return detect(Diag::complement_of_truth_value, e);
         }
-        if (nk == eok_unary_plus && nops.size() == 1 && truth_value(nops[0]))
+        if (nk == eok_unary_plus && nops.size() == 1U && truth_value(nops[0U]))
         {
             return detect(Diag::complement_of_truth_value, e);
         }
@@ -14570,18 +14602,18 @@ private:
     // operand is a truth value.
     bool detect_bitwise_condition(an_expr_node_ptr cond)
     {
-        an_expr_node_ptr n = peel_condition(cond);
+        an_expr_node_ptr n {peel_condition(cond)};
         if (n == nullptr || n->kind != enk_operation || n->is_parenthesized)
         {
             return false;
         }
-        const an_expr_operator_kind k = n->variant.operation.kind;
+        const an_expr_operator_kind k {n->variant.operation.kind};
         if (k != eok_and && k != eok_or)
         {
             return false;
         }
-        auto nops = operands_of(n);
-        if (nops.size() != 2 || !truth_value(nops[1]))
+        auto nops {operands_of(n)};
+        if (nops.size() != 2U || !truth_value(nops[1U]))
         {
             return false;
         }
@@ -14592,34 +14624,35 @@ private:
     // bitwise operation constant (a folded constant) is not the shape.
     bool detect_tautological_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
-            an_expr_node_ptr w = peel_generated_conversions(ops[i]);
+            an_expr_node_ptr w {peel_generated_conversions(ops[i])};
             if (w == nullptr || w->kind != enk_operation)
             {
                 continue;
             }
-            const an_expr_operator_kind k = w->variant.operation.kind;
+            const an_expr_operator_kind k {w->variant.operation.kind};
             if (k != eok_and && k != eok_or)
             {
                 continue;
             }
-            auto wops = operands_of(w);
-            if (wops.size() != 2)
+            auto wops {operands_of(w)};
+            if (wops.size() != 2U)
             {
                 continue;
             }
-            __int128 c2 = 0, c1 = 0;
+            __int128 c2 {0};
+            __int128 c1 {0};
             if (!constant_int128(integer_constant_operand(ops[1 - i]), &c2))
             {
                 continue;
             }
-            int side = -1; // the operand of the bitwise operation that is the constant C1
-            if (constant_int128(integer_constant_operand(wops[1]), &c1) && is_variable_operand(wops[0]))
+            int side {-1}; // the operand of the bitwise operation that is the constant C1
+            if (constant_int128(integer_constant_operand(wops[1U]), &c1) && is_variable_operand(wops[0U]))
             {
                 side = 1;
             }
-            else if (constant_int128(integer_constant_operand(wops[0]), &c1) && is_variable_operand(wops[1]))
+            else if (constant_int128(integer_constant_operand(wops[0U]), &c1) && is_variable_operand(wops[1U]))
             {
                 side = 0;
             }
@@ -14627,7 +14660,7 @@ private:
             {
                 continue;
             }
-            const bool never = k == eok_and ? ((c2 & ~c1) != 0) : ((c1 & ~c2) != 0);
+            const bool never {k == eok_and ? ((c2 & ~c1) != 0) : ((c1 & ~c2) != 0)};
             if (never)
             {
                 return detect(Diag::tautological_bitwise_compare, e);
@@ -14642,7 +14675,7 @@ private:
         {
             return false;
         }
-        VType t = vtype(n->type);
+        VType t {vtype(n->type)};
         return t.ok && t.t.is_int() && !is_enum_type(t.t) && !t.t.int_type->is_signed &&
                t.t.int_type->bits < prog_.c_int_bits();
     }
@@ -14653,26 +14686,26 @@ private:
     // negative `int`.  A negative constant, a non-constant `int`, `~u`, `~ul`, `~sc` and `~uc & 0xFF` are silent.
     bool detect_promoted_complement_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
-            an_expr_node_ptr w = peel_generated_conversions(ops[i]);
+            an_expr_node_ptr w {peel_generated_conversions(ops[i])};
             if (w == nullptr || w->kind != enk_operation || w->variant.operation.kind != eok_complement)
             {
                 continue;
             }
-            auto wops = operands_of(w);
-            if (wops.size() != 1)
+            auto wops {operands_of(w)};
+            if (wops.size() != 1U)
             {
                 continue;
             }
-            an_expr_node_ptr n = peel_generated_conversions(wops[0]);
-            for (int guard = 0;
+            an_expr_node_ptr n {peel_generated_conversions(wops[0U])};
+            for (int guard {0};
                  n != nullptr && guard < 8 && n->kind == enk_operation && n->variant.operation.kind == eok_cast &&
                  !n->compiler_generated && n->variant.operation.operands != nullptr &&
                  n->variant.operation.operands->next == nullptr;
                  ++guard)
             {
-                VType to = vtype(n->type);
+                VType to {vtype(n->type)};
                 if (!to.ok || !to.t.is_int() || to.t.int_type->is_signed == false ||
                     to.t.int_type->bits != prog_.c_int_bits())
                 {
@@ -14684,8 +14717,8 @@ private:
             {
                 continue;
             }
-            __int128 c = 0;
-            bool hit = false;
+            __int128 c {0};
+            bool hit {false};
             if (a_constant_ptr k = integer_constant_operand(ops[1 - i]))
             {
                 hit = constant_int128(k, &c) && c >= 0;
@@ -14705,20 +14738,21 @@ private:
     // or `for` condition, of a `?:` condition, of `!`, `&&`, `||` or a conversion to `bool` (clang).
     void detect_or_as_truth_value(an_expr_node_ptr operand)
     {
-        an_expr_node_ptr n = peel_generated_conversions(operand);
+        an_expr_node_ptr n {peel_generated_conversions(operand)};
         if (n == nullptr || n->kind != enk_operation || n->variant.operation.kind != eok_or)
         {
             return;
         }
-        auto nops = operands_of(n);
-        if (nops.size() != 2)
+        auto nops {operands_of(n)};
+        if (nops.size() != 2U)
         {
             return;
         }
-        __int128 c = 0;
-        const bool left_const = constant_int128(integer_constant_operand(nops[0]), &c) && is_variable_operand(nops[1]);
-        const bool right_const =
-            !left_const && constant_int128(integer_constant_operand(nops[1]), &c) && is_variable_operand(nops[0]);
+        __int128 c {0};
+        const bool left_const {constant_int128(integer_constant_operand(nops[0U]), &c) &&
+                               is_variable_operand(nops[1U])};
+        const bool right_const {!left_const && constant_int128(integer_constant_operand(nops[1U]), &c) &&
+                                is_variable_operand(nops[0U])};
         if ((left_const || right_const) && c != 0)
         {
             detect(Diag::tautological_bitwise_compare, n);
@@ -14743,8 +14777,8 @@ private:
         {
             return false;
         }
-        an_expr_node_ptr q = enumerator_conditional(n);
-        an_expr_node_ptr c = q != nullptr ? q->variant.operation.operands : nullptr;
+        an_expr_node_ptr q {enumerator_conditional(n)};
+        an_expr_node_ptr c {q != nullptr ? q->variant.operation.operands : nullptr};
         EnumOperand arm;
         if (c == nullptr || c->next == nullptr || !sign_compare_enum_operand(c->next, &arm))
         {
@@ -14771,7 +14805,7 @@ private:
     {
         for (an_expr_node_ptr o : ops)
         {
-            an_expr_node_ptr n = peel_condition(o);
+            an_expr_node_ptr n {peel_condition(o)};
             if (n != nullptr && n->kind == enk_operation && !n->is_parenthesized &&
                 n->variant.operation.kind == eok_land)
             {
@@ -14786,12 +14820,12 @@ private:
     {
         for (an_expr_node_ptr o : ops)
         {
-            an_expr_node_ptr n = written_operation(o);
-            if (n == nullptr || n->is_parenthesized || operands_of(n).size() != 2)
+            an_expr_node_ptr n {written_operation(o)};
+            if (n == nullptr || n->is_parenthesized || operands_of(n).size() != 2U)
             {
                 continue;
             }
-            const an_expr_operator_kind nk = n->variant.operation.kind;
+            const an_expr_operator_kind nk {n->variant.operation.kind};
             if (nk == eok_add || nk == eok_subtract)
             {
                 return detect(Diag::shift_operand_parentheses, e);
@@ -14824,13 +14858,14 @@ private:
                        a->variant.param_ref.levels_up == b->variant.param_ref.levels_up;
             case enk_constant:
             {
-                a_constant_ptr ca = a->variant.constant.ptr, cb = b->variant.constant.ptr;
+                a_constant_ptr ca {a->variant.constant.ptr};
+                a_constant_ptr cb {b->variant.constant.ptr};
                 return ca != nullptr && cb != nullptr && ca->kind == ck_integer && cb->kind == ck_integer &&
                        decimal_value(ca) == decimal_value(cb);
             }
             case enk_operation:
             {
-                const an_expr_operator_kind k = a->variant.operation.kind;
+                const an_expr_operator_kind k {a->variant.operation.kind};
                 if (k != b->variant.operation.kind || a->compiler_generated != b->compiler_generated)
                 {
                     return false;
@@ -14870,13 +14905,13 @@ private:
                     default:
                         return false; // calls, assignments, commas, `?:` and anything else: not compared
                 }
-                auto oa = operands_of(a);
-                auto ob = operands_of(b);
+                auto oa {operands_of(a)};
+                auto ob {operands_of(b)};
                 if (oa.size() != ob.size() || oa.empty())
                 {
                     return false;
                 }
-                for (size_t i = 0; i < oa.size(); ++i)
+                for (size_t i {0U}; i < oa.size(); ++i)
                 {
                     if (!same_pure_expr(oa[i], ob[i], has_object, depth + 1))
                     {
@@ -14897,7 +14932,8 @@ private:
         {
             return false;
         }
-        a_constant_ptr ca = a->variant.constant.ptr, cb = b->variant.constant.ptr;
+        a_constant_ptr ca {a->variant.constant.ptr};
+        a_constant_ptr cb {b->variant.constant.ptr};
         if (ca == nullptr || cb == nullptr || ca->kind != ck_integer || cb->kind != ck_integer)
         {
             return false;
@@ -14910,8 +14946,8 @@ private:
         {
             return false;
         }
-        an_expr_node_ptr oa = expr_node_from_constant(ca);
-        an_expr_node_ptr ob = expr_node_from_constant(cb);
+        an_expr_node_ptr oa {expr_node_from_constant(ca)};
+        an_expr_node_ptr ob {expr_node_from_constant(cb)};
         return oa != nullptr && ob != nullptr && oa->kind == enk_variable && ob->kind == enk_variable &&
                oa->variant.variable.ptr != nullptr && oa->variant.variable.ptr == ob->variant.variable.ptr;
     }
@@ -14924,8 +14960,8 @@ private:
         {
             return false;
         }
-        an_expr_node_ptr l = peel_generated_conversions(ops[0]);
-        an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+        an_expr_node_ptr l {peel_generated_conversions(ops[0U])};
+        an_expr_node_ptr r {peel_generated_conversions(ops[1U])};
         if (l == nullptr || r == nullptr)
         {
             return false;
@@ -14935,7 +14971,7 @@ private:
             // Only the same enumerator or the same named constant: an operand the front end folded (`1 + 2`) is a barrier (all four silent).
             return same_named_constant(l, r) && detect(Diag::self_comparison, e);
         }
-        bool has_object = false;
+        bool has_object {false};
         if (!same_pure_expr(l, r, &has_object) || !has_object)
         {
             return false;
@@ -14952,13 +14988,13 @@ private:
         {
             return false;
         }
-        const bool operation = n->kind == enk_operation;
-        const an_expr_operator_kind k = operation ? n->variant.operation.kind : eok_cast;
+        const bool operation {n->kind == enk_operation};
+        const an_expr_operator_kind k {operation ? n->variant.operation.kind : eok_cast};
         if (operation && (k == eok_question || k == eok_comma))
         {
             return false;
         }
-        VType t = vtype(n->type);
+        VType t {vtype(n->type)};
         if (t.ok && t.t.is_bool())
         {
             return true;
@@ -14967,7 +15003,7 @@ private:
         {
             return false;
         }
-        auto nops = operands_of(n);
+        auto nops {operands_of(n)};
         switch (k)
         {
             case eok_lt:
@@ -14984,9 +15020,9 @@ private:
             case eok_and:
             case eok_or:
             case eok_xor:
-                return nops.size() == 2 && gcc_boolean(nops[0], depth + 1) && gcc_boolean(nops[1], depth + 1);
+                return nops.size() == 2U && gcc_boolean(nops[0U], depth + 1) && gcc_boolean(nops[1U], depth + 1);
             case eok_unary_plus:
-                return nops.size() == 1 && gcc_boolean(nops[0], depth + 1);
+                return nops.size() == 1U && gcc_boolean(nops[0U], depth + 1);
             default:
                 return false;
         }
@@ -14994,8 +15030,8 @@ private:
     // R3: an unparenthesized `!` as the left operand of a comparison whose right operand is not a truth value.
     bool detect_logical_not_comparison(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        an_expr_node_ptr l = written_operation(ops[0]);
-        if (l == nullptr || l->variant.operation.kind != eok_not || l->is_parenthesized || gcc_boolean(ops[1]))
+        an_expr_node_ptr l {written_operation(ops[0U])};
+        if (l == nullptr || l->variant.operation.kind != eok_not || l->is_parenthesized || gcc_boolean(ops[1U]))
         {
             return false;
         }
@@ -15007,7 +15043,7 @@ private:
     {
         for (an_expr_node_ptr o : ops)
         {
-            an_expr_node_ptr n = written_operation(o);
+            an_expr_node_ptr n {written_operation(o)};
             if (n != nullptr && !n->is_parenthesized && is_comparison_kind(n->variant.operation.kind))
             {
                 return detect(Diag::chained_comparison, e);
@@ -15023,45 +15059,46 @@ private:
         {
             return true;
         }
-        an_expr_node_ptr m = written_operation(n);
+        an_expr_node_ptr m {written_operation(n)};
         if (m == nullptr || depth > 8)
         {
             return false;
         }
-        const an_expr_operator_kind k = m->variant.operation.kind;
-        auto mops = operands_of(m);
-        if (is_bitwise_binary_kind(k) && mops.size() == 2)
+        const an_expr_operator_kind k {m->variant.operation.kind};
+        auto mops {operands_of(m)};
+        if (is_bitwise_binary_kind(k) && mops.size() == 2U)
         {
-            return compared_truth_value(mops[0], depth + 1) && compared_truth_value(mops[1], depth + 1);
+            return compared_truth_value(mops[0U], depth + 1) && compared_truth_value(mops[1U], depth + 1);
         }
-        if (k == eok_unary_plus && mops.size() == 1)
+        if (k == eok_unary_plus && mops.size() == 1U)
         {
-            return compared_truth_value(mops[0], depth + 1); // clang
+            return compared_truth_value(mops[0U], depth + 1); // clang
         }
-        if (k == eok_assign && mops.size() == 2)
+        if (k == eok_assign && mops.size() == 2U)
         {
-            return compared_truth_value(mops[1], depth + 1); // `(y = (a > b)) == 2` (clang)
+            return compared_truth_value(mops[1U], depth + 1); // `(y = (a > b)) == 2` (clang)
         }
-        if (k == eok_cast && !m->compiler_generated && mops.size() == 1)
+        if (k == eok_cast && !m->compiler_generated && mops.size() == 1U)
         {
-            VType to = vtype(m->type);
-            return to.ok && to.t.is_int() && !is_enum_type(to.t) && compared_truth_value(mops[0], depth + 1);
+            VType to {vtype(m->type)};
+            return to.ok && to.t.is_int() && !is_enum_type(to.t) && compared_truth_value(mops[0U], depth + 1);
         }
         return false;
     }
     // R6: a comparison of a truth value with an integer constant whose result is the same for 0 and for 1.
     bool detect_truth_value_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops, vir::BinaryOp op)
     {
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
-            __int128 c = 0;
+            __int128 c {0};
             if (!constant_int128(integer_constant_operand(ops[1 - i]), &c) || !compared_truth_value(ops[i]))
             {
                 continue;
             }
             auto holds = [&](__int128 v)
             {
-                const __int128 l = i == 0 ? v : c, r = i == 0 ? c : v;
+                const __int128 l {i == 0 ? v : c};
+                const __int128 r {i == 0 ? c : v};
                 switch (op)
                 {
                     case vir::BinaryOp::Eq:
@@ -15107,15 +15144,15 @@ private:
     }
     void detect_int_in_truth(an_expr_node_ptr operand, int depth, bool in_arm, bool conv)
     {
-        an_expr_node_ptr n = peel_condition(operand);
-        if (n == nullptr || depth > 16 || detected_.count(n) != 0)
+        an_expr_node_ptr n {peel_condition(operand)};
+        if (n == nullptr || depth > 16 || detected_.count(n) != 0U)
         {
             return;
         }
         auto non_boolean_constant = [](an_expr_node_ptr x)
         {
             x = peel_condition(x);
-            __int128 v = 0;
+            __int128 v {0};
             return x != nullptr && x->kind == enk_constant && x->variant.constant.ptr != nullptr &&
                    x->variant.constant.ptr->kind == ck_integer && constant_int128(x->variant.constant.ptr, &v) &&
                    v != 0 && v != 1;
@@ -15132,12 +15169,12 @@ private:
         {
             return;
         }
-        auto nops = operands_of(n);
+        auto nops {operands_of(n)};
         switch (n->variant.operation.kind)
         {
             case eok_shiftl:
             {
-                VType t = vtype(n->type);
+                VType t {vtype(n->type)};
                 if (t.ok && t.t.is_int() && !is_enum_type(t.t) && t.t.int_type->is_signed)
                 {
                     detect(Diag::int_in_truth_context, n);
@@ -15152,11 +15189,11 @@ private:
                 return;
             case eok_question:
             {
-                if (nops.size() != 3)
+                if (nops.size() != 3U)
                 {
                     return;
                 }
-                if (non_boolean_constant(nops[1]) || non_boolean_constant(nops[2]))
+                if (non_boolean_constant(nops[1U]) || non_boolean_constant(nops[2U]))
                 {
                     detect(Diag::int_in_truth_context, n);
                     return;
@@ -15166,13 +15203,13 @@ private:
                     x = peel_condition(x);
                     return x != nullptr && x->kind == enk_operation && x->variant.operation.kind == eok_multiply;
                 };
-                if (conv && is_product(nops[1]) && is_product(nops[2]))
+                if (conv && is_product(nops[1U]) && is_product(nops[2U]))
                 {
                     detect(Diag::int_in_truth_context, n);
                     return;
                 }
-                detect_int_in_truth(nops[1], depth + 1, true, conv);
-                detect_int_in_truth(nops[2], depth + 1, true, conv);
+                detect_int_in_truth(nops[1U], depth + 1, true, conv);
+                detect_int_in_truth(nops[2U], depth + 1, true, conv);
                 return;
             }
             case eok_comma:
@@ -15194,19 +15231,19 @@ private:
     // replaced by its original expression (C++ folds `4` in `x && 4` into `true`, whose `expr` is the bool conversion of the `4`).
     static an_expr_node_ptr unfold_generated(an_expr_node_ptr n)
     {
-        for (int guard = 0; guard < 16; ++guard)
+        for (int guard {0}; guard < 16; ++guard)
         {
             n = peel_generated_conversions(n);
             if (n == nullptr || n->kind != enk_constant)
             {
                 break;
             }
-            a_constant_ptr c = n->variant.constant.ptr;
+            a_constant_ptr c {n->variant.constant.ptr};
             if (c == nullptr || c->kind != ck_integer || c->expr == nullptr || c->local_expr_ref || is_enumerator(c))
             {
                 break;
             }
-            an_expr_node_ptr o = expr_node_from_constant(c);
+            an_expr_node_ptr o {expr_node_from_constant(c)};
             if (o == nullptr || o == n)
             {
                 break;
@@ -15227,38 +15264,38 @@ private:
         {
             return false;
         }
-        an_expr_node_ptr r = peel_generated_conversions(ops[1]);
+        an_expr_node_ptr r {peel_generated_conversions(ops[1U])};
         if (r == nullptr || r->kind != enk_constant || r->variant.constant.ptr == nullptr ||
             r->variant.constant.ptr->kind != ck_integer)
         {
             return false;
         }
-        an_expr_node_ptr u = unfold_generated(ops[1]);
-        if (u == nullptr || u->type == nullptr || detected_.count(u) != 0 || detected_.count(r) != 0)
+        an_expr_node_ptr u {unfold_generated(ops[1U])};
+        if (u == nullptr || u->type == nullptr || detected_.count(u) != 0U || detected_.count(r) != 0U)
         {
             return false; // R7 said it already
         }
         if (u->kind == enk_operation)
         {
-            const an_expr_operator_kind k = u->variant.operation.kind;
+            const an_expr_operator_kind k {u->variant.operation.kind};
             if (is_comparison_kind(k) || k == eok_not || k == eok_land || k == eok_lor || k == eok_bool_cast)
             {
                 return false; // `x && !4`, `x && 2 > 1`
             }
         }
-        VType rt = vtype(u->type);
+        VType rt {vtype(u->type)};
         if (rt.ok && rt.t.is_bool())
         {
             return false; // `x && true`
         }
-        an_expr_node_ptr l = peel_generated_conversions(ops[0]);
+        an_expr_node_ptr l {peel_generated_conversions(ops[0U])};
         if (l != nullptr && l->type != nullptr)
         {
-            VType lt = vtype(l->type);
-            bool int_valued = false; // C++ types a comparison `bool`, C `int`: neither exempts
+            VType lt {vtype(l->type)};
+            bool int_valued {false}; // C++ types a comparison `bool`, C `int`: neither exempts
             if (l->kind == enk_operation)
             {
-                const an_expr_operator_kind k = l->variant.operation.kind;
+                const an_expr_operator_kind k {l->variant.operation.kind};
                 int_valued = is_comparison_kind(k) || k == eok_not || k == eok_land || k == eok_lor;
             }
             if (lt.ok && lt.t.is_bool() && !int_valued)
@@ -15275,17 +15312,17 @@ private:
     // enumeration operand has its value range.  `bool` is R6's.
     static bool parse_i128(const std::string& d, __int128* out)
     {
-        size_t i = 0;
-        bool neg = false;
+        size_t i {0U};
+        bool neg {false};
         if (i < d.size() && (d[i] == '-' || d[i] == '+'))
         {
             neg = d[i++] == '-';
         }
-        if (i >= d.size() || d.size() - i > 36)
+        if (i >= d.size() || d.size() - i > 36U)
         {
             return false;
         }
-        __int128 v = 0;
+        __int128 v {0};
         for (; i < d.size(); ++i)
         {
             if (d[i] < '0' || d[i] > '9')
@@ -15303,26 +15340,27 @@ private:
         {
             return false; // code only: a wrong constant in a contract is for verification to report
         }
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
-            __int128 c = 0;
-            a_constant_ptr k = integer_constant_operand(ops[1 - i]);
+            __int128 c {0};
+            a_constant_ptr k {integer_constant_operand(ops[1 - i])};
             // A literal or an enumerator, not another named constant (`c == DEF` with a `const enum color DEF`: all compilers are silent).
             if (!literal_or_enumerator(ops[1 - i]) || !constant_int128(k, &c))
             {
                 continue;
             }
-            an_expr_node_ptr o = peel_generated_conversions(ops[i]);
+            an_expr_node_ptr o {peel_generated_conversions(ops[i])};
             if (o == nullptr || o->type == nullptr || o->kind == enk_constant)
             {
                 continue;
             }
-            VType t = vtype(o->type);
+            VType t {vtype(o->type)};
             if (!t.ok || !t.t.is_int() || t.t.int_type == nullptr)
             {
                 continue;
             }
-            __int128 lo = 0, hi = 0;
+            __int128 lo {0};
+            __int128 hi {0};
             if (is_enum_type(t.t))
             {
                 if (!parse_i128(t.t.int_type->lo, &lo) || !parse_i128(t.t.int_type->hi, &hi))
@@ -15332,7 +15370,7 @@ private:
             }
             else
             {
-                const int bits = t.t.int_type->bits;
+                const int bits {t.t.int_type->bits};
                 if (bits <= 0 || bits > 64)
                 {
                     continue;
@@ -15341,8 +15379,8 @@ private:
                 hi = t.t.int_type->is_signed ? (((__int128)1) << (bits - 1)) - 1 : (((__int128)1) << bits) - 1;
                 if (bits >= prog_.c_int_bits())
                 {
-                    an_expr_node_ptr cn = peel_generated_conversions(ops[1 - i]);
-                    VType ct = cn != nullptr && cn->type != nullptr ? vtype(cn->type) : VType();
+                    an_expr_node_ptr cn {peel_generated_conversions(ops[1 - i])};
+                    VType ct {cn != nullptr && cn->type != nullptr ? vtype(cn->type) : VType()};
                     if (!ct.ok || !ct.t.is_int() || ct.t.int_type == nullptr || ct.t.int_type->bits <= bits)
                     {
                         continue;
@@ -15362,10 +15400,10 @@ private:
     // contradictory precondition on purpose.
     struct VarCompare
     {
-        an_expr_node_ptr var = nullptr;
-        an_expr_node_ptr cmp = nullptr;
-        an_expr_operator_kind op = eok_eq; // with the variable on the left
-        __int128 c = 0;
+        an_expr_node_ptr var {nullptr};
+        an_expr_node_ptr cmp {nullptr};
+        an_expr_operator_kind op {eok_eq}; // with the variable on the left
+        __int128 c {0};
     };
     // A literal (possibly negated) or an enumerator: not another folded named constant (`const int K = 5`; clang is silent on `x > K && x < 3`).
     static bool literal_or_enumerator(an_expr_node_ptr n)
@@ -15376,7 +15414,7 @@ private:
         {
             return false;
         }
-        a_constant_ptr c = n->variant.constant.ptr;
+        a_constant_ptr c {n->variant.constant.ptr};
         if (is_enumerator(c) || (c->expr == nullptr && !c->local_expr_ref))
         {
             return true;
@@ -15385,8 +15423,8 @@ private:
         {
             return false;
         }
-        an_expr_node_ptr o = expr_node_from_constant(c);
-        for (int guard = 0; o != nullptr && guard < 8 && o->kind == enk_operation && operands_of(o).size() == 1 &&
+        an_expr_node_ptr o {expr_node_from_constant(c)};
+        for (int guard {0}; o != nullptr && guard < 8 && o->kind == enk_operation && operands_of(o).size() == 1U &&
                             (o->variant.operation.kind == eok_negate || o->variant.operation.kind == eok_unary_plus ||
                              (o->variant.operation.kind == eok_cast && o->compiler_generated));
              ++guard)
@@ -15400,29 +15438,29 @@ private:
     }
     bool var_compare(an_expr_node_ptr operand, VarCompare* out)
     {
-        an_expr_node_ptr n = peel_condition(operand);
+        an_expr_node_ptr n {peel_condition(operand)};
         if (n == nullptr || n->kind != enk_operation || !is_comparison_kind(n->variant.operation.kind))
         {
             return false;
         }
-        auto nops = operands_of(n);
-        if (nops.size() != 2)
+        auto nops {operands_of(n)};
+        if (nops.size() != 2U)
         {
             return false;
         }
-        for (int i = 0; i < 2; ++i)
+        for (int i {0}; i < 2; ++i)
         {
-            an_expr_node_ptr v = peel_generated_conversions(nops[i]);
+            an_expr_node_ptr v {peel_generated_conversions(nops[i])};
             if (v == nullptr || (v->kind != enk_variable && v->kind != enk_param_ref))
             {
                 continue;
             }
-            __int128 c = 0;
+            __int128 c {0};
             if (!literal_or_enumerator(nops[1 - i]) || !constant_int128(integer_constant_operand(nops[1 - i]), &c))
             {
                 continue;
             }
-            an_expr_operator_kind op = n->variant.operation.kind;
+            an_expr_operator_kind op {n->variant.operation.kind};
             if (i == 1)
             { // `5 < x` is `x > 5`
                 switch (op)
@@ -15475,23 +15513,26 @@ private:
         {
             return false;
         }
-        VarCompare a, b;
-        if (!var_compare(ops[0], &a) || !var_compare(ops[1], &b))
+        VarCompare a;
+        VarCompare b;
+        if (!var_compare(ops[0U], &a) || !var_compare(ops[1U], &b))
         {
             return false;
         }
-        bool has_object = false;
+        bool has_object {false};
         if (!same_pure_expr(a.var, b.var, &has_object))
         {
             return false;
         }
         // The truth value of both is constant between the constants: test each constant, its neighbours and the two ends.
-        const __int128 inf = ((__int128)1) << 100;
-        const __int128 pts[] = {-inf, a.c - 1, a.c, a.c + 1, b.c - 1, b.c, b.c + 1, inf};
-        bool all = true, any = false;
+        const __int128 inf {((__int128)1) << 100U};
+        const __int128 pts[] {-inf, a.c - 1, a.c, a.c + 1, b.c - 1, b.c, b.c + 1, inf};
+        bool all {true};
+        bool any {false};
         for (__int128 x : pts)
         {
-            const bool va = var_compare_holds(a, x), vb = var_compare_holds(b, x);
+            const bool va {var_compare_holds(a, x)};
+            const bool vb {var_compare_holds(b, x)};
             if (is_and)
             {
                 any = any || (va && vb);
@@ -15513,8 +15554,8 @@ private:
     // the walk.  Reported at the `else`.
     static a_statement_ptr last_statement(a_statement_ptr b)
     {
-        a_statement_ptr last = nullptr;
-        for (a_statement_ptr c = b->variant.block.statements; c != nullptr; c = c->next)
+        a_statement_ptr last {nullptr};
+        for (a_statement_ptr c {b->variant.block.statements}; c != nullptr; c = c->next)
         {
             last = c;
         }
@@ -15523,7 +15564,7 @@ private:
     // The statement a dependent statement stands for once the front end's own blocks are peeled (null when none or a written block).
     static a_statement_ptr peel_generated_blocks(a_statement_ptr st)
     {
-        for (int guard = 0; st != nullptr && guard < 64 && st->kind == stmk_block && st->compiler_generated; ++guard)
+        for (int guard {0}; st != nullptr && guard < 64 && st->kind == stmk_block && st->compiler_generated; ++guard)
         {
             st = last_statement(st);
         }
@@ -15535,8 +15576,8 @@ private:
         {
             return;
         }
-        a_statement_ptr st = peel_generated_blocks(s->variant.if_stmt.then_statement);
-        for (int guard = 0; st != nullptr && guard < 64; ++guard)
+        a_statement_ptr st {peel_generated_blocks(s->variant.if_stmt.then_statement)};
+        for (int guard {0}; st != nullptr && guard < 64; ++guard)
         {
             switch (st->kind)
             {
@@ -15544,8 +15585,8 @@ private:
                     if (st->variant.if_stmt.else_statement != nullptr)
                     {
                         reject(Diag::dangling_else,
-                               st->variant.if_stmt.else_position.seq != 0 ? st->variant.if_stmt.else_position
-                                                                          : st->position,
+                               st->variant.if_stmt.else_position.seq != 0U ? st->variant.if_stmt.else_position
+                                                                           : st->position,
                                "");
                         return;
                     }
@@ -15570,13 +15611,13 @@ private:
     // (broader, listed).
     void detect_empty_body(a_statement_ptr body)
     {
-        a_statement_ptr st = peel_generated_blocks(body);
+        a_statement_ptr st {peel_generated_blocks(body)};
         if (st == nullptr || st->kind != stmk_empty || st->is_fallthrough_statement)
         {
             return;
         }
-        const a_source_position& p = st->position;
-        if (p.seq == 0 || p.orig_seq != p.seq || p.orig_column != p.column)
+        const a_source_position& p {st->position};
+        if (p.seq == 0U || p.orig_seq != p.seq || p.orig_column != p.column)
         {
             return;
         }
@@ -15588,18 +15629,18 @@ private:
     // has no obligations of its own.
     const Expr* bitwise_binary(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (!operand_count(e, 2, ops))
+        if (!operand_count(e, 2U, ops))
         {
             return nullptr;
         }
-        if (detected_.count(e) != 0 || detect_bitwise_binary(e, ops))
+        if (detected_.count(e) != 0U || detect_bitwise_binary(e, ops))
         {
             return nullptr;
         }
         // Item 4: enumerators (or values) of two different enumerations (`RED | NA`; C++20 deprecates the conversion, and C and C++
         // give the operands different types): rejected in both modes.  An enumerator is otherwise an `int` constant, as in arithmetic.
         EnumOperand eo[2];
-        if (enumeration_operand(ops[0], &eo[0]) && enumeration_operand(ops[1], &eo[1]) && eo[0].entry != eo[1].entry)
+        if (enumeration_operand(ops[0U], &eo[0]) && enumeration_operand(ops[1U], &eo[1]) && eo[0].entry != eo[1].entry)
         {
             reject(
                 Diag::unsupported_expression, e->position,
@@ -15607,8 +15648,8 @@ private:
                 "for example `(int)RED | (int)NA`");
             return nullptr;
         }
-        const Expr* a = expr(ops[0]);
-        const Expr* c = expr(ops[1]);
+        const Expr* a {expr(ops[0U])};
+        const Expr* c {expr(ops[1U])};
         if (a == nullptr || c == nullptr)
         {
             return nullptr;
@@ -15619,7 +15660,7 @@ private:
                    "a bitwise operator on an enumeration value (decision 0023 item 4)");
             return nullptr;
         }
-        const an_expr_operator_kind k = e->variant.operation.kind;
+        const an_expr_operator_kind k {e->variant.operation.kind};
         return finish(e, b_.binary(k == eok_and  ? vir::BinaryOp::BitAnd
                                    : k == eok_or ? vir::BinaryOp::BitOr
                                                  : vir::BinaryOp::BitXor,
@@ -15627,15 +15668,15 @@ private:
     }
     const Expr* bitwise_complement(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (!operand_count(e, 1, ops))
+        if (!operand_count(e, 1U, ops))
         {
             return nullptr;
         }
-        if (detected_.count(e) != 0 || detect_complement_of_truth_value(e, ops))
+        if (detected_.count(e) != 0U || detect_complement_of_truth_value(e, ops))
         {
             return nullptr;
         }
-        const Expr* a = expr(ops[0]);
+        const Expr* a {expr(ops[0U])};
         if (a == nullptr)
         {
             return nullptr;
@@ -15653,12 +15694,12 @@ private:
     // enumeration and C as `int`; for `==` and `!=` in C it counts as a value of the enumerator's enumeration, as in C++.
     static bool comma_ending_in_enumerator(an_expr_node_ptr n, EnumOperand* out)
     {
-        an_expr_node_ptr m = peel_implicit(n);
+        an_expr_node_ptr m {peel_implicit(n)};
         if (m == nullptr || m->kind != enk_operation || m->variant.operation.kind != eok_comma)
         {
             return false;
         }
-        an_expr_node_ptr r = m->variant.operation.operands;
+        an_expr_node_ptr r {m->variant.operation.operands};
         if (r == nullptr || r->next == nullptr)
         {
             return false;
@@ -15702,12 +15743,12 @@ private:
     // Returns true when the shape was rejected.
     bool reject_enumeration_sign_compare(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
     {
-        if (ops.size() != 2 || ops[0] == nullptr || ops[1] == nullptr)
+        if (ops.size() != 2U || ops[0U] == nullptr || ops[1U] == nullptr)
         {
             return false;
         }
         EnumOperand eo[2];
-        const bool is_enum[2] = {sign_compare_enum_operand(ops[0], &eo[0]), sign_compare_enum_operand(ops[1], &eo[1])};
+        const bool is_enum[2] {sign_compare_enum_operand(ops[0U], &eo[0]), sign_compare_enum_operand(ops[1U], &eo[1])};
         if (is_enum[0] && is_enum[1])
         {
             // Two values or enumerators of DIFFERENT enumerations (in C an enumerator is an `int`, found through the front end's enumerator
@@ -15717,8 +15758,8 @@ private:
             {
                 return false;
             }
-            const EnumInfo& i0 = enum_info(eo[0].entry);
-            const EnumInfo& i1 = enum_info(eo[1].entry);
+            const EnumInfo& i0 {enum_info(eo[0].entry)};
+            const EnumInfo& i1 {enum_info(eo[1].entry)};
             if (!i0.ok || !i1.ok)
             {
                 return false; // the ordinary path reports it
@@ -15734,17 +15775,17 @@ private:
         {
             return false;
         }
-        const int ei_side = is_enum[0] ? 0 : 1;
+        const int ei_side {is_enum[0] ? 0 : 1};
         if (eo[ei_side].enumerator != nullptr || eo[ei_side].inner == nullptr)
         {
             return false;
         }
-        const EnumInfo& info = enum_info(eo[ei_side].entry);
+        const EnumInfo& info {enum_info(eo[ei_side].entry)};
         if (!info.ok)
         {
             return false; // the ordinary path reports it
         }
-        const vir::IntType* et = info.type.int_type;
+        const vir::IntType* et {info.type.int_type};
         if (et == nullptr || vir::dec::negative(vir::dec::range_of(*et).lo))
         {
             return false;
@@ -15752,9 +15793,9 @@ private:
         // The unsigned type C compares E's values in.  A fixed base is its own (an unsigned type of rank int or above).  An unfixed
         // enumeration without negative enumerators has the compatible type `unsigned int` in C, whatever the front end calls its
         // underlying type in C++ (there `int` with the "use unsigned" flag, P26): one verdict in both modes.
-        const a_type_ptr entry = eo[ei_side].entry;
-        const bool fixed = entry->variant.integer.has_explicit_enum_base || entry->variant.integer.is_scoped_enum;
-        const int ubits = fixed ? et->bits : prog_.c_int_bits();
+        const a_type_ptr entry {eo[ei_side].entry};
+        const bool fixed {entry->variant.integer.has_explicit_enum_base || entry->variant.integer.is_scoped_enum};
+        const int ubits {fixed ? et->bits : prog_.c_int_bits()};
         if (fixed && (et->is_signed || et->bits < prog_.c_int_bits()))
         {
             return false;
@@ -15763,18 +15804,18 @@ private:
         // path, whose sign decides: every implicit conversion between it and the operand either preserves its value or lands on an unsigned
         // type (EDG's `const unsigned 4294967295U {expr = cast(const int -1)}`), which the rule exempts, so the innermost value is the one
         // the program wrote.
-        an_expr_node_ptr n = ops[1 - ei_side];
-        a_constant_ptr last_const = nullptr;
-        for (int guard = 0; n != nullptr && guard < 16; ++guard)
+        an_expr_node_ptr n {ops[1 - ei_side]};
+        a_constant_ptr last_const {nullptr};
+        for (int guard {0}; n != nullptr && guard < 16; ++guard)
         {
             if (n->kind == enk_constant && n->variant.constant.ptr != nullptr &&
                 n->variant.constant.ptr->kind == ck_integer)
             {
-                a_constant_ptr c = n->variant.constant.ptr;
+                a_constant_ptr c {n->variant.constant.ptr};
                 last_const = c;
                 if (c->expr != nullptr && !c->local_expr_ref)
                 {
-                    an_expr_node_ptr o = expr_node_from_constant(c);
+                    an_expr_node_ptr o {expr_node_from_constant(c)};
                     if (o != nullptr && o != n)
                     {
                         n = o;
@@ -15785,7 +15826,7 @@ private:
             }
             if (n->kind == enk_operation && n->variant.operation.kind == eok_cast && n->compiler_generated)
             {
-                an_expr_node_ptr o = n->variant.operation.operands;
+                an_expr_node_ptr o {n->variant.operation.operands};
                 if (o == nullptr || o->next != nullptr)
                 {
                     return false;
@@ -15804,7 +15845,7 @@ private:
         {
             return false;
         }
-        VType ot = vtype(n->type);
+        VType ot {vtype(n->type)};
         if (!ot.ok || !ot.t.is_int() || is_enum_type(ot.t) || !ot.t.int_type->is_signed)
         {
             return false;
@@ -15817,8 +15858,9 @@ private:
         {
             return false; // a constant >= 0 (record 0022 item 4)
         }
-        const std::string promoted =
-            ubits == prog_.c_int_bits() ? "unsigned int" : "an unsigned " + std::to_string(ubits) + "-bit integer type";
+        const std::string promoted {ubits == prog_.c_int_bits()
+                                        ? "unsigned int"
+                                        : "an unsigned " + std::to_string(ubits) + "-bit integer type"};
         reject(
             Diag::unsupported_expression, e->position,
             "an equality between a value of `" + et->name +
@@ -15837,8 +15879,8 @@ private:
             return nullptr;
         }
         // Implicit conversions around a `?:` (C promotes its arms and C++ converts the whole): looked through first.
-        an_expr_node_ptr m = n;
-        for (int guard = 0; m != nullptr && guard < 16; ++guard)
+        an_expr_node_ptr m {n};
+        for (int guard {0}; m != nullptr && guard < 16; ++guard)
         {
             if (m->kind == enk_operation && m->variant.operation.kind == eok_cast && m->compiler_generated &&
                 m->variant.operation.operands != nullptr && m->variant.operation.operands->next == nullptr)
@@ -15849,7 +15891,7 @@ private:
                      !is_enumerator(m->variant.constant.ptr) && m->variant.constant.ptr->expr != nullptr &&
                      !m->variant.constant.ptr->local_expr_ref)
             {
-                an_expr_node_ptr o = expr_node_from_constant(m->variant.constant.ptr);
+                an_expr_node_ptr o {expr_node_from_constant(m->variant.constant.ptr)};
                 if (o == nullptr || o == m)
                 {
                     break;
@@ -15863,13 +15905,13 @@ private:
         }
         if (m != nullptr && m->kind == enk_operation && m->variant.operation.kind == eok_question)
         {
-            an_expr_node_ptr cnd = m->variant.operation.operands;
+            an_expr_node_ptr cnd {m->variant.operation.operands};
             if (cnd == nullptr || cnd->next == nullptr || cnd->next->next == nullptr)
             {
                 return nullptr;
             }
-            a_type_ptr x = switch_enumeration(cnd->next, depth + 1);
-            a_type_ptr y = switch_enumeration(cnd->next->next, depth + 1);
+            a_type_ptr x {switch_enumeration(cnd->next, depth + 1)};
+            a_type_ptr y {switch_enumeration(cnd->next->next, depth + 1)};
             return (x != nullptr && x == y) ? x : nullptr;
         }
         EnumOperand eo;
@@ -15896,10 +15938,10 @@ private:
     // Whether the enumerator was written with `= value` (il_def.h:1979: the value range is null when there is none).
     static bool has_written_initializer(a_constant_ptr c)
     {
-        a_decl_position_supplement_ptr x = c->source_corresp.decl_pos_info;
+        a_decl_position_supplement_ptr x {c->source_corresp.decl_pos_info};
         if (x != nullptr)
         {
-            return x->variant.enum_value_range.start.seq != 0;
+            return x->variant.enum_value_range.start.seq != 0U;
         }
         return c->expr != nullptr || c->local_expr_ref;
     }
@@ -15907,9 +15949,9 @@ private:
     // list, a scoped one's scope).
     static std::vector<a_constant_ptr> enumerators_of(a_type_ptr t)
     {
-        const auto& i = t->variant.integer;
+        const auto& i {t->variant.integer};
         std::vector<a_constant_ptr> out;
-        a_constant_ptr c = nullptr;
+        a_constant_ptr c {nullptr};
         if (i.is_scoped_enum)
         {
             c = i.enum_info.assoc_scope != nullptr ? i.enum_info.assoc_scope->constants : nullptr;
@@ -15929,11 +15971,11 @@ private:
     {
         if (vir::dec::negative(a))
         {
-            return vir::dec::neg(vir::dec::dec1(a.substr(1)));
+            return vir::dec::neg(vir::dec::dec1(a.substr(1U)));
         }
-        std::string s = a;
-        size_t i = s.size();
-        while (i > 0)
+        std::string s {a};
+        size_t i {s.size()};
+        while (i > 0U)
         {
             --i;
             if (s[i] == '9')
@@ -15963,7 +16005,7 @@ bool Encoder::is_vector_type_attribute(an_attribute_ptr a)
     {
         return false;
     }
-    const std::string n = a->name;
+    const std::string n {a->name};
     return n == "vector_size" || n == "__vector_size__" || n == "ext_vector_type" || n == "__ext_vector_type__";
 }
 
@@ -16010,7 +16052,7 @@ const char* Encoder::computed_type_reason(a_type_ptr t, std::set<a_type_ptr>& se
             }
             if (a_routine_type_supplement_ptr x = t->variant.routine.extra_info)
             {
-                for (a_param_type_ptr p = x->param_type_list; p != nullptr; p = p->next)
+                for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next)
                 {
                     if (const char* r = computed_type_reason(p->type, seen, depth + 1))
                     {
@@ -16037,23 +16079,23 @@ bool Encoder::template_declared_here(a_routine_ptr r)
 {
     if (r->assoc_template != nullptr)
     {
-        const a_source_position p = r->assoc_template->source_corresp.decl_position;
-        return p.seq != 0 && in_verified_file(p);
+        const a_source_position p {r->assoc_template->source_corresp.decl_position};
+        return p.seq != 0U && in_verified_file(p);
     }
     // A prototype instantiation without a recorded template: the template is where the routine is declared.
-    const a_source_position p = r->source_corresp.decl_position;
-    return p.seq != 0 && in_verified_file(p);
+    const a_source_position p {r->source_corresp.decl_position};
+    return p.seq != 0U && in_verified_file(p);
 }
 
 bool Encoder::class_declared_here(a_routine_ptr r)
 {
-    a_scope_ptr sp = r->source_corresp.parent_scope;
+    a_scope_ptr sp {r->source_corresp.parent_scope};
     if (sp == nullptr || sp->kind != sck_class_struct_union || sp->variant.assoc_type == nullptr)
     {
         return false;
     }
-    const a_source_position p = sp->variant.assoc_type->source_corresp.decl_position;
-    return p.seq != 0 && in_verified_file(p);
+    const a_source_position p {sp->variant.assoc_type->source_corresp.decl_position};
+    return p.seq != 0U && in_verified_file(p);
 }
 
 bool Encoder::has_internal_linkage_or_inline(a_routine_ptr r)
@@ -16065,25 +16107,25 @@ bool Encoder::has_internal_linkage_or_inline(a_routine_ptr r)
 // verified file is reported here, at the declaration, so the uses stay silent.
 const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
 {
-    auto found = enums_.find(t);
+    auto found {enums_.find(t)};
     if (found != enums_.end())
     {
         return found->second;
     }
-    EnumInfo& ei = enums_[t];
-    const auto& i = t->variant.integer;
-    const a_source_position p = t->source_corresp.decl_position;
-    const std::string spelled = render_type(t);
-    if (p.seq == 0 || !in_verified_file(p))
+    EnumInfo& ei {enums_[t]};
+    const auto& i {t->variant.integer};
+    const a_source_position p {t->source_corresp.decl_position};
+    const std::string spelled {render_type(t)};
+    if (p.seq == 0U || !in_verified_file(p))
     {
         ei.name = spelled + " (an enumeration declared in a system file; system files are used only through contracts)";
         return ei; // reported at the use
     }
     ei.silent = true;
-    Ctx saved_cx = std::move(cx_); // a use may reach here in the middle of a function
+    Ctx saved_cx {std::move(cx_)}; // a use may reach here in the middle of a function
     cx_ = Ctx();
     cx_.stmt_pos = p;
-    bool ok = true;
+    bool ok {true};
     auto refuse = [&](const a_source_position& at, const std::string& why)
     {
         reject(Diag::unsupported_declaration, at, why);
@@ -16102,14 +16144,14 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
     {
         refuse(p, "an enumeration declared in a class or a block (decision 0018 item 2)");
     }
-    const int bits = static_cast<int>(t->size) * static_cast<int>(targ_char_bit);
-    const bool is_signed = int_kind_is_signed[i.int_kind] != 0;
-    const bool fixed = i.has_explicit_enum_base || i.is_scoped_enum;
-    const std::vector<a_constant_ptr> list = enumerators_of(t);
+    const int bits {static_cast<int>(t->size) * static_cast<int>(targ_char_bit)};
+    const bool is_signed {int_kind_is_signed[i.int_kind] != 0};
+    const bool fixed {i.has_explicit_enum_base || i.is_scoped_enum};
+    const std::vector<a_constant_ptr> list {enumerators_of(t)};
     // An enumeration without a fixed type and without an enumerator list has no value range (and no size yet): said first, since
     // its size is 0.
-    const bool incomplete =
-        !fixed && list.empty() && !(i.extra_info != nullptr && i.extra_info->enumerator_list_complete);
+    const bool incomplete {!fixed && list.empty() &&
+                           !(i.extra_info != nullptr && i.extra_info->enumerator_list_complete)};
     if (incomplete)
     {
         refuse(p, "an incomplete enumeration without a fixed underlying type (decision 0018 item 2)");
@@ -16121,9 +16163,9 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
     if (i.has_explicit_enum_base)
     {
         // The explicit underlying type (il_def.h:9570, base_type): not bool, and the type entry's own size and signedness agree.
-        a_type_ptr b = i.extra_info != nullptr ? i.extra_info->base_type : nullptr;
+        a_type_ptr b {i.extra_info != nullptr ? i.extra_info->base_type : nullptr};
         std::set<a_type_ptr> chain_seen;
-        const char* computed = b != nullptr ? typeref_chain_reason(b, chain_seen, 0) : nullptr;
+        const char* computed {b != nullptr ? typeref_chain_reason(b, chain_seen, 0) : nullptr};
         b = b != nullptr ? skip_typerefs(b) : nullptr;
         if (computed != nullptr)
         {
@@ -16161,17 +16203,20 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
     vir::IntType c_int;
     c_int.bits = prog_.c_int_bits();
     c_int.is_signed = true;
-    const vir::dec::Range int_range = vir::dec::range_of(c_int);
-    std::string lo, hi;
+    const vir::dec::Range int_range {vir::dec::range_of(c_int)};
+    std::string lo;
+    std::string hi;
     {
         std::string prev;
-        bool have_prev = false;
-        std::string emin, emax;
+        bool have_prev {false};
+        std::string emin;
+        std::string emax;
         for (a_constant_ptr c : list)
         {
-            const a_source_position at = c->source_corresp.decl_position.seq != 0 ? c->source_corresp.decl_position : p;
+            const a_source_position at {c->source_corresp.decl_position.seq != 0U ? c->source_corresp.decl_position
+                                                                                  : p};
             cx_.stmt_pos = at;
-            const auto before = reported_count();
+            const auto before {reported_count()};
             check_attributes(c->source_corresp.attributes);
             if (reported_count() != before)
             {
@@ -16182,7 +16227,7 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
                 refuse(at, "an enumerator whose value this version cannot read");
                 continue;
             }
-            const std::string text = std::string(decimal_str_for_integer_constant(c).as_temp_characters());
+            const std::string text {std::string(decimal_str_for_integer_constant(c).as_temp_characters())};
             if (!vir::dec::in_range(text, int_range))
             {
                 refuse(at, "an enumerator whose value (" + text + ") is outside int (decision 0018 item 2)");
@@ -16191,7 +16236,7 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
             if (!has_written_initializer(c))
             {
                 // C23 6.7.3.3, [dcl.enum]/2: the previous value plus one, 0 for the first.  A property of the IL: fail closed.
-                const std::string expected = have_prev ? dec_inc(prev) : "0";
+                const std::string expected {have_prev ? dec_inc(prev) : "0"};
                 if (text != expected)
                 {
                     refuse(
@@ -16217,7 +16262,7 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
         }
         if (fixed)
         {
-            const vir::dec::Range r = vir::dec::range_of(underlying);
+            const vir::dec::Range r {vir::dec::range_of(underlying)};
             lo = r.lo;
             hi = r.hi;
         }
@@ -16228,13 +16273,13 @@ const Encoder::EnumInfo& Encoder::enum_info(a_type_ptr t)
         else
         {
             // [dcl.enum]/8: the values of the smallest bit-field that holds every enumerator (exact, decimal).
-            const bool non_negative = !vir::dec::negative(emin);
-            int m = 1;
+            const bool non_negative {!vir::dec::negative(emin)};
+            int m {1};
             for (; m <= 128; ++m)
             {
-                vir::dec::Range r = non_negative ? vir::dec::Range {"0", vir::dec::dec1(vir::dec::pow2(m))}
-                                                 : vir::dec::Range {vir::dec::neg(vir::dec::pow2(m - 1)),
-                                                                    vir::dec::dec1(vir::dec::pow2(m - 1))};
+                vir::dec::Range r {non_negative ? vir::dec::Range {"0", vir::dec::dec1(vir::dec::pow2(m))}
+                                                : vir::dec::Range {vir::dec::neg(vir::dec::pow2(m - 1)),
+                                                                   vir::dec::dec1(vir::dec::pow2(m - 1))}};
                 if (vir::dec::in_range(emin, r) && vir::dec::in_range(emax, r))
                 {
                     lo = r.lo;
@@ -16284,8 +16329,8 @@ void Encoder::collect_class_features()
     };
     for (a_routine_ptr r : ents_->routines)
     {
-        a_type_ptr c = owner(r->source_corresp.parent_scope);
-        if (c == nullptr || class_features_.count(c) != 0)
+        a_type_ptr c {owner(r->source_corresp.parent_scope)};
+        if (c == nullptr || class_features_.count(c) != 0U)
         {
             continue;
         }
@@ -16306,7 +16351,7 @@ void Encoder::collect_class_features()
     {
         if (a_type_ptr c = owner(v->source_corresp.parent_scope))
         {
-            if (class_features_.count(c) == 0)
+            if (class_features_.count(c) == 0U)
             {
                 class_features_[c] = "a static data member (C++ class features: M7)";
             }
@@ -16316,7 +16361,7 @@ void Encoder::collect_class_features()
     {
         if (a_type_ptr c = owner(t->source_corresp.parent_scope))
         {
-            if (class_features_.count(c) == 0)
+            if (class_features_.count(c) == 0U)
             {
                 class_features_[c] = "a member type or a nested class (C++ class features: M7)";
             }
@@ -16329,16 +16374,16 @@ void Encoder::collect_class_features()
 // pointer member (`struct node *next`) finds it.
 const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
 {
-    auto found = structs_.find(t);
+    auto found {structs_.find(t)};
     if (found != structs_.end())
     {
         return found->second;
     }
-    StructInfo& si = structs_[t];
-    const a_source_position p = t->source_corresp.decl_position;
-    std::string spelled = render_type(t);
+    StructInfo& si {structs_[t]};
+    const a_source_position p {t->source_corresp.decl_position};
+    std::string spelled {render_type(t)};
     // P65 H5: `typedef struct { ... } Pt;` has no tag in C23 and the name `Pt` in C++20; both modes name it by the typedef when there is no tag.
-    std::string tag = t->source_corresp.name != nullptr ? t->source_corresp.name : "";
+    std::string tag {t->source_corresp.name != nullptr ? t->source_corresp.name : ""};
     if (tag.empty() && ents_ != nullptr)
     {
         for (a_type_ptr ty : ents_->types)
@@ -16351,7 +16396,7 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
             }
         }
     }
-    if (p.seq == 0 || !in_verified_file(p))
+    if (p.seq == 0U || !in_verified_file(p))
     {
         si.name = spelled + " (a struct declared in a system file; system files are used only through contracts)";
         return si; // reported at the use
@@ -16362,18 +16407,18 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
         return si;
     }
     si.silent = true;
-    Ctx saved_cx = std::move(cx_); // a use may reach here in the middle of a function
+    Ctx saved_cx {std::move(cx_)}; // a use may reach here in the middle of a function
     cx_ = Ctx();
     cx_.stmt_pos = p;
-    bool ok = true;
+    bool ok {true};
     auto refuse = [&](const a_source_position& at, const std::string& why)
     {
         reject(Diag::unsupported_declaration, at, why);
         ok = false;
     };
     collect_class_features();
-    const auto& cs = t->variant.class_struct_union;
-    const a_class_type_supplement_ptr x = cs.extra_info;
+    const auto& cs {t->variant.class_struct_union};
+    const a_class_type_supplement_ptr x {cs.extra_info};
     if (t->source_corresp.enclosing_routine != nullptr)
     {
         refuse(p, "a struct defined in a block (M8, decision 0043 item 2)");
@@ -16416,23 +16461,23 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
     {
         refuse(p, "a struct with a friend declaration (C++ class features: M7, decision 0043 item 2)");
     }
-    if (auto cf = class_features_.find(t); cf != class_features_.end())
+    if (auto cf {class_features_.find(t)}; cf != class_features_.end())
     {
         refuse(p, "a struct with " + cf->second);
     }
-    vir::StructType* st = prog_.add_struct(tag, spelled, loc_of(p));
+    vir::StructType* st {prog_.add_struct(tag, spelled, loc_of(p))};
     si.ok = true; // provisional: a member may point back at the struct
     si.type = vir::Type::structure(st);
-    size_t members = 0;
-    bool packed_layout = false;
-    bool non_public = false;
-    for (a_field_ptr f = cs.field_list; f != nullptr; f = f->next)
+    size_t members {0U};
+    bool packed_layout {false};
+    bool non_public {false};
+    for (a_field_ptr f {cs.field_list}; f != nullptr; f = f->next)
     {
-        const a_source_position fp = f->source_corresp.decl_position.seq != 0 ? f->source_corresp.decl_position : p;
+        const a_source_position fp {f->source_corresp.decl_position.seq != 0U ? f->source_corresp.decl_position : p};
         cx_.stmt_pos = fp;
-        const char* fname = f->source_corresp.name;
-        const std::string who = fname != nullptr ? "the member `" + std::string(fname) + "` of " + spelled
-                                                 : "an unnamed member of " + spelled;
+        const char* fname {f->source_corresp.name};
+        const std::string who {fname != nullptr ? "the member `" + std::string(fname) + "` of " + spelled
+                                                : "an unnamed member of " + spelled};
         ++members;
         if (f->is_bit_field)
         {
@@ -16469,18 +16514,18 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
             non_public = true;
             continue;
         }
-        const auto before = reported_count();
+        const auto before {reported_count()};
         check_attributes(f->source_corresp.attributes);
         if (reported_count() != before)
         {
             ok = false;
         }
-        const a_type_qualifier_set fq = f_get_type_qualifiers(f->type, TRUE);
-        a_type_ptr u = skip_typerefs(f->type);
+        const a_type_qualifier_set fq {f_get_type_qualifiers(f->type, TRUE)};
+        a_type_ptr u {skip_typerefs(f->type)};
         // A member laid out off its type's alignment, or a struct aligned below its members (`#pragma pack`, `packed`): a member's address may be misaligned (audit S3).
         if (u != nullptr)
         {
-            if (u->alignment != 0 && f->offset % u->alignment != 0)
+            if (u->alignment != 0 && f->offset % u->alignment != 0U)
             {
                 packed_layout = true;
             }
@@ -16489,12 +16534,12 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                 packed_layout = true;
             }
         }
-        if ((fq & TQ_CONST) != 0)
+        if ((fq & TQ_CONST) != 0U)
         {
             refuse(fp, "a `const` member (" + who + "; const objects come with M4.6, decision 0043 item 2)");
             continue;
         }
-        if ((fq & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0)
+        if ((fq & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0U)
         {
             refuse(fp, "a `volatile` or `_Atomic` member (" + who + "; M8, decision 0043 item 2)");
             continue;
@@ -16537,8 +16582,8 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                     refuse(fp, "a reference member (" + who + "; C++ class features: M7)");
                     continue;
                 }
-                a_type_ptr pointee = u->variant.pointer.type;
-                a_type_ptr pu = pointee != nullptr ? skip_typerefs(pointee) : nullptr;
+                a_type_ptr pointee {u->variant.pointer.type};
+                a_type_ptr pu {pointee != nullptr ? skip_typerefs(pointee) : nullptr};
                 if (pu != nullptr && pu->kind == tk_routine)
                 {
                     refuse(fp, "a pointer-to-function member (" + who +
@@ -16581,13 +16626,13 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
         }
         prog_.add_member(st, fname, mt.t, loc_of(fp));
     }
-    if (members == 0 && ok)
+    if (members == 0U && ok)
     {
         refuse(p, "an empty struct (decision 0043 item 2)");
     }
     if (ok)
     {
-        if (auto ci = class_implicit_.find(t); ci != class_implicit_.end())
+        if (auto ci {class_implicit_.find(t)}; ci != class_implicit_.end())
         {
             refuse(p, "a struct with " + ci->second);
         }
@@ -16621,26 +16666,26 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
         // Attributes written in a verified file on a type of any kind (a typedef, the unnamed type of
         // `int __attribute__((x)) f(int)`) are held to the allow-list; the position of the attribute decides, since the
         // type may have none.
-        for (an_attribute_ptr a = t->source_corresp.attributes; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {t->source_corresp.attributes}; a != nullptr; a = a->next)
         {
-            if (a->position.seq != 0 && in_verified_file(a->position) && !is_vector_type_attribute(a) &&
+            if (a->position.seq != 0U && in_verified_file(a->position) && !is_vector_type_attribute(a) &&
                 !(is_struct_kind(t) && a->name != nullptr &&
                   (std::strcmp(a->name, "packed") == 0 || std::strcmp(a->name, "__packed__") == 0)))
             { // `packed` on a struct: struct_info reports it
                 cx_ = Ctx();
                 cx_.stmt_pos = a->position;
-                an_attribute_ptr one_next = a->next;
+                an_attribute_ptr one_next {a->next};
                 a->next = nullptr; // check this entry alone
                 check_attributes(a);
                 a->next = one_next;
             }
         }
-        const a_source_position p = t->source_corresp.decl_position;
-        if (p.seq == 0 || !in_verified_file(p))
+        const a_source_position p {t->source_corresp.decl_position};
+        if (p.seq == 0U || !in_verified_file(p))
         {
             continue;
         }
-        a_type_ptr u = t->kind == tk_typeref ? nullptr : t;
+        a_type_ptr u {t->kind == tk_typeref ? nullptr : t};
         if (u == nullptr)
         {
             // Decision 0024 item 6: a typedef (or alias) whose type contains an array type is rejected, used or not, until arrays
@@ -16648,7 +16693,7 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
             if (t->source_corresp.name != nullptr)
             {
                 std::set<a_type_ptr> seen;
-                const char* why = computed_type_reason(t->variant.typeref.type, seen);
+                const char* why {computed_type_reason(t->variant.typeref.type, seen)};
                 if (why != nullptr && std::strcmp(why, "an array type") == 0)
                 {
                     reject(
@@ -16658,8 +16703,8 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
             }
             continue;
         }
-        bool is_class = u->kind == tk_class || u->kind == tk_struct || u->kind == tk_union;
-        bool is_enum = u->kind == tk_integer && u->variant.integer.enum_type;
+        bool is_class {u->kind == tk_class || u->kind == tk_struct || u->kind == tk_union};
+        bool is_enum {u->kind == tk_integer && u->variant.integer.enum_type};
         if (!is_class && !is_enum)
         {
             continue;
@@ -16683,7 +16728,7 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
         if (is_struct_kind(u) && u->source_corresp.name != nullptr && !u->incomplete &&
             u->source_corresp.enclosing_routine == nullptr)
         {
-            const auto key = std::make_pair(std::string(u->source_corresp.name), u->source_corresp.parent_scope);
+            const auto key {std::make_pair(std::string(u->source_corresp.name), u->source_corresp.parent_scope)};
             if (!defined_tags.insert(key).second)
             {
                 reject(Diag::unsupported_declaration, p,
@@ -16701,13 +16746,13 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
     }
     for (an_asm_entry_ptr a : ents.asm_entries)
     {
-        const a_source_position p = a->source_corresp.decl_position;
-        if (p.seq == 0 || !in_verified_file(p))
+        const a_source_position p {a->source_corresp.decl_position};
+        if (p.seq == 0U || !in_verified_file(p))
         {
             continue;
         }
         // An asm statement inside a function is rejected as a statement (its scope is the function's).
-        a_scope_ptr sp = a->source_corresp.parent_scope;
+        a_scope_ptr sp {a->source_corresp.parent_scope};
         if (sp != nullptr && sp->kind != sck_file && sp->kind != sck_namespace)
         {
             continue;
@@ -16716,8 +16761,8 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
     }
     for (a_template_ptr t : ents.templates)
     {
-        const a_source_position p = t->source_corresp.decl_position;
-        if (p.seq == 0 || !in_verified_file(p))
+        const a_source_position p {t->source_corresp.decl_position};
+        if (p.seq == 0U || !in_verified_file(p))
         {
             continue;
         }
@@ -16743,8 +16788,8 @@ void Encoder::run(const IlEntities& ents)
     // member of a system class).
     for (a_routine_ptr r : ents.routines)
     {
-        a_statement_ptr body = verified_body(r);
-        const a_source_position decl = r->source_corresp.decl_position;
+        a_statement_ptr body {verified_body(r)};
+        const a_source_position decl {r->source_corresp.decl_position};
         // Decision 0046: the C library's routines (items 4-6) and every routine's attributes by where they are written (item 7), declared here or not.
         cx_ = Ctx();
         cx_.routine = r;
@@ -16755,7 +16800,7 @@ void Encoder::run(const IlEntities& ents)
             continue;
         }
         lib_trust(r);
-        if (reserved_rejected_.count(r) != 0)
+        if (reserved_rejected_.count(r) != 0U)
         {
             continue; // rejected for its reserved name: nothing else about it
         }
@@ -16765,7 +16810,7 @@ void Encoder::run(const IlEntities& ents)
         // it is never read by check_signature or function_of (a call is a typed view).  One whose trust failed was reported by lib_trust.
         if (body == nullptr && mentions_void_pointer(r))
         {
-            if (const LibTrust& lt = lib_trust(r); lt.has)
+            if (const LibTrust& lt {lib_trust(r)}; lt.has)
             {
                 if (lt.ok)
                 {
@@ -16778,12 +16823,12 @@ void Encoder::run(const IlEntities& ents)
         // signature and no contract until its standard name has one) is read like a routine a system header declares: nothing about it is encoded, and a
         // call is `call_without_contract` (callee_for_call).  A contract or marker the program wrote on it keeps it here, to be read like any declaration.
         // A `decreases` alone is no contract, but it is a library annotation (lib_trust(r).has): such a routine keeps reaching check_signature (audit N9).
-        if (body == nullptr && decl.seq != 0 && in_library_file(decl) && !lib_trust(r).has &&
+        if (body == nullptr && decl.seq != 0U && in_library_file(decl) && !lib_trust(r).has &&
             !routine_has_contract(r) && !carries_marker(r))
         {
             continue;
         }
-        const bool declared_here = decl.seq != 0 && in_verified_file(decl);
+        const bool declared_here {decl.seq != 0U && in_verified_file(decl)};
         if (body == nullptr && !declared_here)
         {
             cx_ = Ctx();
@@ -16795,9 +16840,9 @@ void Encoder::run(const IlEntities& ents)
         cx_ = Ctx();
         cx_.routine = r;
         cx_.stmt_pos = decl;
-        const a_source_position at = body != nullptr && body->position.seq != 0 ? body->position : decl;
-        const char* skipped = nullptr;
-        bool covered = false; // the declaration that explains the routine is itself rejected
+        const a_source_position at {body != nullptr && body->position.seq != 0U ? body->position : decl};
+        const char* skipped {nullptr};
+        bool covered {false}; // the declaration that explains the routine is itself rejected
         if (r->is_lambda_body)
         {
             skipped = "the body of a lambda";
@@ -16827,7 +16872,7 @@ void Encoder::run(const IlEntities& ents)
             continue;
         }
         {
-            a_routine_type_supplement_ptr rx = routine_supplement(r);
+            a_routine_type_supplement_ptr rx {routine_supplement(r)};
             check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return);
         }
         if (is_spec_routine(r))
@@ -16873,26 +16918,26 @@ void Encoder::run(const IlEntities& ents)
         }
         // A declaration the program writes with a contract on a routine a library file declares first (EDG keeps the first declaration's position): the
         // signature is rejected at the program's own line (invariant 7), never at the library's.
-        a_source_position sig_at = decl;
+        a_source_position sig_at {decl};
         if (in_library_file(decl))
         {
             a_source_position own {};
             auto earliest = [&](const a_source_position& q)
             {
                 if (written_by_program(q) &&
-                    (own.seq == 0 || q.seq < own.seq || (q.seq == own.seq && q.column < own.column)))
+                    (own.seq == 0U || q.seq < own.seq || (q.seq == own.seq && q.column < own.column)))
                 {
                     own = q;
                 }
             };
-            if (auto sd = ents.secondary_decls.find(r); sd != ents.secondary_decls.end())
+            if (auto sd {ents.secondary_decls.find(r)}; sd != ents.secondary_decls.end())
             {
                 for (const IlEntities::SecondaryDecl& q : sd->second)
                 {
                     earliest(q.position);
                 }
             }
-            if (own.seq != 0)
+            if (own.seq != 0U)
             {
                 sig_at = own;
             }
@@ -16903,12 +16948,12 @@ void Encoder::run(const IlEntities& ents)
         }
         // Decision 0042 item 4: function_of is lazy, so a declaration with a `ref_to_uninit` or `must_init` parameter that nothing calls would never have its
         // marker rules checked (an `owns(*p)` atom, `must_init`'s partner in the `ensures`, the contract reads).  Force it for exactly those routines.
-        if (body == nullptr && (markers_.count(r) != 0 || has_struct_pointer_param(r) || has_function_marker(r) ||
+        if (body == nullptr && (markers_.count(r) != 0U || has_struct_pointer_param(r) || has_function_marker(r) ||
                                 contract_names_block_atom(r)))
         {
             function_of(r, false, decl); // decision 0043: also its member atoms (the const struct pointee rule)
         }
-        if (a_routine_type_supplement_ptr nx = routine_supplement(r);
+        if (a_routine_type_supplement_ptr nx {routine_supplement(r)};
             nx != nullptr && nx->does_not_return && !is_library_routine(r))
         {
             // Also for a function that is declared and never called (function_of is lazy): decision 0015 item 4.
@@ -16926,7 +16971,7 @@ void Encoder::run(const IlEntities& ents)
             {
                 to_verify_.push_back(r);
                 // Decision 0041 item 4 (P63 A7): the global-namespace `main` receives the globals from `program_start`.  `ns::main` is an ordinary function.
-                a_scope_ptr ps = r->source_corresp.parent_scope;
+                a_scope_ptr ps {r->source_corresp.parent_scope};
                 if (is_main(r) && ps != nullptr && ps->kind == sck_file && fns_[r]->params.empty())
                 {
                     prog_.set_entry(fns_[r]);
@@ -16950,7 +16995,7 @@ void Encoder::run(const IlEntities& ents)
 // until M4.5f).  Anything else, a region no routine owns included, is reported: the encoder never passes what it did not check.
 void Encoder::check_block_static_assertions(const IlEntities& ents)
 {
-    if (reported_count() != 0)
+    if (reported_count() != 0U)
     {
         return; // a rejected statement's sub-statements may never have been walked
     }
@@ -16964,13 +17009,13 @@ void Encoder::check_block_static_assertions(const IlEntities& ents)
     }
     for (const auto& entry : ents.region_static_assertions)
     {
-        a_static_assertion_ptr sa = entry.second;
-        if (!static_assertion_in_verified_file(sa) || block_sa_seen_.count(sa) != 0)
+        a_static_assertion_ptr sa {entry.second};
+        if (!static_assertion_in_verified_file(sa) || block_sa_seen_.count(sa) != 0U)
         {
             continue;
         }
-        bool spec = false;
-        auto it = by_region.find(entry.first);
+        bool spec {false};
+        auto it {by_region.find(entry.first)};
         if (it != by_region.end())
         {
             for (a_routine_ptr r : it->second)
@@ -16998,7 +17043,7 @@ void Encoder::require_measures_in_cycles()
         std::vector<a_routine_ptr> todo(edges_[from].begin(), edges_[from].end());
         while (!todo.empty())
         {
-            a_routine_ptr n = todo.back();
+            a_routine_ptr n {todo.back()};
             todo.pop_back();
             if (n == target)
             {
@@ -17017,13 +17062,13 @@ void Encoder::require_measures_in_cycles()
     };
     for (a_routine_ptr r : to_verify_)
     {
-        vir::Function* f = fns_[r];
-        if (f == nullptr || !f->decreases_.empty() || measure_rejected_.count(r) != 0 || !reaches(r, r))
+        vir::Function* f {fns_[r]};
+        if (f == nullptr || !f->decreases_.empty() || measure_rejected_.count(r) != 0U || !reaches(r, r))
         {
             continue;
         }
-        std::string why = edges_[r].count(r) != 0 ? "it calls itself" : "it is part of a cycle of calls";
-        if (edges_[r].count(r) == 0)
+        std::string why {edges_[r].count(r) != 0U ? "it calls itself" : "it is part of a cycle of calls"};
+        if (edges_[r].count(r) == 0U)
         {
             for (a_routine_ptr m : edges_[r])
             {
@@ -17047,21 +17092,21 @@ void Encoder::require_measures_in_cycles()
 // the directive is in the file that record is a child of, one line before the record's first line (P14).
 void reject_line_directives_pass()
 {
-    for (a_seq_number_lookup_entry_ptr e = il_header.seq_number_lookup_entries; e; e = e->next)
+    for (a_seq_number_lookup_entry_ptr e {il_header.seq_number_lookup_entries}; e; e = e->next)
     {
-        a_source_file_ptr f = e->source_file;
+        a_source_file_ptr f {e->source_file};
         if (f == nullptr || f->full_name != nullptr)
         {
             continue;
         }
-        a_source_file_ptr phys = nullptr;
-        a_line_number line = 0;
-        a_boolean at_end = FALSE;
+        a_source_file_ptr phys {nullptr};
+        a_line_number line {0U};
+        a_boolean at_end {FALSE};
         conv_seq_to_physical_file_and_line(e->first, &phys, &line, &at_end);
         // A directive in a file that cannot be placed is rejected too (fail closed, decision 0011 item 4).
-        const std::string c =
-            (phys != nullptr && phys->full_name != nullptr) ? canonical_path(phys->full_name) : std::string();
-        const VerifyConfig& cfg = verify_config();
+        const std::string c {(phys != nullptr && phys->full_name != nullptr) ? canonical_path(phys->full_name)
+                                                                             : std::string()};
+        const VerifyConfig& cfg {verify_config()};
         if (!c.empty() && is_system_file(cfg.system_dirs, cfg.cerastes_header, c, cfg.library_dirs))
         {
             continue;
@@ -17081,9 +17126,9 @@ void reject_line_directives_pass()
         // `#pragma GCC system_header` makes a record of the same file name that is a system header; a `#line` or a
         // linemarker gives the lines another presumed name.  The record of a `#line` starts on the line after the
         // directive; the pragma's starts on the pragma's own line (measured: a pragma on line 2 of a header gives line 2).
-        const bool pragma = f->from_system_include_dir && f->file_name != nullptr && phys->file_name != nullptr &&
-                            std::strcmp(f->file_name, phys->file_name) == 0;
-        at.line = (!pragma && line > 1) ? line - 1 : line;
+        const bool pragma {f->from_system_include_dir && f->file_name != nullptr && phys->file_name != nullptr &&
+                           std::strcmp(f->file_name, phys->file_name) == 0};
+        at.line = (!pragma && line > 1U) ? line - 1U : line;
         report_at(pragma ? Diag::system_header_pragma_in_verify : Diag::line_directive_in_verify, at);
     }
 }
@@ -17092,7 +17137,7 @@ void reject_line_directives_pass()
 
 void verify_encode()
 {
-    VerifyConfig& cfg = verify_config();
+    VerifyConfig& cfg {verify_config()};
     if (cfg.hook == "abort")
     {
         std::abort(); // self-test hook: a crash in the back end is exit status 3
@@ -17108,7 +17153,7 @@ void verify_encode()
         std::set<unsigned long> seen;
         for (const a_source_position& p : diag_pragma_sites())
         {
-            if (p.seq == 0)
+            if (p.seq == 0U)
             { // a pragma that cannot be placed is rejected too (fail closed, decision 0011 item 4)
                 DiagPos unknown;
                 report_at(Diag::diagnostic_pragma_in_verify, unknown);
@@ -17124,13 +17169,13 @@ void verify_encode()
 
     Encoder enc;
     enc.run(collect_entities());
-    if (reported_count() != 0)
+    if (reported_count() != 0U)
     {
         return;
     }
 
-    vir::Program& program = enc.program();
-    std::vector<vir::Diag> problems = vir::check_program(program);
+    vir::Program& program {enc.program()};
+    std::vector<vir::Diag> problems {vir::check_program(program)};
     if (!problems.empty())
     {
         for (const vir::Diag& d : problems)
@@ -17153,13 +17198,13 @@ void verify_encode()
     {
         lo.drop_assert = 0;
     }
-    if (cfg.hook.compare(0, 12, "drop_assert=") == 0)
+    if (cfg.hook.compare(0U, 12U, "drop_assert=") == 0)
     {
         lo.drop_assert = std::atoi(cfg.hook.c_str() + 12);
     }
     lo.perturb_fixed_order = cfg.hook == "perturb_fixed_order";
     lo.force_base_sets = cfg.hook == "force_base_sets";
-    vir::LowerResult lowered = vir::lower_program(program, lo);
+    vir::LowerResult lowered {vir::lower_program(program, lo)};
     if (!lowered.errors.empty())
     {
         cfg.out.internal_inconsistency = true; // a tool failure, exit status 3 (decision 0022 item 12)
@@ -17194,7 +17239,7 @@ void verify_encode()
         }
         return;
     }
-    viper::Emitted emitted = viper::emit(lowered.program);
+    viper::Emitted emitted {viper::emit(lowered.program)};
     if (!emitted.problems.empty())
     {
         cfg.out.internal_inconsistency = true; // a tool failure, exit status 3 (decision 0022 item 12)

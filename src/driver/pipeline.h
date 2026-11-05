@@ -14,10 +14,10 @@ namespace cerastes {
 struct PipelineOptions
 {
     SiliconTools tools;
-    int timeout_seconds = 300;
+    int timeout_seconds {300};
     std::string keep_vpr;     // "": do not keep; else write this path and `<path>.map`
     std::string primary_file; // the verdict line names it
-    int functions = 0;        // how many functions were verified or used through a contract (the verdict line says so)
+    int functions {0};        // how many functions were verified or used through a contract (the verdict line says so)
     std::string hook;         // the self-test hook of a hooked run (decision 0011 item 13); "" for none
     // a hook that injects no fault (library_fixture, decision 0046 item 11): the verdict line names it
     std::string note;
@@ -25,7 +25,7 @@ struct PipelineOptions
 
 struct PipelineResult
 {
-    int exit_code = 3; // 0 verified, 1 verification errors, 3 tool failure (always 3 for a hooked run)
+    int exit_code {3}; // 0 verified, 1 verification errors, 3 tool failure (always 3 for a hooked run)
     std::string out;   // for standard output
     std::string err;   // for standard error
 };

@@ -42,7 +42,7 @@ bool path_is_under(const std::string& path, const std::string& dir)
     {
         return false;
     }
-    if (path.compare(0, dir.size(), dir) != 0)
+    if (path.compare(0U, dir.size(), dir) != 0)
     {
         return false;
     }
@@ -63,12 +63,12 @@ std::vector<std::string> system_directories(const std::vector<std::string>& dirs
     std::vector<std::string> out;
     for (const std::string& d : dirs)
     {
-        std::string c = canonical_path(d);
+        std::string c {canonical_path(d)};
         if (c.empty())
         {
             continue;
         }
-        bool user = false;
+        bool user {false};
         for (const std::string& u : users)
         {
             if (!u.empty() && u == c)
@@ -80,7 +80,7 @@ std::vector<std::string> system_directories(const std::vector<std::string>& dirs
         {
             continue;
         }
-        bool library = false;
+        bool library {false};
         for (const std::string& l : library_dirs)
         {
             if (!l.empty() && (l == c || path_is_under(c, l)))
@@ -92,7 +92,7 @@ std::vector<std::string> system_directories(const std::vector<std::string>& dirs
         {
             continue;
         }
-        bool seen = false;
+        bool seen {false};
         for (const std::string& o : out)
         {
             if (o == c)
@@ -110,7 +110,7 @@ std::vector<std::string> system_directories(const std::vector<std::string>& dirs
 
 bool is_library_file(const std::vector<std::string>& library_dirs, const std::string& path)
 {
-    std::string c = canonical_path(path);
+    std::string c {canonical_path(path)};
     if (c.empty())
     {
         return false;
@@ -133,7 +133,7 @@ bool is_library_file(const std::string& path)
 bool is_system_file(const std::vector<std::string>& system_dirs, const std::string& cerastes_header,
                     const std::string& path, const std::vector<std::string>& library_dirs)
 {
-    std::string c = canonical_path(path);
+    std::string c {canonical_path(path)};
     if (c.empty())
     {
         return false; // cannot be resolved: not a system file (fail closed)
@@ -161,7 +161,7 @@ bool is_system_file(const std::vector<std::string>& system_dirs, const std::stri
 
 bool is_system_file(const std::string& path)
 {
-    const VerifyConfig& c = verify_config();
+    const VerifyConfig& c {verify_config()};
     return is_system_file(c.system_dirs, c.cerastes_header, path, c.library_dirs);
 }
 
