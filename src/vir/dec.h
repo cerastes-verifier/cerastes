@@ -17,14 +17,14 @@ namespace cerastes::vir::dec {
 // A decimal integer: an optional '-', digits without leading zeros ("0" alone), and no "-0".
 inline bool valid(const std::string& s)
 {
-    size_t i = (!s.empty() && s[0] == '-') ? 1 : 0;
+    size_t i {static_cast<size_t>((!s.empty() && s[0U] == '-') ? 1 : 0)};
     if (i >= s.size())
     {
         return false;
     }
     if (s[i] == '0')
     {
-        return s.size() == i + 1 && i == 0;
+        return s.size() == i + 1U && i == 0U;
     }
     for (; i < s.size(); ++i)
     {
@@ -38,7 +38,7 @@ inline bool valid(const std::string& s)
 
 inline bool negative(const std::string& s)
 {
-    return !s.empty() && s[0] == '-';
+    return !s.empty() && s[0U] == '-';
 }
 
 inline std::string neg(const std::string& s)
@@ -47,19 +47,19 @@ inline std::string neg(const std::string& s)
     {
         return s;
     }
-    return negative(s) ? s.substr(1) : "-" + s;
+    return negative(s) ? s.substr(1U) : "-" + s;
 }
 
 // 2^n for n >= 0.
 inline std::string pow2(int n)
 {
     std::vector<int> d {1}; // little-endian digits
-    for (int i = 0; i < n; ++i)
+    for (int i {0}; i < n; ++i)
     {
-        int carry = 0;
+        int carry {0};
         for (int& x : d)
         {
-            int v = x * 2 + carry;
+            int v {x * 2 + carry};
             x = v % 10;
             carry = v / 10;
         }
@@ -69,7 +69,7 @@ inline std::string pow2(int n)
         }
     }
     std::string out;
-    for (auto it = d.rbegin(); it != d.rend(); ++it)
+    for (auto it {d.rbegin()}; it != d.rend(); ++it)
     {
         out += static_cast<char>('0' + *it);
     }
@@ -79,9 +79,9 @@ inline std::string pow2(int n)
 // a - 1 for a positive decimal.
 inline std::string dec1(const std::string& a)
 {
-    std::string s = a;
-    size_t i = s.size();
-    while (i > 0)
+    std::string s {a};
+    size_t i {s.size()};
+    while (i > 0U)
     {
         --i;
         if (s[i] == '0')
@@ -94,20 +94,21 @@ inline std::string dec1(const std::string& a)
             break;
         }
     }
-    size_t first = s.find_first_not_of('0');
+    size_t first {s.find_first_not_of('0')};
     return first == std::string::npos ? "0" : s.substr(first);
 }
 
 // -1, 0 or 1.
 inline int cmp(const std::string& a, const std::string& b)
 {
-    const bool na = negative(a), nb = negative(b);
+    const bool na {negative(a)};
+    const bool nb {negative(b)};
     if (na != nb)
     {
         return na ? -1 : 1;
     }
-    const std::string& ma = na ? a.substr(1) : a;
-    const std::string& mb = nb ? b.substr(1) : b;
+    const std::string& ma {na ? a.substr(1U) : a};
+    const std::string& mb {nb ? b.substr(1U) : b};
     int c;
     if (ma.size() != mb.size())
     {

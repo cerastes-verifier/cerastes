@@ -11,7 +11,7 @@ namespace cerastes::low {
 namespace {
 std::shared_ptr<LExpr> make(LExpr::Kind k)
 {
-    auto e = std::make_shared<LExpr>();
+    auto e {std::make_shared<LExpr>()};
     e->kind = k;
     return e;
 }
@@ -19,28 +19,28 @@ std::shared_ptr<LExpr> make(LExpr::Kind k)
 
 E int_lit(std::string decimal)
 {
-    auto e = make(LExpr::Kind::IntLit);
+    auto e {make(LExpr::Kind::IntLit)};
     e->text = std::move(decimal);
     return e;
 }
 
 E bool_lit(bool v)
 {
-    auto e = make(LExpr::Kind::BoolLit);
+    auto e {make(LExpr::Kind::BoolLit)};
     e->bool_value = v;
     return e;
 }
 
 E var(std::string name)
 {
-    auto e = make(LExpr::Kind::Var);
+    auto e {make(LExpr::Kind::Var)};
     e->text = std::move(name);
     return e;
 }
 
 E neg(E a)
 {
-    auto e = make(LExpr::Kind::Un);
+    auto e {make(LExpr::Kind::Un)};
     e->un = UnOp::Neg;
     e->a = std::move(a);
     return e;
@@ -48,7 +48,7 @@ E neg(E a)
 
 E not_(E a)
 {
-    auto e = make(LExpr::Kind::Un);
+    auto e {make(LExpr::Kind::Un)};
     e->un = UnOp::Not;
     e->a = std::move(a);
     return e;
@@ -56,7 +56,7 @@ E not_(E a)
 
 E bin(BinOp op, E a, E b)
 {
-    auto e = make(LExpr::Kind::Bin);
+    auto e {make(LExpr::Kind::Bin)};
     e->bin = op;
     e->a = std::move(a);
     e->b = std::move(b);
@@ -65,7 +65,7 @@ E bin(BinOp op, E a, E b)
 
 E ite(E c, E a, E b)
 {
-    auto e = make(LExpr::Kind::Ite);
+    auto e {make(LExpr::Kind::Ite)};
     e->a = std::move(c);
     e->b = std::move(a);
     e->c = std::move(b);
@@ -74,7 +74,7 @@ E ite(E c, E a, E b)
 
 E fn(std::string prelude_name, std::vector<E> args)
 {
-    auto e = make(LExpr::Kind::Fn);
+    auto e {make(LExpr::Kind::Fn)};
     e->text = std::move(prelude_name);
     e->args = std::move(args);
     return e;
@@ -87,7 +87,7 @@ E null_()
 
 E field(E recv, std::string field_name)
 {
-    auto e = make(LExpr::Kind::Field);
+    auto e {make(LExpr::Kind::Field)};
     e->text = std::move(field_name);
     e->a = std::move(recv);
     return e;
@@ -95,7 +95,7 @@ E field(E recv, std::string field_name)
 
 E perm_of(E recv, std::string field_name)
 {
-    auto e = make(LExpr::Kind::PermOf);
+    auto e {make(LExpr::Kind::PermOf)};
     e->text = std::move(field_name);
     e->a = std::move(recv);
     return e;
@@ -112,7 +112,7 @@ E no_perm()
 
 E acc(E recv, std::string field_name)
 {
-    auto e = make(LExpr::Kind::Acc);
+    auto e {make(LExpr::Kind::Acc)};
     e->text = std::move(field_name);
     e->a = std::move(recv);
     return e;
@@ -120,7 +120,7 @@ E acc(E recv, std::string field_name)
 
 E acc(E recv, std::string field_name, E amount)
 {
-    auto e = make(LExpr::Kind::Acc);
+    auto e {make(LExpr::Kind::Acc)};
     e->text = std::move(field_name);
     e->a = std::move(recv);
     e->b = std::move(amount);
@@ -129,14 +129,14 @@ E acc(E recv, std::string field_name, E amount)
 
 E old_(E a)
 {
-    auto e = make(LExpr::Kind::Old);
+    auto e {make(LExpr::Kind::Old)};
     e->a = std::move(a);
     return e;
 }
 
 E for_perm(E body)
 {
-    auto e = make(LExpr::Kind::ForPerm);
+    auto e {make(LExpr::Kind::ForPerm)};
     e->text = "t";
     e->a = std::move(body);
     return e;
@@ -160,7 +160,7 @@ bool is_domain_function(const std::string& name)
             return true;
         }
     }
-    return name.compare(0, 3, "GB_") == 0; // a global's block constant (decision 0041 item 4)
+    return name.compare(0U, 3U, "GB_") == 0; // a global's block constant (decision 0041 item 4)
 }
 
 E dom(const std::string& domain_function, std::vector<E> args)
@@ -169,7 +169,7 @@ E dom(const std::string& domain_function, std::vector<E> args)
     {
         throw std::logic_error("`" + domain_function + "` is not a function of the Block domain");
     }
-    auto e = make(LExpr::Kind::Dom);
+    auto e {make(LExpr::Kind::Dom)};
     e->text = domain_function;
     e->args = std::move(args);
     return e;
@@ -177,7 +177,7 @@ E dom(const std::string& domain_function, std::vector<E> args)
 
 E mod_pow2(E a, int k)
 {
-    auto e = make(LExpr::Kind::ModPow2);
+    auto e {make(LExpr::Kind::ModPow2)};
     e->text = vir::dec::pow2(k);
     e->a = std::move(a);
     return e;
@@ -185,7 +185,7 @@ E mod_pow2(E a, int k)
 
 E div_pow2(E a, int k)
 {
-    auto e = make(LExpr::Kind::DivPow2);
+    auto e {make(LExpr::Kind::DivPow2)};
     e->text = vir::dec::pow2(k);
     e->a = std::move(a);
     return e;

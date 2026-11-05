@@ -20,9 +20,9 @@ namespace {
 // obligations after the body and then `assert !c` as an internal check.
 struct ConstVal
 {
-    bool ok = false;
-    bool is_bool = false;
-    __int128 v = 0;
+    bool ok {false};
+    bool is_bool {false};
+    __int128 v {0};
 };
 
 ConstVal unknown()
@@ -46,8 +46,8 @@ bool fits(__int128 v, const Type& t)
     {
         return false;
     }
-    const int bits = t.int_type->bits;
-    const __int128 one = 1;
+    const int bits {t.int_type->bits};
+    const __int128 one {1};
     if (t.int_type->is_signed)
     {
         return v >= -(one << (bits - 1)) && v <= (one << (bits - 1)) - 1;
@@ -69,13 +69,13 @@ ConstVal eval_const(const Expr& e)
             {
                 return bool_val(e.value == "true");
             }
-            if (!e.type.is_int() || !dec::valid(e.value) || e.value.size() > 30)
+            if (!e.type.is_int() || !dec::valid(e.value) || e.value.size() > 30U)
             {
                 return unknown();
             }
-            __int128 v = 0;
-            const bool neg = dec::negative(e.value);
-            for (size_t i = neg ? 1 : 0; i < e.value.size(); ++i)
+            __int128 v {0};
+            const bool neg {dec::negative(e.value)};
+            for (size_t i {static_cast<size_t>(neg ? 1 : 0)}; i < e.value.size(); ++i)
             {
                 v = v * 10 + (e.value[i] - '0');
             }
@@ -86,22 +86,22 @@ ConstVal eval_const(const Expr& e)
             return sub(e.a);
         case Expr::Kind::ToBool:
         {
-            ConstVal a = sub(e.a);
+            ConstVal a {sub(e.a)};
             return a.ok && !a.is_bool ? bool_val(a.v != 0) : unknown();
         }
         case Expr::Kind::BoolToInt:
         {
-            ConstVal a = sub(e.a);
+            ConstVal a {sub(e.a)};
             return a.ok && a.is_bool && fits(a.v, e.type) ? int_val(a.v) : unknown();
         }
         case Expr::Kind::Convert:
         {
-            ConstVal a = sub(e.a);
+            ConstVal a {sub(e.a)};
             return a.ok && !a.is_bool && fits(a.v, e.type) ? int_val(a.v) : unknown();
         }
         case Expr::Kind::Unary:
         {
-            ConstVal a = sub(e.a);
+            ConstVal a {sub(e.a)};
             if (!a.ok)
             {
                 return unknown();
@@ -121,17 +121,17 @@ ConstVal eval_const(const Expr& e)
                 {
                     return unknown();
                 }
-                const __int128 one = 1;
-                const int bits = e.type.int_type->bits;
-                const __int128 r = e.type.int_type->is_signed ? -a.v - 1 : ((one << bits) - 1) - a.v;
+                const __int128 one {1};
+                const int bits {e.type.int_type->bits};
+                const __int128 r {e.type.int_type->is_signed ? -a.v - 1 : ((one << bits) - 1) - a.v};
                 return fits(r, e.type) ? int_val(r) : unknown();
             }
-            const __int128 r = e.uop == UnaryOp::Neg ? -a.v : a.v;
+            const __int128 r {e.uop == UnaryOp::Neg ? -a.v : a.v};
             return fits(r, e.type) ? int_val(r) : unknown();
         }
         case Expr::Kind::Cond:
         {
-            ConstVal c = sub(e.a);
+            ConstVal c {sub(e.a)};
             if (!c.ok || !c.is_bool)
             {
                 return unknown();
@@ -140,7 +140,7 @@ ConstVal eval_const(const Expr& e)
         }
         case Expr::Kind::Binary:
         {
-            ConstVal a = sub(e.a);
+            ConstVal a {sub(e.a)};
             if (!a.ok)
             {
                 return unknown();
@@ -159,10 +159,10 @@ ConstVal eval_const(const Expr& e)
                 {
                     return bool_val(true);
                 }
-                ConstVal b = sub(e.b);
+                ConstVal b {sub(e.b)};
                 return b.ok && b.is_bool ? bool_val(b.v != 0) : unknown();
             }
-            ConstVal b = sub(e.b);
+            ConstVal b {sub(e.b)};
             if (!b.ok || a.is_bool != b.is_bool)
             {
                 return unknown();
@@ -344,7 +344,7 @@ private:
         }
         if (t.pointee->is_struct())
         {
-            return t.pointee->struct_type != nullptr && structs_.count(t.pointee->struct_type) != 0;
+            return t.pointee->struct_type != nullptr && structs_.count(t.pointee->struct_type) != 0U;
         }
         return scalar_type(*t.pointee);
     }
@@ -372,8 +372,8 @@ private:
     }
     void struct_type(const StructType& st)
     {
-        const std::string name = "the struct '" + st.c_name + "'";
-        const auto& ss = prog_.structs();
+        const std::string name {"the struct '" + st.c_name + "'"};
+        const auto& ss {prog_.structs()};
         if (st.id < 0 || static_cast<size_t>(st.id) >= ss.size() || &ss[static_cast<size_t>(st.id)] != &st)
         {
             err(st.loc, name + " has an id that is not its index");
@@ -407,7 +407,7 @@ private:
             }
             if (m.type.is_struct())
             {
-                if (m.type.struct_type == nullptr || structs_.count(m.type.struct_type) == 0)
+                if (m.type.struct_type == nullptr || structs_.count(m.type.struct_type) == 0U)
                 {
                     err(m.loc, "the member '" + m.name + "' of " + name + " is a struct that is not in the program");
                 }
@@ -438,7 +438,7 @@ private:
         {
             return "";
         }
-        const Type* in = &t;
+        const Type* in {&t};
         while (in->is_ptr() && in->pointee != nullptr)
         {
             in = in->pointee;
@@ -463,8 +463,8 @@ private:
     // scalar global's is.
     void global(const Global& g)
     {
-        const std::string name = "the global '" + g.c_name + "'";
-        const auto& gs = prog_.globals();
+        const std::string name {"the global '" + g.c_name + "'"};
+        const auto& gs {prog_.globals()};
         if (g.id < 0 || static_cast<size_t>(g.id) >= gs.size() || &gs[static_cast<size_t>(g.id)] != &g)
         {
             err(g.loc, name + " has an id that is not its index");
@@ -477,7 +477,7 @@ private:
         {
             err(g.loc, name + " has no source position");
         }
-        const bool is_struct = g.type.is_struct();
+        const bool is_struct {g.type.is_struct()};
         if (g.type.is_ptr())
         {
             if (!accepted_pointer(g.type))
@@ -487,7 +487,7 @@ private:
         }
         else if (is_struct)
         {
-            if (g.type.struct_type == nullptr || structs_.count(g.type.struct_type) == 0)
+            if (g.type.struct_type == nullptr || structs_.count(g.type.struct_type) == 0U)
             {
                 err(g.loc, name + " is a struct that is not in the program");
             }
@@ -496,7 +496,7 @@ private:
         {
             err(g.loc, name + " is not a bool, an integer or a pointer to one");
         }
-        if (g.owner != nullptr && functions_.count(g.owner) == 0)
+        if (g.owner != nullptr && functions_.count(g.owner) == 0U)
         {
             err(g.loc, name + " is a `static` local of a function that is not in the program");
         }
@@ -513,20 +513,20 @@ private:
         {
             err(g.loc, name + " is a struct whose initial value is not given per member (decision 0044 item 8)");
         }
-        if (g.type.struct_type == nullptr || structs_.count(g.type.struct_type) == 0)
+        if (g.type.struct_type == nullptr || structs_.count(g.type.struct_type) == 0U)
         {
             return;
         }
-        const std::vector<StructLeaf> leaves = struct_leaves(*g.type.struct_type, g.c_name);
+        const std::vector<StructLeaf> leaves {struct_leaves(*g.type.struct_type, g.c_name)};
         if (g.leaves.size() != leaves.size())
         {
             err(g.loc, name + " has " + std::to_string(g.leaves.size()) + " initial values for the " +
                            std::to_string(leaves.size()) + " leaves of " + g.type.str() + " (decision 0044 item 8)");
             return;
         }
-        for (size_t k = 0; k < leaves.size(); ++k)
+        for (size_t k {0U}; k < leaves.size(); ++k)
         {
-            const GlobalLeaf& l = g.leaves[k];
+            const GlobalLeaf& l {g.leaves[k]};
             global_value("the member '" + leaves[k].text + "' of the global '" + g.c_name + "'",
                          l.loc.known() ? l.loc : g.loc, leaves[k].type, l.kind, l.init, l.value, l.target);
         }
@@ -536,7 +536,7 @@ private:
     void global_value(const std::string& name, const SrcLoc& loc, const Type& type, GlobalInit kind, const Expr* init,
                       const std::string& value, const Global* target)
     {
-        const auto& gs = prog_.globals();
+        const auto& gs {prog_.globals()};
         switch (kind)
         {
             case GlobalInit::Value:
@@ -586,7 +586,7 @@ private:
                     err(loc, name + " is not a pointer but has the initial value `&target`");
                     break;
                 }
-                const Global* t = target;
+                const Global* t {target};
                 if (t == nullptr || t->id < 0 || static_cast<size_t>(t->id) >= gs.size() ||
                     &gs[static_cast<size_t>(t->id)] != t)
                 {
@@ -642,12 +642,12 @@ private:
     // `main(argc, argv)` forms are M4.6's) and no contract (a contract on `main` and a call of `main` stay rejected, 0028 item 5).
     void entry()
     {
-        const Function* m = prog_.entry();
+        const Function* m {prog_.entry()};
         if (m == nullptr)
         {
             return;
         }
-        if (functions_.count(m) == 0)
+        if (functions_.count(m) == 0U)
         {
             err(SrcLoc {}, "the entry function is not in the program");
             return;
@@ -699,7 +699,7 @@ private:
         else if (f.ret.is_struct())
         {
             // Decision 0044 item 4: a struct result is a tuple of the leaves of a struct of the program.
-            if (f.ret.struct_type == nullptr || structs_.count(f.ret.struct_type) == 0)
+            if (f.ret.struct_type == nullptr || structs_.count(f.ret.struct_type) == 0U)
             {
                 err(f.loc, "the return type of '" + f.c_name + "' is a struct that is not in the program");
             }
@@ -708,40 +708,40 @@ private:
         {
             err(f.loc, "the return type of '" + f.c_name + "' is not void, bool, an integer type or a pointer to one");
         }
-        for (size_t k = 0; k < f.params.size(); ++k)
+        for (size_t k {0U}; k < f.params.size(); ++k)
         {
             if (f.params[k].type.is_ptr())
             {
                 if (!accepted_pointer(f.params[k].type))
                 {
-                    err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is " +
+                    err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name + "' is " +
                                              pointer_reason(f.params[k].type));
                 }
             }
             else if (f.params[k].type.is_struct())
             {
                 // Decision 0044 item 3: a by-value struct parameter's local copy is a struct block like every struct local (always address-taken).
-                if (f.params[k].type.struct_type == nullptr || structs_.count(f.params[k].type.struct_type) == 0)
+                if (f.params[k].type.struct_type == nullptr || structs_.count(f.params[k].type.struct_type) == 0U)
                 {
-                    err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name +
+                    err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
                                              "' is a struct that is not in the program");
                 }
                 else if (!f.param_var(static_cast<int>(k))->address_taken)
                 {
-                    err(f.params[k].loc, "internal: the copy of the struct parameter " + std::to_string(k + 1) +
+                    err(f.params[k].loc, "internal: the copy of the struct parameter " + std::to_string(k + 1U) +
                                              " of '" + f.c_name +
                                              "' is not marked address-taken (decision 0044 item 3)");
                 }
             }
             else if (!value_type(f.params[k].type))
             {
-                err(f.params[k].loc, "parameter " + std::to_string(k + 1) + " of '" + f.c_name +
+                err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
                                          "' is not a bool, an integer type or a pointer to one");
             }
             if (f.params[k].is_restrict && !f.params[k].type.is_ptr())
             {
                 err(f.params[k].loc,
-                    "parameter " + std::to_string(k + 1) + " of '" + f.c_name + "' is `restrict` but not a pointer");
+                    "parameter " + std::to_string(k + 1U) + " of '" + f.c_name + "' is `restrict` but not a pointer");
             }
         }
         if (!f.loc.known())
@@ -786,7 +786,7 @@ private:
         {
             for (const GotoProblem& p : goto_problems(f))
             {
-                const char* why = "";
+                const char* why {""};
                 switch (p.kind)
                 {
                     case GotoProblem::Kind::backward:
@@ -851,9 +851,9 @@ private:
     // or `old`, and has exactly the constant's type; `value` is a literal of that type.
     void named_const(const NamedConst& c, const char* what)
     {
-        const bool assertion = c.kind == NamedConst::Kind::StaticAssertion;
-        const std::string name =
-            assertion ? std::string("the static assertion") : std::string(what) + " '" + c.c_name + "'";
+        const bool assertion {c.kind == NamedConst::Kind::StaticAssertion};
+        const std::string name {assertion ? std::string("the static assertion")
+                                          : std::string(what) + " '" + c.c_name + "'"};
         if (!c.loc.known())
         {
             err(c.loc, name + " has no source position");
@@ -988,9 +988,9 @@ private:
         {
             collect_atoms(c.expr, all);
         }
-        const std::vector<AtomSite> sites = contract_atoms(f);
+        const std::vector<AtomSite> sites {contract_atoms(f)};
         // decision 0047 item 4: no ghost amount, no partner
-        const std::vector<AtomSite> block_sites = contract_block_atoms(f);
+        const std::vector<AtomSite> block_sites {contract_block_atoms(f)};
         std::set<const Expr*> placed;
         for (const AtomSite& s : sites)
         {
@@ -1002,7 +1002,7 @@ private:
         }
         for (const Expr* a : all)
         {
-            if (placed.count(a) == 0)
+            if (placed.count(a) == 0U)
             {
                 err(a->loc,
                     "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
@@ -1022,22 +1022,22 @@ private:
                 req.push_back(&s);
             }
         }
-        for (size_t k = 0; k < req.size(); ++k)
+        for (size_t k {0U}; k < req.size(); ++k)
         {
-            const Expr& a = *req[k]->atom;
+            const Expr& a {*req[k]->atom};
             if (a.amount != static_cast<int>(k))
             {
                 err(a.loc, "the permission atoms of the `requires` are not numbered in order (decision 0037 item 6)");
             }
             // a parameter's index or a global's key (decision 0041 item 8) and the member path (decision 0043 item 9)
-            const PlaceKey place = atom_place(a);
+            const PlaceKey place {atom_place(a)};
             if (!place.valid())
             {
                 continue;
             }
-            for (size_t j = 0; j < k; ++j)
+            for (size_t j {0U}; j < k; ++j)
             {
-                const Expr& b = *req[j]->atom;
+                const Expr& b {*req[j]->atom};
                 if (b.atom == a.atom && atom_place(b) == place)
                 {
                     err(a.loc, "the same permission atom twice in a `requires` (decision 0037 item 6)");
@@ -1053,13 +1053,13 @@ private:
             {
                 continue;
             }
-            const Expr& a = *s.atom;
+            const Expr& a {*s.atom};
             if (a.amount < 0 || static_cast<size_t>(a.amount) >= req.size())
             {
                 err(a.loc, "an `ensures` atom without a `requires` atom to return (decision 0037 item 6)");
                 continue;
             }
-            const Expr& partner = *req[static_cast<size_t>(a.amount)]->atom;
+            const Expr& partner {*req[static_cast<size_t>(a.amount)]->atom};
             if (partner.atom != a.atom || !atom_place(partner).valid() || !atom_place(a).valid() ||
                 atom_place(partner) != atom_place(a))
             {
@@ -1089,12 +1089,12 @@ private:
             }
         }
         // `restrict` (item 2): backed by an `owns` that the `ensures` returns.
-        for (size_t k = 0; k < f.params.size(); ++k)
+        for (size_t k {0U}; k < f.params.size(); ++k)
         {
             if (f.params[k].is_restrict && !restrict_backed(f, static_cast<int>(k)))
             {
                 err(f.params[k].loc,
-                    "parameter " + std::to_string(k + 1) + " of '" + f.c_name +
+                    "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
                         "' is `restrict` without `owns(*p)` in its `requires` and `ensures` (decision 0037 item 2)");
             }
         }
@@ -1111,15 +1111,15 @@ private:
         {
             return atom_place(*s.atom).root;
         };
-        for (size_t i = 0; i < block_sites.size(); ++i)
+        for (size_t i {0U}; i < block_sites.size(); ++i)
         {
-            const AtomSite& a = block_sites[i];
-            const int key = operand_key(a);
+            const AtomSite& a {block_sites[i]};
+            const int key {operand_key(a)};
             if (key == kNoPlaceKey)
             {
                 continue; // refused in expr()
             }
-            for (size_t j = 0; j < i; ++j)
+            for (size_t j {0U}; j < i; ++j)
             {
                 if (block_sites[j].in_ensures == a.in_ensures && operand_key(block_sites[j]) == key)
                 {
@@ -1136,7 +1136,7 @@ private:
             }
             if (a.in_ensures && key >= 0)
             {
-                bool taken = false;
+                bool taken {false};
                 for (const AtomSite& r : block_sites)
                 {
                     if (!r.in_ensures && operand_key(r) == key)
@@ -1153,7 +1153,7 @@ private:
         }
         if (f.result_init != InitMarker::None)
         {
-            bool on_result = false;
+            bool on_result {false};
             for (const AtomSite& s : block_sites)
             {
                 if (s.in_ensures && operand_key(s) == kResultSiteKey)
@@ -1180,7 +1180,8 @@ private:
         }
         if (f.deallocates)
         {
-            bool taken = false, returned = false;
+            bool taken {false};
+            bool returned {false};
             for (const AtomSite& s : block_sites)
             {
                 if (operand_key(s) != 0)
@@ -1189,7 +1190,7 @@ private:
                 }
                 (s.in_ensures ? returned : taken) = true;
             }
-            if (!f.ret.is_void() || f.params.size() != 1 || !f.params[0].type.is_ptr())
+            if (!f.ret.is_void() || f.params.size() != 1U || !f.params[0U].type.is_ptr())
             {
                 err(f.loc,
                     "'" + f.c_name +
@@ -1206,7 +1207,7 @@ private:
         // of it and `ref_to_uninit` or not) or a deallocation (`deallocates`).
         if (f.allocator == Allocator::Vlibc)
         {
-            bool on_result = false;
+            bool on_result {false};
             for (const AtomSite& s : block_sites)
             {
                 if (s.in_ensures && operand_key(s) == kResultSiteKey)
@@ -1238,7 +1239,7 @@ private:
         }
         if (e->kind == Expr::Kind::Deref)
         { // `*p` and, decision 0043, a read of a member place of `p` (`p->x`)
-            const Expr* root = member_root(e->a);
+            const Expr* root {member_root(e->a)};
             if (root != nullptr && root->kind == Expr::Kind::Formal && root->index == k)
             {
                 out.push_back({e, in_old});
@@ -1259,15 +1260,15 @@ private:
     // contract reads of item 6.
     void init_markers(const Function& f, const std::vector<AtomSite>& sites, const std::vector<AtomSite>& block_sites)
     {
-        for (size_t i = 0; i < f.params.size(); ++i)
+        for (size_t i {0U}; i < f.params.size(); ++i)
         {
-            const Param& pr = f.params[i];
+            const Param& pr {f.params[i]};
             if (pr.init == InitMarker::None)
             {
                 continue;
             }
-            const int k = static_cast<int>(i);
-            const std::string who = "parameter " + std::to_string(i + 1) + " of '" + f.c_name + "'";
+            const int k {static_cast<int>(i)};
+            const std::string who {"parameter " + std::to_string(i + 1U) + " of '" + f.c_name + "'"};
             if (!pr.type.is_ptr())
             {
                 err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` but is not a pointer");
@@ -1278,10 +1279,12 @@ private:
                 err(pr.loc, who + " is `must_init` on a `noreturn` function (decision 0042 item 4)");
                 continue;
             }
-            bool owns_in = false, owns_out = false, reads_any = false;
+            bool owns_in {false};
+            bool owns_out {false};
+            bool reads_any {false};
             for (const AtomSite& s : sites)
             {
-                const PlaceKey pk = atom_place(*s.atom);
+                const PlaceKey pk {atom_place(*s.atom)};
                 if (pk.root != k || (s.atom->a != nullptr && member_root(s.atom->a)->kind != Expr::Kind::Formal))
                 {
                     continue;
@@ -1360,7 +1363,7 @@ private:
         {
             collect_atoms(c.expr, all);
         }
-        const std::vector<AtomSite> sites = loop_atoms(s);
+        const std::vector<AtomSite> sites {loop_atoms(s)};
         std::set<const Expr*> placed;
         for (const AtomSite& st : sites)
         {
@@ -1373,7 +1376,7 @@ private:
         for (const Expr* a : all)
         {
             // an `owns_block` of an invariant is refused in expr() (decision 0047 item 4)
-            if (placed.count(a) == 0 && a->atom != AtomKind::OwnsBlock)
+            if (placed.count(a) == 0U && a->atom != AtomKind::OwnsBlock)
             {
                 err(a->loc,
                     "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
@@ -1383,16 +1386,16 @@ private:
         {
             err(s.loc, "a permission atom of an invariant reachable twice");
         }
-        for (size_t k = 0; k < sites.size(); ++k)
+        for (size_t k {0U}; k < sites.size(); ++k)
         {
-            const Expr& a = *sites[k].atom;
+            const Expr& a {*sites[k].atom};
             if (a.a == nullptr || a.a->kind != Expr::Kind::Local)
             {
                 continue;
             }
-            for (size_t j = 0; j < k; ++j)
+            for (size_t j {0U}; j < k; ++j)
             {
-                const Expr& b = *sites[j].atom;
+                const Expr& b {*sites[j].atom};
                 if (b.a != nullptr && b.a->kind == Expr::Kind::Local && b.atom == a.atom && b.a->var == a.a->var)
                 {
                     err(a.loc, "the same permission atom twice in the invariant of a loop (decision 0040 item 5)");
@@ -1400,14 +1403,14 @@ private:
             }
         }
         // Decision 0045 item 2: the places with a key of their own (a cell, a member or a load; a plain pointer variable is compared above).
-        for (size_t k = 0; k < sites.size(); ++k)
+        for (size_t k {0U}; k < sites.size(); ++k)
         {
-            const PlaceKey ka = atom_place(*sites[k].atom);
+            const PlaceKey ka {atom_place(*sites[k].atom)};
             if (!ka.valid())
             {
                 continue;
             }
-            for (size_t j = 0; j < k; ++j)
+            for (size_t j {0U}; j < k; ++j)
             {
                 if (sites[j].atom->atom == sites[k].atom->atom && atom_place(*sites[j].atom) == ka)
                 {
@@ -1432,7 +1435,7 @@ private:
         // A `requires` or `ensures` may hold the pointer nodes of decision 0037 item 5 (a pointer parameter, the result, NULL, `*p` of a
         // parameter, the atoms); an invariant, a measure, a constant and a case value still hold none (decision 0032 item 10), which
         // `measure` and the loop and constant checks say by setting no_ptr_.
-        const bool saved = no_ptr_;
+        const bool saved {no_ptr_};
         no_ptr_ = false;
         expr(*c.expr, ctx, false);
         no_ptr_ = saved;
@@ -1457,7 +1460,7 @@ private:
         {
             err(c.loc, std::string("a ") + what + " component has no source position");
         }
-        const bool saved = no_ptr_;
+        const bool saved {no_ptr_};
         no_ptr_ = !memory_ok;
         expr(*c.expr, ctx, false);
         no_ptr_ = saved;
@@ -1487,7 +1490,7 @@ private:
         else if (v.type.is_struct())
         {
             // Decision 0043 item 4: a struct local is always a cell of a block of its struct type.
-            if (v.type.struct_type == nullptr || structs_.count(v.type.struct_type) == 0)
+            if (v.type.struct_type == nullptr || structs_.count(v.type.struct_type) == 0U)
             {
                 err(loc, "variable '" + v.name + "' is a struct that is not in the program");
             }
@@ -1510,7 +1513,7 @@ private:
 
     bool owned(const Var& v) const
     {
-        const auto& ls = fn_->locals();
+        const auto& ls {fn_->locals()};
         return v.id >= 0 && static_cast<size_t>(v.id) < ls.size() && ls[static_cast<size_t>(v.id)].get() == &v;
     }
 
@@ -1518,7 +1521,7 @@ private:
     {
         for (const auto& s : scopes_)
         {
-            if (s.count(v.id) != 0)
+            if (s.count(v.id) != 0U)
             {
                 return true;
             }
@@ -1649,10 +1652,10 @@ private:
                 {
                     err(s.expr->loc, "a loop condition of type " + s.expr->type.str() + " (convert it with to_bool)");
                 }
-                const bool once = s.form == LoopForm::DoOnce;
+                const bool once {s.form == LoopForm::DoOnce};
                 if (once)
                 {
-                    const ConstVal cv = eval_const(*s.expr);
+                    const ConstVal cv {eval_const(*s.expr)};
                     // Rejected: a condition that reads a variable or calls, or that folds cleanly to a non-zero value.  A constant the
                     // evaluator cannot fold (a shift, an inexact conversion, an overflow) is accepted: lowering asserts its obligations
                     // after the body, so the user sees that error, and the internal `assert !c` stops any value that is not zero.
@@ -1752,9 +1755,9 @@ private:
                         "the body of a switch declares a cell but has no closing-brace position (decision 0032 item 8)");
                 }
                 std::set<std::string> values;
-                int defaults = 0;
-                bool declaration_seen = false;
-                bool seen_case = false; // a case label has come
+                int defaults {0};
+                bool declaration_seen {false};
+                bool seen_case {false}; // a case label has come
                 for (const Stmt* c : s.body->stmts)
                 {
                     if (c == nullptr)
@@ -1839,11 +1842,11 @@ private:
             case Stmt::Kind::Break:
             case Stmt::Kind::Continue:
             {
-                const bool is_break = s.kind == Stmt::Kind::Break;
+                const bool is_break {s.kind == Stmt::Kind::Break};
                 // The target is the INNERMOST loop or switch for a break, the innermost loop for a continue (a switch in between is
                 // skipped): anything else would leave or continue the wrong construct, so it is an inconsistency of the encoder.
-                const Target* t = nullptr;
-                for (auto it = targets_.rbegin(); it != targets_.rend(); ++it)
+                const Target* t {nullptr};
+                for (auto it {targets_.rbegin()}; it != targets_.rend(); ++it)
                 {
                     if (is_break || it->is_loop)
                     {
@@ -2040,7 +2043,7 @@ private:
         }
         if (pointer_node(e))
         {
-            const bool contract = ctx == Ctx::Requires || ctx == Ctx::Ensures;
+            const bool contract {ctx == Ctx::Requires || ctx == Ctx::Ensures};
             if (no_ptr_)
             {
                 err(e.loc,
@@ -2051,13 +2054,13 @@ private:
                 err(e.loc,
                     "an address in a contract (decision 0037 item 5: a contract names a pointer parameter, never `&x`)");
             }
-            else if (contract && e.kind == Expr::Kind::MemberAddr && ok_members_.count(&e) == 0)
+            else if (contract && e.kind == Expr::Kind::MemberAddr && ok_members_.count(&e) == 0U)
             {
                 err(e.loc,
                     "the address of a member in a contract outside the place of a read or of an atom (decision 0043 item 9: `p->x`, `owns(p->x)`)");
             }
             else if (contract && e.kind == Expr::Kind::GlobalAddr && e.global != nullptr &&
-                     e.global->owner != nullptr && ok_globals_.count(&e) == 0)
+                     e.global->owner != nullptr && ok_globals_.count(&e) == 0U)
             {
                 err(e.loc, "the address of the `static` local '" + e.global->c_name +
                                "' in a contract (its name is not in scope there, decision 0041 item 12)");
@@ -2214,8 +2217,8 @@ private:
                 }
                 {
                     // A Null arm takes the other arm's pointer type (decision 0032 item 7).
-                    const bool b_null = e.b->kind == Expr::Kind::Null && e.c->type.is_ptr();
-                    const bool c_null = e.c->kind == Expr::Kind::Null && e.b->type.is_ptr();
+                    const bool b_null {e.b->kind == Expr::Kind::Null && e.c->type.is_ptr()};
+                    const bool c_null {e.c->kind == Expr::Kind::Null && e.b->type.is_ptr()};
                     if (e.b->type != e.c->type && !b_null && !c_null)
                     {
                         err(e.loc,
@@ -2245,7 +2248,7 @@ private:
                                    "', which is not marked address-taken (decision 0032 item 4)");
                 }
                 if (!scalar_type(e.var->type) && !accepted_pointer(e.var->type) &&
-                    !(e.var->type.is_struct() && structs_.count(e.var->type.struct_type) != 0))
+                    !(e.var->type.is_struct() && structs_.count(e.var->type.struct_type) != 0U))
                 {
                     err(e.loc, "the address of '" + e.var->name + "', whose type " + e.var->type.str() +
                                    " is not a bool, an integer, a struct or a pointer to one");
@@ -2257,8 +2260,8 @@ private:
                 break;
             case Expr::Kind::GlobalAddr:
             {
-                const Global* g = e.global;
-                const auto& gs = prog_.globals();
+                const Global* g {e.global};
+                const auto& gs {prog_.globals()};
                 if (g == nullptr || g->id < 0 || static_cast<size_t>(g->id) >= gs.size() ||
                     &gs[static_cast<size_t>(g->id)] != g)
                 {
@@ -2282,7 +2285,7 @@ private:
                 {
                     mark_contract_place(e.a); // the read of `g`, of `p->x` (decision 0043)
                 }
-                if (e.a != nullptr && shared_addrs_.count(e.a) != 0)
+                if (e.a != nullptr && shared_addrs_.count(e.a) != 0U)
                 { // the address of the enclosing store, already checked (decision 0039 item 5)
                     if (!e.a->type.is_ptr())
                     {
@@ -2309,7 +2312,7 @@ private:
                 {
                     // In a contract the place is `*p`, `*result`, `g` or, decision 0043 item 9, a member of one of them (`p->x`, `r->t.y`) or, decision 0045 item 2,
                     // any of those reached through loads and pointer leaves (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`): the root under MemberAddr, Deref and Field nodes.
-                    const Expr* root = place_root(e.a);
+                    const Expr* root {place_root(e.a)};
                     if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal &&
                         root->kind != Expr::Kind::GlobalAddr &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
@@ -2364,8 +2367,8 @@ private:
                     {
                         break;
                     }
-                    const bool formal = e.a->kind == Expr::Kind::Formal;
-                    const bool result = e.a->kind == Expr::Kind::Result && ctx == Ctx::Ensures;
+                    const bool formal {e.a->kind == Expr::Kind::Formal};
+                    const bool result {e.a->kind == Expr::Kind::Result && ctx == Ctx::Ensures};
                     if (!formal && !result)
                     {
                         err(e.loc,
@@ -2390,12 +2393,12 @@ private:
                     // The place of the atom (decision 0043 item 9): the pointer `a` itself (`owns(*p)`, `live(p)`) or a member address under it (`owns(p->x)`).
                     // Decision 0045 item 2: the place of the atom is `member_root(a)` (the base pointer) under any number of loads and pointer leaves; `steps` are
                     // the steps from the root to the base (the member tail comes last in place_root's steps and is not one of them).
-                    const Expr* root = member_root(e.a);
-                    const bool member = root != e.a;
+                    const Expr* root {member_root(e.a)};
+                    const bool member {root != e.a};
                     std::vector<int> steps;
-                    const Expr* place = place_root(e.a, &steps);
+                    const Expr* place {place_root(e.a, &steps)};
                     // the base pointer is reached through a load or a pointer leaf
-                    const bool stepped = steps.size() > atom_place(e).path.size();
+                    const bool stepped {steps.size() > atom_place(e).path.size()};
                     if (e.implicit_atom &&
                         !(e.atom == AtomKind::Owns && !member && e.a->kind == Expr::Kind::GlobalAddr &&
                           e.a->global != nullptr && e.a->global->owner != nullptr))
@@ -2411,11 +2414,11 @@ private:
                     }
                     // A contract's place has a Formal, a global or (an `ensures`, through a step: an atom on the result itself is M4.5d2b's) the result for its root; an
                     // invariant's a pointer variable, the address of a cell or (through a load) a global.
-                    const bool root_ok =
+                    const bool root_ok {
                         in_invariant_ ? (place->kind == Expr::Kind::Local || place->kind == Expr::Kind::AddrOf ||
                                          (place->kind == Expr::Kind::GlobalAddr && stepped))
                                       : (place->kind == Expr::Kind::Formal || place->kind == Expr::Kind::GlobalAddr ||
-                                         (ctx == Ctx::Ensures && place->kind == Expr::Kind::Result && stepped));
+                                         (ctx == Ctx::Ensures && place->kind == Expr::Kind::Result && stepped))};
                     // A load that is not of a pointer (`owns(*(*p))` of an `int *p`) is no place's address: the operand must be a pointer unless it is the root itself.
                     if (!root_ok || (place != e.a && !e.a->type.is_ptr()))
                     {
@@ -2456,14 +2459,14 @@ private:
                 {
                     break;
                 }
-                const Type& at = e.a->type;
+                const Type& at {e.a->type};
                 if (!at.is_ptr() || at.pointee == nullptr || !at.pointee->is_struct() ||
                     at.pointee->struct_type == nullptr)
                 {
                     err(e.loc, "the address of a member of a " + at.str() + ", not a pointer to a struct");
                     break;
                 }
-                const StructType& st = *at.pointee->struct_type;
+                const StructType& st {*at.pointee->struct_type};
                 if (e.index < 0 || static_cast<size_t>(e.index) >= st.members.size())
                 {
                     err(e.loc, "the address of member " + std::to_string(e.index) + " of " + st.c_name +
@@ -2479,7 +2482,7 @@ private:
                 if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
                 {
                     // decision 0045 item 2: under loads and pointer leaves too (`p->q->x`)
-                    const Expr* root = place_root(&e);
+                    const Expr* root {place_root(&e)};
                     if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
                     {
@@ -2569,7 +2572,7 @@ private:
     // Whether a struct value is a legal source of a struct Store (decision 0044 item 2): a Call, an Aggregate, or a Field chain over one of them.
     static bool struct_source(const Expr& e)
     {
-        const Expr* x = &e;
+        const Expr* x {&e};
         while (x != nullptr && x->kind == Expr::Kind::Field)
         {
             x = x->a;
@@ -2583,13 +2586,13 @@ private:
     // included (M8), is refused.
     void struct_value(const Expr& e, Ctx ctx)
     {
-        const bool contract = ctx == Ctx::Requires || ctx == Ctx::Ensures;
-        if (e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0)
+        const bool contract {ctx == Ctx::Requires || ctx == Ctx::Ensures};
+        if (e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0U)
         {
             err(e.loc, "an expression of the struct type " + e.type.str() + ", which is not in the program");
             return;
         }
-        if (struct_pos_.count(&e) == 0)
+        if (struct_pos_.count(&e) == 0U)
         {
             err(e.loc,
                 "an expression of struct type " + e.type.str() +
@@ -2603,7 +2606,7 @@ private:
             case Expr::Kind::Field:
                 break;
             case Expr::Kind::StoreE: // only a compound literal's own store (registered by the Comma that holds it)
-                if (literal_stores_.count(&e) == 0)
+                if (literal_stores_.count(&e) == 0U)
                 {
                     err(e.loc,
                         "a write of a struct value used as a value (decision 0044 item 5: a struct assignment used as a value is M8)");
@@ -2619,7 +2622,7 @@ private:
             case Expr::Kind::Formal:
             case Expr::Kind::Result:
             case Expr::Kind::Old:
-                if (!contract || field_base_.count(&e) == 0)
+                if (!contract || field_base_.count(&e) == 0U)
                 {
                     err(e.loc,
                         "a struct parameter, result or `old` used as a whole in a contract (decision 0044 item 3: only a member of it, `s.x`, is a value)");
@@ -2639,8 +2642,8 @@ private:
             err(e.loc, "a member of a missing operand");
             return;
         }
-        const Type& at = e.a->type;
-        const bool valid = at.is_struct() && at.struct_type != nullptr && structs_.count(at.struct_type) != 0;
+        const Type& at {e.a->type};
+        const bool valid {at.is_struct() && at.struct_type != nullptr && structs_.count(at.struct_type) != 0U};
         if (at.is_struct())
         {
             struct_pos_.insert(e.a);
@@ -2655,7 +2658,7 @@ private:
             err(e.loc, "a member of a " + at.str() + ", not a struct value");
             return;
         }
-        const StructType& st = *at.struct_type;
+        const StructType& st {*at.struct_type};
         if (e.index < 0 || static_cast<size_t>(e.index) >= st.members.size())
         {
             err(e.loc, "member " + std::to_string(e.index) + " of " + st.c_name + ", which has " +
@@ -2672,19 +2675,19 @@ private:
     // A struct value built from its leaves (decision 0044 item 2): one argument per leaf, in struct_leaves order, exactly the leaf's type.  Code only.
     void aggregate_value(const Expr& e, Ctx ctx)
     {
-        if (!e.type.is_struct() || e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0)
+        if (!e.type.is_struct() || e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0U)
         {
             err(e.loc, "an aggregate of the type " + e.type.str() + ", not a struct of the program");
             return;
         }
-        const std::vector<StructLeaf> leaves = struct_leaves(*e.type.struct_type);
+        const std::vector<StructLeaf> leaves {struct_leaves(*e.type.struct_type)};
         if (e.args.size() != leaves.size())
         {
             err(e.loc, "an aggregate of " + e.type.str() + " with " + std::to_string(e.args.size()) + " arguments, " +
                            std::to_string(leaves.size()) + " leaves expected");
             return;
         }
-        for (size_t k = 0; k < e.args.size(); ++k)
+        for (size_t k {0U}; k < e.args.size(); ++k)
         {
             if (e.args[k] == nullptr)
             {
@@ -2694,7 +2697,7 @@ private:
             expr(*e.args[k], ctx, false);
             if (e.args[k]->type != leaves[k].type)
             {
-                err(e.args[k]->loc, "leaf " + std::to_string(k + 1) + " ('" +
+                err(e.args[k]->loc, "leaf " + std::to_string(k + 1U) + " ('" +
                                         (leaves[k].text.empty() ? std::string("?") : leaves[k].text) +
                                         "') of an aggregate of " + e.type.str() + " is given a " +
                                         e.args[k]->type.str() + ", not a " + leaves[k].type.str());
@@ -2840,7 +2843,7 @@ private:
         }
         if (e.c->type.pointee != nullptr && e.c->type.pointee->is_struct())
         {
-            if (literal_stores_.count(&e) != 0)
+            if (literal_stores_.count(&e) != 0U)
             { // a compound literal's object (decision 0044 item 7)
                 if (e.type != *e.c->type.pointee || e.a->type != *e.c->type.pointee)
                 {
@@ -3038,8 +3041,8 @@ private:
         }
         expr(*e.a, ctx, false);
         expr(*e.b, ctx, false);
-        const Type& a = e.a->type;
-        const Type& b = e.b->type;
+        const Type& a {e.a->type};
+        const Type& b {e.b->type};
         switch (e.bop)
         {
             case BinaryOp::Add:
@@ -3171,12 +3174,12 @@ private:
         {
             err(e.loc, "a call in a contract");
         }
-        if (e.callee == nullptr || functions_.count(e.callee) == 0)
+        if (e.callee == nullptr || functions_.count(e.callee) == 0U)
         {
             err(e.loc, "a call of a function that is not in the program");
             return;
         }
-        const Function& f = *e.callee;
+        const Function& f {*e.callee};
         if (&f == prog_.entry())
         {
             err(e.loc, "a call of '" + f.c_name +
@@ -3187,7 +3190,7 @@ private:
             err(e.loc, "call of '" + f.c_name + "' with " + std::to_string(e.args.size()) + " arguments, " +
                            std::to_string(f.params.size()) + " expected");
         }
-        for (size_t k = 0; k < e.args.size(); ++k)
+        for (size_t k {0U}; k < e.args.size(); ++k)
         {
             if (e.args[k] == nullptr)
             {
@@ -3201,7 +3204,7 @@ private:
             expr(*e.args[k], ctx, false);
             if (k < f.params.size() && e.args[k]->type != f.params[k].type)
             {
-                err(e.args[k]->loc, "argument " + std::to_string(k + 1) + " of '" + f.c_name + "' is " +
+                err(e.args[k]->loc, "argument " + std::to_string(k + 1U) + " of '" + f.c_name + "' is " +
                                         e.args[k]->type.str() + ", the parameter is " + f.params[k].type.str() +
                                         " (convert it)");
             }
@@ -3214,12 +3217,12 @@ private:
 
     const Program& prog_;
     std::unordered_set<const Function*> functions_;
-    const Function* fn_ = nullptr;
+    const Function* fn_ {nullptr};
     std::set<int> declared_;
     // the AssignE, StoreE, Comma and Call nodes met in the current function (each may be reachable once)
     std::set<const Expr*> seen_effects_;
     // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
-    bool in_invariant_ = false;
+    bool in_invariant_ {false};
     // the GlobalAddr nodes that stand under a Deref or an Atom of a contract: where a `static` local's address may
     // appear (its implicit atom; decision 0041 items 7, 12)
     std::set<const Expr*> ok_globals_;
@@ -3247,8 +3250,8 @@ private:
     std::vector<std::set<int>> scopes_;
     // checking a function's measure, a constant or a case value: no pointer node (a contract clause or a loop's
     // invariant or measure may hold some, decisions 0037 and 0038)
-    bool no_ptr_ = false;
-    int old_depth_ = 0; // inside an `Old`
+    bool no_ptr_ {false};
+    int old_depth_ {0}; // inside an `Old`
     std::vector<Diag> diags_;
 };
 
@@ -3271,17 +3274,17 @@ struct GotoWalk
     };
     struct Info
     {
-        const Stmt* stmt = nullptr;
-        int order = 0;
+        const Stmt* stmt {nullptr};
+        int order {0};
         // the enclosing Blocks, outermost first, with the index of the child holding the statement
         std::vector<Pos> path;
-        const Stmt* parent_block = nullptr; // Label: the Block it is a direct statement of (null: not direct)
-        size_t index = 0;
+        const Stmt* parent_block {nullptr}; // Label: the Block it is a direct statement of (null: not direct)
+        size_t index {0U};
     };
     std::vector<Info> gotos;
     std::vector<Info> labels;
     std::vector<Pos> path;
-    int counter = 0;
+    int counter {0};
 
     void walk(const Stmt* s, const Stmt* parent_block, size_t index)
     {
@@ -3289,7 +3292,7 @@ struct GotoWalk
         {
             return;
         }
-        const int order = counter++;
+        const int order {counter++};
         if (s->kind == Stmt::Kind::Goto || s->kind == Stmt::Kind::Label)
         {
             Info i;
@@ -3303,7 +3306,7 @@ struct GotoWalk
         switch (s->kind)
         {
             case Stmt::Kind::Block:
-                for (size_t k = 0; k < s->stmts.size(); ++k)
+                for (size_t k {0U}; k < s->stmts.size(); ++k)
                 {
                     path.push_back(Pos {s, k});
                     walk(s->stmts[k], s, k);
@@ -3311,15 +3314,15 @@ struct GotoWalk
                 }
                 break;
             case Stmt::Kind::If:
-                walk(s->then_body, nullptr, 0);
-                walk(s->else_body, nullptr, 0);
+                walk(s->then_body, nullptr, 0U);
+                walk(s->else_body, nullptr, 0U);
                 break;
             case Stmt::Kind::While:
-                walk(s->body, nullptr, 0);
-                walk(s->step, nullptr, 0);
+                walk(s->body, nullptr, 0U);
+                walk(s->step, nullptr, 0U);
                 break;
             case Stmt::Kind::Switch:
-                walk(s->body, nullptr, 0);
+                walk(s->body, nullptr, 0U);
                 break;
             default:
                 break;
@@ -3337,10 +3340,10 @@ std::vector<GotoProblem> goto_problems(const Function& f)
         return out;
     }
     GotoWalk w;
-    w.walk(f.body, nullptr, 0);
+    w.walk(f.body, nullptr, 0U);
     for (const GotoWalk::Info& g : w.gotos)
     {
-        const GotoWalk::Info* target = nullptr;
+        const GotoWalk::Info* target {nullptr};
         for (const GotoWalk::Info& l : w.labels)
         {
             if (l.stmt->jump_id == g.stmt->jump_id)
@@ -3358,7 +3361,7 @@ std::vector<GotoProblem> goto_problems(const Function& f)
             continue;
         }
         p.label = target->stmt->label_name;
-        bool accepted = false;
+        bool accepted {false};
         if (target->parent_block != nullptr)
         {
             for (const GotoWalk::Pos& pos : g.path)
@@ -3367,10 +3370,10 @@ std::vector<GotoProblem> goto_problems(const Function& f)
                 {
                     continue;
                 }
-                const Stmt* skipped = nullptr;
-                for (size_t k = pos.index + 1; k < target->index && skipped == nullptr; ++k)
+                const Stmt* skipped {nullptr};
+                for (size_t k {pos.index + 1U}; k < target->index && skipped == nullptr; ++k)
                 {
-                    const Stmt* c = pos.block->stmts[k];
+                    const Stmt* c {pos.block->stmts[k]};
                     if (c != nullptr && c->kind == Stmt::Kind::Decl && c->expr != nullptr)
                     {
                         skipped = c;
@@ -3425,28 +3428,28 @@ public:
 private:
     // An object key: a local's id (>= 0), or, for the place `*v`, `**v`, ... of a pointer variable `v` (decision 0039 item 3, 0040 A8: each depth is its
     // own object), `-(id + 1) - stride * (depth - 1)`.
-    static constexpr int kDepthStride = 1 << 20;
+    static constexpr int kDepthStride {1 << 20U};
     static int deref_key(int var_id, int depth)
     {
         return -(var_id + 1) - kDepthStride * (depth - 1);
     }
     // A global or `static` local (decision 0041 item 11) is its own object: key `kGlobalKeyBase + id`, above every local's id; a Wr map and the reports
     // decode it through `gnames_`, which `expr` fills when it meets the GlobalAddr (every access to the object contains one).
-    static constexpr int kGlobalKeyBase = 1 << 28;
+    static constexpr int kGlobalKeyBase {1 << 28U};
 
     // A MEMBER object (decision 0043 item 12): a leaf or a nested struct of a struct place, keyed by its base object's key (`s` for the struct local, `*v` for
     // the pointer variable `v`, ...) and the member path, so `s.x` and `s.y` are two objects and `s.x` twice is one.  Keys are interned above every other
     // kind (`kMemberKeyBase + n`, n the order of first sight); `mnames_` spells them.  An address with no object (any other root) has none: lowering's
     // path-precise check covers it.
-    static constexpr int kMemberKeyBase = 1 << 29;
+    static constexpr int kMemberKeyBase {1 << 29U};
     int member_key(int base, const std::vector<int>& path, const std::string& text)
     {
-        const auto it = member_keys_.find({base, path});
+        const auto it {member_keys_.find({base, path})};
         if (it != member_keys_.end())
         {
             return it->second;
         }
-        const int key = kMemberKeyBase + static_cast<int>(member_keys_.size());
+        const int key {kMemberKeyBase + static_cast<int>(member_keys_.size())};
         member_keys_.emplace(std::make_pair(base, path), key);
         mnames_[key] = text;
         return key;
@@ -3458,29 +3461,29 @@ private:
         {
             return;
         }
-        const auto& ls = f_.locals();
+        const auto& ls {f_.locals()};
         if (var_id >= kMemberKeyBase)
         {
-            const auto m = mnames_.find(var_id);
+            const auto m {mnames_.find(var_id)};
             out_.push_back(SequenceProblem {at, m != mnames_.end() ? m->second : "?"});
             return;
         }
         if (var_id >= kGlobalKeyBase)
         {
-            const auto g = gnames_.find(var_id);
+            const auto g {gnames_.find(var_id)};
             out_.push_back(SequenceProblem {at, g != gnames_.end() ? g->second : "?"});
             return;
         }
-        int id = var_id;
-        int depth = 0;
+        int id {var_id};
+        int depth {0};
         if (var_id < 0)
         { // `*v`, `**v`, ...: the pointer variable's id and the depth
-            const int m = -var_id - 1;
+            const int m {-var_id - 1};
             id = m % kDepthStride;
             depth = m / kDepthStride + 1;
         }
-        std::string name = static_cast<size_t>(id) < ls.size() ? ls[static_cast<size_t>(id)]->name : "?";
-        name.insert(0, static_cast<size_t>(depth), '*');
+        std::string name {static_cast<size_t>(id) < ls.size() ? ls[static_cast<size_t>(id)]->name : "?"};
+        name.insert(0U, static_cast<size_t>(depth), '*');
         out_.push_back(SequenceProblem {at, name});
     }
 
@@ -3491,10 +3494,10 @@ private:
     {
         // A member place `&s.x`, `&p->x`, `&s.t.x`: the base object of the root (as below, for the address the MemberAddrs stand on) and the member path.
         std::vector<int> path;
-        const Expr* root = member_root(addr, &path);
+        const Expr* root {member_root(addr, &path)};
         if (root != addr)
         {
-            int base = 0;
+            int base {0};
             if (path.empty() || !object_of_root(root, &base))
             {
                 return false;
@@ -3507,7 +3510,7 @@ private:
 
     static bool object_of_root(const Expr* addr, int* key)
     {
-        int depth = 0; // the reads through the variable that the address is made of
+        int depth {0}; // the reads through the variable that the address is made of
         for (;;)
         {
             while (addr != nullptr && addr->kind == Expr::Kind::ReportAt)
@@ -3553,19 +3556,19 @@ private:
     {
         for (const auto& [id, node] : p.w)
         {
-            const auto qw = q.w.find(id);
+            const auto qw {q.w.find(id)};
             if (qw != q.w.end())
             {
                 report(qw->second, id);
             }
-            else if (q.r.count(id) != 0)
+            else if (q.r.count(id) != 0U)
             {
                 report(node, id);
             }
         }
         for (const auto& [id, node] : q.w)
         {
-            if (p.r.count(id) != 0 && p.w.count(id) == 0)
+            if (p.r.count(id) != 0U && p.w.count(id) == 0U)
             {
                 report(node, id);
             }
@@ -3622,11 +3625,11 @@ private:
             case Expr::Kind::Deref:
             {
                 // A compound store's value reads a Deref that shares the store's address node: the address counts once (decision 0039 item 5).
-                if (shared_.count(e->a) == 0)
+                if (shared_.count(e->a) == 0U)
                 {
                     absorb(out, expr(e->a), false);
                 }
-                int key = 0;
+                int key {0};
                 if (object_of(e->a, &key))
                 {
                     out.r.insert(key);
@@ -3656,9 +3659,9 @@ private:
                 {
                     leaves.push_back(expr(a));
                 }
-                for (size_t i = 0; i < leaves.size(); ++i)
+                for (size_t i {0U}; i < leaves.size(); ++i)
                 {
-                    for (size_t j = i + 1; j < leaves.size(); ++j)
+                    for (size_t j {i + 1U}; j < leaves.size(); ++j)
                     {
                         pair(leaves[i], leaves[j]);
                     }
@@ -3671,9 +3674,9 @@ private:
             }
             case Expr::Kind::Binary:
             {
-                const Wr a = expr(e->a);
-                const Wr b = expr(e->b);
-                const bool lazy = e->bop == BinaryOp::LAnd || e->bop == BinaryOp::LOr;
+                const Wr a {expr(e->a)};
+                const Wr b {expr(e->b)};
+                const bool lazy {e->bop == BinaryOp::LAnd || e->bop == BinaryOp::LOr};
                 if (!lazy)
                 {
                     pair(a, b);
@@ -3684,9 +3687,9 @@ private:
             }
             case Expr::Kind::Cond:
             {
-                const Wr c = expr(e->a);
-                const Wr x = expr(e->b);
-                const Wr y = expr(e->c); // the arms are not checked against each other: at most one runs
+                const Wr c {expr(e->a)};
+                const Wr x {expr(e->b)};
+                const Wr y {expr(e->c)}; // the arms are not checked against each other: at most one runs
                 absorb(out, c, true);
                 absorb(out, x, false);
                 absorb(out, y, false);
@@ -3694,8 +3697,8 @@ private:
             }
             case Expr::Kind::Comma:
             {
-                const Wr a = expr(e->a);
-                const Wr b = expr(e->b);
+                const Wr a {expr(e->a)};
+                const Wr b {expr(e->b)};
                 absorb(out, a, true);
                 absorb(out, b, false);
                 break;
@@ -3707,9 +3710,9 @@ private:
                 {
                     args.push_back(expr(a));
                 }
-                for (size_t i = 0; i < args.size(); ++i)
+                for (size_t i {0U}; i < args.size(); ++i)
                 {
-                    for (size_t j = i + 1; j < args.size(); ++j)
+                    for (size_t j {i + 1U}; j < args.size(); ++j)
                     {
                         pair(args[i], args[j]);
                     }
@@ -3722,10 +3725,10 @@ private:
             }
             case Expr::Kind::AssignE:
             {
-                const Wr a = expr(e->a);
+                const Wr a {expr(e->a)};
                 if (e->var != nullptr)
                 {
-                    const auto hit = a.wu.find(e->var->id);
+                    const auto hit {a.wu.find(e->var->id)};
                     if (hit != a.wu.end())
                     {
                         report(hit->second, e->var->id); // a write of the target inside the stored value
@@ -3743,16 +3746,16 @@ private:
             {
                 // `*c := a` as a value: the address and the stored value are unsequenced operands (as for Stmt::Store); a write of the target
                 // object inside the stored value is a conflict; the node writes the object `*c` (when it is one).
-                const Wr ad = expr(e->c);
+                const Wr ad {expr(e->c)};
                 shared_.insert(e->c);
-                const Wr v = expr(e->a);
+                const Wr v {expr(e->a)};
                 shared_.erase(e->c);
                 pair(ad, v);
-                int key = 0;
-                const bool obj = object_of(e->c, &key);
+                int key {0};
+                const bool obj {object_of(e->c, &key)};
                 if (obj)
                 {
-                    const auto hit = v.wu.find(key);
+                    const auto hit {v.wu.find(key)};
                     if (hit != v.wu.end())
                     {
                         report(hit->second, key);
@@ -3780,8 +3783,8 @@ private:
             return;
         }
         std::vector<int> path;
-        const Expr* root = member_root(addr, &path);
-        int base = 0;
+        const Expr* root {member_root(addr, &path)};
+        int base {0};
         if (!object_of_root(root, &base))
         {
             return;
@@ -3789,14 +3792,14 @@ private:
         // Only objects some access has already named have a key (member_key interns on sight), and only those can be written inside the value.
         for (const StructLeaf& l : struct_leaves(*addr->type.pointee->struct_type))
         {
-            std::vector<int> leaf_path = path;
+            std::vector<int> leaf_path {path};
             leaf_path.insert(leaf_path.end(), l.path.begin(), l.path.end());
-            const auto it = member_keys_.find({base, leaf_path});
+            const auto it {member_keys_.find({base, leaf_path})};
             if (it == member_keys_.end())
             {
                 continue;
             }
-            const auto hit = v.wu.find(it->second);
+            const auto hit {v.wu.find(it->second)};
             if (hit != v.wu.end())
             {
                 report(hit->second, it->second);
@@ -3807,12 +3810,12 @@ private:
     // A plain store of `value` to `target` (an Assign or a Decl).
     void store(const Var* target, const Expr* value)
     {
-        const Wr v = expr(value);
+        const Wr v {expr(value)};
         if (target == nullptr)
         {
             return;
         }
-        const auto hit = v.wu.find(target->id);
+        const auto hit {v.wu.find(target->id)};
         if (hit != v.wu.end())
         {
             report(hit->second, target->id);
@@ -3843,16 +3846,16 @@ private:
             {
                 // `*addr = value`: the two are unsequenced operands (decision 0032 item 9), as the operands of a Binary are, so `*p = (p = q, 1)`
                 // is a conflict like any other Viper-local one; and the stored value may not write a local the address reads.
-                const Wr a = expr(s->addr);
+                const Wr a {expr(s->addr)};
                 // a compound store's value reads a Deref sharing the address node (decision 0039 item 5)
                 shared_.insert(s->addr);
-                const Wr v = expr(s->expr);
+                const Wr v {expr(s->expr)};
                 shared_.erase(s->addr);
                 pair(a, v);
-                int key = 0;
+                int key {0};
                 if (object_of(s->addr, &key))
                 { // the target object: a write of it inside the stored value is a conflict (`*p = (*p)++`)
-                    const auto hit = v.wu.find(key);
+                    const auto hit {v.wu.find(key)};
                     if (hit != v.wu.end())
                     {
                         report(hit->second, key);

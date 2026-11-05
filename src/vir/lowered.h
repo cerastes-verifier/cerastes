@@ -74,14 +74,14 @@ struct LExpr
         Dom,
         Old,
         ForPerm
-    } kind = Kind::IntLit;
+    } kind {Kind::IntLit};
     // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor,
     // 2^k, a decimal;
     std::string text;
     // Field, PermOf, Acc: the Viper field (`v_int`, `d_int`, `lv`); Dom: the domain function (`loc`, `len`, ...)
-    bool bool_value = false; // BoolLit
-    UnOp un = UnOp::Neg;
-    BinOp bin = BinOp::Add;
+    bool bool_value {false}; // BoolLit
+    UnOp un {UnOp::Neg};
+    BinOp bin {BinOp::Add};
     E a, b, c; // operands; Ite: condition, then, else; Field, PermOf, Acc: the receiver (a Ref expression in `a`)
     std::vector<E> args; // Fn, Dom
 };
@@ -134,7 +134,7 @@ struct Meta
     std::string category;
     SrcLoc loc;
     std::string message;
-    bool has_note = false;
+    bool has_note {false};
     SrcLoc note_loc;
     std::string note_text;
 };
@@ -174,7 +174,7 @@ struct LStmt
         FieldAssign,
         Exhale,
         CaseSplit
-    } kind = Kind::Block;
+    } kind {Kind::Block};
     // CaseSplit (decision 0037 items 8-9): the no-op `if (<expr>) { }`, one line, that makes Silicon branch on whether two terms are equal.
     // Assign: target; Call: the method; Goto, Label: the label; Comment: the text; FieldAssign: the receiver variable
     std::string name;
@@ -182,7 +182,7 @@ struct LStmt
     E expr;            // Assign: value; Assert: the condition; If, While: the condition
     Check check;       // Assert; Call (its call.precondition backstop)
     // Call: the callee has a termination measure, so Silicon may report termination.failed here
-    bool has_termination = false;
+    bool has_termination {false};
     Check termination;   // Call: that check (decision 0013 item 8)
     std::vector<E> args; // Call
     std::string target;  // Call: the result variable, or empty
@@ -210,7 +210,7 @@ enum class LType
 struct LVar
 {
     std::string name;
-    LType type = LType::Int;
+    LType type {LType::Int};
 };
 
 struct LClause
@@ -230,9 +230,9 @@ struct LMethod
     // `decreases e1, ...` (decision 0013): printed on every method; empty for a function outside any recursion cycle and
     // for the well-formedness methods; `decreases _` (assumed) only for a bodyless method with a trusted contract.
     std::vector<E> decreases_;
-    bool decreases_assumed = false;
+    bool decreases_assumed {false};
     Check decreases_check; // the map entry of a non-empty `decreases` line (termination.failed)
-    bool has_body = false;
+    bool has_body {false};
     std::vector<LVar> locals; // declared at the top of the body
     std::vector<LStmt> body;
     std::string trusted_reason; // bodyless methods: emitted as `// cerastes:trusted-contract <reason>`
@@ -244,10 +244,10 @@ struct LProgram
     std::set<std::string> prelude_used; // the prelude functions the methods call (emit.cpp adds their dependencies)
     // The memory prelude (decision 0032 item 5), emitted only when `memory` is set: the fields `v_<t>: <type>` and `d_<t>: Bool` of each cell
     // type `<t>` (the key; the value is the type of `v_<t>`), `field lv: Bool`, and the Block domain with its four axioms.
-    bool memory = false;
+    bool memory {false};
     // Decision 0047 item 7: a heap program (a view call or an `owns_block` site in some contract) declares `field tok: Bool`, the free token of a block at
     // slot -1; every other program has no `tok` and its Viper is as it was before M4.5d2a.  Implies `memory`.
-    bool heap = false;
+    bool heap {false};
     std::map<std::string, LType> cell_types;
     // The Viper names of the globals' block constants, `GB_<name>__<id>` (decision 0041 item 4), in declaration order: declared `unique function
     // GB_...(): Block` inside the Block domain (only with `memory`).

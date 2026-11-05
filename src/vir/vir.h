@@ -38,8 +38,8 @@ namespace cerastes::vir {
 struct SrcLoc
 {
     std::string file;
-    int line = 0;
-    int column = 0;
+    int line {0};
+    int column {0};
     bool known() const
     {
         return line > 0;
@@ -56,10 +56,10 @@ struct SrcLoc
 struct IntType
 {
     std::string name; // "int", "unsigned long", "char", ... (for messages and Viper comments)
-    int bits = 0;
-    bool is_signed = false;
-    bool is_enum = false;   // an enumeration type (Program::enum_type)
-    bool is_scoped = false; // a C++ scoped enumeration
+    int bits {0};
+    bool is_signed {false};
+    bool is_enum {false};   // an enumeration type (Program::enum_type)
+    bool is_scoped {false}; // a C++ scoped enumeration
     std::string lo, hi;     // an enumeration's value range, decimal (dec::range_of)
 };
 
@@ -87,10 +87,10 @@ struct Type
         Ptr,
         Struct
     };
-    Kind kind = Kind::Void;
-    const IntType* int_type = nullptr;       // Kind::Int only; owned by the Program
-    const Type* pointee = nullptr;           // Kind::Ptr only; interned by Program::pointer_to, owned by the Program
-    const StructType* struct_type = nullptr; // Kind::Struct only; owned by the Program, compared by identity
+    Kind kind {Kind::Void};
+    const IntType* int_type {nullptr};       // Kind::Int only; owned by the Program
+    const Type* pointee {nullptr};           // Kind::Ptr only; interned by Program::pointer_to, owned by the Program
+    const StructType* struct_type {nullptr}; // Kind::Struct only; owned by the Program, compared by identity
 
     static Type void_type()
     {
@@ -179,7 +179,7 @@ struct StructMember
 // no value of its own, only leaves.
 struct StructType
 {
-    int id = 0; // the index in Program::structs(); part of the Viper name
+    int id {0}; // the index in Program::structs(); part of the Viper name
     // the C tag (`S` of `struct S`); may be empty for an untagged struct (named by its typedef: the encoder sets `tag`
     // then)
     std::string tag;
@@ -385,18 +385,18 @@ struct Expr
         // arguments of a call but without a sequence point after them.
         Aggregate
     };
-    Kind kind = Kind::Const;
+    Kind kind {Kind::Const};
     Type type; // the type of the value (Void only for a Call of a void function)
     SrcLoc loc;
     std::string value;            // Const
-    const Var* var = nullptr;     // Local
-    int index = 0;                // Formal
-    UnaryOp uop = UnaryOp::Neg;   // Unary
-    BinaryOp bop = BinaryOp::Add; // Binary
-    const Expr* a = nullptr;
-    const Expr* b = nullptr;
-    const Expr* c = nullptr;
-    bool explicit_cast = false; // Convert
+    const Var* var {nullptr};     // Local
+    int index {0};                // Formal
+    UnaryOp uop {UnaryOp::Neg};   // Unary
+    BinaryOp bop {BinaryOp::Add}; // Binary
+    const Expr* a {nullptr};
+    const Expr* b {nullptr};
+    const Expr* c {nullptr};
+    bool explicit_cast {false}; // Convert
     // How the program spells this node's type (a C/C++ type name such as "signed char" or "unsigned short"),
     // for messages only; empty means "use type.str()".  IntTypes are interned by shape, so the spelling the
     // user wrote lives here: set it on Convert nodes and on constants where it helps (Builder::spelled).
@@ -408,16 +408,16 @@ struct Expr
     // MemberAddr only (decision 0045 item 12): `c_text` ("&" + the place) is the user's own spelling of a place reached through a load or a pointer leaf
     // (`&p->q->x`), and `place_text`/`member_place` return it instead of rebuilding `(p->q)->x`.  Set by the encoder for the new places only: every load-free place
     // and every place of code keeps member_place's text (existing position maps must not change).
-    bool user_spelling = false;
-    const Function* callee = nullptr; // Call
+    bool user_spelling {false};
+    const Function* callee {nullptr}; // Call
     std::vector<const Expr*> args;    // Call: already converted to the parameter types
-    AtomKind atom = AtomKind::Owns;   // Atom
-    int amount = -1;                  // Atom: the number of the atom's ghost amount (see Kind::Atom)
-    bool yields_old = false;          // AssignE, StoreE: the value is the old value `b` (x++, x--), not the new one
-    const Global* global = nullptr;   // GlobalAddr (decision 0041): the global; owned by the Program
+    AtomKind atom {AtomKind::Owns};   // Atom
+    int amount {-1};                  // Atom: the number of the atom's ghost amount (see Kind::Atom)
+    bool yields_old {false};          // AssignE, StoreE: the value is the old value `b` (x++, x--), not the new one
+    const Global* global {nullptr};   // GlobalAddr (decision 0041): the global; owned by the Program
     // Atom: added by the encoder for a `static` local (decision 0041 item 12), not written by the user: an Owns of a
     // GlobalAddr whose global has an `owner`; messages say "the `static` local `s` of `f`"
-    bool implicit_atom = false;
+    bool implicit_atom {false};
 };
 
 // ---- statements ------------------------------------------------------------------------------------------------
@@ -426,7 +426,7 @@ struct Expr
 // postcondition or invariant failure is reported at, and the note of a precondition failure).
 struct Clause
 {
-    const Expr* expr = nullptr;
+    const Expr* expr {nullptr};
     SrcLoc loc;
 };
 
@@ -474,29 +474,29 @@ struct Stmt
         // lowering evaluates the pointer once.  The target's spelling for messages is "*" + addr->c_text.
         Store
     };
-    Kind kind = Kind::Block;
+    Kind kind {Kind::Block};
     SrcLoc loc;
-    const Var* var = nullptr;   // Decl, Assign
-    const Expr* expr = nullptr; // see Kind
-    const Expr* addr = nullptr; // Store: the pointer written through
+    const Var* var {nullptr};   // Decl, Assign
+    const Expr* expr {nullptr}; // see Kind
+    const Expr* addr {nullptr}; // Store: the pointer written through
     SrcLoc end_loc; // Block: the closing brace (decision 0032 item 8: where leaving the block's scope is reported);
                     // required (known) by check_program on a Block that declares a cell; unknown elsewhere is fine
-    const Stmt* then_body = nullptr; // If
-    const Stmt* else_body = nullptr; // If
+    const Stmt* then_body {nullptr}; // If
+    const Stmt* else_body {nullptr}; // If
     std::vector<Clause> invariants;  // While: the user's `invariant` clauses, in order
     std::vector<Clause> measure;     // While: the termination measure (`decreases`, decision 0013): one or more Int
                                      // expressions, compared lexicographically; required (check.h)
-    const Stmt* body = nullptr;      // While
+    const Stmt* body {nullptr};      // While
     std::vector<const Stmt*> stmts;  // Block
-    LoopForm form = LoopForm::While; // While
+    LoopForm form {LoopForm::While}; // While
     // While: a `for` loop's increment (an Assign or ExprStmt, or a Block of them: a discarded comma `i++, j--`), run
     // after the body and after each `continue`; may be null
-    const Stmt* step = nullptr;
-    int jump_id = 0;          // While, Switch: this construct's id (> 0 when a Break or Continue may name it;
+    const Stmt* step {nullptr};
+    int jump_id {0};          // While, Switch: this construct's id (> 0 when a Break or Continue may name it;
                               // unique within a Function, Builder::jump_id()); Break, Continue, Goto: the target's id;
                               // Label: its own id
     std::string label_name;   // Label: the user's name
-    bool from_assert = false; // Check: written as C's `assert(e)`: `expr` is typed like code (calls allowed) and a
+    bool from_assert {false}; // Check: written as C's `assert(e)`: `expr` is typed like code (calls allowed) and a
                               // failure says `assert` (decision 0015 item 6)
     std::string folded;       // Case (not default): the front end's value of the label, a decimal Int literal of the
     // scrutinee's type; the dispatch compares with it and a prologue guard proves `expr` equals
@@ -507,7 +507,7 @@ struct Stmt
 
 struct Var
 {
-    int id = 0;       // unique within its function
+    int id {0};       // unique within its function
     std::string name; // the C/C++ name (for messages and generated identifiers)
     // Bool, Int, a pointer or (decision 0043 item 4) a struct: a struct local is ALWAYS a cell (`address_taken`, set by
     // the
@@ -516,19 +516,19 @@ struct Var
     // leaves are written by Stores, initializers and copies being expanded by the encoder); `AddrOf` of it is the slot
     SrcLoc loc;                 // the declaration
     std::string c_type_name;    // the C/C++ spelling of the type, for messages (empty: use type.str())
-    bool is_param_copy = false; // the local copy of a parameter (0012 item 2)
+    bool is_param_copy {false}; // the local copy of a parameter (0012 item 2)
     // The hidden object of a compound literal `&(T){...}` (decision 0044 item 7): a cell the encoder declares at the start of the block that holds the literal and
     // writes with a StoreE inside the expression `Comma(StoreE(&cl, value), &cl)`.  `name` is how messages spell the literal (`(struct S){...}`), never an internal
     // name.  check_program admits a struct StoreE only at such a variable, with an Aggregate, as the discarded left operand of a Comma.
-    bool compound_literal = false;
-    int param_index = -1; // for a parameter copy
+    bool compound_literal {false};
+    int param_index {-1}; // for a parameter copy
     // The program takes this variable's address (EDG's `address_taken`, decision 0032 item 4): the variable is a CELL, an object in a
     // one-slot block that a pointer may reach.  Set with Function::mark_address_taken.  Assign, Decl and AssignE of it keep their kinds (the
     // lowering dispatches on the flag; an AssignE of a cell is accepted from decision 0039 item 2).  A pointer variable may be a cell too
     // (decision 0040 item 2: its field is the pointer-typed `v_ptr_...`).  On a PARAMETER COPY (decision 0037 item 4) the flag is accepted
     // (a scalar or a pointer parameter): the copy is allocated as a one-slot block at entry and holds the formal's value; the body's scope exit
     // releases it; contracts keep reading the Formal.
-    bool address_taken = false;
+    bool address_taken {false};
 };
 
 // A named constant (decision 0017): a file-scope `const` object (global), or a `const` local of a function that a case
@@ -547,14 +547,14 @@ struct NamedConst
         Constant,        // a `const` object (the default: every existing construction)
         StaticAssertion, // a `static_assert` / `_Static_assert` (decision 0024)
     };
-    int id = 0;                 // unique within its list
+    int id {0};                 // unique within its list
     std::string c_name;         // the C/C++ name (messages and the Viper comment)
     Type type;                  // Bool or Int
     SrcLoc loc;                 // the declaration (the guard's position)
-    const Expr* init = nullptr; // the initializer as written: call-free, no Local/Result/Formal/Old, exactly `type`;
+    const Expr* init {nullptr}; // the initializer as written: call-free, no Local/Result/Formal/Old, exactly `type`;
                                 // null for C's tentative definition (value "0"): nothing is checked
     std::string value;          // the front end's value, a decimal literal of `type` ("0"/"1" for Bool)
-    Kind kind = Kind::Constant; // appended with a default: every existing construction is unchanged
+    Kind kind {Kind::Constant}; // appended with a default: every existing construction is unchanged
 };
 
 // A mutable global variable or a `static` local (decision 0041 items 2-5, 12): one block of the program, named by a `unique` 0-ary Viper function
@@ -574,11 +574,11 @@ enum class GlobalInit
 // the leaf has none), unknown means the global's.
 struct GlobalLeaf
 {
-    GlobalInit kind = GlobalInit::Value;
+    GlobalInit kind {GlobalInit::Value};
     // Value, Unknown: the element as written (closed, call-free, exactly the leaf's type), or null
-    const Expr* init = nullptr;
-    std::string value = "0";        // Value: EDG's value, a decimal literal of the leaf's type ("0"/"1" for bool)
-    const Global* target = nullptr; // Addr: another Global of the program
+    const Expr* init {nullptr};
+    std::string value {"0"};        // Value: EDG's value, a decimal literal of the leaf's type ("0"/"1" for bool)
+    const Global* target {nullptr}; // Addr: another Global of the program
     SrcLoc loc;
 };
 
@@ -594,18 +594,18 @@ struct Global
     //           (question 84).  `init` may still hold the initializer as written (a bool, integer or enumeration): the prologue checks its obligations
     //           like a Value global's, with no guard against a value; `program_start` states the range only.
     using Init = GlobalInit;
-    int id = 0;         // the index in Program::globals(); unique in the Program; part of the Viper name
+    int id {0};         // the index in Program::globals(); unique in the Program; part of the Viper name
     std::string c_name; // the C/C++ name as messages say it (`g`, `count`, `ns::g`)
     // Bool, Int (an enumeration included), an accepted pointer or (decision 0044 item 8) a struct of the Program
     Type type;
     SrcLoc loc; // the defining declaration (the position of its `program_start` row)
     // a `static` local: the function whose body names it (decision 0041 item 12); null for a file/namespace-scope
     // global
-    const Function* owner = nullptr;
-    Init init_kind = Init::Value;
-    const Expr* init = nullptr;     // Init::Value: the initializer as written, or null
-    std::string value = "0";        // Init::Value: EDG's value
-    const Global* target = nullptr; // Init::Addr
+    const Function* owner {nullptr};
+    Init init_kind {Init::Value};
+    const Expr* init {nullptr};     // Init::Value: the initializer as written, or null
+    std::string value {"0"};        // Init::Value: EDG's value
+    const Global* target {nullptr}; // Init::Addr
     std::string c_type_name;        // the C/C++ spelling of the type, for messages (empty: use type.str())
     // A STRUCT global (decision 0044 item 8): one entry per leaf of the struct in struct_leaves order (depth first), each with its own initial value; the
     // scalar fields above (`init_kind`, `init`, `value`, `target`) are then unused (check_program: `init` and `target` null).  Empty for every other global.
@@ -649,21 +649,21 @@ struct Param
     std::string c_type_name; // the C/C++ spelling of the type, for messages (empty: use type.str())
     // `T *restrict p` (decision 0037 item 2): accepted only when the `requires` holds `owns(*p)` as a top-level conjunct or as `p == NULL ||
     // owns(*p)` and the `ensures` returns the same atom; check_program repeats the rule as a backstop (the encoder reports it first).
-    bool is_restrict = false;
+    bool is_restrict {false};
     // `[[cerastes::ref_to_uninit]]` / `[[cerastes::must_init]]` on a pointer parameter (decision 0042 item 4).  Set by the encoder before the
     // contract is read, so a written read of the pointee is rejected there.
-    InitMarker init = InitMarker::None;
+    InitMarker init {InitMarker::None};
 };
 
 struct Function
 {
-    int id = 0;         // unique within the Program
+    int id {0};         // unique within the Program
     std::string c_name; // for messages and generated identifiers
     SrcLoc loc;         // the declaration (what a precondition note points at when a clause has no loc)
     SrcLoc end_loc;     // the closing brace of the body (missing-return, void postconditions)
     // Void, Bool, Int, a pointer to Bool/Int (decision 0037 item 3: `ensures WF(result)` from lowering) or a struct by
     // value (0044 item 4)
-    Type ret = Type::void_type();
+    Type ret {Type::void_type()};
     std::vector<Param> params;
     std::vector<Clause> requires_; // the user's `requires`, in order; mention Formal parameters only
     std::vector<Clause> ensures_;  // the user's `ensures`, in order; Formal, Result and Old
@@ -671,26 +671,26 @@ struct Function
     // lexicographically.  Empty for a function that is not part of a recursion cycle (then lowered as an empty `decreases`);
     // ignored for a function without a body (a trusted contract is assumed to terminate, 0013 item 5).
     std::vector<Clause> decreases_;
-    const Stmt* body = nullptr; // null: a function used only through its contract (a trusted contract)
+    const Stmt* body {nullptr}; // null: a function used only through its contract (a trusted contract)
     // For a function without a body: why its contract is trusted ("declared here, defined in another unit" or
     // "trusted, never verified" for a function of a system file).  Required then; emitted as a comment tag.
     std::string trusted_reason;
     // Declared not to return (`[[noreturn]]`, `_Noreturn`; decision 0015 item 4): with a body, every reachable `return` and the
     // closing brace are `noreturn` errors and the method ensures `false`; without one it is a trusted contract that ensures `false`
     // (`trusted_reason` required).  It has no user `ensures`.
-    bool noreturn = false;
+    bool noreturn {false};
     // Decision 0047 items 2 and 5: P4222's `ref_to_uninit` on the RESULT (a pointer): the block the result owns (the `ensures` holds an `OwnsBlock` atom on
     // `Result`) has no value on return (its flags are unknown, `uninitialized` on a read before a write).  `None` (every function until M4.5d2a) or
     // `RefToUninit`; `MustInit` is refused (the encoder never sets it).  check_program: a `RefToUninit` needs a pointer result and an `ensures` `OwnsBlock`
     // on the `Result`.
-    InitMarker result_init = InitMarker::None;
+    InitMarker result_init {InitMarker::None};
     // Decision 0047 item 2 (D): the function ends the allocation its one pointer parameter starts (the typed view of `free`): the `requires` holds an
     // `OwnsBlock` atom on parameter 0 (guarded `p == NULL ||`) that the `ensures` does not return, and the lowering adds the free checks (`invalid-free`).
     // check_program: a void function of exactly one pointer parameter, a `requires` `OwnsBlock` on it, no `ensures` `OwnsBlock` on it.
-    bool deallocates = false;
+    bool deallocates {false};
     // Decision 0050 item 3: the allocator of a heap view (an allocation, or a deallocation with `deallocates`).  `Platform` for every other function.
     // check_program accepts `Vlibc` only on a bodiless, trusted allocation or deallocation view.
-    Allocator allocator = Allocator::Platform;
+    Allocator allocator {Allocator::Platform};
 
     bool verified() const
     {
@@ -833,8 +833,8 @@ public:
     }
 
 private:
-    int c_int_bits_ = 32;
-    int next_jump_id_ = 1;
+    int c_int_bits_ {32};
+    int next_jump_id_ {1};
     std::deque<std::unique_ptr<IntType>> int_types_;
     std::deque<Type> pointees_;                       // the interned pointee types of pointer_to
     std::deque<std::unique_ptr<IntType>> enum_types_; // apart from int_types_, so int_type() never returns one
@@ -842,7 +842,7 @@ private:
     std::deque<NamedConst> named_consts_;
     std::deque<Global> globals_;
     std::deque<StructType> structs_;
-    const Function* entry_ = nullptr;
+    const Function* entry_ {nullptr};
     std::deque<Expr> exprs_;
     std::deque<Stmt> stmts_;
 };
@@ -870,7 +870,7 @@ private:
 //    `*(q = p) += 1` is no conflict.
 struct SequenceProblem
 {
-    const Expr* at = nullptr; // the AssignE or StoreE whose write conflicts
+    const Expr* at {nullptr}; // the AssignE or StoreE whose write conflicts
     std::string variable;     // the local's source name
 };
 std::vector<SequenceProblem> sequence_problems(const Function& f);
@@ -894,8 +894,8 @@ std::set<int> assigned_params(const Function& f);
 // nodes over the place grammar), which the lowering frames per path like any contract read.  The atoms of an enclosing `&&` add no guard.
 struct AtomGuard
 {
-    const Expr* cond = nullptr;
-    bool holds = true;
+    const Expr* cond {nullptr};
+    bool holds {true};
 };
 // The place an atom names (decision 0043 item 9): a root plus a member path.  The root is as atom_place_key (a parameter's index, `kGlobalSiteBase
 // + id` for a global, `kNoPlaceKey` for anything else, an invariant's `Local` included); the path is the member indices from the root's pointee
@@ -903,9 +903,9 @@ struct AtomGuard
 // paths are equal; they OVERLAP (share cells) by slots, which the lowering decides from the struct types (struct_slots_of), never by this key.
 struct AtomSite
 {
-    const Expr* atom = nullptr; // the Atom node
-    bool in_ensures = false;
-    int clause = 0; // the index in Function::requires_ or ensures_
+    const Expr* atom {nullptr}; // the Atom node
+    bool in_ensures {false};
+    int clause {0}; // the index in Function::requires_ or ensures_
     std::vector<AtomGuard> guards;
     // the member path of the atom's place (decision 0043; empty for `*p`, a global, a Local): atom_place(*atom).path
     std::vector<int> path;
@@ -914,7 +914,7 @@ struct AtomSite
     // steps, otherwise a Deref or a Field node (`**pp`: base `*pp`, via {load}; `p->q->x`: base `p->q` as a loaded pointer, via {q, load}, path {x}).  Lowering
     // lowers `base`, then applies `path`.
     std::vector<int> via;
-    const Expr* base = nullptr;
+    const Expr* base {nullptr};
 };
 // The atoms of `f`'s contract in allowed positions, the `requires` first and then the `ensures`, each clause in evaluation order (left
 // operand first; the arms of `?:` then-arm first).  An Atom in a position the record forbids (under `!`, inside `==`, as an argument, on
@@ -962,13 +962,13 @@ bool reads_heap(const Expr& e);
 // The place a permission atom names (decision 0041 item 8: the sites of 0037 are keyed by place, not by the parameter's index): the parameter's index
 // (>= 0) for an atom on a `Formal`, `kGlobalSiteBase + global->id` for an atom on a `GlobalAddr`, `kNoPlaceKey` for anything else (an invariant's
 // `Local`).  Two atoms name one place iff their keys are equal and not `kNoPlaceKey`; `kResultSiteKey` is reserved for lowering's result site.
-constexpr int kGlobalSiteBase = 1 << 20;
+constexpr int kGlobalSiteBase {1 << 20U};
 // The ranges of site keys are disjoint (decision 0045 audit S7): a Formal's index in [0, kGlobalSiteBase), a global's `kGlobalSiteBase + id` in
 // [kGlobalSiteBase, kLocalSiteBase), an invariant's pointer variable or cell `kLocalSiteBase + var->id` in [kLocalSiteBase, kDerivedKeyBase), and the
 // lowering's derived keys (one per distinct root and steps, decision 0045 item 2) from kDerivedKeyBase on.  `kResultSiteKey` and `kNoPlaceKey` are negative.
 // Test a key with these helpers, never with a one-sided `>=`.
-constexpr int kLocalSiteBase = 1 << 24;
-constexpr int kDerivedKeyBase = 1 << 28;
+constexpr int kLocalSiteBase {1 << 24U};
+constexpr int kDerivedKeyBase {1 << 28U};
 inline bool is_global_site_key(int k)
 {
     return k >= kGlobalSiteBase && k < kLocalSiteBase;
@@ -981,8 +981,8 @@ inline bool is_derived_site_key(int k)
 {
     return k >= kDerivedKeyBase;
 }
-constexpr int kResultSiteKey = -1;
-constexpr int kNoPlaceKey = -2;
+constexpr int kResultSiteKey {-1};
+constexpr int kNoPlaceKey {-2};
 // The root key of an atom whose place has an EMPTY member path and no steps (`via`); `kNoPlaceKey` for any other place (use `atom_place`).  So a caller that
 // predates structs never treats `owns(p->x)` as `owns(*p)`, and one that predates decision 0045 never treats `owns(**pp)` as `owns(*pp)`.
 int atom_place_key(const Expr& atom);
@@ -991,7 +991,7 @@ int atom_place_key(const Expr& atom);
 // (a Deref: the pointer so far is a pointer to a pointer and the step reads the pointer it holds: a LOAD) or `field_step(k)` (a Field of a by-value struct
 // parameter's value or of the result's: the pointer leaf `s.q`, `r.q`).  Examples: `**pp` = (pp, {load}, {}); `p->q->x` = (p, {q, load}, {x}); `*s.q` =
 // (s, {field q}, {}); `*gp` = (global gp, {load}, {}); `(*ps)->data` = (ps, {load}, {data}); `owns(*p)` and `owns(p->t.x)` have no steps.
-constexpr int kLoadStep = -1;
+constexpr int kLoadStep {-1};
 constexpr int field_step(int member)
 {
     return -2 - member;
@@ -1016,7 +1016,7 @@ bool steps_have_load(const std::vector<int>& via);
 // `Ref`s in the evaluated state, never by this key.
 struct PlaceKey
 {
-    int root = kNoPlaceKey;
+    int root {kNoPlaceKey};
     // the steps from the root to the base pointer (see above); empty for every place without a load or a pointer leaf
     std::vector<int> via;
     std::vector<int> path; // the member indices from the base pointer's pointee; >= 0 only
@@ -1055,14 +1055,14 @@ std::string place_text(const Expr& addr);
 // `backward` (the Label comes before the Goto in a pre-order walk) or `enters` (anything else).
 struct GotoProblem
 {
-    const Stmt* go = nullptr;
+    const Stmt* go {nullptr};
     enum class Kind
     {
         backward,
         enters,
         skips_declaration,
         no_label
-    } kind = Kind::no_label;
+    } kind {Kind::no_label};
     std::string label;    // the user's name of the label (empty for no_label)
     std::string variable; // skips_declaration: the variable
 };
