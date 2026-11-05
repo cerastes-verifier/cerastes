@@ -55,7 +55,7 @@
   - It keeps raw storage out of the profile (§8.2's drafting note).
   - These are d2b2's (question 152).
 
-## Owner decisions (questions 152–155, 2026-11-05: each the recommendation)
+## Owner decisions (questions 152–160, 2026-11-05: each the recommendation)
 
 - **152, the split**. **d2b1 (this session):**
   - partnerless `ensures` atoms;
@@ -78,6 +78,9 @@
 
   Anything else is rejected. This differs from P4416 p6, which counts null as "initialized" and so would reject every allocation wrapper's `return NULL;`.
 - **155, `must_init` on a local**: it stays refused (P4222 defines `must_init` for parameters only). The pin keeps EDG's #1835; only its `Pins:` comment stops naming d2b.
+- **156, 157 (during the session, spike S38 (a)):** a covered atom's output amount is assigned `write` (it grants nothing); a covered `live(r)` gives pointer use only, and reads of `*r` need `owns(*r)`/`reads(*r)`, which a returned atom covers by place equality.
+- **158, 159 (during the session, audit round 1 B3, B4; `build/m4.5d2b/audit1.md`):** a partnerless atom in a contract without a body is accepted only on a fresh result (no equation of the result, or a pointer read through it, with anything but NULL), else rejected naming M6, closing a hole open since d2a (`reject_owns_block_ensures_no_partner.c` stays rejected, re-messaged, instead of its planned flip); only implicit atoms cover (a static local's `owns(s)`, an `owning` parameter's borrow), so `&&` between written atoms stays separating.
+- **160 (during the session):** a new, uncommitted test whose first run fails for its designed reason at a different line or a neighbouring category may have that expect line corrected, reviewed by the auditor in round 2 and listed in the status entry (as question 102).
 
 **Standing:**
 - 69: the EDG merge waits for the box.
@@ -215,7 +218,7 @@ Written before code (invariant 6). Audit round 1 reads the draft together with S
 ## Spike S38 (il-analyst, before code; fixtures in `build/m4.5d2b/s38/`, kept ones in `tests/viper-smoke/memory/`)
 
 Hand-written Viper in the target shapes, each with Silicon's verdict and time:
-- (a) a covered `live(r)` of a static local, with the caller's `*p`;
+- (a) a covered `live(r)` of a static local, with the caller's use of `p` (question 157: not `*p`); (a') a covered `owns(*r)` of the static local, with the caller's `*p`;
 - (b) an uncovered `owns(*r)` returning a held global's cell with an output amount, and the caller's use;
 - (c) the same when not held, failing at the return row;
 - (d) a covered `owns(*r)` with `r == &p->x` beside a returned `owns(p->x)`;
@@ -296,7 +299,6 @@ A failed spike changes the record before code. Audit round 1 reads the spike wit
   - `reject_struct_value_live_result.c`
   - `reject_owns_result_member_target.c`
   - `reject_owns_result_double_deref.c`: `owns(**r)` with no atom on `*r` is a framing failure at the atom
-  - `reject_owns_block_ensures_no_partner.c`
 - **Retired for positives of the same shape:**
   - `reject_owns_block_invariant.c`
   - `reject_owns_block_guard_heap_requires.c`
@@ -306,6 +308,7 @@ A failed spike changes the record before code. Audit round 1 reads the spike wit
   - `reject_owning_local.c` (its shape is accepted; a new pin `reject_owning_global.c` takes its place)
   - `reject_ref_to_uninit_local.c` (likewise, `reject_ref_to_uninit_global.c`)
 - **Message and `Pins:` only:**
+  - `reject_owns_block_ensures_no_partner.c` (question 158: bodiless, stays rejected);
   - `reject_must_init_local.c` and `reject_struct_owning_field.c` (EDG's #1835 stays);
   - `reject_owns_block_load.c`, `reject_owns_block_global.c`;
   - `reject_strict_init_malloc_{local,argument,member,return,store}.c` and `reject_strict_init_vlibc_malloc_local.c` (a pin whose exact shape item 4 accepts is retired for a positive instead, and listed);
