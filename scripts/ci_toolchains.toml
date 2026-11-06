@@ -89,8 +89,25 @@ clang_major = 21
 gcc_major = 15
 build = "gcc"
 
+# Ubuntu 24.04's glibc 2.39 and GCC 14, with clang 20 from its archive (noble-updates): EDG emulates clang 20, whose
+# language is clang 21's for every test (ubuntu-26.04-clang20-gcc15), so what differs is the C library.
 [[profile]]
 name = "ubuntu-24.04"
+platform = "linux"
+runner = "ubuntu-24.04"
+cadence = "dispatch"
+jobs = 4
+ubuntu_version = "24.04"
+glibc = "2.39"
+clang_major = 20
+gcc_major = 14
+build = "clang"
+
+# The image's default clang 18: cerastes builds with it, but EDG emulating clang 18 is another language for some tests
+# (no standard [[assume]], non-constant enumerator values accepted, linkage conflicts between vlibc's shim and
+# clang 18's headers; S8, internal/handoff.md).  Dispatch only, until the owner decides (handoff question 163).
+[[profile]]
+name = "ubuntu-24.04-clang18"
 platform = "linux"
 runner = "ubuntu-24.04"
 cadence = "dispatch"
