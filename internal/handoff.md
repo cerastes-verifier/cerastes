@@ -15,11 +15,12 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 
 ## 1. State
 
-- **M4.5d2b1** (planning 2026-11-05; record 0052; plan `.claude/plans/m4-5d2b1-results-locals.md`, questions
-  152–155): in progress on branch `m4.5d2b1-results-locals`, from S7's tip `a660abc` (S7 is not merged yet and the
-  owner was away: "make your next branch on top of the current one"), in the worktree `.claude/worktrees/m4.5d2b`.
-  M4.5d2b is split (question 152): d2b1 now, d2b2 next (§4.2). The planning surveys are `build/m4.5d2b/survey-{encoder,tests}.md`
-  and `build/m4.5d2b/p74.md` in the worktree; the baseline is S7's (`build/m4.5d2b/baseline`).
+- **M4.5d2b1** (2026-11-05; record 0052; plan `.claude/plans/m4-5d2b1-results-locals.md`, questions 150–161): done on
+  branch `m4.5d2b1-results-locals`, from S7's tip `a660abc` (S7 is not merged yet and the owner was away: "make your next
+  branch on top of the current one"), in the worktree `.claude/worktrees/m4.5d2b`; result in `internal/status.md`. M4.5d2b
+  is split (question 152): d2b1 done, **d2b2 next** (§4.2, §3 "From M4.5d2b1" and "M4.5d2b2"). Planning surveys, spike
+  S38, the audits (`audit{1,2,3,3b}.md`), the expect corrections and the Viper shapes are in `build/m4.5d2b/` in the
+  worktree; the baseline is S7's (`build/m4.5d2b/baseline`).
 
 - **S7** (2026-11-05; record 0051; plan `.claude/plans/s7-code-style.md`, questions 146–149): done on branch
   `s7-code-style` (from local `main` `c2bc48d`, the planning commit) in the worktree `.claude/worktrees/s7`; result in
@@ -87,6 +88,10 @@ done yet still apply.
    The branch also holds `9cff0ad`, outside S7's plan: `doc/package-lock.json` deduplicated, since Dependabot's Antora
    3.2.2 merge (`aa488d8`) had nested six copies of `@antora/logger` and broken `build_docs.sh`'s failure on warnings
    (the harness self-test failed on `main`).
+4. **M4.5d2b1** (`m4.5d2b1-results-locals`, stacked on S7): after S7 merges, push it and open its PR (it touches
+   `src/`, so dispatch the full check once, both jobs). The Linux run on the x86-64 box was not done in the session: CI
+   decides. Then remove the worktree `.claude/worktrees/m4.5d2b` (its `build/m4.5d2b/` holds the audits and the S38
+   fixtures; copy anything wanted first).
 
 ## 3. Open notes, by the session that consumes them
 
@@ -153,6 +158,26 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
   (0049 item 5). [S6]
 
 *M4.5d2v's notes moved into its plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
+
+**From M4.5d2b1** (record 0052, audits `build/m4.5d2b/audit{1,2,3,3b}.md` in the worktree)
+- **Cut to d2b2:** written `owns_block` in loop invariants (record 0052 item 6(a), the plan's pre-agreed cut (a); tests kept
+  in `build/m4.5d2b/d2b2-tests/`; pin `reject_owns_block_invariant.c`); audit S10's points apply (NOTAUTO guards, one
+  carrier with an owning loop variable, the written sites in the exemption). [d2b1]
+- **Documented false alarms, pinned, for d2b2:** a covered atom on a leaf of a `static` struct (`return &s.x;`,
+  `static_struct_member_result_false_alarm.c`; covering a leaf broke `f__wf`, audit 2 N1); owning loop variables whose
+  block becomes shared inside the loop (`owning_loop_becomes_shared_false_alarm.c`,
+  `owning_loop_alias_becomes_owned_false_alarm.c`: a `permission` row, then a consequential `leak`) or stops being shared
+  (`owning_loop_stops_shared_false_alarm.c`), because the carriers' guards are loop-entry snapshots (audit 3b). [d2b1]
+- **Limits stated in record 0052:** a given amount is an unknown fraction to the caller (a callee hands back what it took
+  by returning the partner); written atoms never cover (question 159); a bodiless declaration nothing calls is not
+  checked against rule 2a (checking it changed 30 tests' Viper; audit 2 N3); `owns(**pp)` of a block stored in `*pp`
+  needs d2b2's `owns_block(*pp)`; an owner freed inside a loop must be reset to `NULL`. [d2b1]
+- **Notes not taken:** two reports for one fault in a few loop shapes (audit 3 N2: an owner freed through an alias and left
+  non-null; N3: a `NULL`-head loop without `v == NULL` in its invariant; the docs say how to avoid both); an owner
+  entering a loop with the other allocator's block is reported at entry even if the loop frees it first (audit 3 N4,
+  documented). [d2b1]
+- **Process:** the first il-analyst ran out of context after Part A and the owning locals outside loops; a fresh one (same
+  role) did the loops and the audit fixes. Only one agent runs `run_tests.py` (a second run empties `build/vpr`). [d2b1]
 
 **M4.5d2b2 owning globals, `static` locals and fields, P4418R0** (from M4.5d2a's planning; sources: P4222R3, P4416R0,
 P4418R0, P4417R0, all 2026-10-22, read again at M4.5d2b1's planning; question 152 gives d2b2's planning the P4418
@@ -949,4 +974,13 @@ and `owning` keep naming the platform's), 154 (under `--strict-init` a `ref_to_u
 `ref_to_uninit` call or a null pointer constant; anything else is rejected; null departs from P4416 p6), 155 (`must_init`
 stays parameter-only; EDG keeps refusing it on a local). The owner also asked for the branch on top of S7's (not merged
 yet), three Sonnet agents and one Opus agent from `.claude/agents/`, and a stop for any question.
+During M4.5d2b1 (each the recommendation; recorded in its plan and record 0052): 156 (a covered atom's output amount is
+`write`: it grants nothing), 157 (a covered `live` gives pointer use only; reads need `owns`/`reads`), 158 (a
+partnerless atom in a contract without a body only on a fresh result, else rejected naming M6; closes a hole open since
+d2a), 159 (only implicit atoms cover: `&&` between written atoms stays separating, as VeriFast's `&*&`), 160 (a new test's
+expect line may be corrected after its first run when it fails for its designed reason at another line or a neighbouring
+category, listed in the status entry), 161 (two flipped pins expect two real errors each).
+
+**Open, for the next session:** none. M4.5d2b2's planning decides its own questions (P4418R0's spellings, a strict
+profile mode, borrow against transfer on parameters, static owners at `main`'s end; §3).
 

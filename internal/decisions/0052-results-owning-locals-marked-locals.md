@@ -1,6 +1,7 @@
 # 0052 — Partnerless results, owning locals, marked locals (M4.5d2b1)
 
-- **Status:** draft (2026-11-05, M4.5d2b1), written before code (invariant 6); audit round 1 reads it with spike S38.
+- **Status:** accepted (2026-11-05, M4.5d2b1), written before code (invariant 6); revised after spike S38, audit round 1
+  (`build/m4.5d2b/audit1.md`), audit round 2 (`audit2.md`), the re-audit (`audit3.md`) and its targeted check (`audit3b.md`).
   Owner decisions (M4.5d2b1 planning and spike S38, 2026-11-05; plan `.claude/plans/m4-5d2b1-results-locals.md`; handoff questions
   152–159, each the recommendation): 152 (M4.5d2b is two sessions; this record is d2b1's), 153
   (`cerastes_owns_vlibc_block`), 154 (a `ref_to_uninit` function's returns under `--strict-init`), 155 (`must_init`
@@ -76,12 +77,23 @@
      is inhaled.
    - **The caller** receives `o_k` in a ghost local of a multi-target call (0044's form): Viper's call gives it the
      postcondition. The after-call result splits (0050's `result_splits`) cover the new places, so a later read or `free`
-     of `*r` does not leave Silicon without a case.
+     of `*r` does not leave Silicon without a case; as built (audit 2 B3), `lvloc` case splits of a given place against the
+     call's pointer arguments, the caller's cells and its `requires` roots follow every call that gives a `live` or
+     `reads` atom. A given amount is an unknown fraction to the caller: after lending a place's liveness to a callee that
+     keeps its partner and gives the place back through a partnerless atom, the caller cannot prove it holds the whole
+     object again (`free` is `invalid-free`, a local's scope end `lifetime`). A callee hands back what it took by returning
+     the partner (with `r == p`), never through a partnerless atom; partnerless atoms are for places the caller did not
+     give.
    - **Framing and checks.** A partnerless atom frames the contract reads after it in evaluation order (0037 item 7, 0047
      item 4). 0039 item 7's partner-by-path check has no partner and does not apply; its exclusivity rows do. `owns(**r)`
      with no atom on `*r` before it is unframed (`permission` in `f__wf`). A partnerless atom on a root that also has a
-     partnered atom on a nested path (`owns(*p)` beside a partnerless `owns(p->x)`) is rejected before lowering
-     (`unsupported_annotation`; audit N7: `paths_nested`'s `internal_error`).
+     partnered `ensures` atom on the same place or one inside the other (`live(p)` beside a partnerless `owns(*p)`,
+     `owns(*p)` beside a partnerless `owns(p->x)`, `owns(*pp)` beside a partnerless `owns(**pp)`) is rejected before
+     lowering (`unsupported_annotation`: "a place a function was given cannot be promised again as a new one"; audit N7:
+     `paths_nested`'s `internal_error`), and so is the same kind twice on one partnerless place. A formal's partnerless
+     atom therefore needs a root the `ensures` returns nothing else of; `owns(**pp)` of a block stored in `*pp` waits for
+     d2b2's `owns_block(*pp)`. `reject_ensures_atom_no_partner.c` (`live(p)` beside `owns(*p)`) stays rejected with this
+     message.
    - **What a cover gives** (question 157). A covered `live(r)` gives the equality of liveness cells only (the model has
      no injectivity for `lvloc`), so the caller may use the pointer (copy, compare, pass it: 0028 item 3a) but not read
      `*r`, as `live` never gives access. A covered `owns(*r)` or `reads(*r)` gives the equality of the places (`r ==
@@ -89,7 +101,10 @@
    - **The `static` local.** `int *where(void) ensures(r, live(r)) { static int s; return &s; }` verifies: `live(r)` is
      covered by the implicit `owns(s)`, and its caller may use `r`; with `ensures(r, owns(*r))` the caller also reads and
      writes `*r` through its own implicit atom on `s`. Without the `ensures` (`static_local_return_address_use.c`), the
-     copy stays `lifetime`, its message naming the clause.
+     copy stays `lifetime`, its message naming the clause. A member of a `static` struct (`return &s.x;` with
+     `ensures(r, owns(*r))`) is not covered (the implicit atom covers the struct's place, not a leaf of it; covering a leaf
+     broke the contract's well-formedness method): a documented false alarm ("returns `*r` without holding it"), pinned,
+     for M4.5d2b2 (audit 2 N1).
    - **A written atom returned with its place.** `requires(owns(p->x)) ensures(owns(p->x)) ensures(r, owns(*r))` returning
      `&p->x` fails the separation row at the return; the callee that hands `p->x` over drops it from its `ensures` (it
      keeps it, 0037 item 13) and gives `owns(*r)`.
@@ -108,7 +123,11 @@
    pointer constant: vlibc's `r == NULL || owns_block(r)`, `r == NULL || owns(*r)` and `r->x == 0` are accepted
    (Viper's call picks a place the caller does not hold); `owns_block(r) && r == p`, `r->q == p` and every partnerless
    atom on a formal are rejected (`unsupported_annotation`, naming M6's contract manifest).
-   `reject_owns_block_ensures_no_partner.c` (bodiless) stays rejected with this message.
+   `reject_owns_block_ensures_no_partner.c` (bodiless) stays rejected with this message. As built (audit round 2 B1) the
+   rule is an allow-list: in such a contract the result and every place through it appear only as an atom's place, in
+   `X == NULL` or `X != NULL` with `X` directly such a path, or as a value that is not a pointer; `r != p ? r == NULL :
+   owns(*r)`, `!(r != p)`, `(c ? r : r) == p` and the like are rejected. A bodiless declaration that nothing calls is not
+   read (as today), so it is not checked; it cannot reach a proof (audit 2 N3).
 
 3. **Owning automatic locals** (amends 0029 item 1's registration phasing; 0038 item 3; 0047 item 10; revised after
    audit round 1).
@@ -142,12 +161,39 @@
    - **What is not changed.** The end-of-function `forperm` row stays and catches blocks without an owner. A non-owning
      copy (`int *q = v;`) does not take the obligation (P4417 p3), so `v`'s exit still fails if the block is held.
    - **Loops** (audit B2; S38 (f)). An owning local declared outside a loop that the loop assigns is a loop place keyed on
-     its **current** value: the invariant `held_v ==> (v != null && <v's whole block: offset 0, the token at write with
-     value tv_v, full liveness, every cell, 0047 item 4's facts>)`, with `held_v` and `tv_v` loop-carried, preceded by
-     explicit entry and back-edge ending rows of the same text (so a violation is a user error at the loop, never
-     Silicon's invariant check); the back-edge leak row exempts exactly `held_v && t == loc(block_of(v), −1)`. A loop
-     that allocates into a `NULL`-initialized owner every iteration fails the reassignment row in its second iteration.
-     Programs without an owning local keep their Viper byte for byte.
+     its **current** value: the invariant `v != null ==> (held_v && <v's whole block: offset 0, the token at write with
+     value tv_v, full liveness, every cell, 0047 item 4's facts>)`, with `held_v` and `tv_v` loop-carried and 0047 item
+     10's entry-keyed place (`hb`) not built for it. Explicit entry and back-edge ending rows `v != null ==> held_v`
+     precede the invariant (`permission`: "owning `v` holds no block at the loop's entry/back edge but is not null: set it
+     to `NULL` after freeing it or handing it on"), so a violation is a user error at the loop, never Silicon's invariant
+     check, and after the loop `v == NULL` or `held_v` with the whole block. The back-edge leak row exempts exactly `v !=
+     null && t == loc(block_of(v), −1)`. A loop that allocates into a `NULL`-initialized owner every iteration fails the
+     reassignment row in its second iteration; an owner freed on some iteration is set to `NULL` there (the invariant
+     cannot carry "freed" otherwise). As built: the invariant states `held_v == (v != null)` (Viper havocs `held_v`, and
+     the one direction let a swap of two owners fail); an owner the loop uses or assigns carries its whole block (a
+     `HeapHolder`, not 0047 item 10's entry-keyed place), and one the loop neither uses nor assigns but whose body calls
+     a function carries only `held_v` and its token (the call's `held_v` update reads the token's permission); beside
+     the held rows, whole-block permission rows at entry and at the back edge make a lost cell a `permission` error at
+     the loop, never an `internal` one; the token's value is `true` in a platform program and, in a vlibc heap program, a
+     loop-entry snapshot with a row that fires if the loop swaps in the other allocator's block; where every assignment
+     to the owner in the loop comes from one allocator's views (or is `NULL`), that allocator is the invariant's constant
+     and a `permission` row at entry reports an owner entering with the other allocator's block (so a vlibc loop may start
+     from a `NULL` owner). A non-owning alias of an owner's block keeps its 0047 item 10 place with guards that exclude
+     the owner's block (both claimed the same permissions, an `internal` failure before). A user invariant or measure
+     reading `*v` of a carried owner is framed by the owner's cells; a written atom on them (`owns(*v)`) is a
+     `permission` error at the atom ("which the loop already owns through its owning local"). After the re-audit
+     (`build/m4.5d2b/audit3.md`): an owner the loop uses but does not assign is **keyed** — its block is the variable's
+     0047 item 10 heap place, which keeps its value and flag, and the loop carries only `held_v == (v != null)` and the
+     held row (adding `owning` never makes a verifying read-only loop fail); two owners of one block are carried once —
+     each later owner's carrier clauses, rows and exemption term are guarded by a loop-entry snapshot "not the block of
+     an earlier owner" (a current-value guard loses the distinctness of two blocks after the loop); heap places are
+     guarded against carried owners by entry snapshots likewise; a given atom's `lvloc` splits after a call cover struct
+     result leaves and places through loads too. Because those guards are entry snapshots, a block that becomes shared
+     inside the loop (an owner taking a block another carrier holds: `b = a;`, or `v = w;` with `w` a plain pointer to a
+     held block) is reported by a `permission` ending row before the back-edge invariant ("owning `v` takes a block this
+     loop already carries through `w`"), never Silicon's own check, and one that stops being shared (`a = NULL;` with `b`
+     still holding it) is not picked up by the other carrier: both are documented false alarms, pinned, for M4.5d2b2
+     (audit 3b). Programs without an owning local keep their Viper byte for byte.
 
 4. **Marked automatic locals and P4222R3's strict rules** (amends 0029 item 2, 0042 item 8, 0047 item 8).
    - **Registration:** `ref_to_uninit` becomes `"r|v|p"`. `must_init` stays `"p"` (question 155: P4222 defines it for
@@ -177,16 +223,15 @@
      - a null argument to a `ref_to_uninit` parameter stays rejected (0042 item 8, P4222R3).
 
 5. **The lint** (`lint_viper.py`): each ghost `Perm` **result** of a method has exactly `ensures none < o && o <= write`
-   first (beside 0037 item 14's rule for `Perm` formals); a method may not read an `o` it has not assigned before a
-   return. A call's `Perm` target (`t, o := f(…)`) is allowed where the callee's `o` carries that row (S38: 0038 item 9's
+   first (beside 0037 item 14's rule for `Perm` formals); an unassigned `o` is Silicon's own failure (exit 3), never a proof, so no rule pins it (audit 2 N4). A call's `Perm` target (`t, o := f(…)`) is allowed where the callee's `o` carries that row (S38: 0038 item 9's
    rule flags it otherwise). The owner rows read `tok` inside an `assert`, which the lint allows (0047 item 7).
 
 6. **The leftovers.**
-   - (a) **Written `owns_block` in loop invariants** (amends 0047 items 10 and 11): a whole-block loop place (the token
-     with its allocator's value, full liveness, every cell, 0047 item 4's facts), on a pointer local or formal; through a
-     load or on a global stays d2b2's. Audit S10: 0040 item 5's NOTAUTO guards keep the written place apart from the
-     entry-keyed automatic places; an owning loop variable with a written site has one carrier (the written one); the
-     written sites, under their guards, are in the back-edge exemption.
+   - (a) **Written `owns_block` in loop invariants: cut to M4.5d2b2** (the plan's pre-agreed cut; the loop places'
+     carrier for a written block site with its token value is about a session's work over 0047 item 10's machinery). It
+     stays rejected, its pin `reject_owns_block_invariant.c` re-messaged; d2b2 takes audit S10's points (0040 item 5's
+     NOTAUTO guards, one carrier with an owning loop variable, the written sites in the back-edge exemption). An owning
+     loop variable (item 3) needs no written invariant.
    - (b) **Block-site guards that read the heap, a global or `old`** (amends 0047 item 4; audit 2 S2): framed and
      evaluated like 0045 item 11's atom guards. An `ensures` guard is read in the post-state, where the leak exemption
      (0047 item 7) repeats it (the places it reads are still held there, S38 (h)); a `requires` guard is read in the entry
@@ -209,7 +254,7 @@
 
 8. **Still rejected** (fail closed; one pin each, the message naming the session): `owning` and `ref_to_uninit` on
    globals, `static` locals and (for `owning`) address-taken locals; owning fields (EDG's #1835 until d2b2 registers
-   `d`); block sites through loads or on globals; P4418R0's attributes (unregistered: EDG's warning #1097 or #1835);
+   `d`); block sites through loads or on globals; written `owns_block` in loop invariants (item 6(a)); P4418R0's attributes (unregistered: EDG's warning #1097 or #1835);
    `must_init` on a local (permanent, question 155).
 
 9. **Categories:** none new. `leak` gains the owner messages (item 3); `permission` gains the value rule (item 3) and
