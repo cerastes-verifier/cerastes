@@ -20,9 +20,9 @@ cd "$ROOT"
 
 # ---- Expected values (decisions 0001 and 0016: change them together) -----------
 CLT=/Library/Developer/CommandLineTools
-CLT_VERSION=27.0.0.0.1788430756
+CLT_VERSION=27.2.0.0.1792721180
 CLANG_BANNER='Apple clang version 21.0.0 (clang-2100.3.34.2)'
-SDK_VERSION=27.0
+SDK_VERSION=27.2
 SDK_BUILD=26A425
 GCC_MAJOR=16
 GCC_VERSION=16.2.0
