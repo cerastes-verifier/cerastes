@@ -65,6 +65,11 @@ clang_major = 20
 gcc_major = 15
 build = "clang"
 
+[[profile.exclusions]]
+test = "tests/scalar/negative/reject_coroutine.cpp"
+mode = "c++20"
+reason = "with libc++ 20's <coroutine>, vlibc's <stdlib.h> shim redeclares abort, exit, _Exit, malloc, calloc and free with a linkage incompatible with glibc's first declarations (incompatible_linkage_specifier); libc++ 21 and 22 do not (vlibc's to fix, handoff question 170)"
+
 [[profile]]
 name = "ubuntu-26.04-clang22-gcc14"
 platform = "linux"
@@ -105,7 +110,7 @@ build = "clang"
 
 # The image's default clang 18: cerastes builds with it, but EDG emulating clang 18 is another language for some tests
 # (no standard [[assume]], non-constant enumerator values accepted, linkage conflicts between vlibc's shim and
-# clang 18's headers; S8, internal/handoff.md).  Dispatch only, until the owner decides (handoff question 163).
+# clang 18's headers; S8, internal/handoff.md).  Dispatch only, until the owner decides (handoff question 169).
 [[profile]]
 name = "ubuntu-24.04-clang18"
 platform = "linux"

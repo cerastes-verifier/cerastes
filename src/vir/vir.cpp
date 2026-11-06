@@ -1012,7 +1012,10 @@ const Expr* Builder::assign_expr(const Var* v, const Expr* value, SrcLoc loc)
 const Expr* Builder::compound_assign_expr(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc)
 {
     const Expr* xval {local(x, loc)};
-    return assign_expr(x, compound_value(x->type, xval, op, rhs, loc), std::move(loc));
+    // The value first, in its own statement: as one argument list beside `std::move(loc)`, the order is unspecified, and
+    // GCC moved `loc` out before the value's nodes copied it (their positions lost the file; decision 0053 item 10).
+    const Expr* value {compound_value(x->type, xval, op, rhs, loc)};
+    return assign_expr(x, value, std::move(loc));
 }
 
 const Expr* Builder::inc_dec_expr(const Var* x, bool increment, bool post, SrcLoc loc)
@@ -1041,7 +1044,9 @@ const Expr* Builder::store_expr(const Expr* addr, const Expr* value, SrcLoc loc)
 const Expr* Builder::compound_store_expr(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc)
 {
     const Expr* cur {deref(addr, loc)}; // shares `addr`
-    return store_expr(addr, compound_value(cur->type, cur, op, rhs, loc), std::move(loc));
+    // the value first, as in compound_assign_expr: `loc` is moved only after it is copied
+    const Expr* value {compound_value(cur->type, cur, op, rhs, loc)};
+    return store_expr(addr, value, std::move(loc));
 }
 
 const Expr* Builder::inc_dec_store_expr(const Expr* addr, bool increment, bool post, SrcLoc loc)

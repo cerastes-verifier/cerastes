@@ -144,7 +144,13 @@ emulates and which warnings exist. That is where a profile should say what it ru
     are unchanged. The first full run then failed 165 tests: EDG's CMake takes its default `EDG_BASE` (the predefined
     macros of the emulated compiler) from the compiler that builds it, so the GCC build got `bases/docker/dev-env/gcc`
     and emulated clang without clang's macros (libc++ stops at its `__BYTE_ORDER__` check). `bootstrap.sh` names the
-    clang base on Linux, the one EDG chooses for a clang build, so a clang build is unchanged.
+    clang base on Linux, the one EDG chooses for a clang build, so a clang build is unchanged. The next run found a
+    real cerastes bug that clang's argument order hides: `Builder::compound_assign_expr` and `compound_store_expr`
+    (`src/vir/vir.cpp`) passed `compound_value(..., loc)` and `std::move(loc)` in one argument list; GCC moved `loc`
+    first, so the nodes of `x /= d` and `x += y` used as values lost their file and the errors read `:19: error: ...`
+    (`compound_value_div_zero.c`, `compound_value_overflow.c`). The value is now computed first. Under Apple clang 21
+    the old and new binaries emit byte-identical `.vpr` and `.map` for all 1262 runs of the verify tests that contain a
+    compound assignment; a scan of `src/` found no other statement that copies and moves one variable.
 11. **ubuntu-24.04** (from S8c). glibc 2.39, clang 18 with libc++ 18, GCC 14, CMake 3.31, ShellCheck 0.9.0. The
     encoder matches glibc 2.43's `assert` expansions exactly (0031 item 5). A 2.39 shape that differs is an encoding
     rule, with its must-verify and must-fail tests (invariant 2), an item here, and the soundness audit. Anything
@@ -152,7 +158,16 @@ emulates and which warnings exist. That is where a profile should say what it ru
     *Found in S8:* clang 18 refuses `const bool is_break {l->break_label};` (`src/backend/encode.cpp`, a one-bit EDG
     bit-field narrowed to `bool` in a braced initializer), which clang 21 accepts; it is now `{l->break_label != 0}`,
     like the line after it (object file and IR identical under Apple clang 21, `object_identity.py`). Nothing else in
-    the build differs.
+    the build differs. The suite with clang 18, though, is another language for eight tests: EDG emulating clang 18
+    does not know the standard `[[assume]]` (`p13_attributes.cpp`'s golden, `reject_attribute.cpp`), accepts
+    non-constant enumerator values (`reject_enum_div_not_constant.cpp`, `reject_enum_shift_not_constant.cpp`), and meets
+    the linkage conflict below (`reject_coroutine.cpp`); three are glibc 2.39's (below). So the profile `ubuntu-24.04`
+    uses clang 20 from Ubuntu 24.04's archive, whose emulated language is clang 21's for every test but one, and
+    `ubuntu-24.04-clang18` stays `dispatch` for the owner (question 169). Ubuntu 24.04's ShellCheck 0.9.0 reports
+    `A && B || C` in `check_edg_options.sh` (SC2015), which 0.11.0 does not: the `&&` is grouped, the same command.
+    *Both clang 18 and clang 20* give `incompatible_linkage_specifier` in `reject_coroutine.cpp` at vlibc's `<stdlib.h>`
+    shim's redeclarations of `abort`, `exit`, `_Exit`, `malloc`, `calloc` and `free` when libc++'s `<coroutine>`
+    reaches it; clang 21 and 22 do not. The fix is vlibc's (question 170); the clang 20 profiles record the exclusion.
 12. **Out of scope** (M8 entries):
     - arm64 Linux runners (`ubuntu-*-arm`): plain `char` and `wchar_t` are unsigned there, which the encoder's target
       facts do not model;
