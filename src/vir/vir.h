@@ -418,8 +418,13 @@ struct Expr
     bool yields_old {false};          // AssignE, StoreE: the value is the old value `b` (x++, x--), not the new one
     const Global* global {nullptr};   // GlobalAddr (decision 0041): the global; owned by the Program
     // Atom: added by the encoder for a `static` local (decision 0041 item 12), not written by the user: an Owns of a
-    // GlobalAddr whose global has an `owner`; messages say "the `static` local `s` of `f`"
+    // GlobalAddr whose global has an `owner`; messages say "the `static` local `s` of `f`"; or (decision 0052 item 2,
+    // question 159) the merged borrow of an
+    // `owning` pointer parameter: an Owns of the parameter's Formal in the `requires` and the `ensures`
     bool implicit_atom {false};
+    // OwnsBlock: spelled `cerastes_owns_vlibc_block` (decision 0052 item 7): the block is vlibc's (its token's value is
+    // `false`, decision 0050 item 3), not the platform's.
+    bool vlibc_block {false};
 };
 
 // ---- statements ------------------------------------------------------------------------------------------------
@@ -531,6 +536,12 @@ struct Var
     // (a scalar or a pointer parameter): the copy is allocated as a one-slot block at entry and holds the formal's value; the body's scope exit
     // releases it; contracts keep reading the Formal.
     bool address_taken {false};
+    // `[[cerastes::owning]]` on an automatic pointer local (decision 0052 item 3): the variable owns the block it
+    // points to (the value rule, the scope-exit and reassignment rows, the loop place on its current value).  The
+    // encoder sets it, on the Var that new_local returns, only on a pointer variable that is neither address-taken nor
+    // a parameter copy nor a compound literal, of a pointer-to-object type that is not `void *` and not a pointer to a
+    // `const` or `volatile` type; check_program refuses any other Var with it.
+    bool owning {false};
 };
 
 // A named constant (decision 0017): a file-scope `const` object (global), or a `const` local of a function that a case

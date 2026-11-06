@@ -472,39 +472,4 @@ void define_heap_read_places()
        });
 }
 
-void define_heap_read_place_rejections()
-{
-    auto PT = [](Kit& k)
-    {
-        return k.ptr(k.i32);
-    };
-    auto PPT = [](Kit& k)
-    {
-        return k.ptr(k.ptr(k.i32));
-    };
-    auto owns = [](Kit& k, const Expr* place, int amount)
-    {
-        return k.b.atom(AtomKind::Owns, place, amount, k.at());
-    };
-    // owns(*r.q) of a struct result's pointer member: an atom with no requires partner (question 106: M4.5d2)
-    rc("hr_rej_result_member_atom", "without a `requires` atom",
-       [=](Kit& k)
-       {
-           StructType* S {k.strukt("S", {{"q", PT(k)}})};
-           Function* f {k.fn("f", Type::structure(S), {{"p", PT(k)}})};
-           k.ens(f, owns(k, k.b.field(k.R(f), 0, k.at()), 0));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    // owns(**r) through the result of type int ** (M4.5d2)
-    rc("hr_rej_result_double_deref", "without a `requires` atom",
-       [=](Kit& k)
-       {
-           Function* f {k.fn("f", PPT(k))};
-           k.ens(f, owns(k, k.deref(k.R(f)), 0));
-           f->body = k.blk({k.ret(k.nul(PPT(k)))});
-           k.done(f);
-       });
-}
-
 } // namespace

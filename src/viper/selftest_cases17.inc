@@ -1097,13 +1097,14 @@ void define_heap_rejections()
            f->body = k.blk({});
            k.done(f);
        });
-    // an ensures atom on a formal with no requires partner: the caller's pointer cannot come to own a block the call made
+    // an ensures atom on a formal with no requires partner in a function without a body (decision 0052 item 2: with a
+    // body the callee may give a block it holds)
     rc("hb_rej_ensures_without_requires", "without one in the `requires`",
        [=](Kit& k)
        {
            Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.ens(f, block(k, FP(k, f, 0)));
-           f->body = k.blk({});
+           k.trusted(f);
            k.done(f);
        });
     // result_init: a pointer result and an ensures owns_block of the result

@@ -1480,9 +1480,13 @@ void define_struct_values();
 void define_struct_literals();
 void define_struct_globals();
 void define_heap_read_places();
-void define_heap_read_place_rejections();
 void define_heap();
 void define_heap_rejections();
+void define_partnerless_atoms();
+void define_owning_locals();
+void define_owning_loops();
+void define_owning_loops_audit2();
+void define_block_guards_and_vlibc_sites();
 } // namespace
 
 #include "selftest_cases2.inc"
@@ -1502,6 +1506,10 @@ void define_heap_rejections();
 #include "selftest_cases16.inc"
 #include "selftest_cases17.inc"
 #include "selftest_cases18.inc"
+#include "selftest_cases19.inc"
+#include "selftest_cases20.inc"
+#include "selftest_cases21.inc"
+#include "selftest_cases22.inc"
 
 namespace {
 
@@ -1755,9 +1763,13 @@ int main(int argc, char** argv)
     define_struct_literals();
     define_struct_globals();
     define_heap_read_places();
-    define_heap_read_place_rejections();
     define_heap();
     define_heap_rejections();
+    define_partnerless_atoms();
+    define_owning_locals();
+    define_owning_loops();
+    define_owning_loops_audit2();
+    define_block_guards_and_vlibc_sites();
     define_vlibc_heap();
     int bad {0};
     for (const Case& c : lowering_cases())

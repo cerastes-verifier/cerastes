@@ -1,7 +1,7 @@
-// expect: rejected cerastes-unsupported_annotation @ L10
+// expect: error permission @ L12
 // mode: c23, c++20
 // twin: tests/memory/live_result.c
-// Pins: 0037 item 15: an atom on *result is rejected until owning results (re-expected by M4.5d2b: owning results of M4.5d2a cover only a result's owns_block, record 0047 item 11)
+// Pins: 0037 item 15, flipped by record 0052 item 2 (approved Flip, M4.5d2b1): an atom on *result is accepted now; this callee holds only live(p), so owns(*r) is given and not held: permission at the return (the rejection it pinned is lifted)
 #include <cerastes.h>
 #include <stddef.h>
 

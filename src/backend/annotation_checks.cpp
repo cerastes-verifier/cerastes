@@ -1657,6 +1657,7 @@ bool is_protected_macro_name(const std::string& n, const std::set<std::string>& 
                                       "cerastes_old",
                                       "owns_block",
                                       "cerastes_owns_block",
+                                      "cerastes_owns_vlibc_block",
                                       "cerastes_zeroed"};
     for (const char* f : fixed)
     {

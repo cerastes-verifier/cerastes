@@ -687,6 +687,18 @@ private:
             {
                 scopes_.back().insert(v->id);
             }
+            if (v->owning)
+            {
+                // decision 0052 item 3: an owning local is an automatic pointer to an object that is not a cell, a
+                // parameter's copy or a compound literal
+                if (!v->type.is_ptr() || v->type.pointee == nullptr || v->type.pointee->is_void() || v->address_taken ||
+                    v->is_param_copy || v->compound_literal)
+                {
+                    err(v->loc,
+                        "'" + v->name +
+                            "' is marked owning but is not an automatic pointer variable to an object (decision 0052 item 3)");
+                }
+            }
         }
         // Decision 0037 items 2-3: a parameter or a result may be a pointer to a bool, an integer or an enumeration.
         if (f.ret.is_ptr())
@@ -1047,6 +1059,8 @@ private:
         // `owns(*p)` and `reads(*p)` of one parameter in one clause list: lowering asserts per path that they do not both hold (`f__wf`,
         // decision 0039 item 7), so only a same-kind pair is refused here.
         std::set<int> used;
+        size_t outputs {0U};
+        bool saw_output {false};
         for (const AtomSite& s : sites)
         {
             if (!s.in_ensures)
@@ -1054,7 +1068,61 @@ private:
                 continue;
             }
             const Expr& a {*s.atom};
-            if (a.amount < 0 || static_cast<size_t>(a.amount) >= req.size())
+            if (a.amount >= 0 && static_cast<size_t>(a.amount) >= req.size())
+            {
+                // Decision 0052 item 2: an atom without a partner carries the number of its OUTPUT amount, numbered
+                // from the number of `requires` atoms in
+                // evaluation order.  An `owns`, `reads` or `live`; an implicit atom always has its partner.
+                if (a.implicit_atom || static_cast<size_t>(a.amount) != req.size() + outputs++)
+                {
+                    err(a.loc,
+                        "an `ensures` atom without a `requires` atom to return, whose output amount is not the next one "
+                        "(decision 0052 item 2)");
+                }
+                else if (!atom_place(a).valid())
+                {
+                    err(a.loc,
+                        "an `ensures` atom without a `requires` atom on a place decision 0052 item 2 does not allow");
+                }
+                else if (f.body == nullptr && atom_place(a).root != kResultSiteKey)
+                {
+                    // item 2a: a bodiless contract is trusted; a partnerless atom on anything but the result gives the
+                    // caller a permission it may already hold
+                    err(a.loc,
+                        "an `ensures` atom without a `requires` atom on something other than the result in a function without a body (decision 0052 item 2a)");
+                }
+                else
+                {
+                    for (const AtomSite& other : sites)
+                    {
+                        const Expr& b {*other.atom};
+                        if (!other.in_ensures || &b == &a || b.amount < 0 ||
+                            static_cast<size_t>(b.amount) >= req.size())
+                        {
+                            continue;
+                        }
+                        const PlaceKey pa {atom_place(a)};
+                        const PlaceKey pb {atom_place(b)};
+                        const size_t n {std::min(pa.path.size(), pb.path.size())};
+                        if (pb.valid() && pa.root == pb.root && pa.via == pb.via &&
+                            std::equal(pa.path.begin(), pa.path.begin() + static_cast<std::ptrdiff_t>(n),
+                                       pb.path.begin()))
+                        {
+                            // N7: two atoms of one root, one inside the other, one of them without a partner
+                            err(a.loc,
+                                "an `ensures` atom without a `requires` atom on a place that also holds a partnered `ensures` atom of its root, one inside the other (decision 0052 item 2)");
+                        }
+                    }
+                    saw_output = true;
+                }
+                continue;
+            }
+            if (a.implicit_atom && saw_output)
+            {
+                err(a.loc,
+                    "an implicit `static` local atom after an `ensures` atom without a partner (decision 0052 item 2: the cover must come first)");
+            }
+            if (a.amount < 0)
             {
                 err(a.loc, "an `ensures` atom without a `requires` atom to return (decision 0037 item 6)");
                 continue;
@@ -1144,8 +1212,10 @@ private:
                         taken = true;
                     }
                 }
-                if (!taken)
+                if (!taken && f.body == nullptr)
                 {
+                    // decision 0052 item 2: in a function with a body a block site on a formal may be given (the callee
+                    // holds the whole block)
                     err(a.atom->loc,
                         "an `ensures` `owns_block` of a parameter without one in the `requires` (it would return a block it never took; decision 0047 item 4)");
                 }
@@ -2349,6 +2419,11 @@ private:
                 {
                     err(e.loc, "a permission atom is not a bool");
                 }
+                if (e.vlibc_block && e.atom != AtomKind::OwnsBlock)
+                {
+                    err(e.loc,
+                        "the vlibc mark on a permission atom that is not an `owns_block` (decision 0052 item 7)");
+                }
                 if (e.atom == AtomKind::OwnsBlock)
                 {
                     // Decision 0047 item 4: `owns_block(p)` of a pointer parameter or, in an `ensures`, the result: the whole heap block, with no ghost amount.
@@ -2399,12 +2474,13 @@ private:
                     const Expr* place {place_root(e.a, &steps)};
                     // the base pointer is reached through a load or a pointer leaf
                     const bool stepped {steps.size() > atom_place(e).path.size()};
-                    if (e.implicit_atom &&
-                        !(e.atom == AtomKind::Owns && !member && e.a->kind == Expr::Kind::GlobalAddr &&
-                          e.a->global != nullptr && e.a->global->owner != nullptr))
+                    if (e.implicit_atom && !(e.atom == AtomKind::Owns && !member &&
+                                             ((e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr &&
+                                               e.a->global->owner != nullptr) ||
+                                              e.a->kind == Expr::Kind::Formal)))
                     {
                         err(e.loc,
-                            "an implicit atom that is not the `owns` of a `static` local (decision 0041 item 12)");
+                            "an implicit atom that is not the `owns` of a `static` local or of an `owning` parameter (decisions 0041 item 12, 0052 item 2)");
                     }
                     if (in_invariant_ && place->kind == Expr::Kind::GlobalAddr && !stepped)
                     {
@@ -2412,13 +2488,14 @@ private:
                             "a permission atom on a global in a loop invariant (decision 0041 item 10: the globals the function holds are in every loop's invariant already)");
                         break;
                     }
-                    // A contract's place has a Formal, a global or (an `ensures`, through a step: an atom on the result itself is M4.5d2b's) the result for its root; an
+                    // A contract's place has a Formal, a global or (an `ensures`; decision 0052 item 2) the result for
+                    // its root; an
                     // invariant's a pointer variable, the address of a cell or (through a load) a global.
                     const bool root_ok {
                         in_invariant_ ? (place->kind == Expr::Kind::Local || place->kind == Expr::Kind::AddrOf ||
                                          (place->kind == Expr::Kind::GlobalAddr && stepped))
                                       : (place->kind == Expr::Kind::Formal || place->kind == Expr::Kind::GlobalAddr ||
-                                         (ctx == Ctx::Ensures && place->kind == Expr::Kind::Result && stepped))};
+                                         (ctx == Ctx::Ensures && place->kind == Expr::Kind::Result))};
                     // A load that is not of a pointer (`owns(*(*p))` of an `int *p`) is no place's address: the operand must be a pointer unless it is the root itself.
                     if (!root_ok || (place != e.a && !e.a->type.is_ptr()))
                     {

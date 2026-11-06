@@ -301,6 +301,12 @@ private:
             std::string callee_param;
         };
         std::vector<StrictPass> strict_pass;
+        // Decision 0052 item 4: the pointer locals marked `[[cerastes::ref_to_uninit]]`.  Under `--strict-init` a call
+        // whose result is `ref_to_uninit` is accepted only where its node is in `strict_result_ok` (the value of a
+        // marked local's initializer or assignment, a `ref_to_uninit` argument, a marked function's return), which the
+        // encoding of that context fills before it encodes the value.
+        std::set<const vir::Var*> ref_marked;
+        std::set<const an_expr_node*> strict_result_ok;
     };
 
     vir::Program prog_;
@@ -1024,7 +1030,7 @@ private:
         if (a_routine_ptr c {direct_callee(e)}; c != nullptr)
         {
             const SpecFn fn {spec_fn(c)};
-            if (fn == SpecFn::owns_block || fn == SpecFn::zeroed)
+            if (fn == SpecFn::owns_block || fn == SpecFn::owns_vlibc_block || fn == SpecFn::zeroed)
             {
                 return true;
             }
@@ -2086,6 +2092,10 @@ private:
         }
     }
 
+    // The `owns(*p)` atoms an `owning` parameter stands for (the added ones and the user's own that they merged with,
+    // decision 0040 item 3): decision 0052 item 2 (question 159) lets only these and a `static` local's atoms cover a
+    // partnerless atom.
+    std::set<const Expr*> owning_param_atoms_;
     void apply_owning(a_routine_ptr r, vir::Function* f)
     {
         apply_function_markers(r, f);
@@ -2100,6 +2110,9 @@ private:
         std::vector<vir::Clause> add_requires;
         std::vector<vir::Clause> add_ensures;
         const std::vector<vir::AtomSite> sites {vir::contract_atoms(*f)};
+        // Decision 0052 item 6 (c): an `owns_block` of the parameter in a list merges like an `owns` does, when it is
+        // in both lists.
+        const std::vector<vir::AtomSite> blocks {vir::contract_block_atoms(*f)};
         for (const OwningParam& o : it->second)
         {
             const auto k {static_cast<size_t>(o.index)};
@@ -2107,6 +2120,15 @@ private:
             {
                 continue; // the signature was rejected
             }
+            const vir::AtomSite* block_in[2] {nullptr, nullptr};
+            for (const vir::AtomSite& bs : blocks)
+            {
+                if (bs.atom->a != nullptr && bs.atom->a->kind == Expr::Kind::Formal && bs.atom->a->index == o.index)
+                {
+                    block_in[bs.in_ensures ? 1 : 0] = &bs;
+                }
+            }
+            const bool block_both {block_in[0] != nullptr && (block_in[1] != nullptr || f->noreturn)};
             const std::string pname {f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name};
             for (int list {0}; list < 2; ++list)
             {
@@ -2116,6 +2138,18 @@ private:
                 }
                 bool merge {false};
                 bool bad {false};
+                const Expr* merged_atom {nullptr};
+                if (const vir::AtomSite* bs = block_in[list])
+                {
+                    if (block_both && vir::atom_guard_shape(*bs, o.index) != vir::GuardShape::Other)
+                    {
+                        merge = true;
+                    }
+                    else
+                    {
+                        bad = true;
+                    }
+                }
                 for (const vir::AtomSite& st : sites)
                 {
                     if (st.in_ensures != (list == 1) || st.atom->a == nullptr)
@@ -2140,6 +2174,7 @@ private:
                              vir::atom_guard_shape(st, o.index) != vir::GuardShape::Other)
                     {
                         merge = true;
+                        merged_atom = st.atom;
                     }
                     else
                     {
@@ -2148,16 +2183,22 @@ private:
                 }
                 if (bad)
                 {
-                    reject(Diag::unsupported_annotation, o.pos,
-                           "\"cerastes::owning\" on `" + pname +
-                               "` beside `reads`, `live`, an atom on a member or a guarded `owns` of `" + pname +
-                               "` in its `" + (list == 0 ? "requires" : "ensures") + "` (`" + pname +
-                               "` is an owning parameter: its contract already holds `" + pname + " == NULL || owns(*" +
-                               pname + ")`)");
+                    reject(
+                        Diag::unsupported_annotation, o.pos,
+                        "\"cerastes::owning\" on `" + pname +
+                            "` beside `reads`, `live`, an atom on a member, a guarded `owns` or an `owns_block` that "
+                            "is in one list only of `" +
+                            pname + "` in its `" + (list == 0 ? "requires" : "ensures") + "` (`" + pname +
+                            "` is an owning parameter: its contract already holds `" + pname + " == NULL || owns(*" +
+                            pname + ")`)");
                     continue;
                 }
                 if (merge)
                 {
+                    if (merged_atom != nullptr)
+                    {
+                        owning_param_atoms_.insert(merged_atom);
+                    }
                     continue;
                 }
                 const SrcLoc l {loc_of(o.pos)};
@@ -2168,6 +2209,7 @@ private:
                 b_.text(pf2, pname);
                 const Expr* atom {b_.atom(vir::AtomKind::Owns, pf2, -1, l)};
                 atom_pos_[atom] = o.pos;
+                owning_param_atoms_.insert(atom);
                 (list == 0 ? add_requires : add_ensures)
                     .push_back(vir::Clause {b_.binary(vir::BinaryOp::LOr, eq, atom, l), l});
             }
@@ -3633,7 +3675,7 @@ private:
             // `section` change what the object holds, an unknown one may.
             const auto before {reported_count()};
             check_attributes(v->source_corresp.attributes);
-            if (reported_count() != before)
+            if (reported_count() != before || reject_variable_markers(v, "a global variable"))
             {
                 rejected_globals_.insert(v);
                 return;
@@ -4517,6 +4559,19 @@ private:
         for (auto& [f, ids] : need)
         {
             int n {vir::requires_atom_count(*f)};
+            // Decision 0052 item 2: the output amounts of a function's partnerless `ensures` atoms are numbered from
+            // the number of `requires` atoms, so the `requires` atoms added here move them up; and the implicit
+            // `ensures` atoms come BEFORE the written ones in such a method (audit B5), so that an atom that covers
+            // frames the reads after it.  Every other function keeps today's order and numbers.
+            std::vector<const Expr*> outputs;
+            for (const vir::AtomSite& st : vir::contract_atoms(*f))
+            {
+                if (st.in_ensures && st.atom->amount >= n)
+                {
+                    outputs.push_back(st.atom);
+                }
+            }
+            std::vector<vir::Clause> implicit_ensures;
             for (int id : ids)
             {
                 const vir::Global* g {&prog_.globals()[static_cast<size_t>(id)]};
@@ -4525,10 +4580,25 @@ private:
                     vir::Clause {b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l});
                 if (!f->noreturn)
                 {
-                    f->ensures_.push_back(
-                        vir::Clause {b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l});
+                    vir::Clause c {b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l};
+                    if (outputs.empty())
+                    {
+                        f->ensures_.push_back(c);
+                    }
+                    else
+                    {
+                        implicit_ensures.push_back(c);
+                    }
                 }
                 ++n;
+            }
+            if (!outputs.empty())
+            {
+                for (const Expr* o : outputs)
+                {
+                    const_cast<Expr*>(o)->amount += static_cast<int>(ids.size());
+                }
+                f->ensures_.insert(f->ensures_.begin(), implicit_ensures.begin(), implicit_ensures.end());
             }
         }
     }
@@ -5686,6 +5756,7 @@ private:
         old_c,
         unsupported,
         owns_block,
+        owns_vlibc_block,
         zeroed
     };
     // The routine is one of the functions <cerastes.h> declares (decision 0047, audit N6: `owns_block` and `zeroed` are entities, not names).
@@ -5700,7 +5771,8 @@ private:
     static SpecFn spec_fn(a_routine_ptr r)
     {
         const std::string n {rname(r)};
-        if ((n == "cerastes::owns_block" || n == "cerastes_owns_block" || n == "cerastes_zeroed") &&
+        if ((n == "cerastes::owns_block" || n == "cerastes_owns_block" || n == "cerastes_owns_vlibc_block" ||
+             n == "cerastes_zeroed") &&
             !declared_in_cerastes_header(r))
         {
             return SpecFn::none;
@@ -5720,6 +5792,10 @@ private:
         if (n == "cerastes::owns_block" || n == "cerastes_owns_block")
         {
             return SpecFn::owns_block; // decision 0047 item 4
+        }
+        if (n == "cerastes_owns_vlibc_block")
+        {
+            return SpecFn::owns_vlibc_block; // decision 0052 item 7
         }
         if (n == "cerastes_zeroed")
         {
@@ -5814,15 +5890,10 @@ private:
                 return nullptr;
             }
             const Expr* rootE {vir::place_root(addr)};
-            if (rootE->kind == Expr::Kind::Result)
-            {
-                reject(
-                    Diag::unsupported_annotation, e->position,
-                    "\"" + name +
-                        "\" of a member of `*result` or of a place reached from the result (an atom on the result, an owning result: M4.5d2b)");
-                return nullptr;
-            }
-            if (rootE->kind != Expr::Kind::Formal && rootE->kind != Expr::Kind::GlobalAddr)
+            // decision 0052 item 2: a member of the result (`r->x`, `r.q`) is a place of an `ensures` atom with no
+            // `requires` partner
+            if (rootE->kind != Expr::Kind::Formal && rootE->kind != Expr::Kind::GlobalAddr &&
+                rootE->kind != Expr::Kind::Result)
             {
                 reject(Diag::unsupported_annotation, e->position,
                        "\"" + name + "\" of a place not reached from a pointer parameter or a global");
@@ -5884,8 +5955,8 @@ private:
                 reject(
                     Diag::unsupported_annotation, e->position,
                     "\"" + name +
-                        "\" of a place other than `*P` of a pointer P read from a parameter, a global or the result, or a member of one (`*local` or an element: M4.5e1; "
-                        "an element of the result: M4.5d2b)");
+                        "\" of a place other than `*P` of a pointer P read from a parameter, a global or the result, "
+                        "or a member of one (`*local` or an element: M4.5e1)");
                 return nullptr;
             }
         }
@@ -5893,15 +5964,6 @@ private:
         const Expr* pf {place_pointer(pn, e->position)};
         if (pf == nullptr)
         {
-            return nullptr;
-        }
-        const Expr* rootE {vir::place_root(pf)};
-        if (rootE->kind == Expr::Kind::Result)
-        {
-            reject(
-                Diag::unsupported_annotation, e->position,
-                "\"" + name +
-                    "\" of a place through the result (`live(r.q)`, `owns(*r.q)`, `owns(**r)`, an atom on `*result`: an owning result, M4.5d2b)");
             return nullptr;
         }
         if (fn == SpecFn::owns && pn->type != nullptr)
@@ -6049,7 +6111,10 @@ private:
         }
         auto spelling = [](const Expr* atom)
         {
-            return atom->atom == vir::AtomKind::Owns ? "owns" : atom->atom == vir::AtomKind::Reads ? "reads" : "live";
+            return atom->atom == vir::AtomKind::Owns        ? "owns"
+                   : atom->atom == vir::AtomKind::Reads     ? "reads"
+                   : atom->atom == vir::AtomKind::OwnsBlock ? "owns_block"
+                                                            : "live";
         };
         auto pos_of = [&](const Expr* atom)
         {
@@ -6281,6 +6346,94 @@ private:
         return finish(ind, b_.deref(pf, loc_of(ind->position)));
     }
 
+    // Decision 0052 item 2a: whether `x` reads the result or a place reached from it (a member, a load): `r`, `r->q`,
+    // `*r`, `r.q`.
+    static bool through_result(const Expr* x)
+    {
+        for (int guard {0}; x != nullptr && guard < 32; ++guard)
+        {
+            switch (x->kind)
+            {
+                case Expr::Kind::Result:
+                    return true;
+                case Expr::Kind::Deref:
+                case Expr::Kind::Field:
+                case Expr::Kind::MemberAddr:
+                case Expr::Kind::ReportAt:
+                    x = x->a;
+                    break;
+                default:
+                    return false;
+            }
+        }
+        return false;
+    }
+    // Decision 0052 item 2a (audit round 2, B1): whether the result, or a place through it, appears in a clause of the
+    // `ensures` of `f` anywhere but where it cannot make a place the contract gives coincide with one the caller
+    // holds: as the place of an atom, in `X == NULL` or `X != NULL` with `X` directly such a path (not under `?:`, a
+    // conversion or a call), or as a value that is not a pointer (`*r == 0`, `r->x > 0`).  Any other occurrence of a
+    // pointer read through the result (`r != p`, `!(r != p)`, `(c ? r : r) == p`, `r->q == p`, a struct result's
+    // pointer leaf) could pick the object the caller already holds.
+    static bool contract_equates_result(const vir::Function& f)
+    {
+        std::function<bool(const Expr*, const Expr*)> walk = [&](const Expr* x, const Expr* parent) -> bool
+        {
+            if (x == nullptr || x->kind == Expr::Kind::Atom)
+            {
+                return false; // an atom's place is what a contract may name
+            }
+            if (through_result(x))
+            {
+                if (x->type.is_ptr() || x->type.is_struct())
+                {
+                    const bool null_test {
+                        parent != nullptr && parent->kind == Expr::Kind::Binary &&
+                        (parent->bop == vir::BinaryOp::Eq || parent->bop == vir::BinaryOp::Ne) &&
+                        ((parent->a == x && parent->b != nullptr && parent->b->kind == Expr::Kind::Null) ||
+                         (parent->b == x && parent->a != nullptr && parent->a->kind == Expr::Kind::Null))};
+                    return !null_test;
+                }
+                return false; // a value read that is not a pointer
+            }
+            for (const Expr* y : {x->a, x->b, x->c})
+            {
+                if (walk(y, x))
+                {
+                    return true;
+                }
+            }
+            for (const Expr* y : x->args)
+            {
+                if (walk(y, x))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        for (const vir::Clause& c : f.ensures_)
+        {
+            if (walk(c.expr, nullptr))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The reason a contract with no body in the unit cannot promise a permission it did not take (decision 0052 item
+    // 2a).
+    static std::string manifest_reason(int root)
+    {
+        return std::string(
+                   "a contract nothing verifies is trusted, so a permission it promises that its caller may already "
+                   "hold would make "
+                   "the caller's state impossible; it may promise one only on its result, and only where the result, "
+                   "and a pointer read through it, appear only as an atom's place, in a comparison with a null "
+                   "pointer or as a value that is not a pointer") +
+               (root == vir::kResultSiteKey ? "" : " (a place that is not the result's)") +
+               " (the contract manifest, M6, decision 0052 item 2a)";
+    }
+
     // The checks of a finished contract that need all its clauses (decision 0037 items 5 and 6): every atom stands where the position rule allows;
     // the atoms of the `requires` are numbered in evaluation order, each at most once per kind and parameter; each atom of the `ensures` returns the
     // `requires` atom of its kind and parameter.
@@ -6414,6 +6567,14 @@ private:
         // `owns(*p)` and `reads(*p)` of one parameter in one clause list are accepted (decision 0039 item 7): lowering asserts per path that they
         // do not both hold.
         std::set<int> used;
+        // Decision 0052 item 2: an `ensures` atom with no `requires` partner has an OUTPUT amount, numbered from the
+        // number of `requires` atoms in the order of the `ensures` atoms; item 2a: a contract with no body in the unit
+        // may promise one only on its result.
+        size_t outputs {0U};
+        const bool bodiless {cx_.routine == nullptr || verified_body(cx_.routine) == nullptr};
+        const bool result_equated {bodiless && contract_equates_result(*f)};
+        std::vector<std::pair<vir::AtomKind, vir::PlaceKey>> given;
+        std::vector<const vir::AtomSite*> given_sites;
         for (const vir::AtomSite& st : sites)
         {
             if (!st.in_ensures)
@@ -6431,11 +6592,40 @@ private:
             }
             if (partner < 0)
             {
-                reject(
-                    Diag::unsupported_annotation, pos_of(st.atom),
-                    std::string("an `ensures` \"") + spelling(st.atom) + "\" with no \"" + spelling(st.atom) +
-                        "\" of the same " + atom_word(*st.atom) +
-                        " in the `requires` (a permission a function creates, such as a pointee result, is M4.5d2b)");
+                const vir::PlaceKey pk {vir::atom_place(*st.atom)};
+                const std::string head {std::string("an `ensures` \"") + spelling(st.atom) + "\" with no \"" +
+                                        spelling(st.atom) + "\" of the same " + atom_word(*st.atom) +
+                                        " in the `requires`"};
+                if (!pk.valid())
+                {
+                    reject(Diag::unsupported_annotation, pos_of(st.atom),
+                           head +
+                               ": a place that a permission can be given on is a pointee, a member or a place reached "
+                               "through loads "
+                               "(decision 0052 item 2)");
+                    continue;
+                }
+                if (bodiless && (pk.root != vir::kResultSiteKey || result_equated))
+                {
+                    reject(Diag::unsupported_annotation, pos_of(st.atom),
+                           head + ", in a contract with no body in this unit: " + manifest_reason(pk.root));
+                    continue;
+                }
+                bool twice {false};
+                for (const auto& [gk, gp] : given)
+                {
+                    twice = twice || (gk == st.atom->atom && gp == pk);
+                }
+                if (twice)
+                {
+                    reject(Diag::unsupported_annotation, pos_of(st.atom),
+                           std::string("\"") + spelling(st.atom) + "\" of the same " + atom_word(*st.atom) +
+                               " twice in an `ensures`");
+                    continue;
+                }
+                given.emplace_back(st.atom->atom, pk);
+                given_sites.push_back(&st);
+                const_cast<Expr*>(st.atom)->amount = static_cast<int>(req.size() + outputs++);
                 continue;
             }
             if (!used.insert(partner).second)
@@ -6446,6 +6636,48 @@ private:
                 continue;
             }
             const_cast<Expr*>(st.atom)->amount = partner;
+        }
+        // Decision 0052 item 2 (audit N7): an atom with no partner on a root that also has a partnered `ensures` atom
+        // on a place inside it, or around it (`owns(*p)` beside `live(p)`, `owns(p->x)` beside `owns(*p)`), would make
+        // lowering's path lists nested: rejected here.
+        for (const vir::AtomSite* g : given_sites)
+        {
+            const vir::PlaceKey pg {vir::atom_place(*g->atom)};
+            for (const vir::AtomSite& o : sites)
+            {
+                if (!o.in_ensures || o.atom == g->atom || o.atom->amount < 0 ||
+                    static_cast<size_t>(o.atom->amount) >= req.size())
+                {
+                    continue;
+                }
+                const vir::PlaceKey po {vir::atom_place(*o.atom)};
+                const size_t n {std::min(pg.path.size(), po.path.size())};
+                if (po.valid() && po.root == pg.root && po.via == pg.via &&
+                    std::equal(pg.path.begin(), pg.path.begin() + static_cast<long>(n), po.path.begin()))
+                {
+                    reject(Diag::unsupported_annotation, pos_of(g->atom),
+                           std::string("an `ensures` \"") + spelling(g->atom) + "\" with no \"" + spelling(g->atom) +
+                               "\" of the same " + atom_word(*g->atom) +
+                               " in the `requires`, on a place that also holds `" + atom_text(*o.atom) +
+                               "`, which the `requires` takes, one inside the other (a place a function was given "
+                               "cannot be promised again "
+                               "as a new one; decision 0052 item 2)");
+                    break;
+                }
+            }
+        }
+        if (outputs > 0U)
+        {
+            // Decision 0052 item 2 (question 159): in a function with an output amount, the atoms of its `owning`
+            // parameters are implicit atoms, so that lowering lets only implicit atoms cover.  Their `requires`
+            // partners carry the mark too (check_program compares them).
+            for (const vir::AtomSite& st : sites)
+            {
+                if (owning_param_atoms_.count(st.atom) != 0U)
+                {
+                    const_cast<Expr*>(st.atom)->implicit_atom = true;
+                }
+            }
         }
         // Decision 0047 item 4: the rules of the `owns_block` atoms (check_program repeats them).  The operand's key is the parameter's index, or the result's.
         for (size_t i {0U}; i < block_sites.size(); ++i)
@@ -6471,45 +6703,18 @@ private:
                            std::string(b.in_ensures ? "an `ensures`" : "a `requires`") + " (decision 0047 item 4)");
                 continue;
             }
-            // Audit 2 S2: a guard of a block site that reads memory, a global or `old` would make the block depend on the heap; the lowering has no place for it.
-            std::function<bool(const Expr*)> heap_guard = [&](const Expr* x) -> bool
+            bool mixed {false};
+            for (size_t j {0U}; j < i; ++j)
             {
-                if (x == nullptr)
-                {
-                    return false;
-                }
-                if (x->kind == Expr::Kind::Deref || x->kind == Expr::Kind::Atom || x->kind == Expr::Kind::Old ||
-                    x->kind == Expr::Kind::GlobalAddr)
-                {
-                    return true;
-                }
-                for (const Expr* y : {x->a, x->b, x->c})
-                {
-                    if (heap_guard(y))
-                    {
-                        return true;
-                    }
-                }
-                for (const Expr* y : x->args)
-                {
-                    if (heap_guard(y))
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            };
-            bool guarded_by_heap {false};
-            for (const vir::AtomGuard& g : b.guards)
-            {
-                guarded_by_heap = guarded_by_heap || heap_guard(g.cond);
+                mixed = mixed || (vir::atom_place(*block_sites[j].atom).root == key &&
+                                  block_sites[j].atom->vlibc_block != b.atom->vlibc_block);
             }
-            if (guarded_by_heap)
+            if (mixed)
             {
                 reject(
                     Diag::unsupported_annotation, pos_of(b.atom),
-                    "an \"owns_block\" whose guard reads memory, a global or `old` (`*q > 0 ? owns_block(p) : true`): whether a function owns a block may depend on its arguments only "
-                    "(a guard over the heap is M4.5d2b, decision 0047 item 4)");
+                    "\"cerastes_owns_vlibc_block\" and \"owns_block\" of the same pointer in one contract (a contract "
+                    "may not name both allocators' blocks on one root, decision 0052 item 7)");
                 continue;
             }
             bool beside {false};
@@ -6521,12 +6726,22 @@ private:
                     beside = true;
                 }
             }
-            // `owns(*r)` on the result is refused by spec_atom (an owning result), so only a parameter's atoms can be beside.
+            // An atom on the result (decision 0052 item 2) is beside the result's block site like a parameter's atoms
+            // are.
             if (beside)
             {
                 reject(
                     Diag::unsupported_annotation, pos_of(b.atom),
                     "\"owns_block\" beside \"owns\", \"reads\" or \"live\" of the same pointer (the block already holds every cell and its liveness; decision 0047 item 4)");
+                continue;
+            }
+            if (bodiless && b.in_ensures && key == vir::kResultSiteKey && result_equated)
+            {
+                reject(
+                    Diag::unsupported_annotation, pos_of(b.atom),
+                    "an `ensures` \"owns_block\" of the result, in a contract with no body in this unit whose result "
+                    "is used other than as an atom's place, in a comparison with a null pointer or as a value: " +
+                        manifest_reason(key));
                 continue;
             }
             if (b.in_ensures && key >= 0)
@@ -6539,12 +6754,13 @@ private:
                         taken = true;
                     }
                 }
-                if (!taken)
+                if (!taken && bodiless)
                 {
-                    reject(
-                        Diag::unsupported_annotation, pos_of(b.atom),
-                        "an `ensures` \"owns_block\" of a parameter with no \"owns_block\" of it in the `requires` (the call cannot make the caller's pointer own a block it did not "
-                        "have: a partnerless permission is M4.5d2b, decision 0047 item 4)");
+                    reject(Diag::unsupported_annotation, pos_of(b.atom),
+                           "an `ensures` \"owns_block\" of a parameter with no \"owns_block\" of it in the `requires`, "
+                           "in a contract "
+                           "with no body in this unit: " +
+                               manifest_reason(key));
                 }
             }
         }
@@ -6823,6 +7039,10 @@ private:
             {
                 return spec_block_atom(e, name, ops);
             }
+            if (fn == SpecFn::owns_vlibc_block)
+            {
+                return spec_block_atom(e, name, ops, true);
+            }
             if (fn == SpecFn::zeroed)
             {
                 reject(
@@ -6908,6 +7128,11 @@ private:
         for (size_t i {1U}; i < ops.size(); ++i)
         {
             allow_enum_conversion(ops[i]); // decision 0018 item 6 (iii)
+            if (f->params[i - 1U].init == vir::InitMarker::RefToUninit)
+            {
+                allow_strict_result(
+                    ops[i]); // decision 0052 item 4: a `ref_to_uninit` result passed to a `ref_to_uninit` parameter
+            }
             const vir::Type& pty {f->params[i - 1U].type};
             // decision 0044 item 5: a struct argument passes its leaves
             const Expr* a {pty.is_struct() ? struct_value(ops[i], pty) : expr(ops[i])};
@@ -6932,8 +7157,9 @@ private:
         {
             strict_init_arguments(f, args, name, e->position);
         }
-        if (verify_config().strict_init && f->result_init == vir::InitMarker::RefToUninit)
-        { // decision 0047 item 8 (audit S6)
+        // decision 0047 item 8 (audit S6), 0052 item 4
+        if (verify_config().strict_init && f->result_init == vir::InitMarker::RefToUninit && !strict_result_allowed(e))
+        {
             reject_strict_uninit_result(f, e->position);
             return nullptr;
         }
@@ -6977,6 +7203,15 @@ private:
                 cx_.fn->params[static_cast<size_t>(a->var->param_index)].init != vir::InitMarker::None)
             {
                 cx_.strict_pass.push_back(Ctx::StrictPass {a->var->param_index, at, cname, pn});
+                continue;
+            }
+            // Decision 0052 item 4: a marked local, or the result of a `ref_to_uninit` call (admitted by
+            // strict_result_allowed), holds no value to read.
+            if (a != nullptr &&
+                ((a->kind == Expr::Kind::Local && a->var != nullptr && cx_.ref_marked.count(a->var) != 0U) ||
+                 (a->kind == Expr::Kind::Call && a->callee != nullptr &&
+                  a->callee->result_init == vir::InitMarker::RefToUninit)))
+            {
                 continue;
             }
             std::string text {a != nullptr && !a->c_text.empty()            ? "`" + a->c_text + "`"
@@ -7026,6 +7261,243 @@ private:
                        sp.callee_param + "`, but the function " +
                        (taken ? "takes the address of `" + pn + "`" : "assigns `" + pn + "`") + ": `" + pn +
                        "` is no longer the pointer the caller handed in, so it may point to an initialized object");
+        }
+    }
+
+    // ---- markers on variables (decision 0052 items 3 and 4) ----------------------------------------------------
+    // The nodes of `kind` on the attribute list of a variable, one per written spelling (a leading attribute is on
+    // every declarator of its declaration, a trailing one on its own, P74).
+    static std::vector<an_attribute_ptr> variable_markers(a_variable_ptr v, Annot kind)
+    {
+        std::vector<an_attribute_ptr> r;
+        for (an_attribute_ptr a {v->source_corresp.attributes}; a != nullptr; a = a->next)
+        {
+            if (!is_registered_cerastes(a) || classify(a) != kind)
+            {
+                continue;
+            }
+            bool dup {false};
+            for (an_attribute_ptr o : r)
+            {
+                dup = dup || o == a || same_spelling(o->position, a->position);
+            }
+            if (!dup)
+            {
+                r.push_back(a);
+            }
+        }
+        return r;
+    }
+
+    // `owning` or `ref_to_uninit` on a global or a `static` local (`what` names it): registered with target `v`,
+    // rejected until M4.5d2b2 (decision 0052 item 8). True when it rejected.
+    bool reject_variable_markers(a_variable_ptr v, const std::string& what)
+    {
+        bool bad {false};
+        for (Annot k : {Annot::owning, Annot::ref_to_uninit})
+        {
+            const std::vector<an_attribute_ptr> ns {variable_markers(v, k)};
+            if (ns.empty())
+            {
+                continue;
+            }
+            reject(
+                Diag::unsupported_annotation, ns[0U]->position,
+                std::string("\"cerastes::") + marker_name(k) + "\" on " + what + " (" +
+                    (k == Annot::owning ? "an owning global or `static` local" : "a marked global or `static` local") +
+                    ": M4.5d2b2, decision 0052 item 8)");
+            bad = true;
+        }
+        return bad;
+    }
+
+    struct LocalMarks
+    {
+        bool owning {false};
+        bool ref {false};
+        // the variable is not a pointer, or is one the type rules explain: the declaration encodes nothing more
+        bool skip {false};
+    };
+
+    // Reads and checks `owning` and `ref_to_uninit` on an automatic local (decision 0052 items 3 and 4).  Rejects
+    // (unsupported_annotation) a non-pointer, a pointer to a function, a `void *`, twice, `owning(n)` (M4.5e1),
+    // `owning` on a pointer to a `const` or `volatile` object and on an address-taken local (M4.5d2b2).  A marker that
+    // was rejected is not set.
+    LocalMarks read_local_markers(a_variable_ptr v)
+    {
+        LocalMarks r;
+        const std::string name {v->source_corresp.name != nullptr ? v->source_corresp.name : "?"};
+        a_type_ptr vt {v->type != nullptr ? skip_typerefs(v->type) : nullptr};
+        const bool is_ptr {vt != nullptr && vt->kind == tk_pointer && !vt->variant.pointer.is_reference};
+        a_type_ptr pe {is_ptr && vt->variant.pointer.type != nullptr ? skip_typerefs(vt->variant.pointer.type)
+                                                                     : nullptr};
+        for (Annot k : {Annot::owning, Annot::ref_to_uninit})
+        {
+            const std::vector<an_attribute_ptr> ns {variable_markers(v, k)};
+            if (ns.empty())
+            {
+                continue;
+            }
+            const std::string an {std::string("cerastes::") + marker_name(k)};
+            const a_source_position at {ns[0U]->position};
+            if (ns.size() > 1U)
+            {
+                reject(Diag::unsupported_annotation, ns[1U]->position, "\"" + an + "\" twice on `" + name + "`");
+                continue;
+            }
+            if (!is_ptr)
+            {
+                reject(Diag::unsupported_annotation, at, "\"" + an + "\" on `" + name + "` (it is not a pointer)");
+                r.skip = true;
+                continue;
+            }
+            if (pe != nullptr && pe->kind == tk_routine)
+            {
+                reject(Diag::unsupported_annotation, at,
+                       "\"" + an + "\" on `" + name + "` (a pointer to a function: M4.7)");
+                r.skip = true;
+                continue;
+            }
+            if (pe != nullptr && pe->kind == tk_void)
+            {
+                reject(Diag::unsupported_annotation, at,
+                       "\"" + an + "\" on `" + name + "` (a `void *`: a pointer to an untyped object)");
+                r.skip = true;
+                continue;
+            }
+            if (k == Annot::ref_to_uninit)
+            {
+                r.ref = true;
+                continue;
+            }
+            if (!arguments_of(ns[0U]).empty())
+            {
+                reject(Diag::unsupported_annotation, at,
+                       "\"cerastes::owning(n)\" on `" + name + "` (an owned range: M4.5e1)");
+            }
+            else if (pointee_qualified(v->type))
+            {
+                reject(Diag::unsupported_annotation, at,
+                       "\"cerastes::owning\" on `" + name +
+                           "` (a pointer to a `const` or `volatile` object: nothing may be written through an "
+                           "owner, decision 0052 item 3)");
+            }
+            else if (v->address_taken)
+            {
+                reject(Diag::unsupported_annotation, at,
+                       "\"cerastes::owning\" on `" + name +
+                           "`, whose address is taken (an owning cell: M4.5d2b2, decision 0052 item 8)");
+            }
+            else
+            {
+                r.owning = true;
+            }
+        }
+        return r;
+    }
+
+    // Under `--strict-init` the nodes through which a value reaches its receiver unchanged, from `e` down to the call
+    // (casts and lvalue adjustments), may hold a call whose result is `ref_to_uninit` (decision 0052 item 4).
+    void allow_strict_result(an_expr_node_ptr e)
+    {
+        if (!verify_config().strict_init)
+        {
+            return;
+        }
+        for (int guard {0}; e != nullptr && guard < 16; ++guard)
+        {
+            cx_.strict_result_ok.insert(e);
+            if (e->kind != enk_operation ||
+                (e->variant.operation.kind != eok_cast && e->variant.operation.kind != eok_lvalue_adjust) ||
+                e->variant.operation.operands == nullptr || e->variant.operation.operands->next != nullptr)
+            {
+                break;
+            }
+            e = e->variant.operation.operands;
+        }
+    }
+    bool strict_result_allowed(an_expr_node_ptr e) const
+    {
+        return e != nullptr && cx_.strict_result_ok.count(e) != 0U;
+    }
+
+    // `--strict-init`, a marked pointer local `var` (decision 0052 item 4): what it receives has no value to read: a
+    // null pointer constant, the result of a `ref_to_uninit` call (the call itself was admitted by
+    // strict_result_allowed), `&x` of an `uninit` local, or another marked local or parameter. Anything else may point
+    // to an initialized object.
+    void check_marked_source(const vir::Var* var, const Expr* x, const a_source_position& at)
+    {
+        if (!verify_config().strict_init || var == nullptr || cx_.ref_marked.count(var) == 0U)
+        {
+            return;
+        }
+        if (strict_value_uninit_ok(x))
+        {
+            return;
+        }
+        reject(Diag::uninit_ref_initialized, at,
+               "`" + var->name + "` is marked `ref_to_uninit` but receives " +
+                   (x != nullptr && !x->c_text.empty() ? "`" + x->c_text + "`" : std::string("a value")) +
+                   ", which may point to an initialized object: only a null pointer, the result of a `ref_to_uninit` "
+                   "call, `&x` of an `uninit` local or another marked pointer may be stored in it");
+    }
+    // `--strict-init`, a `ref_to_uninit` function's returns (question 154, decision 0052 item 4): a marked local, a
+    // call to a `ref_to_uninit` function or a null pointer constant.  P4416R0 [profiles.init.ref] p6 counts null as
+    // initialized, which would reject every allocation wrapper's `return NULL;`.
+    void check_marked_return(const vir::Function* f, const Expr* x, const a_source_position& at)
+    {
+        const Expr* a {x};
+        while (a != nullptr && a->kind == Expr::Kind::ReportAt)
+        {
+            a = a->a;
+        }
+        const bool ok {a != nullptr &&
+                       (a->kind == Expr::Kind::Null ||
+                        (a->kind == Expr::Kind::Call && a->callee != nullptr &&
+                         a->callee->result_init == vir::InitMarker::RefToUninit) ||
+                        (a->kind == Expr::Kind::Local && a->var != nullptr && cx_.ref_marked.count(a->var) != 0U))};
+        if (ok)
+        {
+            return;
+        }
+        reject(Diag::uninit_ref_initialized, at,
+               "`" + f->c_name + "` is marked `ref_to_uninit` but returns " +
+                   (x != nullptr && !x->c_text.empty() ? "`" + x->c_text + "`" : std::string("a value")) +
+                   ", which may point to an initialized object: only a local marked `ref_to_uninit`, the result of "
+                   "a `ref_to_uninit` call or a null pointer may be returned");
+    }
+    bool strict_value_uninit_ok(const Expr* x) const
+    {
+        while (x != nullptr && x->kind == Expr::Kind::ReportAt)
+        {
+            x = x->a;
+        }
+        if (x == nullptr)
+        {
+            return false;
+        }
+        switch (x->kind)
+        {
+            case Expr::Kind::Null:
+                return true;
+            case Expr::Kind::Call:
+                return x->callee != nullptr && x->callee->result_init == vir::InitMarker::RefToUninit;
+            case Expr::Kind::AddrOf:
+                return x->var != nullptr && cx_.uninit_marked.count(x->var) != 0U;
+            case Expr::Kind::Local:
+                if (x->var == nullptr)
+                {
+                    return false;
+                }
+                if (cx_.ref_marked.count(x->var) != 0U)
+                {
+                    return true;
+                }
+                return x->var->is_param_copy && x->var->param_index >= 0 && cx_.fn != nullptr &&
+                       static_cast<size_t>(x->var->param_index) < cx_.fn->params.size() &&
+                       cx_.fn->params[static_cast<size_t>(x->var->param_index)].init != vir::InitMarker::None;
+            default:
+                return false;
         }
     }
 
@@ -9974,8 +10446,10 @@ private:
             return nullptr;
         }
         vir::Function* v {heap_view(r, sh, *to.t.pointee, pt)};
-        if (verify_config().strict_init && v->result_init == vir::InitMarker::RefToUninit)
-        { // decision 0047 item 8 (audit S6)
+        // decision 0047 item 8 (audit S6), 0052 item 4
+        if (verify_config().strict_init && v->result_init == vir::InitMarker::RefToUninit &&
+            !strict_result_allowed(call) && !strict_result_allowed(cast))
+        {
             reject_strict_uninit_result(v, call->position);
             return nullptr;
         }
@@ -9990,15 +10464,19 @@ private:
         return c;
     }
 
-    // Decision 0047 item 8 (audit S6): under `--strict-init` every call of a function whose result is `ref_to_uninit` is rejected, wherever it stands
-    // (P4222R3 and P4416R0 require the receiving pointer to be marked: target `v`, a marked result or parameter, which M4.5d2b decides).
+    // Decisions 0047 item 8 (audit S6) and 0052 item 4: under `--strict-init` a call of a function whose result is
+    // `ref_to_uninit` stands only where the result goes to a pointer marked `ref_to_uninit` (a local's initializer or
+    // assignment), is returned by a marked function or is the argument of a marked parameter (P4222R3 section 4.2,
+    // P4416R0 [profiles.init.ref]); anywhere else (an unmarked local, a member, a store through a pointer, an unmarked
+    // return or parameter) it is rejected.
     void reject_strict_uninit_result(const vir::Function* f, const a_source_position& at)
     {
         reject(
             Diag::unsupported_annotation, at,
             "under `--strict-init` the result of `" + f->c_name +
-                "` holds no value (`ref_to_uninit`): P4222R3 and P4416R0 require the pointer that receives it "
-                "to be marked (a local `ref_to_uninit`, a marked result or parameter: M4.5d2b, decision 0047 item 8)");
+                "` holds no value (`ref_to_uninit`): P4222R3 requires the pointer that receives it to be marked "
+                "`ref_to_uninit` (write `CERASTES_REF_TO_UNINIT` on the local that holds it, or on the function that "
+                "returns it, decisions 0047 item 8 and 0052 item 4)");
     }
 
     // A call of a heap routine that is not the direct operand of a conversion: an allocation not converted at once (rejected), or the deallocation `free`
@@ -10087,13 +10565,20 @@ private:
         return b_.call(v, {a}, loc_of(e->position));
     }
 
-    // `cerastes_owns_block(p)` / `cerastes::owns_block(p)` in a contract (decision 0047 item 4): an atom on a pointer parameter or, in an `ensures`, the result.
-    const Expr* spec_block_atom(an_expr_node_ptr e, const std::string& name, const std::vector<an_expr_node_ptr>& ops)
+    // `cerastes_owns_block(p)` / `cerastes::owns_block(p)` / `cerastes_owns_vlibc_block(p)` in a contract (decision
+    // 0047 item 4, 0052 item 7): an atom on a pointer parameter or, in an `ensures`, the result.  In the `invariant` of
+    // a loop it is rejected until M4.5d2b2 (decision 0052 item 6 (a)).
+    const Expr* spec_block_atom(an_expr_node_ptr e, const std::string& name, const std::vector<an_expr_node_ptr>& ops,
+                                bool vlibc = false)
     {
         if (!cx_.contract)
         {
-            reject(Diag::unsupported_annotation, e->position,
-                   "\"" + name + "\" in a loop invariant or a termination measure (decision 0047 item 4: M4.5d2b)");
+            // Decision 0052 item 6 (a) is cut to M4.5d2b2: a written `owns_block` in a loop invariant, a measure or a
+            // `do ... while (0)`.
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "\"" + name +
+                    "\" in a loop invariant or a termination measure (a loop place for a whole block: M4.5d2b2, decision 0052 item 6 (a))");
             return nullptr;
         }
         if (cx_.annot == Annot::decreases)
@@ -10101,6 +10586,14 @@ private:
             reject(Diag::unsupported_expression, e->position,
                    "a permission atom (\"" + name +
                        "\") in a termination measure (a measure holds no permission atom, decision 0038 item 10)");
+            return nullptr;
+        }
+        if (vlibc && il_header.source_language != sl_C)
+        {
+            reject(Diag::unsupported_annotation, e->position,
+                   "\"" + name +
+                       "\" in C++: vlibc's allocations are rejected in C++ until M7 (decisions 0050 item 7 and 0052 "
+                       "item 7)");
             return nullptr;
         }
         if (ops.size() != 2U)
@@ -10114,17 +10607,16 @@ private:
         if (cx_.old_depth > 0)
         {
             reject(Diag::unsupported_annotation, e->position,
-                   "\"" + name + "\" under \"old\" (decision 0047 item 4: M4.5d2b)");
+                   "\"" + name + "\" under \"old\" (decision 0047 item 4: M4.5d2b2)");
             return nullptr;
         }
         an_expr_node_ptr a {peel_place(ops[1U])};
         if (a == nullptr || a->kind != enk_param_ref)
         {
-            reject(
-                Diag::unsupported_annotation, e->position,
-                "\"" + name +
-                    "\" of something other than a pointer parameter or, in an `ensures`, the result: a place reached through a load, a member or a global is M4.5d2b "
-                    "(decision 0047 item 4)");
+            reject(Diag::unsupported_annotation, e->position,
+                   "\"" + name +
+                       "\" of something other than a pointer parameter or, in an `ensures`, the result: a place "
+                       "reached through a load, a member or a global is M4.5d2b2 (decision 0047 item 4)");
             return nullptr;
         }
         const Expr* p {expr(a)};
@@ -10149,6 +10641,10 @@ private:
         }
         const Expr* atom {b_.atom(vir::AtomKind::OwnsBlock, p, -1, loc_of(e->position))};
         atom_pos_[atom] = e->position;
+        if (vlibc)
+        {
+            const_cast<Expr*>(atom)->vlibc_block = true; // decision 0052 item 7
+        }
         return atom;
     }
 
@@ -10461,6 +10957,11 @@ private:
             // Decision 0041 item 12 (P63 A6): a `static` local of an accepted type is a block of the program; its declaration emits nothing.
             if (v->storage_class == sc_static && !v->is_thread_local && v->source_corresp.enclosing_routine != nullptr)
             {
+                if (reject_variable_markers(v, "a `static` local variable"))
+                {
+                    cx_.rejected_vars.insert(v);
+                    continue;
+                }
                 static_local_decl(v, at);
                 continue;
             }
@@ -10470,6 +10971,13 @@ private:
                        v->storage_class == sc_extern ? "an extern declaration in a function"
                        : v->is_thread_local          ? "a thread_local variable"
                                                      : "a static local variable");
+                cx_.rejected_vars.insert(v);
+                continue;
+            }
+            // decision 0052 items 3 and 4
+            const LocalMarks marks {read_local_markers(v)};
+            if (marks.skip)
+            {
                 cx_.rejected_vars.insert(v);
                 continue;
             }
@@ -10559,6 +11067,11 @@ private:
             {
                 cx_.uninit_marked.insert(var);
             }
+            var->owning = marks.owning;
+            if (marks.ref)
+            {
+                cx_.ref_marked.insert(var);
+            }
             // Decision 0032 item 4: a local the front end flags `address_taken` is a cell, a pointer local included (decision 0040 item 2).
             if (v->address_taken || vt.t.is_struct())
             {
@@ -10602,6 +11115,10 @@ private:
         if (init_expr != nullptr)
         {
             allow_enum_conversion(init_expr); // decision 0018 item 6 (iii)
+            if (cx_.ref_marked.count(var) != 0U)
+            {
+                allow_strict_result(init_expr); // decision 0052 item 4
+            }
             x = expr(init_expr);
         }
         else if (init_constant != nullptr)
@@ -10623,6 +11140,7 @@ private:
             reject(Diag::unsupported_expression, at, "an initializer whose type is not the variable's type");
             return;
         }
+        check_marked_source(var, x, at);
         out.push_back(b_.decl(var, x, loc_of(at)));
     }
 
@@ -11568,10 +12086,18 @@ private:
             check_self_assignment(e, ops);
             const bool target_ok {assign_target(ops[0U], p)};
             allow_enum_conversion(ops[1U]); // decision 0018 item 6 (iii)
+            if (target_ok && p->v != nullptr && cx_.ref_marked.count(p->v) != 0U)
+            {
+                allow_strict_result(ops[1U]); // decision 0052 item 4
+            }
             p->x = expr(ops[1U]);
             if (!target_ok || p->x == nullptr)
             {
                 return AssignRes::rejected;
+            }
+            if (p->v != nullptr)
+            {
+                check_marked_source(p->v, p->x, e->position);
             }
             if ((p->addr != nullptr || p->target.is_ptr()) && p->x->type != p->target)
             {
@@ -12445,10 +12971,20 @@ private:
             return;
         }
         allow_enum_conversion(s->expr); // decision 0018 item 6 (iii)
+        const bool strict_marked {verify_config().strict_init && f->result_init == vir::InitMarker::RefToUninit};
+        if (strict_marked)
+        {
+            allow_strict_result(
+                s->expr); // decision 0052 item 4: a `ref_to_uninit` call may be returned by a marked function
+        }
         const Expr* x {expr(s->expr)};
         if (x == nullptr)
         {
             return;
+        }
+        if (strict_marked)
+        {
+            check_marked_return(f, x, s->position);
         }
         // `main`'s generated `return 0` has no position: its postconditions are reported at the closing brace.
         SrcLoc l {s->position.seq != 0U ? loc_of(s->position) : f->end_loc};

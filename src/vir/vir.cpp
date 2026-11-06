@@ -1301,11 +1301,9 @@ PlaceKey atom_place(const Expr& atom)
             }
             break;
         case Expr::Kind::Result:
-            // Only a place reached from the result by a step (`*r.q`, `**r`; an atom on the result itself or on a member of it, `owns(r->x)`, stays keyless: M4.5d2b).
-            if (!k.via.empty())
-            {
-                k.root = kResultSiteKey;
-            }
+            // The place `*r`, `r->x`, `*r.q`, `**r` (decision 0052 item 2: an atom on the result has no `requires`
+            // partner, its ghost amount is an output).
+            k.root = kResultSiteKey;
             break;
         case Expr::Kind::Local:
             // A plain pointer variable (`owns(*q)` of an invariant) stays keyless, as before decision 0045; a cell read or a member of a variable gets its own key.
@@ -1391,7 +1389,7 @@ std::vector<AtomSite> loop_atoms(const Stmt& s)
     {
         AtomCollector(all, false, static_cast<int>(k)).walk(s.invariants[k].expr);
     }
-    // An OwnsBlock atom of an invariant (decision 0047 item 4: d2b) is never listed; check_program refuses it.
+    // An OwnsBlock atom of an invariant (decision 0052 item 6 (a): M4.5d2b2) is never listed; check_program refuses it.
     for (AtomSite& a : all)
     {
         if (a.atom->atom != AtomKind::OwnsBlock)
@@ -1562,6 +1560,21 @@ std::string restrict_hazard(const Function& f, int param)
                    mine.str() + "` that is not based on `" + name(param) + "`";
         }
     }
+    // Decision 0052 item 6 (d): the block of a result's `owns_block` holds every leaf of its type, so it can hold a `T
+    // *` that is not based on `param` too (a block site on a Formal is judged by the parameter's type in the loop
+    // above).
+    for (const AtomSite& s : contract_block_atoms(f))
+    {
+        if (s.atom->a != nullptr && s.atom->a->kind == Expr::Kind::Result && !f.ret.is_void())
+        {
+            std::set<const StructType*> seen;
+            if (may_hold_pointer_to(f.ret, *mine.pointee, seen))
+            {
+                return "the result of `" + f.c_name + "` named by the contract can hold a `" + mine.str() +
+                       "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+            }
+        }
+    }
     return "";
 }
 
@@ -1581,7 +1594,22 @@ bool restrict_backed(const Function& f, int param, int* offender)
         return false;
     }
     const std::vector<AtomSite> sites {contract_atoms(f)};
-    bool own {false};
+    // Decision 0052 item 6 (d): an `owns_block` of the parameter, in the `requires` and in the `ensures` (a borrow),
+    // gives everything `owns(*p)` does.
+    const std::vector<AtomSite> blocks {contract_block_atoms(f)};
+    auto block_of = [&](int q, bool in_ensures)
+    {
+        for (const AtomSite& b : blocks)
+        {
+            if (b.in_ensures == in_ensures && b.atom->a != nullptr && b.atom->a->kind == Expr::Kind::Formal &&
+                b.atom->a->index == q && null_guard(b, q))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    bool own {block_of(param, false) && block_of(param, true)};
     for (const AtomSite& r : sites)
     {
         if (r.in_ensures || r.atom->atom != AtomKind::Owns || r.atom->a == nullptr ||
@@ -1636,7 +1664,7 @@ bool restrict_backed(const Function& f, int param, int* offender)
         {
             continue;
         }
-        bool covered {false};
+        bool covered {block_of(static_cast<int>(q), false)};
         for (const AtomSite& r : sites)
         {
             if (!r.in_ensures && (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads) &&

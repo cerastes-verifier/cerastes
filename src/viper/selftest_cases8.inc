@@ -730,14 +730,6 @@ void define_pointer_contract_rejections()
            f->body = k.blk({});
            k.done(f);
        });
-    rc("ptr_rej_ensures_atom_without_partner", "an `ensures` atom without",
-       [=](Kit& k)
-       {
-           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
-           k.ens(f, k.b.atom(AtomKind::Owns, FP(k, f, 0), 0, k.at()));
-           f->body = k.blk({});
-           k.done(f);
-       });
     rc("ptr_rej_atom_in_body", "a permission atom outside a contract",
        [=](Kit& k)
        {
