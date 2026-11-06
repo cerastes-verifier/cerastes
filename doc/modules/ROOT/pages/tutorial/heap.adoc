@@ -97,6 +97,41 @@ heap_struct.c: verified (2 functions; one translation unit: assumes that functio
 Here `main` frees the allocation itself: owning the whole block, from
 the postcondition of `make_point`, is what allows it.
 
+== An owner you cannot forget
+
+A function that allocates and frees in the same place can mark the variable that
+holds the allocation `CERASTES_OWNING`. The variable then owns the block, and
+cerastes checks that it no longer does when the variable's scope ends:
+
+[source,c]
+----
+include::example$tutorial/heap_owner.c[tag=source]
+----
+
+[source,console]
+----
+heap_owner.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`round_trip` frees `p` before it returns on the path where the allocation
+succeeded, and returns without allocating on the other. Add a path that returns
+early and forgets the `free`, and cerastes reports it where the variable's scope
+ends, at the `return` that leaves it, instead of at the end of the function:
+
+[source,c]
+----
+include::example$tutorial/heap_owner_leak_error.c[tag=source]
+----
+
+[source,console]
+----
+heap_owner_leak_error.c:18: error: leak: owning `p` still holds its block
+----
+
+The same words appear when the variable is assigned a new allocation while it
+holds one. A variable that is not marked is checked at the end of the function
+only, which is why this chapter's earlier leak is reported at the closing brace.
+
 == What you have learned
 
 * The result of `malloc` must be tested against `NULL` before it is used.
@@ -104,10 +139,13 @@ the postcondition of `make_point`, is what allows it.
   it to hand an allocation to the caller or to take one.
 * Every allocation is freed exactly once by its owner; one that is not is a
   `leak`, at the end of the function that loses it.
+* A local marked `CERASTES_OWNING` owns its allocation, and a path that leaves
+  its scope while it still holds the block is a `leak` at that path.
 
 That is the end of the tutorial for this version. The
 xref:memory.adoc#heap[reference on allocated memory] covers `calloc`, loops
-over allocations, the attribute `cerastes::owning` and
+over allocations, the attribute `cerastes::owning`
+(xref:memory.adoc#owning-locals[owning locals] in full) and
 xref:memory.adoc#vlibc-allocator[vlibc's own allocator] (`vlibc_malloc` and
 `vlibc_free`, a heap of its own whose blocks only `vlibc_free` frees), and
 xref:memory.adoc#not-yet[What is not supported yet] says what is still

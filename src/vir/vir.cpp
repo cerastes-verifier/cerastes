@@ -6,772 +6,1067 @@
 
 namespace cerastes::vir {
 
-std::string Type::str() const {
-  switch (kind) {
-    case Kind::Void: return "void";
-    case Kind::Bool: return "bool";
-    case Kind::Int: return int_type != nullptr ? int_type->name : "<int>";
-    case Kind::Ptr: return (pointee != nullptr ? pointee->str() : std::string("<?>")) + "*";
-    case Kind::Struct: return struct_type != nullptr ? (struct_type->c_name.empty() ? "struct " + struct_type->tag : struct_type->c_name) : "<struct>";
-  }
-  return "?";
+std::string Type::str() const
+{
+    switch (kind)
+    {
+        case Kind::Void:
+            return "void";
+        case Kind::Bool:
+            return "bool";
+        case Kind::Int:
+            return int_type != nullptr ? int_type->name : "<int>";
+        case Kind::Ptr:
+            return (pointee != nullptr ? pointee->str() : std::string("<?>")) + "*";
+        case Kind::Struct:
+            return struct_type != nullptr
+                       ? (struct_type->c_name.empty() ? "struct " + struct_type->tag : struct_type->c_name)
+                       : "<struct>";
+    }
+    return "?";
 }
 
 namespace {
-void collect_leaves(const StructType& s, std::vector<int>& path, const std::string& text, bool first_arrow, std::vector<StructLeaf>& out, int depth) {
-  if (depth > 64) return;  // a by-value cycle is a check_program error; do not recurse forever
-  for (size_t k = 0; k < s.members.size(); ++k) {
-    const StructMember& m = s.members[k];
-    const std::string name = m.name.empty() ? "<" + std::to_string(k) + ">" : m.name;
-    std::string t = text.empty() ? name : text + (first_arrow ? "->" : ".") + name;
-    path.push_back(static_cast<int>(k));
-    if (m.type.is_struct() && m.type.struct_type != nullptr) collect_leaves(*m.type.struct_type, path, t, false, out, depth + 1);
-    else out.push_back(StructLeaf{path, m.type, std::move(t)});
-    path.pop_back();
-  }
+void collect_leaves(const StructType& s, std::vector<int>& path, const std::string& text, bool first_arrow,
+                    std::vector<StructLeaf>& out, int depth)
+{
+    if (depth > 64)
+    {
+        return; // a by-value cycle is a check_program error; do not recurse forever
+    }
+    for (size_t k {0U}; k < s.members.size(); ++k)
+    {
+        const StructMember& m {s.members[k]};
+        const std::string name {m.name.empty() ? "<" + std::to_string(k) + ">" : m.name};
+        std::string t {text.empty() ? name : text + (first_arrow ? "->" : ".") + name};
+        path.push_back(static_cast<int>(k));
+        if (m.type.is_struct() && m.type.struct_type != nullptr)
+        {
+            collect_leaves(*m.type.struct_type, path, t, false, out, depth + 1);
+        }
+        else
+        {
+            out.push_back(StructLeaf {path, m.type, std::move(t)});
+        }
+        path.pop_back();
+    }
 }
 
-void collect_slots(const StructType& a, const StructType& b, std::vector<int>& path, std::vector<std::vector<int>>& out, int depth) {
-  if (depth > 64) return;
-  if (&a == &b) out.push_back(path);
-  for (size_t k = 0; k < a.members.size(); ++k) {
-    const Type& t = a.members[k].type;
-    if (!t.is_struct() || t.struct_type == nullptr) continue;
-    path.push_back(static_cast<int>(k));
-    collect_slots(*t.struct_type, b, path, out, depth + 1);
-    path.pop_back();
-  }
+void collect_slots(const StructType& a, const StructType& b, std::vector<int>& path, std::vector<std::vector<int>>& out,
+                   int depth)
+{
+    if (depth > 64)
+    {
+        return;
+    }
+    if (&a == &b)
+    {
+        out.push_back(path);
+    }
+    for (size_t k {0U}; k < a.members.size(); ++k)
+    {
+        const Type& t {a.members[k].type};
+        if (!t.is_struct() || t.struct_type == nullptr)
+        {
+            continue;
+        }
+        path.push_back(static_cast<int>(k));
+        collect_slots(*t.struct_type, b, path, out, depth + 1);
+        path.pop_back();
+    }
 }
-}  // namespace
+} // namespace
 
-std::vector<StructLeaf> struct_leaves(const StructType& s, const std::string& root_text, bool arrow) {
-  std::vector<StructLeaf> out;
-  std::vector<int> path;
-  collect_leaves(s, path, root_text, arrow, out, 0);
-  return out;
-}
-
-std::vector<std::vector<int>> struct_slots_of(const StructType& a, const StructType& b) {
-  std::vector<std::vector<int>> out;
-  std::vector<int> path;
-  collect_slots(a, b, path, out, 0);
-  return out;
-}
-
-Type struct_member_type(const StructType& s, const std::vector<int>& path) {
-  Type cur = Type::structure(&s);
-  for (int k : path) {
-    if (!cur.is_struct() || cur.struct_type == nullptr || k < 0 || static_cast<size_t>(k) >= cur.struct_type->members.size()) return Type::void_type();
-    cur = cur.struct_type->members[static_cast<size_t>(k)].type;
-  }
-  return cur;
+std::vector<StructLeaf> struct_leaves(const StructType& s, const std::string& root_text, bool arrow)
+{
+    std::vector<StructLeaf> out;
+    std::vector<int> path;
+    collect_leaves(s, path, root_text, arrow, out, 0);
+    return out;
 }
 
-void scan_assigned_expr(const Expr* e, std::set<int>& assigned) {
-  if (e == nullptr) return;
-  if (e->kind == Expr::Kind::AssignE && e->var != nullptr) assigned.insert(e->var->id);
-  for (const Expr* x : {e->a, e->b, e->c}) scan_assigned_expr(x, assigned);
-  for (const Expr* x : e->args) scan_assigned_expr(x, assigned);
+std::vector<std::vector<int>> struct_slots_of(const StructType& a, const StructType& b)
+{
+    std::vector<std::vector<int>> out;
+    std::vector<int> path;
+    collect_slots(a, b, path, out, 0);
+    return out;
 }
 
-void scan_assigned(const Stmt& s, std::set<int>& assigned, std::set<int>& declared) {
-  switch (s.kind) {
-    case Stmt::Kind::Decl:
-      declared.insert(s.var->id);
-      scan_assigned_expr(s.expr, assigned);
-      break;
-    case Stmt::Kind::Assign:
-      assigned.insert(s.var->id);
-      scan_assigned_expr(s.expr, assigned);
-      break;
-    case Stmt::Kind::ExprStmt: case Stmt::Kind::Return: case Stmt::Kind::Check: scan_assigned_expr(s.expr, assigned); break;
-    case Stmt::Kind::If:
-      scan_assigned_expr(s.expr, assigned);
-      if (s.then_body != nullptr) scan_assigned(*s.then_body, assigned, declared);
-      if (s.else_body != nullptr) scan_assigned(*s.else_body, assigned, declared);
-      break;
-    case Stmt::Kind::While:
-      scan_assigned_expr(s.expr, assigned);
-      if (s.body != nullptr) scan_assigned(*s.body, assigned, declared);
-      if (s.step != nullptr) scan_assigned(*s.step, assigned, declared);
-      break;
-    case Stmt::Kind::Switch:
-      scan_assigned_expr(s.expr, assigned);
-      if (s.body != nullptr) scan_assigned(*s.body, assigned, declared);
-      break;
-    case Stmt::Kind::Block:
-      for (const Stmt* c : s.stmts) scan_assigned(*c, assigned, declared);
-      break;
-    case Stmt::Kind::Store:  // `*addr = expr`: either operand may hold an assignment (`*(p = q) = 1`, `*p = (q = r, 1)`)
-      scan_assigned_expr(s.addr, assigned);
-      scan_assigned_expr(s.expr, assigned);
-      break;
-    case Stmt::Kind::Case:  // a constant (or none): no assignment, scanned so that every Stmt kind with an expression is covered
-      scan_assigned_expr(s.expr, assigned);
-      break;
-    case Stmt::Kind::Break: case Stmt::Kind::Continue: case Stmt::Kind::Goto: case Stmt::Kind::Label: break;  // no expression
-  }
+Type struct_member_type(const StructType& s, const std::vector<int>& path)
+{
+    Type cur {Type::structure(&s)};
+    for (int k : path)
+    {
+        if (!cur.is_struct() || cur.struct_type == nullptr || k < 0 ||
+            static_cast<size_t>(k) >= cur.struct_type->members.size())
+        {
+            return Type::void_type();
+        }
+        cur = cur.struct_type->members[static_cast<size_t>(k)].type;
+    }
+    return cur;
 }
 
-std::set<int> assigned_params(const Function& f) {
-  std::set<int> out;
-  if (f.body == nullptr) return out;
-  std::set<int> assigned, declared;
-  scan_assigned(*f.body, assigned, declared);
-  for (size_t k = 0; k < f.params.size(); ++k)
-    if (f.params[k].type.is_ptr() && assigned.count(f.param_var(static_cast<int>(k))->id) != 0) out.insert(static_cast<int>(k));
-  return out;
+void scan_assigned_expr(const Expr* e, std::set<int>& assigned)
+{
+    if (e == nullptr)
+    {
+        return;
+    }
+    if (e->kind == Expr::Kind::AssignE && e->var != nullptr)
+    {
+        assigned.insert(e->var->id);
+    }
+    for (const Expr* x : {e->a, e->b, e->c})
+    {
+        scan_assigned_expr(x, assigned);
+    }
+    for (const Expr* x : e->args)
+    {
+        scan_assigned_expr(x, assigned);
+    }
 }
 
-int Function::add_param(std::string name, Type type, SrcLoc loc) {
-  const int k = static_cast<int>(params.size());
-  params.push_back(Param{name, type, loc, std::string()});
-  Var* v = new_local(name.empty() ? "arg" + std::to_string(k) : name, type, std::move(loc));
-  v->is_param_copy = true;
-  v->param_index = k;
-  param_vars_.push_back(locals_.size() - 1);
-  return k;
+void scan_assigned(const Stmt& s, std::set<int>& assigned, std::set<int>& declared)
+{
+    switch (s.kind)
+    {
+        case Stmt::Kind::Decl:
+            declared.insert(s.var->id);
+            scan_assigned_expr(s.expr, assigned);
+            break;
+        case Stmt::Kind::Assign:
+            assigned.insert(s.var->id);
+            scan_assigned_expr(s.expr, assigned);
+            break;
+        case Stmt::Kind::ExprStmt:
+        case Stmt::Kind::Return:
+        case Stmt::Kind::Check:
+            scan_assigned_expr(s.expr, assigned);
+            break;
+        case Stmt::Kind::If:
+            scan_assigned_expr(s.expr, assigned);
+            if (s.then_body != nullptr)
+            {
+                scan_assigned(*s.then_body, assigned, declared);
+            }
+            if (s.else_body != nullptr)
+            {
+                scan_assigned(*s.else_body, assigned, declared);
+            }
+            break;
+        case Stmt::Kind::While:
+            scan_assigned_expr(s.expr, assigned);
+            if (s.body != nullptr)
+            {
+                scan_assigned(*s.body, assigned, declared);
+            }
+            if (s.step != nullptr)
+            {
+                scan_assigned(*s.step, assigned, declared);
+            }
+            break;
+        case Stmt::Kind::Switch:
+            scan_assigned_expr(s.expr, assigned);
+            if (s.body != nullptr)
+            {
+                scan_assigned(*s.body, assigned, declared);
+            }
+            break;
+        case Stmt::Kind::Block:
+            for (const Stmt* c : s.stmts)
+            {
+                scan_assigned(*c, assigned, declared);
+            }
+            break;
+        // `*addr = expr`: either operand may hold an assignment (`*(p = q) = 1`, `*p = (q = r, 1)`)
+        case Stmt::Kind::Store:
+            scan_assigned_expr(s.addr, assigned);
+            scan_assigned_expr(s.expr, assigned);
+            break;
+        // a constant (or none): no assignment, scanned so that every Stmt kind with an expression is covered
+        case Stmt::Kind::Case:
+            scan_assigned_expr(s.expr, assigned);
+            break;
+        case Stmt::Kind::Break:
+        case Stmt::Kind::Continue:
+        case Stmt::Kind::Goto:
+        case Stmt::Kind::Label:
+            break; // no expression
+    }
 }
 
-Var* Function::new_local(std::string name, Type type, SrcLoc loc) {
-  auto v = std::make_unique<Var>();
-  v->id = static_cast<int>(locals_.size());
-  v->name = std::move(name);
-  v->type = type;
-  v->loc = std::move(loc);
-  locals_.push_back(std::move(v));
-  return locals_.back().get();
+std::set<int> assigned_params(const Function& f)
+{
+    std::set<int> out;
+    if (f.body == nullptr)
+    {
+        return out;
+    }
+    std::set<int> assigned;
+    std::set<int> declared;
+    scan_assigned(*f.body, assigned, declared);
+    for (size_t k {0U}; k < f.params.size(); ++k)
+    {
+        if (f.params[k].type.is_ptr() && assigned.count(f.param_var(static_cast<int>(k))->id) != 0U)
+        {
+            out.insert(static_cast<int>(k));
+        }
+    }
+    return out;
 }
 
-void Function::mark_address_taken(const Var* v) {
-  if (v == nullptr || v->id < 0 || static_cast<size_t>(v->id) >= locals_.size() || locals_[static_cast<size_t>(v->id)].get() != v) return;
-  locals_[static_cast<size_t>(v->id)]->address_taken = true;
+int Function::add_param(std::string name, Type type, SrcLoc loc)
+{
+    const int k {static_cast<int>(params.size())};
+    params.push_back(Param {name, type, loc, std::string()});
+    Var* v {new_local(name.empty() ? "arg" + std::to_string(k) : name, type, std::move(loc))};
+    v->is_param_copy = true;
+    v->param_index = k;
+    param_vars_.push_back(locals_.size() - 1U);
+    return k;
 }
 
-Global* Program::add_global(std::string c_name, Type type, SrcLoc loc, const Function* owner) {
-  Global& g = globals_.emplace_back();
-  g.id = static_cast<int>(globals_.size()) - 1;
-  g.c_name = std::move(c_name);
-  g.type = type;
-  g.loc = std::move(loc);
-  g.owner = owner;
-  return &g;
+Var* Function::new_local(std::string name, Type type, SrcLoc loc)
+{
+    auto v {std::make_unique<Var>()};
+    v->id = static_cast<int>(locals_.size());
+    v->name = std::move(name);
+    v->type = type;
+    v->loc = std::move(loc);
+    locals_.push_back(std::move(v));
+    return locals_.back().get();
 }
 
-std::string Global::viper_name() const {
-  auto ident = [](const std::string& s) {
-    std::string r;
-    for (char ch : s) r += (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_') ? ch : '_';
-    return r;
-  };
-  std::string n = "GB_";
-  if (owner != nullptr) n += ident(owner->c_name) + "__";
-  return n + ident(c_name) + "__" + std::to_string(id);
+void Function::mark_address_taken(const Var* v)
+{
+    if (v == nullptr || v->id < 0 || static_cast<size_t>(v->id) >= locals_.size() ||
+        locals_[static_cast<size_t>(v->id)].get() != v)
+    {
+        return;
+    }
+    locals_[static_cast<size_t>(v->id)]->address_taken = true;
 }
 
-Type Program::pointer_to(const Type& pointee) {
-  for (const Type& t : pointees_)
-    if (t == pointee) return Type{Type::Kind::Ptr, nullptr, &t, nullptr};
-  pointees_.push_back(pointee);
-  return Type{Type::Kind::Ptr, nullptr, &pointees_.back(), nullptr};
+Global* Program::add_global(std::string c_name, Type type, SrcLoc loc, const Function* owner)
+{
+    Global& g {globals_.emplace_back()};
+    g.id = static_cast<int>(globals_.size()) - 1;
+    g.c_name = std::move(c_name);
+    g.type = type;
+    g.loc = std::move(loc);
+    g.owner = owner;
+    return &g;
 }
 
-StructType* Program::add_struct(const std::string& tag, const std::string& c_name, SrcLoc loc) {
-  StructType& st = structs_.emplace_back();
-  st.id = static_cast<int>(structs_.size()) - 1;
-  st.tag = tag;
-  std::string clean;
-  for (char ch : tag) clean += (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_') ? ch : '_';
-  st.name = "struct_" + std::to_string(st.id) + "_" + (clean.empty() ? "anon" : clean);
-  st.c_name = c_name;
-  st.loc = std::move(loc);
-  return &st;
+std::string Global::viper_name() const
+{
+    auto ident = [](const std::string& s)
+    {
+        std::string r;
+        for (char ch : s)
+        {
+            r += (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_') ? ch : '_';
+        }
+        return r;
+    };
+    std::string n {"GB_"};
+    if (owner != nullptr)
+    {
+        n += ident(owner->c_name) + "__";
+    }
+    return n + ident(c_name) + "__" + std::to_string(id);
 }
 
-int Program::add_member(StructType* s, std::string name, Type type, SrcLoc loc) {
-  s->members.push_back(StructMember{std::move(name), type, std::move(loc)});
-  return static_cast<int>(s->members.size()) - 1;
+Type Program::pointer_to(const Type& pointee)
+{
+    for (const Type& t : pointees_)
+    {
+        if (t == pointee)
+        {
+            return Type {Type::Kind::Ptr, nullptr, &t, nullptr};
+        }
+    }
+    pointees_.push_back(pointee);
+    return Type {Type::Kind::Ptr, nullptr, &pointees_.back(), nullptr};
 }
 
-const IntType* Program::int_type(const std::string& name, int bits, bool is_signed) {
-  for (const auto& t : int_types_)
-    if (t->bits == bits && t->is_signed == is_signed) return t.get();
-  auto t = std::make_unique<IntType>();
-  t->name = name;
-  t->bits = bits;
-  t->is_signed = is_signed;
-  int_types_.push_back(std::move(t));
-  return int_types_.back().get();
+StructType* Program::add_struct(const std::string& tag, const std::string& c_name, SrcLoc loc)
+{
+    StructType& st {structs_.emplace_back()};
+    st.id = static_cast<int>(structs_.size()) - 1;
+    st.tag = tag;
+    std::string clean;
+    for (char ch : tag)
+    {
+        clean += (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_') ? ch : '_';
+    }
+    st.name = "struct_" + std::to_string(st.id) + "_" + (clean.empty() ? "anon" : clean);
+    st.c_name = c_name;
+    st.loc = std::move(loc);
+    return &st;
 }
 
-const IntType* Program::int_type_of(int bits, bool is_signed) {
-  return int_type((is_signed ? "int" : "uint") + std::to_string(bits), bits, is_signed);
+int Program::add_member(StructType* s, std::string name, Type type, SrcLoc loc)
+{
+    s->members.push_back(StructMember {std::move(name), type, std::move(loc)});
+    return static_cast<int>(s->members.size()) - 1;
 }
 
-const IntType* Program::enum_type(const std::string& name, int bits, bool is_signed, bool is_scoped, const std::string& lo,
-                                  const std::string& hi) {
-  auto t = std::make_unique<IntType>();
-  t->name = name;
-  t->bits = bits;
-  t->is_signed = is_signed;
-  t->is_enum = true;
-  t->is_scoped = is_scoped;
-  t->lo = lo;
-  t->hi = hi;
-  enum_types_.push_back(std::move(t));
-  return enum_types_.back().get();
+const IntType* Program::int_type(const std::string& name, int bits, bool is_signed)
+{
+    for (const auto& t : int_types_)
+    {
+        if (t->bits == bits && t->is_signed == is_signed)
+        {
+            return t.get();
+        }
+    }
+    auto t {std::make_unique<IntType>()};
+    t->name = name;
+    t->bits = bits;
+    t->is_signed = is_signed;
+    int_types_.push_back(std::move(t));
+    return int_types_.back().get();
 }
 
-Function* Program::add_function(std::string c_name, Type ret, SrcLoc loc, SrcLoc end_loc) {
-  Function& f = functions_.emplace_back();
-  f.id = static_cast<int>(functions_.size()) - 1;
-  f.c_name = std::move(c_name);
-  f.ret = ret;
-  f.loc = std::move(loc);
-  f.end_loc = std::move(end_loc);
-  return &f;
+const IntType* Program::int_type_of(int bits, bool is_signed)
+{
+    return int_type((is_signed ? "int" : "uint") + std::to_string(bits), bits, is_signed);
 }
 
-NamedConst* Program::add_named_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value) {
-  NamedConst& c = named_consts_.emplace_back();
-  c.id = static_cast<int>(named_consts_.size()) - 1;
-  c.c_name = std::move(c_name);
-  c.type = type;
-  c.loc = std::move(loc);
-  c.init = init;
-  c.value = std::move(value);
-  return &c;
+const IntType* Program::enum_type(const std::string& name, int bits, bool is_signed, bool is_scoped,
+                                  const std::string& lo, const std::string& hi)
+{
+    auto t {std::make_unique<IntType>()};
+    t->name = name;
+    t->bits = bits;
+    t->is_signed = is_signed;
+    t->is_enum = true;
+    t->is_scoped = is_scoped;
+    t->lo = lo;
+    t->hi = hi;
+    enum_types_.push_back(std::move(t));
+    return enum_types_.back().get();
 }
 
-NamedConst* Program::add_static_assertion(SrcLoc loc, const Expr* condition) {
-  NamedConst& c = named_consts_.emplace_back();
-  c.id = static_cast<int>(named_consts_.size()) - 1;
-  c.c_name = "static_assert";
-  c.type = Type::bool_type();
-  c.loc = std::move(loc);
-  c.init = condition;
-  c.value = "1";
-  c.kind = NamedConst::Kind::StaticAssertion;
-  return &c;
+Function* Program::add_function(std::string c_name, Type ret, SrcLoc loc, SrcLoc end_loc)
+{
+    Function& f {functions_.emplace_back()};
+    f.id = static_cast<int>(functions_.size()) - 1;
+    f.c_name = std::move(c_name);
+    f.ret = ret;
+    f.loc = std::move(loc);
+    f.end_loc = std::move(end_loc);
+    return &f;
 }
 
-NamedConst* Function::add_local_static_assertion(SrcLoc loc, const Expr* condition) {
-  NamedConst& c = local_consts_.emplace_back();
-  c.id = static_cast<int>(local_consts_.size()) - 1;
-  c.c_name = "static_assert";
-  c.type = Type::bool_type();
-  c.loc = std::move(loc);
-  c.init = condition;
-  c.value = "1";
-  c.kind = NamedConst::Kind::StaticAssertion;
-  return &c;
+NamedConst* Program::add_named_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value)
+{
+    NamedConst& c {named_consts_.emplace_back()};
+    c.id = static_cast<int>(named_consts_.size()) - 1;
+    c.c_name = std::move(c_name);
+    c.type = type;
+    c.loc = std::move(loc);
+    c.init = init;
+    c.value = std::move(value);
+    return &c;
 }
 
-NamedConst* Function::add_local_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value) {
-  NamedConst& c = local_consts_.emplace_back();
-  c.id = static_cast<int>(local_consts_.size()) - 1;
-  c.c_name = std::move(c_name);
-  c.type = type;
-  c.loc = std::move(loc);
-  c.init = init;
-  c.value = std::move(value);
-  return &c;
+NamedConst* Program::add_static_assertion(SrcLoc loc, const Expr* condition)
+{
+    NamedConst& c {named_consts_.emplace_back()};
+    c.id = static_cast<int>(named_consts_.size()) - 1;
+    c.c_name = "static_assert";
+    c.type = Type::bool_type();
+    c.loc = std::move(loc);
+    c.init = condition;
+    c.value = "1";
+    c.kind = NamedConst::Kind::StaticAssertion;
+    return &c;
 }
 
-const IntType* promoted(Program& p, const IntType* t) {
-  if (t->bits < p.c_int_bits()) return p.int_type_of(p.c_int_bits(), true);
-  return t;
+NamedConst* Function::add_local_static_assertion(SrcLoc loc, const Expr* condition)
+{
+    NamedConst& c {local_consts_.emplace_back()};
+    c.id = static_cast<int>(local_consts_.size()) - 1;
+    c.c_name = "static_assert";
+    c.type = Type::bool_type();
+    c.loc = std::move(loc);
+    c.init = condition;
+    c.value = "1";
+    c.kind = NamedConst::Kind::StaticAssertion;
+    return &c;
 }
 
-const IntType* usual_arithmetic(Program& p, const IntType* a, const IntType* b) {
-  if (a->is_signed == b->is_signed) return a->bits >= b->bits ? a : b;
-  const IntType* s = a->is_signed ? a : b;
-  const IntType* u = a->is_signed ? b : a;
-  if (u->bits >= s->bits) return p.int_type_of(u->bits, false);
-  return s;
+NamedConst* Function::add_local_const(std::string c_name, Type type, SrcLoc loc, const Expr* init, std::string value)
+{
+    NamedConst& c {local_consts_.emplace_back()};
+    c.id = static_cast<int>(local_consts_.size()) - 1;
+    c.c_name = std::move(c_name);
+    c.type = type;
+    c.loc = std::move(loc);
+    c.init = init;
+    c.value = std::move(value);
+    return &c;
+}
+
+const IntType* promoted(Program& p, const IntType* t)
+{
+    if (t->bits < p.c_int_bits())
+    {
+        return p.int_type_of(p.c_int_bits(), true);
+    }
+    return t;
+}
+
+const IntType* usual_arithmetic(Program& p, const IntType* a, const IntType* b)
+{
+    if (a->is_signed == b->is_signed)
+    {
+        return a->bits >= b->bits ? a : b;
+    }
+    const IntType* s {a->is_signed ? a : b};
+    const IntType* u {a->is_signed ? b : a};
+    if (u->bits >= s->bits)
+    {
+        return p.int_type_of(u->bits, false);
+    }
+    return s;
 }
 
 // ---- Builder ------------------------------------------------------------------------------------------------
 
 namespace {
-Expr* fresh(Program& p, Expr::Kind k, Type t, SrcLoc loc) {
-  Expr* e = p.new_expr();
-  e->kind = k;
-  e->type = t;
-  e->loc = std::move(loc);
-  return e;
+Expr* fresh(Program& p, Expr::Kind k, Type t, SrcLoc loc)
+{
+    Expr* e {p.new_expr()};
+    e->kind = k;
+    e->type = t;
+    e->loc = std::move(loc);
+    return e;
 }
-Stmt* fresh_stmt(Program& p, Stmt::Kind k, SrcLoc loc) {
-  Stmt* s = p.new_stmt();
-  s->kind = k;
-  s->loc = std::move(loc);
-  return s;
+Stmt* fresh_stmt(Program& p, Stmt::Kind k, SrcLoc loc)
+{
+    Stmt* s {p.new_stmt()};
+    s->kind = k;
+    s->loc = std::move(loc);
+    return s;
 }
-}  // namespace
+} // namespace
 
-const Expr* Builder::int_const(Type t, std::string decimal, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Const, t, std::move(loc));
-  e->value = std::move(decimal);
-  return e;
-}
-
-const Expr* Builder::bool_const(bool value, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Const, Type::bool_type(), std::move(loc));
-  e->value = value ? "true" : "false";
-  return e;
+const Expr* Builder::int_const(Type t, std::string decimal, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Const, t, std::move(loc))};
+    e->value = std::move(decimal);
+    return e;
 }
 
-const Expr* Builder::local(const Var* v, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Local, v->type, std::move(loc));
-  e->var = v;
-  return e;
+const Expr* Builder::bool_const(bool value, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Const, Type::bool_type(), std::move(loc))};
+    e->value = value ? "true" : "false";
+    return e;
 }
 
-const Expr* Builder::formal(const Function& f, int k, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Formal, f.params[static_cast<size_t>(k)].type, std::move(loc));
-  e->index = k;
-  return e;
+const Expr* Builder::local(const Var* v, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Local, v->type, std::move(loc))};
+    e->var = v;
+    return e;
 }
 
-const Expr* Builder::result(const Function& f, SrcLoc loc) {
-  return fresh(p_, Expr::Kind::Result, f.ret, std::move(loc));
+const Expr* Builder::formal(const Function& f, int k, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Formal, f.params[static_cast<size_t>(k)].type, std::move(loc))};
+    e->index = k;
+    return e;
 }
 
-const Expr* Builder::old(const Expr* a, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Old, a->type, std::move(loc));
-  e->a = a;
-  return e;
+const Expr* Builder::result(const Function& f, SrcLoc loc)
+{
+    return fresh(p_, Expr::Kind::Result, f.ret, std::move(loc));
 }
 
-const Expr* Builder::unary(UnaryOp op, const Expr* a, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Unary, op == UnaryOp::Not ? Type::bool_type() : a->type, std::move(loc));
-  e->uop = op;
-  e->a = a;
-  return e;
+const Expr* Builder::old(const Expr* a, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Old, a->type, std::move(loc))};
+    e->a = a;
+    return e;
 }
 
-const Expr* Builder::binary(BinaryOp op, const Expr* a, const Expr* b, SrcLoc loc) {
-  Type t = a->type;
-  switch (op) {
-    case BinaryOp::Lt: case BinaryOp::Le: case BinaryOp::Gt: case BinaryOp::Ge:
-    case BinaryOp::Eq: case BinaryOp::Ne: case BinaryOp::LAnd: case BinaryOp::LOr:
-      t = Type::bool_type();
-      break;
-    default: break;
-  }
-  Expr* e = fresh(p_, Expr::Kind::Binary, t, std::move(loc));
-  e->bop = op;
-  e->a = a;
-  e->b = b;
-  return e;
+const Expr* Builder::unary(UnaryOp op, const Expr* a, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Unary, op == UnaryOp::Not ? Type::bool_type() : a->type, std::move(loc))};
+    e->uop = op;
+    e->a = a;
+    return e;
 }
 
-const Expr* Builder::cond(const Expr* c, const Expr* a, const Expr* b, SrcLoc loc) {
-  // A Null arm takes the other arm's pointer type (decision 0032 item 7).
-  const Type t = a->kind == Expr::Kind::Null && b->type.is_ptr() ? b->type : a->type;
-  Expr* e = fresh(p_, Expr::Kind::Cond, t, std::move(loc));
-  e->a = c;
-  e->b = a;
-  e->c = b;
-  return e;
-}
-
-const Expr* Builder::convert(Type to, const Expr* a, bool explicit_cast, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Convert, to, std::move(loc));
-  e->a = a;
-  e->explicit_cast = explicit_cast;
-  return e;
-}
-
-const Expr* Builder::to_bool(const Expr* a, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::ToBool, Type::bool_type(), std::move(loc));
-  e->a = a;
-  return e;
-}
-
-const Expr* Builder::bool_to_int(Type to, const Expr* a, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::BoolToInt, to, std::move(loc));
-  e->a = a;
-  return e;
-}
-
-const Expr* Builder::call(const Function* callee, std::vector<const Expr*> args, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Call, callee->ret, std::move(loc));
-  e->callee = callee;
-  e->args = std::move(args);
-  return e;
-}
-
-const Expr* Builder::report_at(const Expr* a, SrcLoc loc, std::string note) {
-  Expr* e = fresh(p_, Expr::Kind::ReportAt, a->type, std::move(loc));
-  e->a = a;
-  e->value = std::move(note);
-  return e;
-}
-
-const Expr* Builder::spelled(const Expr* e, std::string c_type_name) {
-  const_cast<Expr*>(e)->c_type_name = std::move(c_type_name);
-  return e;
-}
-
-const Expr* Builder::text(const Expr* e, std::string c_text) {
-  const_cast<Expr*>(e)->c_text = std::move(c_text);
-  return e;
-}
-
-const Expr* Builder::atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc));
-  e->atom = kind;
-  e->a = ptr;
-  e->amount = amount;
-  if (ptr != nullptr && ptr->kind == Expr::Kind::MemberAddr) {  // decision 0043: `owns(p->x)`, `reads(p->t)`
-    const std::string place = place_text(*ptr);
-    if (!place.empty()) e->c_text = std::string(kind == AtomKind::Owns ? "owns(" : "reads(") + place + ")";
-  } else if (ptr != nullptr && !ptr->c_text.empty()) {
-    switch (kind) {
-      case AtomKind::Owns: e->c_text = "owns(*" + ptr->c_text + ")"; break;
-      case AtomKind::Reads: e->c_text = "reads(*" + ptr->c_text + ")"; break;
-      case AtomKind::Live: e->c_text = "live(" + ptr->c_text + ")"; break;
-      case AtomKind::OwnsBlock: e->c_text = "owns_block(" + ptr->c_text + ")"; break;
+const Expr* Builder::binary(BinaryOp op, const Expr* a, const Expr* b, SrcLoc loc)
+{
+    Type t {a->type};
+    switch (op)
+    {
+        case BinaryOp::Lt:
+        case BinaryOp::Le:
+        case BinaryOp::Gt:
+        case BinaryOp::Ge:
+        case BinaryOp::Eq:
+        case BinaryOp::Ne:
+        case BinaryOp::LAnd:
+        case BinaryOp::LOr:
+            t = Type::bool_type();
+            break;
+        default:
+            break;
     }
-  }
-  return e;
+    Expr* e {fresh(p_, Expr::Kind::Binary, t, std::move(loc))};
+    e->bop = op;
+    e->a = a;
+    e->b = b;
+    return e;
 }
 
-const Expr* Builder::global_atom(AtomKind kind, const Expr* global_addr, int amount, SrcLoc loc, bool implicit) {
-  Expr* e = fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc));
-  e->atom = kind;
-  e->a = global_addr;
-  e->amount = amount;
-  e->implicit_atom = implicit;
-  if (global_addr != nullptr && global_addr->global != nullptr) {
-    const std::string& n = global_addr->global->c_name;
-    switch (kind) {
-      case AtomKind::Owns: e->c_text = "owns(" + n + ")"; break;
-      case AtomKind::Reads: e->c_text = "reads(" + n + ")"; break;
-      case AtomKind::Live: e->c_text = "live(&" + n + ")"; break;
-      case AtomKind::OwnsBlock: break;  // never on a global (decision 0047 item 4: d2b); check_program refuses it
+const Expr* Builder::cond(const Expr* c, const Expr* a, const Expr* b, SrcLoc loc)
+{
+    // A Null arm takes the other arm's pointer type (decision 0032 item 7).
+    const Type t {a->kind == Expr::Kind::Null && b->type.is_ptr() ? b->type : a->type};
+    Expr* e {fresh(p_, Expr::Kind::Cond, t, std::move(loc))};
+    e->a = c;
+    e->b = a;
+    e->c = b;
+    return e;
+}
+
+const Expr* Builder::convert(Type to, const Expr* a, bool explicit_cast, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Convert, to, std::move(loc))};
+    e->a = a;
+    e->explicit_cast = explicit_cast;
+    return e;
+}
+
+const Expr* Builder::to_bool(const Expr* a, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::ToBool, Type::bool_type(), std::move(loc))};
+    e->a = a;
+    return e;
+}
+
+const Expr* Builder::bool_to_int(Type to, const Expr* a, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::BoolToInt, to, std::move(loc))};
+    e->a = a;
+    return e;
+}
+
+const Expr* Builder::call(const Function* callee, std::vector<const Expr*> args, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Call, callee->ret, std::move(loc))};
+    e->callee = callee;
+    e->args = std::move(args);
+    return e;
+}
+
+const Expr* Builder::report_at(const Expr* a, SrcLoc loc, std::string note)
+{
+    Expr* e {fresh(p_, Expr::Kind::ReportAt, a->type, std::move(loc))};
+    e->a = a;
+    e->value = std::move(note);
+    return e;
+}
+
+const Expr* Builder::spelled(const Expr* e, std::string c_type_name)
+{
+    const_cast<Expr*>(e)->c_type_name = std::move(c_type_name);
+    return e;
+}
+
+const Expr* Builder::text(const Expr* e, std::string c_text)
+{
+    const_cast<Expr*>(e)->c_text = std::move(c_text);
+    return e;
+}
+
+const Expr* Builder::atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc))};
+    e->atom = kind;
+    e->a = ptr;
+    e->amount = amount;
+    if (ptr != nullptr && ptr->kind == Expr::Kind::MemberAddr)
+    { // decision 0043: `owns(p->x)`, `reads(p->t)`
+        const std::string place {place_text(*ptr)};
+        if (!place.empty())
+        {
+            e->c_text = std::string(kind == AtomKind::Owns ? "owns(" : "reads(") + place + ")";
+        }
     }
-  }
-  return e;
+    else if (ptr != nullptr && !ptr->c_text.empty())
+    {
+        switch (kind)
+        {
+            case AtomKind::Owns:
+                e->c_text = "owns(*" + ptr->c_text + ")";
+                break;
+            case AtomKind::Reads:
+                e->c_text = "reads(*" + ptr->c_text + ")";
+                break;
+            case AtomKind::Live:
+                e->c_text = "live(" + ptr->c_text + ")";
+                break;
+            case AtomKind::OwnsBlock:
+                e->c_text = "owns_block(" + ptr->c_text + ")";
+                break;
+        }
+    }
+    return e;
 }
 
-const Expr* Builder::null_const(Type ptr_type, SrcLoc loc) {
-  return fresh(p_, Expr::Kind::Null, ptr_type, std::move(loc));
+const Expr* Builder::global_atom(AtomKind kind, const Expr* global_addr, int amount, SrcLoc loc, bool implicit)
+{
+    Expr* e {fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc))};
+    e->atom = kind;
+    e->a = global_addr;
+    e->amount = amount;
+    e->implicit_atom = implicit;
+    if (global_addr != nullptr && global_addr->global != nullptr)
+    {
+        const std::string& n {global_addr->global->c_name};
+        switch (kind)
+        {
+            case AtomKind::Owns:
+                e->c_text = "owns(" + n + ")";
+                break;
+            case AtomKind::Reads:
+                e->c_text = "reads(" + n + ")";
+                break;
+            case AtomKind::Live:
+                e->c_text = "live(&" + n + ")";
+                break;
+            case AtomKind::OwnsBlock:
+                break; // never on a global (decision 0047 item 4: d2b); check_program refuses it
+        }
+    }
+    return e;
 }
 
-const Expr* Builder::addr_of(const Var* v, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::AddrOf, p_.pointer_to(v->type), std::move(loc));
-  e->var = v;
-  e->c_text = "&" + v->name;
-  return e;
+const Expr* Builder::null_const(Type ptr_type, SrcLoc loc)
+{
+    return fresh(p_, Expr::Kind::Null, ptr_type, std::move(loc));
 }
 
-const Expr* Builder::global_addr(const Global* g, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::GlobalAddr, p_.pointer_to(g->type), std::move(loc));
-  e->global = g;
-  e->c_text = "&" + g->c_name;
-  return e;
+const Expr* Builder::addr_of(const Var* v, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::AddrOf, p_.pointer_to(v->type), std::move(loc))};
+    e->var = v;
+    e->c_text = "&" + v->name;
+    return e;
 }
 
-const Expr* Builder::deref(const Expr* addr, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Deref, addr->type.is_ptr() && addr->type.pointee != nullptr ? *addr->type.pointee : addr->type, std::move(loc));
-  e->a = addr;
-  if (addr->kind == Expr::Kind::GlobalAddr && addr->global != nullptr) e->c_text = addr->global->c_name;  // `*&g` is `g`
-  else if (addr->kind == Expr::Kind::MemberAddr) e->c_text = place_text(*addr);  // `*&p->x` is `p->x`
-  else if (!addr->c_text.empty()) e->c_text = "*" + addr->c_text;
-  return e;
+const Expr* Builder::global_addr(const Global* g, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::GlobalAddr, p_.pointer_to(g->type), std::move(loc))};
+    e->global = g;
+    e->c_text = "&" + g->c_name;
+    return e;
+}
+
+const Expr* Builder::deref(const Expr* addr, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Deref,
+                   addr->type.is_ptr() && addr->type.pointee != nullptr ? *addr->type.pointee : addr->type,
+                   std::move(loc))};
+    e->a = addr;
+    if (addr->kind == Expr::Kind::GlobalAddr && addr->global != nullptr)
+    {
+        e->c_text = addr->global->c_name; // `*&g` is `g`
+    }
+    else if (addr->kind == Expr::Kind::MemberAddr)
+    {
+        e->c_text = place_text(*addr); // `*&p->x` is `p->x`
+    }
+    else if (!addr->c_text.empty())
+    {
+        e->c_text = "*" + addr->c_text;
+    }
+    return e;
 }
 
 namespace {
 // The place spelling of a MemberAddr (decision 0043 item 14): `p->x` for a pointer operand, `s.x` for the address of a struct local, `s.t.x` for a
 // nested member, `g.x` for a global.  Empty when the operand has no spelling.
-std::string member_place(const Expr& ma) {
-  if (ma.user_spelling && ma.c_text.size() > 1 && ma.c_text[0] == '&') return ma.c_text.substr(1);  // decision 0045 item 12
-  const Expr* op = ma.a;
-  if (op == nullptr || !op->type.is_ptr() || op->type.pointee == nullptr || !op->type.pointee->is_struct() || op->type.pointee->struct_type == nullptr) return "";
-  const StructType& st = *op->type.pointee->struct_type;
-  const size_t k = ma.index >= 0 ? static_cast<size_t>(ma.index) : st.members.size();
-  if (k >= st.members.size()) return "";
-  const std::string name = st.members[k].name.empty() ? "<" + std::to_string(k) + ">" : st.members[k].name;
-  if (op->kind == Expr::Kind::MemberAddr) {
-    const std::string base = member_place(*op);
-    return base.empty() ? std::string() : base + "." + name;
-  }
-  if (op->kind == Expr::Kind::AddrOf && op->var != nullptr) return op->var->name + "." + name;
-  if (op->kind == Expr::Kind::GlobalAddr && op->global != nullptr) return op->global->c_name + "." + name;
-  if (op->c_text.empty()) return "";
-  bool simple = true;
-  for (char ch : op->c_text) simple = simple && (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_' || ch == ':');
-  return (simple ? op->c_text : "(" + op->c_text + ")") + "->" + name;
+std::string member_place(const Expr& ma)
+{
+    if (ma.user_spelling && ma.c_text.size() > 1U && ma.c_text[0U] == '&')
+    {
+        return ma.c_text.substr(1U); // decision 0045 item 12
+    }
+    const Expr* op {ma.a};
+    if (op == nullptr || !op->type.is_ptr() || op->type.pointee == nullptr || !op->type.pointee->is_struct() ||
+        op->type.pointee->struct_type == nullptr)
+    {
+        return "";
+    }
+    const StructType& st {*op->type.pointee->struct_type};
+    const size_t k {ma.index >= 0 ? static_cast<size_t>(ma.index) : st.members.size()};
+    if (k >= st.members.size())
+    {
+        return "";
+    }
+    const std::string name {st.members[k].name.empty() ? "<" + std::to_string(k) + ">" : st.members[k].name};
+    if (op->kind == Expr::Kind::MemberAddr)
+    {
+        const std::string base {member_place(*op)};
+        return base.empty() ? std::string() : base + "." + name;
+    }
+    if (op->kind == Expr::Kind::AddrOf && op->var != nullptr)
+    {
+        return op->var->name + "." + name;
+    }
+    if (op->kind == Expr::Kind::GlobalAddr && op->global != nullptr)
+    {
+        return op->global->c_name + "." + name;
+    }
+    if (op->c_text.empty())
+    {
+        return "";
+    }
+    bool simple {true};
+    for (char ch : op->c_text)
+    {
+        simple = simple && (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_' || ch == ':');
+    }
+    return (simple ? op->c_text : "(" + op->c_text + ")") + "->" + name;
 }
-}  // namespace
+} // namespace
 
-const Expr* Builder::member_addr(const Expr* a, int index, SrcLoc loc) {
-  Type t = a->type;  // ill-typed on purpose when `a` is no pointer to a struct or the index is out of range
-  if (a->type.is_ptr() && a->type.pointee != nullptr && a->type.pointee->is_struct() && a->type.pointee->struct_type != nullptr && index >= 0 &&
-      static_cast<size_t>(index) < a->type.pointee->struct_type->members.size())
-    t = p_.pointer_to(a->type.pointee->struct_type->members[static_cast<size_t>(index)].type);
-  Expr* e = fresh(p_, Expr::Kind::MemberAddr, t, std::move(loc));
-  e->a = a;
-  e->index = index;
-  const std::string place = member_place(*e);
-  if (!place.empty()) e->c_text = "&" + place;
-  return e;
-}
-
-const Expr* Builder::field(const Expr* a, int index, SrcLoc loc) {
-  Type t = a->type;  // ill-typed on purpose when `a` is no struct value or the index is out of range
-  std::string text;
-  if (a->type.is_struct() && a->type.struct_type != nullptr && index >= 0 && static_cast<size_t>(index) < a->type.struct_type->members.size()) {
-    const StructMember& m = a->type.struct_type->members[static_cast<size_t>(index)];
-    t = m.type;
-    if (!a->c_text.empty()) text = a->c_text + "." + (m.name.empty() ? "<" + std::to_string(index) + ">" : m.name);
-  }
-  Expr* e = fresh(p_, Expr::Kind::Field, t, std::move(loc));
-  e->a = a;
-  e->index = index;
-  e->c_text = std::move(text);
-  return e;
-}
-
-const Expr* Builder::aggregate(Type struct_type, std::vector<const Expr*> args, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Aggregate, struct_type, std::move(loc));
-  e->args = std::move(args);
-  return e;
-}
-
-const Stmt* Builder::decl(const Var* v, const Expr* init, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Decl, std::move(loc));
-  s->var = v;
-  s->expr = init;
-  return s;
-}
-
-const Stmt* Builder::assign(const Var* v, const Expr* value, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Assign, std::move(loc));
-  s->var = v;
-  s->expr = value;
-  return s;
+const Expr* Builder::member_addr(const Expr* a, int index, SrcLoc loc)
+{
+    Type t {a->type}; // ill-typed on purpose when `a` is no pointer to a struct or the index is out of range
+    if (a->type.is_ptr() && a->type.pointee != nullptr && a->type.pointee->is_struct() &&
+        a->type.pointee->struct_type != nullptr && index >= 0 &&
+        static_cast<size_t>(index) < a->type.pointee->struct_type->members.size())
+    {
+        t = p_.pointer_to(a->type.pointee->struct_type->members[static_cast<size_t>(index)].type);
+    }
+    Expr* e {fresh(p_, Expr::Kind::MemberAddr, t, std::move(loc))};
+    e->a = a;
+    e->index = index;
+    const std::string place {member_place(*e)};
+    if (!place.empty())
+    {
+        e->c_text = "&" + place;
+    }
+    return e;
 }
 
-const Stmt* Builder::expr_stmt(const Expr* e, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::ExprStmt, std::move(loc));
-  s->expr = e;
-  return s;
+const Expr* Builder::field(const Expr* a, int index, SrcLoc loc)
+{
+    Type t {a->type}; // ill-typed on purpose when `a` is no struct value or the index is out of range
+    std::string text;
+    if (a->type.is_struct() && a->type.struct_type != nullptr && index >= 0 &&
+        static_cast<size_t>(index) < a->type.struct_type->members.size())
+    {
+        const StructMember& m {a->type.struct_type->members[static_cast<size_t>(index)]};
+        t = m.type;
+        if (!a->c_text.empty())
+        {
+            text = a->c_text + "." + (m.name.empty() ? "<" + std::to_string(index) + ">" : m.name);
+        }
+    }
+    Expr* e {fresh(p_, Expr::Kind::Field, t, std::move(loc))};
+    e->a = a;
+    e->index = index;
+    e->c_text = std::move(text);
+    return e;
 }
 
-const Stmt* Builder::if_stmt(const Expr* c, const Stmt* then_body, const Stmt* else_body, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::If, std::move(loc));
-  s->expr = c;
-  s->then_body = then_body;
-  s->else_body = else_body;
-  return s;
+const Expr* Builder::aggregate(Type struct_type, std::vector<const Expr*> args, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Aggregate, struct_type, std::move(loc))};
+    e->args = std::move(args);
+    return e;
 }
 
-const Stmt* Builder::while_stmt(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::While, std::move(loc));
-  s->expr = c;
-  s->invariants = std::move(invariants);
-  s->measure = std::move(measure);
-  s->body = body;
-  return s;
+const Stmt* Builder::decl(const Var* v, const Expr* init, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Decl, std::move(loc))};
+    s->var = v;
+    s->expr = init;
+    return s;
 }
 
-const Stmt* Builder::loop(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body, const Stmt* step,
-                          LoopForm form, int jump_id, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::While, std::move(loc));
-  s->expr = c;
-  s->invariants = std::move(invariants);
-  s->measure = std::move(measure);
-  s->body = body;
-  s->step = step;
-  s->form = form;
-  s->jump_id = jump_id;
-  return s;
+const Stmt* Builder::assign(const Var* v, const Expr* value, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Assign, std::move(loc))};
+    s->var = v;
+    s->expr = value;
+    return s;
 }
 
-const Stmt* Builder::switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Switch, std::move(loc));
-  s->expr = scrutinee;
-  s->body = body;
-  s->jump_id = jump_id;
-  return s;
+const Stmt* Builder::expr_stmt(const Expr* e, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::ExprStmt, std::move(loc))};
+    s->expr = e;
+    return s;
 }
 
-const Stmt* Builder::case_label(const Expr* value, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Case, std::move(loc));
-  s->expr = value;
-  return s;
+const Stmt* Builder::if_stmt(const Expr* c, const Stmt* then_body, const Stmt* else_body, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::If, std::move(loc))};
+    s->expr = c;
+    s->then_body = then_body;
+    s->else_body = else_body;
+    return s;
 }
 
-const Stmt* Builder::case_label(const Expr* value, std::string folded, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Case, std::move(loc));
-  s->expr = value;
-  s->folded = std::move(folded);
-  return s;
+const Stmt* Builder::while_stmt(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure,
+                                const Stmt* body, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::While, std::move(loc))};
+    s->expr = c;
+    s->invariants = std::move(invariants);
+    s->measure = std::move(measure);
+    s->body = body;
+    return s;
 }
 
-const Stmt* Builder::break_stmt(int target, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Break, std::move(loc));
-  s->jump_id = target;
-  return s;
+const Stmt* Builder::loop(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body,
+                          const Stmt* step, LoopForm form, int jump_id, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::While, std::move(loc))};
+    s->expr = c;
+    s->invariants = std::move(invariants);
+    s->measure = std::move(measure);
+    s->body = body;
+    s->step = step;
+    s->form = form;
+    s->jump_id = jump_id;
+    return s;
 }
 
-const Stmt* Builder::continue_stmt(int target, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Continue, std::move(loc));
-  s->jump_id = target;
-  return s;
+const Stmt* Builder::switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Switch, std::move(loc))};
+    s->expr = scrutinee;
+    s->body = body;
+    s->jump_id = jump_id;
+    return s;
 }
 
-const Stmt* Builder::return_stmt(const Expr* value, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Return, std::move(loc));
-  s->expr = value;
-  return s;
+const Stmt* Builder::case_label(const Expr* value, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Case, std::move(loc))};
+    s->expr = value;
+    return s;
 }
 
-const Stmt* Builder::check(const Expr* e, SrcLoc loc, bool from_assert) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Check, std::move(loc));
-  s->expr = e;
-  s->from_assert = from_assert;
-  return s;
+const Stmt* Builder::case_label(const Expr* value, std::string folded, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Case, std::move(loc))};
+    s->expr = value;
+    s->folded = std::move(folded);
+    return s;
 }
 
-const Stmt* Builder::goto_stmt(int label_id, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Goto, std::move(loc));
-  s->jump_id = label_id;
-  return s;
+const Stmt* Builder::break_stmt(int target, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Break, std::move(loc))};
+    s->jump_id = target;
+    return s;
 }
 
-const Stmt* Builder::label_stmt(int label_id, std::string name, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Label, std::move(loc));
-  s->jump_id = label_id;
-  s->label_name = std::move(name);
-  return s;
+const Stmt* Builder::continue_stmt(int target, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Continue, std::move(loc))};
+    s->jump_id = target;
+    return s;
 }
 
-const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Block, std::move(loc));
-  s->stmts = std::move(stmts);
-  return s;
+const Stmt* Builder::return_stmt(const Expr* value, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Return, std::move(loc))};
+    s->expr = value;
+    return s;
 }
 
-const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc, SrcLoc end_loc) {
-  Stmt* s = const_cast<Stmt*>(block(std::move(stmts), std::move(loc)));
-  s->end_loc = std::move(end_loc);
-  return s;
+const Stmt* Builder::check(const Expr* e, SrcLoc loc, bool from_assert)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Check, std::move(loc))};
+    s->expr = e;
+    s->from_assert = from_assert;
+    return s;
 }
 
-const Stmt* Builder::store(const Expr* addr, const Expr* value, SrcLoc loc) {
-  Stmt* s = fresh_stmt(p_, Stmt::Kind::Store, std::move(loc));
-  s->addr = addr;
-  s->expr = value;
-  return s;
+const Stmt* Builder::goto_stmt(int label_id, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Goto, std::move(loc))};
+    s->jump_id = label_id;
+    return s;
 }
 
-const Stmt* Builder::compound_store(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc) {
-  const Expr* cur = deref(addr, loc);  // shares `addr`
-  return store(addr, compound_value(cur->type, cur, op, rhs, loc), loc);
+const Stmt* Builder::label_stmt(int label_id, std::string name, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Label, std::move(loc))};
+    s->jump_id = label_id;
+    s->label_name = std::move(name);
+    return s;
 }
 
-const Stmt* Builder::inc_dec_store(const Expr* addr, bool increment, SrcLoc loc) {
-  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
-  const Expr* one = int_const(Type::integer(c_int), "1", loc);
-  return compound_store(addr, increment ? BinaryOp::Add : BinaryOp::Sub, one, std::move(loc));
+const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Block, std::move(loc))};
+    s->stmts = std::move(stmts);
+    return s;
 }
 
-const Expr* Builder::compound_value(const Type& xt, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc) {
-  if (!xt.is_int() || !rhs->type.is_int()) return rhs;  // ill-typed on purpose
-  // An enumeration operand (decision 0018 item 8): the arithmetic on it, which check_program rejects; never promoted here.
-  if (xt.int_type->is_enum || rhs->type.int_type->is_enum) return binary(op, xval, rhs, loc);
-  const IntType* tx = xt.int_type;
-  const IntType* px = promoted(p_, tx);
-  const Expr* left;
-  const Expr* right;
-  const IntType* c;
-  if (op == BinaryOp::Shl || op == BinaryOp::Shr) {
-    c = px;
-    left = convert(Type::integer(c), xval, false, loc);
-    right = rhs;
-  } else {
-    c = usual_arithmetic(p_, px, promoted(p_, rhs->type.int_type));
-    left = convert(Type::integer(c), xval, false, loc);
-    right = convert(Type::integer(c), rhs, false, loc);
-  }
-  const Expr* v = binary(op, left, right, loc);
-  return convert(xt, v, false, loc);
+const Stmt* Builder::block(std::vector<const Stmt*> stmts, SrcLoc loc, SrcLoc end_loc)
+{
+    Stmt* s {const_cast<Stmt*>(block(std::move(stmts), std::move(loc)))};
+    s->end_loc = std::move(end_loc);
+    return s;
 }
 
-const Stmt* Builder::compound_assign(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
-  if (!x->type.is_int() || !rhs->type.is_int()) return assign(x, rhs, loc);  // ill-typed on purpose
-  // An enumeration operand: compound_value gives the ill-typed `x op rhs`, which check_program rejects.
-  const Expr* xval = local(x, loc);
-  return assign(x, compound_value(x->type, xval, op, rhs, loc), loc);
+const Stmt* Builder::store(const Expr* addr, const Expr* value, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::Store, std::move(loc))};
+    s->addr = addr;
+    s->expr = value;
+    return s;
 }
 
-const Stmt* Builder::inc_dec(const Var* x, bool increment, SrcLoc loc) {
-  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
-  const Expr* one = int_const(Type::integer(c_int), "1", loc);
-  return compound_assign(x, increment ? BinaryOp::Add : BinaryOp::Sub, one, std::move(loc));
+const Stmt* Builder::compound_store(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc)
+{
+    const Expr* cur {deref(addr, loc)}; // shares `addr`
+    return store(addr, compound_value(cur->type, cur, op, rhs, loc), loc);
 }
 
-const Expr* Builder::assign_expr(const Var* v, const Expr* value, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::AssignE, v->type, std::move(loc));
-  e->var = v;
-  e->a = value;
-  return e;
+const Stmt* Builder::inc_dec_store(const Expr* addr, bool increment, SrcLoc loc)
+{
+    const IntType* c_int {p_.int_type_of(p_.c_int_bits(), true)};
+    const Expr* one {int_const(Type::integer(c_int), "1", loc)};
+    return compound_store(addr, increment ? BinaryOp::Add : BinaryOp::Sub, one, std::move(loc));
 }
 
-const Expr* Builder::compound_assign_expr(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc) {
-  const Expr* xval = local(x, loc);
-  return assign_expr(x, compound_value(x->type, xval, op, rhs, loc), std::move(loc));
+const Expr* Builder::compound_value(const Type& xt, const Expr* xval, BinaryOp op, const Expr* rhs, SrcLoc loc)
+{
+    if (!xt.is_int() || !rhs->type.is_int())
+    {
+        return rhs; // ill-typed on purpose
+    }
+    // An enumeration operand (decision 0018 item 8): the arithmetic on it, which check_program rejects; never promoted here.
+    if (xt.int_type->is_enum || rhs->type.int_type->is_enum)
+    {
+        return binary(op, xval, rhs, loc);
+    }
+    const IntType* tx {xt.int_type};
+    const IntType* px {promoted(p_, tx)};
+    const Expr* left;
+    const Expr* right;
+    const IntType* c;
+    if (op == BinaryOp::Shl || op == BinaryOp::Shr)
+    {
+        c = px;
+        left = convert(Type::integer(c), xval, false, loc);
+        right = rhs;
+    }
+    else
+    {
+        c = usual_arithmetic(p_, px, promoted(p_, rhs->type.int_type));
+        left = convert(Type::integer(c), xval, false, loc);
+        right = convert(Type::integer(c), rhs, false, loc);
+    }
+    const Expr* v {binary(op, left, right, loc)};
+    return convert(xt, v, false, loc);
 }
 
-const Expr* Builder::inc_dec_expr(const Var* x, bool increment, bool post, SrcLoc loc) {
-  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
-  const Expr* one = int_const(Type::integer(c_int), "1", loc);
-  const Expr* old_value = local(x, loc);  // one node: the stored value and (for x++) the node's value share it
-  const Expr* value = compound_value(x->type, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc);
-  Expr* e = const_cast<Expr*>(assign_expr(x, value, std::move(loc)));
-  if (post) {
-    e->b = old_value;
-    e->yields_old = true;
-  }
-  return e;
+const Stmt* Builder::compound_assign(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc)
+{
+    if (!x->type.is_int() || !rhs->type.is_int())
+    {
+        return assign(x, rhs, loc); // ill-typed on purpose
+    }
+    // An enumeration operand: compound_value gives the ill-typed `x op rhs`, which check_program rejects.
+    const Expr* xval {local(x, loc)};
+    return assign(x, compound_value(x->type, xval, op, rhs, loc), loc);
 }
 
-const Expr* Builder::store_expr(const Expr* addr, const Expr* value, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::StoreE, value->type, std::move(loc));
-  e->c = addr;
-  e->a = value;
-  return e;
+const Stmt* Builder::inc_dec(const Var* x, bool increment, SrcLoc loc)
+{
+    const IntType* c_int {p_.int_type_of(p_.c_int_bits(), true)};
+    const Expr* one {int_const(Type::integer(c_int), "1", loc)};
+    return compound_assign(x, increment ? BinaryOp::Add : BinaryOp::Sub, one, std::move(loc));
 }
 
-const Expr* Builder::compound_store_expr(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc) {
-  const Expr* cur = deref(addr, loc);  // shares `addr`
-  return store_expr(addr, compound_value(cur->type, cur, op, rhs, loc), std::move(loc));
+const Expr* Builder::assign_expr(const Var* v, const Expr* value, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::AssignE, v->type, std::move(loc))};
+    e->var = v;
+    e->a = value;
+    return e;
 }
 
-const Expr* Builder::inc_dec_store_expr(const Expr* addr, bool increment, bool post, SrcLoc loc) {
-  const IntType* c_int = p_.int_type_of(p_.c_int_bits(), true);
-  const Expr* one = int_const(Type::integer(c_int), "1", loc);
-  const Expr* old_value = deref(addr, loc);  // one node: the stored value and (for (*p)++) the node's value share it; it shares `addr`
-  const Expr* value = compound_value(old_value->type, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc);
-  Expr* e = const_cast<Expr*>(store_expr(addr, value, std::move(loc)));
-  if (post) {
-    e->b = old_value;
-    e->yields_old = true;
-  }
-  return e;
+const Expr* Builder::compound_assign_expr(const Var* x, BinaryOp op, const Expr* rhs, SrcLoc loc)
+{
+    const Expr* xval {local(x, loc)};
+    return assign_expr(x, compound_value(x->type, xval, op, rhs, loc), std::move(loc));
 }
 
-const Expr* Builder::comma(const Expr* a, const Expr* b, SrcLoc loc) {
-  Expr* e = fresh(p_, Expr::Kind::Comma, b->type, std::move(loc));
-  e->a = a;
-  e->b = b;
-  return e;
+const Expr* Builder::inc_dec_expr(const Var* x, bool increment, bool post, SrcLoc loc)
+{
+    const IntType* c_int {p_.int_type_of(p_.c_int_bits(), true)};
+    const Expr* one {int_const(Type::integer(c_int), "1", loc)};
+    const Expr* old_value {local(x, loc)}; // one node: the stored value and (for x++) the node's value share it
+    const Expr* value {compound_value(x->type, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc)};
+    Expr* e {const_cast<Expr*>(assign_expr(x, value, std::move(loc)))};
+    if (post)
+    {
+        e->b = old_value;
+        e->yields_old = true;
+    }
+    return e;
 }
 
+const Expr* Builder::store_expr(const Expr* addr, const Expr* value, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::StoreE, value->type, std::move(loc))};
+    e->c = addr;
+    e->a = value;
+    return e;
+}
+
+const Expr* Builder::compound_store_expr(const Expr* addr, BinaryOp op, const Expr* rhs, SrcLoc loc)
+{
+    const Expr* cur {deref(addr, loc)}; // shares `addr`
+    return store_expr(addr, compound_value(cur->type, cur, op, rhs, loc), std::move(loc));
+}
+
+const Expr* Builder::inc_dec_store_expr(const Expr* addr, bool increment, bool post, SrcLoc loc)
+{
+    const IntType* c_int {p_.int_type_of(p_.c_int_bits(), true)};
+    const Expr* one {int_const(Type::integer(c_int), "1", loc)};
+    // one node: the stored value and (for (*p)++) the node's value share it; it shares `addr`
+    const Expr* old_value {deref(addr, loc)};
+    const Expr* value {compound_value(old_value->type, old_value, increment ? BinaryOp::Add : BinaryOp::Sub, one, loc)};
+    Expr* e {const_cast<Expr*>(store_expr(addr, value, std::move(loc)))};
+    if (post)
+    {
+        e->b = old_value;
+        e->yields_old = true;
+    }
+    return e;
+}
+
+const Expr* Builder::comma(const Expr* a, const Expr* b, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Comma, b->type, std::move(loc))};
+    e->a = a;
+    e->b = b;
+    return e;
+}
 
 // ---- permissions in contracts (decision 0037 items 5-7) -----------------------------------------------------------------------
 
@@ -780,317 +1075,628 @@ namespace {
 // Whether `e` may be an atom's guard (decision 0045 item 9, owner question 109, amending 0037 item 5): it holds no `Atom`, no call and no side effect.  It
 // may read memory (`*pp == NULL`, `p->q == NULL`): a read through a pointer is framed per path like any contract read, by the atoms before it, and
 // check_program refuses a read outside the place grammar.
-bool guard_ok(const Expr& e) {
-  switch (e.kind) {
-    case Expr::Kind::Atom: case Expr::Kind::Call: case Expr::Kind::AssignE: case Expr::Kind::StoreE: return false;
-    default: break;
-  }
-  for (const Expr* x : {e.a, e.b, e.c})
-    if (x != nullptr && !guard_ok(*x)) return false;
-  for (const Expr* x : e.args)
-    if (x != nullptr && !guard_ok(*x)) return false;
-  return true;
+bool guard_ok(const Expr& e)
+{
+    switch (e.kind)
+    {
+        case Expr::Kind::Atom:
+        case Expr::Kind::Call:
+        case Expr::Kind::AssignE:
+        case Expr::Kind::StoreE:
+            return false;
+        default:
+            break;
+    }
+    for (const Expr* x : {e.a, e.b, e.c})
+    {
+        if (x != nullptr && !guard_ok(*x))
+        {
+            return false;
+        }
+    }
+    for (const Expr* x : e.args)
+    {
+        if (x != nullptr && !guard_ok(*x))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Walks one clause in evaluation order and collects the atoms in the positions decision 0037 item 5 allows: the clause itself, an operand of
 // `&&` (no guard), the right operand of `||` whose left operand is a guard (guard_ok; the guard is: the left is false), an arm of `?:` whose condition
 // is a guard (guard: the condition is true / false).  The walk goes on through the right operand of `||` and the arms of `?:`, so that a
 // conjunction of atoms may stand there.
-class AtomCollector {
- public:
-  AtomCollector(std::vector<AtomSite>& out, bool in_ensures, int clause) : out_(out), in_ensures_(in_ensures), clause_(clause) {}
+class AtomCollector
+{
+public:
+    AtomCollector(std::vector<AtomSite>& out, bool in_ensures, int clause)
+        : out_(out), in_ensures_(in_ensures), clause_(clause)
+    {}
 
-  void walk(const Expr* e) {
-    if (e == nullptr) return;
-    switch (e->kind) {
-      case Expr::Kind::Atom: {
-        AtomSite s;
-        s.atom = e;
-        s.in_ensures = in_ensures_;
-        s.clause = clause_;
-        s.guards = guards_;
-        const PlaceKey pk = atom_place(*e);
-        s.path = pk.path;
-        s.via = pk.via;
-        s.base = e->a != nullptr ? member_root(e->a) : nullptr;
-        out_.push_back(std::move(s));
-        break;
-      }
-      case Expr::Kind::Binary:
-        if (e->bop == BinaryOp::LAnd) {
-          walk(e->a);
-          walk(e->b);
-        } else if (e->bop == BinaryOp::LOr && e->a != nullptr && guard_ok(*e->a)) {
-          guards_.push_back(AtomGuard{e->a, false});
-          walk(e->b);
-          guards_.pop_back();
+    void walk(const Expr* e)
+    {
+        if (e == nullptr)
+        {
+            return;
         }
-        break;
-      case Expr::Kind::Cond:
-        if (e->a != nullptr && guard_ok(*e->a)) {
-          guards_.push_back(AtomGuard{e->a, true});
-          walk(e->b);
-          guards_.pop_back();
-          guards_.push_back(AtomGuard{e->a, false});
-          walk(e->c);
-          guards_.pop_back();
+        switch (e->kind)
+        {
+            case Expr::Kind::Atom:
+            {
+                AtomSite s;
+                s.atom = e;
+                s.in_ensures = in_ensures_;
+                s.clause = clause_;
+                s.guards = guards_;
+                const PlaceKey pk {atom_place(*e)};
+                s.path = pk.path;
+                s.via = pk.via;
+                s.base = e->a != nullptr ? member_root(e->a) : nullptr;
+                out_.push_back(std::move(s));
+                break;
+            }
+            case Expr::Kind::Binary:
+                if (e->bop == BinaryOp::LAnd)
+                {
+                    walk(e->a);
+                    walk(e->b);
+                }
+                else if (e->bop == BinaryOp::LOr && e->a != nullptr && guard_ok(*e->a))
+                {
+                    guards_.push_back(AtomGuard {e->a, false});
+                    walk(e->b);
+                    guards_.pop_back();
+                }
+                break;
+            case Expr::Kind::Cond:
+                if (e->a != nullptr && guard_ok(*e->a))
+                {
+                    guards_.push_back(AtomGuard {e->a, true});
+                    walk(e->b);
+                    guards_.pop_back();
+                    guards_.push_back(AtomGuard {e->a, false});
+                    walk(e->c);
+                    guards_.pop_back();
+                }
+                break;
+            default:
+                break;
         }
-        break;
-      default: break;
     }
-  }
 
- private:
-  std::vector<AtomSite>& out_;
-  bool in_ensures_;
-  int clause_;
-  std::vector<AtomGuard> guards_;
+private:
+    std::vector<AtomSite>& out_;
+    bool in_ensures_;
+    int clause_;
+    std::vector<AtomGuard> guards_;
 };
 
-}  // namespace
+} // namespace
 
-bool reads_heap(const Expr& e) {
-  if (e.kind == Expr::Kind::Deref || e.kind == Expr::Kind::Atom) return true;
-  for (const Expr* x : {e.a, e.b, e.c})
-    if (x != nullptr && reads_heap(*x)) return true;
-  for (const Expr* x : e.args)
-    if (x != nullptr && reads_heap(*x)) return true;
-  return false;
+bool reads_heap(const Expr& e)
+{
+    if (e.kind == Expr::Kind::Deref || e.kind == Expr::Kind::Atom)
+    {
+        return true;
+    }
+    for (const Expr* x : {e.a, e.b, e.c})
+    {
+        if (x != nullptr && reads_heap(*x))
+        {
+            return true;
+        }
+    }
+    for (const Expr* x : e.args)
+    {
+        if (x != nullptr && reads_heap(*x))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
-const Expr* member_root(const Expr* e, std::vector<int>* path) {
-  std::vector<int> rev;
-  while (e != nullptr && e->kind == Expr::Kind::MemberAddr) {
-    rev.push_back(e->index);
-    e = e->a;
-  }
-  if (path != nullptr) path->assign(rev.rbegin(), rev.rend());
-  return e;
+const Expr* member_root(const Expr* e, std::vector<int>* path)
+{
+    std::vector<int> rev;
+    while (e != nullptr && e->kind == Expr::Kind::MemberAddr)
+    {
+        rev.push_back(e->index);
+        e = e->a;
+    }
+    if (path != nullptr)
+    {
+        path->assign(rev.rbegin(), rev.rend());
+    }
+    return e;
 }
 
-bool steps_have_load(const std::vector<int>& via) { return std::find(via.begin(), via.end(), kLoadStep) != via.end(); }
-
-const Expr* place_root(const Expr* e, std::vector<int>* steps) {
-  std::vector<int> rev;
-  bool under_field = false;  // the node above `e` is a Field: only there is an `Old` of a Formal the Formal (decision 0044 item 3: `old(s).x`)
-  while (e != nullptr) {
-    if (e->kind == Expr::Kind::MemberAddr) rev.push_back(e->index);
-    else if (e->kind == Expr::Kind::Deref) rev.push_back(kLoadStep);
-    else if (e->kind == Expr::Kind::Field) rev.push_back(field_step(e->index));
-    else if (under_field && e->kind == Expr::Kind::Old && e->a != nullptr && e->a->kind == Expr::Kind::Formal) { e = e->a; break; }
-    else break;
-    under_field = e->kind == Expr::Kind::Field;
-    e = e->a;
-  }
-  if (e != nullptr && e->kind == Expr::Kind::Local && e->var != nullptr && e->var->address_taken) rev.push_back(kLoadStep);  // a cell read by name
-  if (steps != nullptr) steps->assign(rev.rbegin(), rev.rend());
-  return e;
+bool steps_have_load(const std::vector<int>& via)
+{
+    return std::find(via.begin(), via.end(), kLoadStep) != via.end();
 }
 
-PlaceKey atom_place(const Expr& atom) {
-  PlaceKey k;
-  if (atom.a == nullptr) return k;
-  if (atom.atom == AtomKind::OwnsBlock) {
-    // Decision 0047 item 4: the pointer itself, a Formal or the Result, with no steps and no member path (anything else is a check_program error).
-    if (atom.a->kind == Expr::Kind::Formal) k.root = atom.a->index;
-    else if (atom.a->kind == Expr::Kind::Result) k.root = kResultSiteKey;
+const Expr* place_root(const Expr* e, std::vector<int>* steps)
+{
+    std::vector<int> rev;
+    // the node above `e` is a Field: only there is an `Old` of a Formal the Formal (decision 0044 item 3: `old(s).x`)
+    bool under_field {false};
+    while (e != nullptr)
+    {
+        if (e->kind == Expr::Kind::MemberAddr)
+        {
+            rev.push_back(e->index);
+        }
+        else if (e->kind == Expr::Kind::Deref)
+        {
+            rev.push_back(kLoadStep);
+        }
+        else if (e->kind == Expr::Kind::Field)
+        {
+            rev.push_back(field_step(e->index));
+        }
+        else if (under_field && e->kind == Expr::Kind::Old && e->a != nullptr && e->a->kind == Expr::Kind::Formal)
+        {
+            e = e->a;
+            break;
+        }
+        else
+        {
+            break;
+        }
+        under_field = e->kind == Expr::Kind::Field;
+        e = e->a;
+    }
+    if (e != nullptr && e->kind == Expr::Kind::Local && e->var != nullptr && e->var->address_taken)
+    {
+        rev.push_back(kLoadStep); // a cell read by name
+    }
+    if (steps != nullptr)
+    {
+        steps->assign(rev.rbegin(), rev.rend());
+    }
+    return e;
+}
+
+PlaceKey atom_place(const Expr& atom)
+{
+    PlaceKey k;
+    if (atom.a == nullptr)
+    {
+        return k;
+    }
+    if (atom.atom == AtomKind::OwnsBlock)
+    {
+        // Decision 0047 item 4: the pointer itself, a Formal or the Result, with no steps and no member path (anything else is a check_program error).
+        if (atom.a->kind == Expr::Kind::Formal)
+        {
+            k.root = atom.a->index;
+        }
+        else if (atom.a->kind == Expr::Kind::Result)
+        {
+            k.root = kResultSiteKey;
+        }
+        return k;
+    }
+    const Expr* base {member_root(atom.a, &k.path)};
+    std::vector<int> steps;
+    const Expr* root {place_root(base, &steps)};
+    if (root == nullptr)
+    {
+        return k;
+    }
+    // The steps of the base pointer only: `base` is `atom.a` without its outermost MemberAddr nodes (the member tail), so `place_root(base)` has none of them.
+    k.via = std::move(steps);
+    switch (root->kind)
+    {
+        case Expr::Kind::Formal:
+            k.root = root->index;
+            break;
+        case Expr::Kind::GlobalAddr:
+            if (root->global != nullptr)
+            {
+                k.root = kGlobalSiteBase + root->global->id;
+            }
+            break;
+        case Expr::Kind::Result:
+            // The place `*r`, `r->x`, `*r.q`, `**r` (decision 0052 item 2: an atom on the result has no `requires`
+            // partner, its ghost amount is an output).
+            k.root = kResultSiteKey;
+            break;
+        case Expr::Kind::Local:
+            // A plain pointer variable (`owns(*q)` of an invariant) stays keyless, as before decision 0045; a cell read or a member of a variable gets its own key.
+            if (root->var != nullptr && !(k.via.empty() && k.path.empty()))
+            {
+                k.root = kLocalSiteBase + root->var->id;
+            }
+            break;
+        case Expr::Kind::AddrOf:
+            if (root->var != nullptr)
+            {
+                k.root = kLocalSiteBase + root->var->id;
+            }
+            break;
+        default:
+            break;
+    }
     return k;
-  }
-  const Expr* base = member_root(atom.a, &k.path);
-  std::vector<int> steps;
-  const Expr* root = place_root(base, &steps);
-  if (root == nullptr) return k;
-  // The steps of the base pointer only: `base` is `atom.a` without its outermost MemberAddr nodes (the member tail), so `place_root(base)` has none of them.
-  k.via = std::move(steps);
-  switch (root->kind) {
-    case Expr::Kind::Formal: k.root = root->index; break;
-    case Expr::Kind::GlobalAddr:
-      if (root->global != nullptr) k.root = kGlobalSiteBase + root->global->id;
-      break;
-    case Expr::Kind::Result:
-      // Only a place reached from the result by a step (`*r.q`, `**r`; an atom on the result itself or on a member of it, `owns(r->x)`, stays keyless: M4.5d2b).
-      if (!k.via.empty()) k.root = kResultSiteKey;
-      break;
-    case Expr::Kind::Local:
-      // A plain pointer variable (`owns(*q)` of an invariant) stays keyless, as before decision 0045; a cell read or a member of a variable gets its own key.
-      if (root->var != nullptr && !(k.via.empty() && k.path.empty())) k.root = kLocalSiteBase + root->var->id;
-      break;
-    case Expr::Kind::AddrOf:
-      if (root->var != nullptr) k.root = kLocalSiteBase + root->var->id;
-      break;
-    default: break;
-  }
-  return k;
 }
 
-int atom_place_key(const Expr& atom) {
-  const PlaceKey k = atom_place(atom);
-  return k.path.empty() && k.via.empty() ? k.root : kNoPlaceKey;
+int atom_place_key(const Expr& atom)
+{
+    const PlaceKey k {atom_place(atom)};
+    return k.path.empty() && k.via.empty() ? k.root : kNoPlaceKey;
 }
 
-std::string place_text(const Expr& addr) {
-  if (addr.kind == Expr::Kind::GlobalAddr && addr.global != nullptr) return addr.global->c_name;
-  if (addr.kind == Expr::Kind::MemberAddr) return member_place(addr);
-  return addr.c_text.empty() ? std::string() : "*" + addr.c_text;
+std::string place_text(const Expr& addr)
+{
+    if (addr.kind == Expr::Kind::GlobalAddr && addr.global != nullptr)
+    {
+        return addr.global->c_name;
+    }
+    if (addr.kind == Expr::Kind::MemberAddr)
+    {
+        return member_place(addr);
+    }
+    return addr.c_text.empty() ? std::string() : "*" + addr.c_text;
 }
 
 namespace {
-std::vector<AtomSite> collect_contract_atoms(const Function& f, bool blocks) {
-  std::vector<AtomSite> all;
-  for (size_t k = 0; k < f.requires_.size(); ++k) AtomCollector(all, false, static_cast<int>(k)).walk(f.requires_[k].expr);
-  for (size_t k = 0; k < f.ensures_.size(); ++k) AtomCollector(all, true, static_cast<int>(k)).walk(f.ensures_[k].expr);
-  std::vector<AtomSite> out;
-  for (AtomSite& s : all)
-    if ((s.atom->atom == AtomKind::OwnsBlock) == blocks) out.push_back(std::move(s));
-  return out;
+std::vector<AtomSite> collect_contract_atoms(const Function& f, bool blocks)
+{
+    std::vector<AtomSite> all;
+    for (size_t k {0U}; k < f.requires_.size(); ++k)
+    {
+        AtomCollector(all, false, static_cast<int>(k)).walk(f.requires_[k].expr);
+    }
+    for (size_t k {0U}; k < f.ensures_.size(); ++k)
+    {
+        AtomCollector(all, true, static_cast<int>(k)).walk(f.ensures_[k].expr);
+    }
+    std::vector<AtomSite> out;
+    for (AtomSite& s : all)
+    {
+        if ((s.atom->atom == AtomKind::OwnsBlock) == blocks)
+        {
+            out.push_back(std::move(s));
+        }
+    }
+    return out;
 }
-}  // namespace
+} // namespace
 
-std::vector<AtomSite> contract_atoms(const Function& f) { return collect_contract_atoms(f, false); }
-
-std::vector<AtomSite> contract_block_atoms(const Function& f) { return collect_contract_atoms(f, true); }
-
-std::vector<AtomSite> loop_atoms(const Stmt& s) {
-  std::vector<AtomSite> all, out;
-  if (s.kind != Stmt::Kind::While || s.form == LoopForm::DoOnce) return out;
-  for (size_t k = 0; k < s.invariants.size(); ++k) AtomCollector(all, false, static_cast<int>(k)).walk(s.invariants[k].expr);
-  // An OwnsBlock atom of an invariant (decision 0047 item 4: d2b) is never listed; check_program refuses it.
-  for (AtomSite& a : all)
-    if (a.atom->atom != AtomKind::OwnsBlock) out.push_back(std::move(a));
-  return out;
+std::vector<AtomSite> contract_atoms(const Function& f)
+{
+    return collect_contract_atoms(f, false);
 }
 
-GuardShape atom_guard_shape(const AtomSite& s, int q) {
-  if (s.guards.empty()) return GuardShape::None;
-  if (s.guards.size() != 1 || s.guards[0].holds) return GuardShape::Other;
-  const Expr* c = s.guards[0].cond;
-  // The condition is `q == NULL` as the encoder builds it in either language: C wraps the comparison's value in `bool_to_int`/`to_bool`.
-  while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt)) c = c->a;
-  if (c == nullptr || c->kind != Expr::Kind::Binary || c->bop != BinaryOp::Eq) return GuardShape::Other;
-  const Expr* l = c->a;
-  const Expr* r = c->b;
-  if (l != nullptr && l->kind == Expr::Kind::Null) std::swap(l, r);
-  return l != nullptr && r != nullptr && l->kind == Expr::Kind::Formal && l->index == q && r->kind == Expr::Kind::Null ? GuardShape::NullCheck
-                                                                                                                       : GuardShape::Other;
+std::vector<AtomSite> contract_block_atoms(const Function& f)
+{
+    return collect_contract_atoms(f, true);
+}
+
+std::vector<AtomSite> loop_atoms(const Stmt& s)
+{
+    std::vector<AtomSite> all;
+    std::vector<AtomSite> out;
+    if (s.kind != Stmt::Kind::While || s.form == LoopForm::DoOnce)
+    {
+        return out;
+    }
+    for (size_t k {0U}; k < s.invariants.size(); ++k)
+    {
+        AtomCollector(all, false, static_cast<int>(k)).walk(s.invariants[k].expr);
+    }
+    // An OwnsBlock atom of an invariant (decision 0052 item 6 (a): M4.5d2b2) is never listed; check_program refuses it.
+    for (AtomSite& a : all)
+    {
+        if (a.atom->atom != AtomKind::OwnsBlock)
+        {
+            out.push_back(std::move(a));
+        }
+    }
+    return out;
+}
+
+GuardShape atom_guard_shape(const AtomSite& s, int q)
+{
+    if (s.guards.empty())
+    {
+        return GuardShape::None;
+    }
+    if (s.guards.size() != 1U || s.guards[0U].holds)
+    {
+        return GuardShape::Other;
+    }
+    const Expr* c {s.guards[0U].cond};
+    // The condition is `q == NULL` as the encoder builds it in either language: C wraps the comparison's value in `bool_to_int`/`to_bool`.
+    while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt))
+    {
+        c = c->a;
+    }
+    if (c == nullptr || c->kind != Expr::Kind::Binary || c->bop != BinaryOp::Eq)
+    {
+        return GuardShape::Other;
+    }
+    const Expr* l {c->a};
+    const Expr* r {c->b};
+    if (l != nullptr && l->kind == Expr::Kind::Null)
+    {
+        std::swap(l, r);
+    }
+    return l != nullptr && r != nullptr && l->kind == Expr::Kind::Formal && l->index == q && r->kind == Expr::Kind::Null
+               ? GuardShape::NullCheck
+               : GuardShape::Other;
 }
 
 namespace {
 // Whether an object of type `t` can hold, transitively, a pointer to `target` (a `target *`, a `target **`, ...): `t` is such a pointer or reaches one
 // through a struct (leaves, and the structs that pointer leaves point to).
-bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const StructType*>& seen) {
-  const Type* base = &t;
-  int steps = 0;  // pointer levels between the object and the struct reached
-  while (base->is_ptr() && base->pointee != nullptr) {
-    if (*base->pointee == target) return true;
-    base = base->pointee;
-    ++steps;
-  }
-  if (base->is_struct() && base->struct_type != nullptr) {
-    const std::vector<StructLeaf> leaves = struct_leaves(*base->struct_type);
-    // A pointer to a struct that has a cell of the target's field (any depth of nesting): a pointer loaded from the object reaches that cell (audit S1).
-    if (steps > 0)
-      for (const StructLeaf& l : leaves)
-        if (l.type == target) return true;
-    if (seen.insert(base->struct_type).second)
-      for (const StructLeaf& l : leaves)
-        if (may_hold_pointer_to(l.type, target, seen)) return true;
-  }
-  return false;
-}
-}  // namespace
-
-std::string restrict_hazard(const Function& f, int param) {
-  const Type& mine = f.params[static_cast<size_t>(param)].type;
-  if (!mine.is_ptr() || mine.pointee == nullptr) return "";
-  if (mine.pointee->is_struct()) return "it points to a struct (`restrict` on a struct pointer: M8)";
-  auto name = [&](int i) { return f.params[static_cast<size_t>(i)].name.empty() ? "arg" + std::to_string(i + 1) : f.params[static_cast<size_t>(i)].name; };
-  for (size_t q = 0; q < f.params.size(); ++q) {
-    if (static_cast<int>(q) == param) continue;
-    // Decision 0044 item 11: a by-value struct whose leaves can hold a pointer from which a `T *` can be formed (an `int *` leaf, or a `struct U *` leaf
-    // whose `U` has an `int` leaf, at any depth) is a place beside which `restrict` is refused, as the object of a pointer parameter is.
-    if (f.params[q].type.is_struct()) {
-      std::set<const StructType*> seen;
-      if (may_hold_pointer_to(f.params[q].type, *mine.pointee, seen))
-        return "the by-value struct `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
-      continue;
+bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const StructType*>& seen)
+{
+    const Type* base {&t};
+    int steps {0}; // pointer levels between the object and the struct reached
+    while (base->is_ptr() && base->pointee != nullptr)
+    {
+        if (*base->pointee == target)
+        {
+            return true;
+        }
+        base = base->pointee;
+        ++steps;
     }
-    if (!f.params[q].type.is_ptr() || f.params[q].type.pointee == nullptr) continue;
-    std::set<const StructType*> seen;
-    if (may_hold_pointer_to(*f.params[q].type.pointee, *mine.pointee, seen))
-      return "the object of `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
-  }
-  for (const AtomSite& s : contract_atoms(f)) {
-    // Decision 0045 item 10: the root of the atom's place under any number of loads, members and pointer leaves (`*gp`, `**pp`, `*s.q`, `*r.q`): a pointer loaded
-    // through it is not based on `param` either.  A Formal root is judged by its type in the loop above; a global by its type; the result by the function's
-    // result type; any other root of a place with steps is a place this check cannot place, which fails closed.
-    if (s.atom->a == nullptr) continue;
-    std::vector<int> steps;
-    const Expr* root = place_root(s.atom->a, &steps);
-    if (root == nullptr) continue;
-    if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr) {
-      std::set<const StructType*> seen;
-      if (may_hold_pointer_to(root->global->type, *mine.pointee, seen))
-        return "the global `" + root->global->c_name + "` named by the contract can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
-    } else if (root->kind == Expr::Kind::Result) {
-      std::set<const StructType*> seen;
-      if (!f.ret.is_void() && may_hold_pointer_to(f.ret, *mine.pointee, seen))
-        return "the result of `" + f.c_name + "` named by the contract can hold a `" + mine.str() + "`, and a pointer loaded from it is not based on `" + name(param) + "`";
-    } else if (root->kind != Expr::Kind::Formal && !steps.empty()) {
-      return "a place named by the contract is reached through a load from a root `cerastes` cannot place, which could hold a `" + mine.str() +
-             "` that is not based on `" + name(param) + "`";
+    if (base->is_struct() && base->struct_type != nullptr)
+    {
+        const std::vector<StructLeaf> leaves {struct_leaves(*base->struct_type)};
+        // A pointer to a struct that has a cell of the target's field (any depth of nesting): a pointer loaded from the object reaches that cell (audit S1).
+        if (steps > 0)
+        {
+            for (const StructLeaf& l : leaves)
+            {
+                if (l.type == target)
+                {
+                    return true;
+                }
+            }
+        }
+        if (seen.insert(base->struct_type).second)
+        {
+            for (const StructLeaf& l : leaves)
+            {
+                if (may_hold_pointer_to(l.type, target, seen))
+                {
+                    return true;
+                }
+            }
+        }
     }
-  }
-  return "";
-}
-
-bool restrict_backed(const Function& f, int param, int* offender) {
-  // The site's guard is none, or exactly `q == NULL` being false.
-  auto null_guard = [&](const AtomSite& s, int q) { return atom_guard_shape(s, q) != GuardShape::Other; };
-  if (offender != nullptr) *offender = -1;
-  if (!restrict_hazard(f, param).empty()) return false;
-  const std::vector<AtomSite> sites = contract_atoms(f);
-  bool own = false;
-  for (const AtomSite& r : sites) {
-    if (r.in_ensures || r.atom->atom != AtomKind::Owns || r.atom->a == nullptr || r.atom->a->kind != Expr::Kind::Formal ||
-        r.atom->a->index != param || !null_guard(r, param))
-      continue;
-    for (const AtomSite& e : sites)
-      if (e.in_ensures && e.atom->atom == AtomKind::Owns && e.atom->amount == r.atom->amount && null_guard(e, param)) own = true;
-  }
-  if (!own) return false;
-  const Type& mine = f.params[static_cast<size_t>(param)].type;
-  // Decision 0043 item 10: `restrict` stays on scalar and pointer pointees; a struct pointee is refused (M8).
-  if (mine.is_ptr() && mine.pointee != nullptr && mine.pointee->is_struct()) return false;
-  // A pointer parameter of another pointee type may still reach `param`'s cell when its pointee is a struct with a leaf of `param`'s pointee type
-  // (`int *q` can point at `s->x`), so such a parameter needs its own atom like a same-typed one (the "field" rule of item 10).
-  auto reaches = [&](const Type& qt) {
-    if (qt == mine) return true;
-    if (!qt.is_ptr() || qt.pointee == nullptr || !qt.pointee->is_struct() || qt.pointee->struct_type == nullptr || !mine.is_ptr() || mine.pointee == nullptr)
-      return false;
-    for (const StructLeaf& l : struct_leaves(*qt.pointee->struct_type))
-      if (l.type == *mine.pointee) return true;
     return false;
-  };
-  for (size_t q = 0; q < f.params.size(); ++q) {
-    if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || !reaches(f.params[q].type)) continue;
-    bool covered = false;
-    for (const AtomSite& r : sites)
-      if (!r.in_ensures && (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads) && r.atom->a != nullptr &&
-          r.atom->a->kind == Expr::Kind::Formal && r.atom->a->index == static_cast<int>(q) && null_guard(r, static_cast<int>(q)))
-        covered = true;
-    if (!covered) {
-      if (offender != nullptr) *offender = static_cast<int>(q);
-      return false;
+}
+} // namespace
+
+std::string restrict_hazard(const Function& f, int param)
+{
+    const Type& mine {f.params[static_cast<size_t>(param)].type};
+    if (!mine.is_ptr() || mine.pointee == nullptr)
+    {
+        return "";
     }
-  }
-  return true;
+    if (mine.pointee->is_struct())
+    {
+        return "it points to a struct (`restrict` on a struct pointer: M8)";
+    }
+    auto name = [&](int i)
+    {
+        return f.params[static_cast<size_t>(i)].name.empty() ? "arg" + std::to_string(i + 1)
+                                                             : f.params[static_cast<size_t>(i)].name;
+    };
+    for (size_t q {0U}; q < f.params.size(); ++q)
+    {
+        if (static_cast<int>(q) == param)
+        {
+            continue;
+        }
+        // Decision 0044 item 11: a by-value struct whose leaves can hold a pointer from which a `T *` can be formed (an `int *` leaf, or a `struct U *` leaf
+        // whose `U` has an `int` leaf, at any depth) is a place beside which `restrict` is refused, as the object of a pointer parameter is.
+        if (f.params[q].type.is_struct())
+        {
+            std::set<const StructType*> seen;
+            if (may_hold_pointer_to(f.params[q].type, *mine.pointee, seen))
+            {
+                return "the by-value struct `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() +
+                       "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+            }
+            continue;
+        }
+        if (!f.params[q].type.is_ptr() || f.params[q].type.pointee == nullptr)
+        {
+            continue;
+        }
+        std::set<const StructType*> seen;
+        if (may_hold_pointer_to(*f.params[q].type.pointee, *mine.pointee, seen))
+        {
+            return "the object of `" + name(static_cast<int>(q)) + "` can hold a `" + mine.str() +
+                   "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+        }
+    }
+    for (const AtomSite& s : contract_atoms(f))
+    {
+        // Decision 0045 item 10: the root of the atom's place under any number of loads, members and pointer leaves (`*gp`, `**pp`, `*s.q`, `*r.q`): a pointer loaded
+        // through it is not based on `param` either.  A Formal root is judged by its type in the loop above; a global by its type; the result by the function's
+        // result type; any other root of a place with steps is a place this check cannot place, which fails closed.
+        if (s.atom->a == nullptr)
+        {
+            continue;
+        }
+        std::vector<int> steps;
+        const Expr* root {place_root(s.atom->a, &steps)};
+        if (root == nullptr)
+        {
+            continue;
+        }
+        if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr)
+        {
+            std::set<const StructType*> seen;
+            if (may_hold_pointer_to(root->global->type, *mine.pointee, seen))
+            {
+                return "the global `" + root->global->c_name + "` named by the contract can hold a `" + mine.str() +
+                       "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+            }
+        }
+        else if (root->kind == Expr::Kind::Result)
+        {
+            std::set<const StructType*> seen;
+            if (!f.ret.is_void() && may_hold_pointer_to(f.ret, *mine.pointee, seen))
+            {
+                return "the result of `" + f.c_name + "` named by the contract can hold a `" + mine.str() +
+                       "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+            }
+        }
+        else if (root->kind != Expr::Kind::Formal && !steps.empty())
+        {
+            return "a place named by the contract is reached through a load from a root `cerastes` cannot place, which could hold a `" +
+                   mine.str() + "` that is not based on `" + name(param) + "`";
+        }
+    }
+    // Decision 0052 item 6 (d): the block of a result's `owns_block` holds every leaf of its type, so it can hold a `T
+    // *` that is not based on `param` too (a block site on a Formal is judged by the parameter's type in the loop
+    // above).
+    for (const AtomSite& s : contract_block_atoms(f))
+    {
+        if (s.atom->a != nullptr && s.atom->a->kind == Expr::Kind::Result && !f.ret.is_void())
+        {
+            std::set<const StructType*> seen;
+            if (may_hold_pointer_to(f.ret, *mine.pointee, seen))
+            {
+                return "the result of `" + f.c_name + "` named by the contract can hold a `" + mine.str() +
+                       "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+            }
+        }
+    }
+    return "";
 }
 
-int requires_atom_count(const Function& f) {
-  int n = 0;
-  for (const AtomSite& s : contract_atoms(f))
-    if (!s.in_ensures) ++n;
-  return n;
+bool restrict_backed(const Function& f, int param, int* offender)
+{
+    // The site's guard is none, or exactly `q == NULL` being false.
+    auto null_guard = [&](const AtomSite& s, int q)
+    {
+        return atom_guard_shape(s, q) != GuardShape::Other;
+    };
+    if (offender != nullptr)
+    {
+        *offender = -1;
+    }
+    if (!restrict_hazard(f, param).empty())
+    {
+        return false;
+    }
+    const std::vector<AtomSite> sites {contract_atoms(f)};
+    // Decision 0052 item 6 (d): an `owns_block` of the parameter, in the `requires` and in the `ensures` (a borrow),
+    // gives everything `owns(*p)` does.
+    const std::vector<AtomSite> blocks {contract_block_atoms(f)};
+    auto block_of = [&](int q, bool in_ensures)
+    {
+        for (const AtomSite& b : blocks)
+        {
+            if (b.in_ensures == in_ensures && b.atom->a != nullptr && b.atom->a->kind == Expr::Kind::Formal &&
+                b.atom->a->index == q && null_guard(b, q))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    bool own {block_of(param, false) && block_of(param, true)};
+    for (const AtomSite& r : sites)
+    {
+        if (r.in_ensures || r.atom->atom != AtomKind::Owns || r.atom->a == nullptr ||
+            r.atom->a->kind != Expr::Kind::Formal || r.atom->a->index != param || !null_guard(r, param))
+        {
+            continue;
+        }
+        for (const AtomSite& e : sites)
+        {
+            if (e.in_ensures && e.atom->atom == AtomKind::Owns && e.atom->amount == r.atom->amount &&
+                null_guard(e, param))
+            {
+                own = true;
+            }
+        }
+    }
+    if (!own)
+    {
+        return false;
+    }
+    const Type& mine {f.params[static_cast<size_t>(param)].type};
+    // Decision 0043 item 10: `restrict` stays on scalar and pointer pointees; a struct pointee is refused (M8).
+    if (mine.is_ptr() && mine.pointee != nullptr && mine.pointee->is_struct())
+    {
+        return false;
+    }
+    // A pointer parameter of another pointee type may still reach `param`'s cell when its pointee is a struct with a leaf of `param`'s pointee type
+    // (`int *q` can point at `s->x`), so such a parameter needs its own atom like a same-typed one (the "field" rule of item 10).
+    auto reaches = [&](const Type& qt)
+    {
+        if (qt == mine)
+        {
+            return true;
+        }
+        if (!qt.is_ptr() || qt.pointee == nullptr || !qt.pointee->is_struct() || qt.pointee->struct_type == nullptr ||
+            !mine.is_ptr() || mine.pointee == nullptr)
+        {
+            return false;
+        }
+        for (const StructLeaf& l : struct_leaves(*qt.pointee->struct_type))
+        {
+            if (l.type == *mine.pointee)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (size_t q {0U}; q < f.params.size(); ++q)
+    {
+        if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || !reaches(f.params[q].type))
+        {
+            continue;
+        }
+        bool covered {block_of(static_cast<int>(q), false)};
+        for (const AtomSite& r : sites)
+        {
+            if (!r.in_ensures && (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads) &&
+                r.atom->a != nullptr && r.atom->a->kind == Expr::Kind::Formal &&
+                r.atom->a->index == static_cast<int>(q) && null_guard(r, static_cast<int>(q)))
+            {
+                covered = true;
+            }
+        }
+        if (!covered)
+        {
+            if (offender != nullptr)
+            {
+                *offender = static_cast<int>(q);
+            }
+            return false;
+        }
+    }
+    return true;
 }
 
-}  // namespace cerastes::vir
+int requires_atom_count(const Function& f)
+{
+    int n {0};
+    for (const AtomSite& s : contract_atoms(f))
+    {
+        if (!s.in_ensures)
+        {
+            ++n;
+        }
+    }
+    return n;
+}
+
+} // namespace cerastes::vir

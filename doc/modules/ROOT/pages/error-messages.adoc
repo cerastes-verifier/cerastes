@@ -475,6 +475,16 @@ right is missing:
   one object when `x` is a member of `s`
   (xref:memory.adoc#structures[Structures]);
 * at a `return`, when the function does not hold what its `ensures` promises;
+  an `ensures` that promises a place on the result that no `requires` atom took,
+  and that the function does not hold, is "returns `*r` without holding it"
+  (xref:memory.adoc#results[Results that give a place]);
+* at the initialization or the assignment of an owning local, when the value is not
+  the start of a block the function holds whole ("owning `q` receives a pointer that
+  is not the start of a block the function holds"), and at the start or the end of
+  an iteration of a loop, when an owning local the loop assigns is not null but holds
+  no block ("owning `v` holds no block at the loop's entry but is not null: set it
+  to `NULL` after freeing it or handing it on")
+  (xref:memory.adoc#owning-locals[Owning locals]);
 * at a contract clause that reads `*p` (or `*r`, the object a pointer result
   points to) where no `owns` or `reads` of that object comes before it, at a contract that both owns and reads `*p` on one path, at
   an `ensures` that gives back `*p` on a path where the `requires` did not take
@@ -498,6 +508,50 @@ A local variable exists only until its block ends; a pointer to it is then
 *dangling*, and reading or writing through it is undefined behaviour in C and
 pass:[C++]. xref:memory.adoc[Memory and ownership] describes the lifetimes
 cerastes checks.
+
+A function can promise only what it holds. This one promises the cell of a global
+through its result, and holds nothing of it:
+
+[source,c]
+----
+include::example$memory/result_not_held.c[tag=source]
+----
+
+[source,console]
+----
+result_not_held.c:12: error: permission: returns `*r` without holding it
+----
+
+An owning local must be given the start of an allocation that the function holds:
+
+[source,c]
+----
+include::example$memory/owning_local_value_rule.c[tag=source]
+----
+
+[source,console]
+----
+owning_local_value_rule.c:10: error: permission: owning `q` receives a pointer that is not the start of a block the function holds
+----
+
+An owning local that a loop assigns must hold its block, or be null, at the start and
+at the end of every iteration (xref:memory.adoc#owning-locals[Owning locals]). This loop
+frees the owner and leaves it pointing at the freed block, which is reported at the
+closing brace of the loop's body:
+
+[source,c]
+----
+include::example$memory/owning_loop_no_reset.c[tag=source]
+----
+
+[source,console]
+----
+owning_loop_no_reset.c:24: error: permission: owning `v` holds no block at the end of an iteration of this loop but is not null: set it to `NULL` after freeing it or handing it on
+----
+
+*How to fix it.* Set the owner to `NULL` after the `free` (or after handing the block
+on), and say so in the loop's invariant (`k > 0 || v == NULL` in
+xref:memory.adoc#owning-locals[the example there]).
 
 [source,c]
 ----
@@ -709,3 +763,30 @@ caller the allocation the function returns
 ----
 include::example$error-messages/leak_fixed.c[tag=source]
 ----
+
+*An owning local.* A local marked `cerastes::owning` (xref:memory.adoc#owning-locals[Owning locals])
+reports the same mistake where it happens: "owning `p` still holds its block" at
+the way out of the variable's scope (the closing brace, a `break`, a `continue`, a
+`goto` or a `return`), and "assigning to owning `p` still holds its block" at an
+assignment that drops the block it holds. Each block is reported once.
+
+[source,c]
+----
+include::example$memory/owning_local_leak.c[tag=source]
+----
+
+[source,console]
+----
+owning_local_leak.c:17: error: leak: owning `p` still holds its block
+----
+
+[source,c]
+----
+include::example$memory/owning_local_overwrite.c[tag=source]
+----
+
+[source,console]
+----
+owning_local_overwrite.c:16: error: leak: assigning to owning `p` still holds its block
+----
+

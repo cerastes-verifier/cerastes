@@ -555,9 +555,110 @@ reach the function and that C does not order (`next_id() + next_id()`) are
 reported as xref:error-messages.adoc#_unsequenced[`unsequenced`]: the result
 depends on which runs first. A `static` local may be a structure; the function
 and its callers then hold every member. A function may return the address of its
-`static` local, but its callers cannot use the pointer yet (it is reported as
-xref:error-messages.adoc#_lifetime[`lifetime`]). A `static const` local is not
-supported yet.
+`static` local; its caller can use the pointer when the contract says what it
+points to (<<results,Results that give a place>>), and otherwise a use of it is
+reported as xref:error-messages.adoc#_lifetime[`lifetime`]. A `static const`
+local is not supported yet.
+
+[#results]
+== Results that give a place
+
+An `ensures` that names a pointer parameter's object normally gives back what the
+`requires` took (<<contracts,Pointer parameters and contracts>>). A function can
+also promise something about the object its pointer result points to, or about a
+member of a returned structure's pointer (`cerastes_owns(*r)`,
+`cerastes_reads(*r)`, `cerastes_live(r)`, `cerastes_live(r.q)`,
+`+cerastes_owns(**r)+`), though no `requires` atom names it. The promise is one
+of two kinds, and cerastes decides which at each `return`.
+
+*Covered.* The function already holds the object through a right it does not
+list: the implicit right to its `static` local (<<static-locals,`static` local
+variables>>), or the object of an `owning` parameter. The atom then adds nothing
+the caller does not get anyway: the caller learns that the result is that
+object and uses the right it holds. With `live(r)` the caller may use the
+pointer: copy it, compare it, pass it on.
+
+[source,c]
+----
+include::example$memory/result_static_live.c[tag=source]
+----
+
+A covered `live` gives the equality of the objects and nothing more. It never
+gives access, so the caller may not read `*p` through it:
+
+[source,c]
+----
+include::example$memory/result_live_no_read.c[tag=source]
+----
+
+With `owns(*r)` the caller reads and writes the object through its own right to
+the `static` local:
+
+[source,c]
+----
+include::example$memory/result_static_owns.c[tag=source]
+----
+
+An `owning` parameter's object is covered the same way:
+
+[source,c]
+----
+include::example$memory/result_owning_parameter.c[tag=source]
+----
+
+*Given.* The function holds the object beyond what it gives back for its other
+atoms, and hands the right over. `take_cell` takes a global's cell and gives it to
+its caller through the result; its own `ensures` does not give `g` back, since
+the caller now has it as `*r`:
+
+[source,c]
+----
+include::example$memory/result_given_cell.c[tag=source]
+----
+
+A function can give only what it holds. If `take_cell` held nothing of `g`, it
+would promise a place it does not have, and cerastes reports it at the `return`:
+
+[source,c]
+----
+include::example$memory/result_not_held.c[tag=source]
+----
+
+Only the implicit rights cover; a written atom never does. Two atoms joined by
+`&&` stay two objects, so the caller of `pick` concludes that the result is not
+`*p`, and may write through it without changing `x` (the contract says `*p` is
+unchanged, which the caller needs to know `x` still holds 1):
+
+[source,c]
+----
+include::example$memory/result_separating.c[tag=source]
+----
+
+A place that lies inside or around one the `requires` takes cannot be promised
+again as a new one (`owns(*p)` taken, a new `owns(p->x)` promised, or `live(p)`
+beside a new `owns(*p)`): write one atom on the whole place. A reach through the
+result (`+owns(**r)+`) needs an atom on `*r` before it, as every contract read of
+an object does.
+
+*Contracts without a body.* A function declared without a body is trusted, and a
+contract nothing verifies must not promise a right its caller may already hold,
+or the caller's state would be impossible and everything after the call would
+verify. Such a contract may therefore promise a place only on its result, and
+only when no clause equates the result, or a pointer read through it, with
+anything but a null pointer: a function that returns a fresh object is such a
+contract. Any other promise (a place on a parameter, a result tied to a
+parameter) is `cerastes-unsupported_annotation`, until the contract manifest
+(planned with the concepts) lets a unit state what it relies on:
+
+[source,c]
+----
+include::example$memory/result_bodiless.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/result_bodiless_rejected.c[tag=source]
+----
 
 [#expressions]
 == Writes and calls inside expressions
@@ -765,8 +866,9 @@ include::example$memory/heap_cell.c[tag=source]
 
 In this version a function can hand over only the allocation of its result, or
 the allocation a parameter points to: `owns_block` of an object reached through
-another pointer (`+*pp+`, `p->next`) or of a global, and owning local variables,
-globals and structure members, are planned for the next version.
+another pointer (`+*pp+`, `p->next`) or of a global, and owning globals and
+structure members, are planned for the next version. A local that owns an
+allocation is <<owning-locals,an owning local>>.
 
 [#vlibc-allocator]
 *vlibc's allocator.* vlibc also has an allocator of its own,
@@ -785,13 +887,213 @@ include::example$memory/vlibc_alloc.c[tag=source]
 ----
 
 A function can borrow the objects of a block of either allocator through
-`owns(*p)`, `reads(*p)` and `live(p)`. `cerastes_owns_block` and
-`cerastes::owning` name a block of `malloc` or `calloc` only, so handing a block
-of vlibc's over through them is reported (`permission`); a spelling for it is
-planned for the next version. vlibc's allocator is for C: in pass:[C++] a call of
-`vlibc_malloc` or `vlibc_calloc` is rejected, since pass:[C++] creates objects
-only in the storage `std::malloc` and its family return (placement `new` comes
-with classes).
+`owns(*p)`, `reads(*p)` and `live(p)`. vlibc's allocator is for C: in pass:[C++] a
+call of `vlibc_malloc` or `vlibc_calloc` is rejected, since pass:[C++] creates
+objects only in the storage `std::malloc` and its family return (placement `new`
+comes with classes).
+
+[#vlibc-blocks]
+*A vlibc block in a contract.* `cerastes_owns_block` and `cerastes::owning` name a
+block of `malloc` or `calloc`: handing a block of vlibc's over through them is
+reported as `permission`. `cerastes_owns_vlibc_block(p)` is `cerastes_owns_block(p)`
+for a block of vlibc's allocator. It is declared by `<cerastes.h>` under that C
+name only, in C programs (in pass:[C++] it is `cerastes-unsupported_annotation`,
+like the allocation itself), and everything said of `cerastes_owns_block` applies:
+a `requires` alone takes the block, an `ensures` alone about the result hands it
+over, both on one parameter borrow it. A contract does not name both spellings
+for one pointer. A program that names it is checked as one that uses vlibc's
+allocator: each block's allocator is checked wherever it is handed over or freed.
+
+[source,c]
+----
+include::example$memory/vlibc_block_contract.c[tag=source]
+----
+
+A block of the other allocator is reported where it is passed:
+
+[source,c]
+----
+include::example$memory/vlibc_block_contract_mismatch.c[tag=source]
+----
+
+[#owning-locals]
+== Owning locals
+
+A pointer local marked `cerastes::owning` (`CERASTES_OWNING`) owns the allocation
+it points to. cerastes then reports a forgotten allocation where it happens, at
+the end of the variable's scope or when the variable is assigned another value,
+instead of only at the end of the function
+(xref:annotations.adoc#marked-locals[the attribute]).
+
+*The value rule.* An owner is given the start of an allocation the function
+holds whole, or null. Anything else (the address of a local, a pointer into the
+middle of a block, a block the function does not own) is
+xref:error-messages.adoc#_permission[`permission`] at the initialization or the
+assignment:
+
+[source,c]
+----
+include::example$memory/owning_local_value_rule.c[tag=source]
+----
+
+*Lifetime end.* At each way out of the variable's scope (the end of its block, a
+`break`, a `continue` or a `goto` that leaves it, a `return`) the owner must no
+longer hold its block: it was freed, handed to a function that takes it, or
+passed to another owner or returned. One that still holds it is
+xref:error-messages.adoc#_leak[`leak`], reported at the way out:
+
+[source,c]
+----
+include::example$memory/owning_local_free.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/owning_local_leak.c[tag=source]
+----
+
+*Reassignment.* Assigning to an owner that holds a block drops the block, and is
+`leak` at the assignment, unless another owner or the value being assigned holds
+it (`p = p` is fine):
+
+[source,c]
+----
+include::example$memory/owning_local_overwrite.c[tag=source]
+----
+
+*Owners.* At a point, the owners are the owning locals in scope that hold their
+block. A block is also held by an owner that outlives the way out: a variable of
+an enclosing scope, the value a function returns when the function is `owning`
+or its `ensures` hands over the result, and the entry value of a parameter that
+the function borrows (`cerastes_owns_block` in both lists), so that a function
+can park a borrowed block in an owning local:
+
+[source,c]
+----
+include::example$memory/owning_local_return.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/owning_local_return_other.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/owning_local_borrow.c[tag=source]
+----
+
+*Handing a block on.* Passing the pointer to a function whose `requires` takes
+the block (`cerastes_owns_block(p)` without a matching `ensures`, or `free`)
+ends the obligation, and so does assigning it to another owner:
+
+[source,c]
+----
+include::example$memory/owning_local_consume.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/owning_local_handoff.c[tag=source]
+----
+
+*A dangling owner.* After the block is freed or taken by a call, the owner holds
+nothing, even if a later allocation returns the same address. A use of the
+pointer after the `free` is still xref:error-messages.adoc#_lifetime[`lifetime`].
+A copy in a plain pointer does not take the obligation: the owner still holds
+the block when its scope ends, whatever the copy does later, so a block moved to
+a plain pointer is reported at the owner's scope:
+
+[source,c]
+----
+include::example$memory/owning_local_copy.c[tag=source]
+----
+
+*Unannotated pointers.* Nothing changes for a pointer that is not marked: the
+rule at the end of the function (every allocation the function still holds and
+does not hand back is a `leak`) stays, and it reports blocks that no owner holds.
+
+*Loops.* An owning local declared outside a loop that the loop assigns is kept
+across iterations by its value: at the start of the loop, and at the end of each
+iteration, an owner that is not null must hold the whole block it points to, and
+after the loop it is null or holds its block. A loop that frees the block of such
+an owner sets the variable to `NULL` after the `free`, and its invariant says so:
+the loop cannot carry "freed" otherwise. A loop that allocates into the variable
+every iteration, without freeing the previous block, drops a block in the second
+iteration (the reassignment rule above). So an owner that the loop allocates into
+must be `NULL` at the head of each iteration: say so in the invariant
+(`v == NULL`), or free it and set it to `NULL` in the body; otherwise the
+assignment at the head is reported as a `leak`, since the invariant does not say
+that the owner holds nothing there.
+
+[source,c]
+----
+include::example$memory/owning_loop_reset.c[tag=source]
+----
+
+A violation is reported at the loop, as `permission`, at the start or at the end of
+an iteration:
+
+[source,c]
+----
+include::example$memory/owning_loop_no_reset.c[tag=source]
+----
+
+A loop's invariant may read the owner's object (`*v`); the loop holds it through
+the owning local, so an `owns(*v)` or `reads(*v)` written for it in the invariant
+is `permission` ("which the loop already owns through its owning local"): drop
+the atom. A pointer that only copies the owner's block (`int *alias = v;`) is an
+ordinary pointer in the loop, as before. When every assignment to the owner in the
+loop comes from one allocator (`malloc` or `vlibc_malloc`), the loop keeps the
+allocator, so a vlibc loop may start from a `NULL` owner; an owner that enters
+the loop with a block of the other allocator is `permission` at the loop's entry,
+even when the loop would free it before the first assignment.
+
+An owner that is a global, a `static` local, a local whose address is taken or a
+structure's member is planned for the next version
+(<<not-yet,What is not supported yet>>).
+
+[#block-guards]
+== A block that depends on memory
+
+`cerastes_owns_block(p)` may be under a condition, as the atoms of an `owns` and a
+`reads` may: `cond ? cerastes_owns_block(p) : true`, or `p == NULL || ...`. The
+condition may read memory, in the state the clause is about: a `requires` reads it
+on entry, an `ensures` on return. The function below takes the block exactly where
+`*q` is positive, and frees it under the same test:
+
+[source,c]
+----
+include::example$memory/block_guard_consume.c[tag=source]
+----
+
+An `ensures` guard decides whether the caller receives a block, and is read on
+return, so the caller learns the block only where the guard holds after the call:
+
+[source,c]
+----
+include::example$memory/block_guard_result.c[tag=source]
+----
+
+A function that borrows a block under a guard and gives it back under the same
+guard must say that the guard still holds on return: `*q == cerastes_old(*q)`,
+or use a guard that cannot change. The `ensures` guard is read on return, so
+without it the contract itself is wrong, whatever the body does: on a path where
+`*q` is no longer positive it returns a block that the `requires` did not take,
+which is `permission`, reported at the contract:
+
+[source,c]
+----
+include::example$memory/block_guard_borrow.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/block_guard_changed.c[tag=source]
+----
+
+A guard may also read a global or `cerastes_old`. The caller must hold what the
+guard reads (here `*q`), like any contract read.
 
 [#not-yet]
 == What is not supported yet
@@ -799,12 +1101,13 @@ with classes).
 These are rejected with a diagnostic, never approximated
 (xref:verifying.adoc#not-supported[the full list]):
 
-* `owns`, `reads` or `live` of the object of a pointer result or of a returned
-  structure's pointer member (`*r`, `+*r.q+`, `+cerastes_live(r.q)+`, `+**r+`):
-  they give the caller something the `requires` did not take (planned for the
-  next version; `cerastes_owns_block(r)` hands over a whole allocation already),
-  and contracts that name objects other than those reached from the parameters
-  and the global variables;
+* contracts that name objects other than those reached from the parameters, the
+  global variables and the result, and, in a function whose body is not in the
+  file, an `owns`, `reads`, `live` or `cerastes_owns_block` that its `requires`
+  does not take, except on the result and only where no clause equates the
+  result with anything but a null pointer (nothing verifies the contract, so it
+  may promise only what the caller cannot already hold: the contract manifest,
+  planned with the concepts);
 * `cerastes_old` inside the path of a place (`+*cerastes_old(*pp)+`, the object
   `*pp` pointed to on entry, read on return; `+cerastes_old(p)->q->x+`), and
   `cerastes_old` in a loop invariant (copy the value into a local before the
@@ -815,19 +1118,27 @@ These are rejected with a diagnostic, never approximated
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and of
   a global itself in an invariant (`cerastes_owns(g)`: the loop holds it
   already);
-* the attribute `cerastes::owning` on a local or global variable or a
-  structure's member (planned for the next version), and `owning(n)`;
-* `cerastes::ref_to_uninit` on a local, and `cerastes::uninit` on anything but a
-  local; under `--strict-init`, a call of a function whose result has no value
-  (`malloc`);
+* the attribute `cerastes::owning` on a global variable, a `static` local, a
+  local whose address is taken and a structure's member (planned for the next
+  version: they need block sites reached through a pointer read from memory, and
+  contracts that say who owns a variable), and `owning(n)`;
+* `cerastes::ref_to_uninit` on a global variable or a `static` local,
+  `cerastes::uninit` on anything but a local, and `cerastes::must_init` on
+  anything but a parameter (P4222 defines it for parameters only);
+* the attributes of the P4417R0 and P4418R0 invalidation profile (an owner
+  parameter that transfers its object to the callee, a pointer parameter the
+  function does not invalidate, a suppression for a pointer that dangles on
+  purpose): planned for the next version;
 * allocations of more than one object (`n * sizeof(T)`), `realloc`, and
-  `cerastes_owns_block` of an object reached through another pointer or of a
-  global (<<heap>>);
+  `cerastes_owns_block` of an object reached through another pointer, of a
+  structure's member or of a global (<<heap>>);
 * `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized` and
   `vlibc_free_aligned_sized`, which have no contract yet
-  (`call_without_contract`), a block of vlibc's allocator handed over through
-  `cerastes_owns_block` or `cerastes::owning`, and `vlibc_malloc` and
-  `vlibc_calloc` in pass:[C++] (<<vlibc-allocator,vlibc's allocator>>);
+  (`call_without_contract`), a block of vlibc's allocator named by
+  `cerastes::owning` or `cerastes_owns_block` (they name the platform's
+  allocator; `cerastes_owns_vlibc_block` is the spelling for vlibc's), and
+  `vlibc_malloc`, `vlibc_calloc` and `cerastes_owns_vlibc_block` in pass:[C++]
+  (<<vlibc-allocator,vlibc's allocator>>);
 * `restrict` except on a C parameter whose contract owns its object;
 * `void *` other than an allocation's result converted at once to `T *` and
   the argument of `free` (<<heap>>), and pointers to unions, to functions and to

@@ -1,0 +1,6 @@
+# cerastes's code style (decision 0051) lives in src/.clang-format and include/.clang-format, and only
+# there.  Everywhere else formatting is off, so no editor or tool can reformat a test (invariant 1: test
+# lines are expectations), a doc example, the fixtures of scripts/testdata, the probes of internal/upstream,
+# or a file of EDG, Silicon or vlibc.  Fail-closed: a new directory is unformatted until it is given a style.
+DisableFormat: true
+SortIncludes: Never

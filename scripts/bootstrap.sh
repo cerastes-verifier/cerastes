@@ -7,13 +7,13 @@
 # them on the runner), checks out the submodules, builds EDG (stock, for scripts/cpfe.sh, and the cerastes
 # configuration, build/cerastes-fe and build/cerastes, the `verify` driver, which gets the
 # tool locations of Silicon, Z3 and the JDK and the vlibc checkout, third_party/vlibc or CERASTES_VLIBC_SRC's,
-# at configure time, decision 0046; with CERASTES_EDG_SRC set, another EDG tree in build/override, decision 0005), builds Silicon, fetches the pinned Z3,
+# at configure time, decision 0046; with CERASTES_EDG_SRC set, another EDG tree in build/override, decision 0005), builds Silicon, fetches the pinned Z3 and clang-format (decision 0051),
 # installs the documentation tool chain (Node, `npm ci` in doc/) and writes
 # build/env.sh.  Every pin is recorded in internal/decisions/0001-toolchain-pins.md;
 # change a pin here and there together.
 #
 # Usage: scripts/bootstrap.sh [--build-only] [--force-silicon]
-#   --build-only     skip Homebrew, the Z3 and sbt downloads and `npm ci`.  It still
+#   --build-only     skip Homebrew, the Z3, clang-format and sbt downloads and `npm ci`.  It still
 #                    initializes missing submodules, rebuilds EDG, cerastes-fe
 #                    and (when its stamp is stale) Silicon, where sbt may fetch
 #                    dependencies, and rewrites build/env.sh.  Stale or missing
@@ -36,11 +36,15 @@ TOOLS="$BUILD/tools"
 PLATFORM="$(uname -s)-$(uname -m)"
 JDK_FORMULA=openjdk@17          # sbt 1.6.2 (pinned by Silicon) fails on JDK 27
 Z3_VERSION=4.16.0               # the version Silicon's CI tests against
+CLANG_FORMAT_VERSION=23.1.3     # PyPI's wheel: the same binary on both platforms (decision 0051)
 case "$PLATFORM" in
   Darwin-arm64)
     EDG_PRESET=macos-arm-clang-debug
     Z3_ASSET=z3-4.16.0-arm64-osx-15.7.3
-    Z3_SHA256=41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae ;;
+    Z3_SHA256=41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae
+    CLANG_FORMAT_URL=https://files.pythonhosted.org/packages/47/a5/2007b7a7a53dfe417e66d0a6b38b2f87f16391bfe6fe522d436d1e50be1c/clang_format-23.1.3-py2.py3-none-macosx_11_0_arm64.whl
+    CLANG_FORMAT_SHA256=79f53ac55434af6dda88eb90eeb65d903ff920c910f78041de41e3ca666dfba5
+    CLANG_FORMAT_BIN_SHA256=5fd9412265516d41a7d0147c18254f78fffbc57554539be1497e4c33d82ee70c ;;
   Linux-x86_64)
     # decision 0031: EDG's Linux preset in Clang emulation, built and scraped with
     # clang-$LINUX_CLANG_MAJOR over libc++ (the C++ library macOS has); JDK 17 and the
@@ -49,6 +53,9 @@ case "$PLATFORM" in
     LINUX_CLANG_MAJOR=21
     Z3_ASSET=z3-4.16.0-x64-glibc-2.39
     Z3_SHA256=7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e
+    CLANG_FORMAT_URL=https://files.pythonhosted.org/packages/11/d1/658d3da4dcbca98620956868c7cf6f4ba19fccecbdfc30cc055e19c9d4a7/clang_format-23.1.3-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+    CLANG_FORMAT_SHA256=58bf1804216501669832a39f2415e14284337438a062ff564729792adec664ac
+    CLANG_FORMAT_BIN_SHA256=5f4faeae3aadb096e72aad1fc9d36324e26bfaf7715e277637efd1da249e028f
     SBT_VERSION=2.0.10
     SBT_SHA256=6ff28e1dea38d1de48ea3d4e903f0380b85b19f945a103e30ec4298717c90cd7
     SBT_URL="https://github.com/sbt/sbt/releases/download/v$SBT_VERSION/sbt-$SBT_VERSION.zip" ;;
@@ -287,6 +294,29 @@ if [[ ! -x "$Z3_EXE" ]]; then
 fi
 "$Z3_EXE" --version | grep -q "Z3 version $Z3_VERSION" || die "$Z3_EXE is not Z3 $Z3_VERSION"
 
+# ---- 5a. clang-format (the code style's formatter, decision 0051) ---------------
+# The official PyPI wheel, one per platform, checked against its pinned SHA-256; only the
+# binary is unpacked (a wheel is a zip).  scripts/format.sh refuses any other version.
+CLANG_FORMAT_DIR="$TOOLS/clang-format-$CLANG_FORMAT_VERSION"
+CLANG_FORMAT_EXE="$CLANG_FORMAT_DIR/clang-format"
+if [[ ! -x "$CLANG_FORMAT_EXE" ]]; then
+  [[ $BUILD_ONLY -eq 0 ]] || die "pinned clang-format is missing; run scripts/bootstrap.sh"
+  log "downloading clang-format $CLANG_FORMAT_VERSION"
+  whl="$TOOLS/clang-format-$CLANG_FORMAT_VERSION.whl"
+  fetch_pinned "$CLANG_FORMAT_URL" "$CLANG_FORMAT_SHA256" "$whl"
+  rm -rf "$CLANG_FORMAT_DIR"
+  mkdir -p "$CLANG_FORMAT_DIR"
+  unzip -q -j "$whl" clang_format/data/bin/clang-format -d "$CLANG_FORMAT_DIR"
+  chmod +x "$CLANG_FORMAT_EXE"
+  rm -f "$whl"
+fi
+# The binary itself is pinned too (CLANG_FORMAT_BIN_SHA256, the wheel member's digest), checked on every
+# run: the wheel is deleted after unpacking, so a later run can still tell the binary is the pinned one.
+[[ "$(sha256_of "$CLANG_FORMAT_EXE")" == "$CLANG_FORMAT_BIN_SHA256" ]] \
+  || die "$CLANG_FORMAT_EXE is not the pinned binary (SHA-256 mismatch); delete $CLANG_FORMAT_DIR and run scripts/bootstrap.sh"
+"$CLANG_FORMAT_EXE" --version | grep -q "^clang-format version $CLANG_FORMAT_VERSION\$" \
+  || die "$CLANG_FORMAT_EXE is not clang-format $CLANG_FORMAT_VERSION"
+
 # ---- 5b. Documentation dependencies (doc/node_modules) ------------------------
 # `npm ci` installs exactly what doc/package-lock.json pins.  The stamp records
 # package.json, the lockfile and the node major it was installed with; the
@@ -428,6 +458,7 @@ export CERASTES_ROOT="$ROOT"
 export CERASTES_JAVA="$JAVA_HOME/bin/java"
 export SILICON_JAR="$SILICON_JAR"
 export Z3_EXE="$Z3_EXE"
+export CERASTES_CLANG_FORMAT="$CLANG_FORMAT_EXE"
 export CERASTES_EDG_KIND="$EDG_KIND"
 export CERASTES_EDG_SRC_ACTIVE="$EDG_SRC"
 export CERASTES_EDG_GEN="$EDG_BUILD/src/includes"
@@ -452,6 +483,7 @@ log "toolchain ready; source build/env.sh to use it"
 printf '    %-8s %s\n' \
   java "$("$JAVA_HOME/bin/java" -version 2>&1 | head -1)" \
   z3 "$("$Z3_EXE" --version)" \
+  clang-format "$("$CLANG_FORMAT_EXE" --version)" \
   edg "$EDG_KIND $EDG_SRC" \
   vlibc "$VLIBC_KIND $VLIBC_DIR" \
   cpfe "$(rel "$EDG_BUILD")/bin/cpfe" \

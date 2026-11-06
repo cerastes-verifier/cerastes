@@ -23,20 +23,23 @@
 #include "error.h"
 #include "pragma.h"
 
-extern a_function_pointer function_pointers[];  // EDG's table of handler functions (see install_diag_pragma_recorder)
+extern a_function_pointer function_pointers[]; // EDG's table of handler functions (see install_diag_pragma_recorder)
 
 #if !EDG_ATTRIBUTE_REGISTRATION
+// A #error message is one line, over 120 columns here: the formatter would continue it after a backslash.
+// clang-format off
 #error "cerastes M2 needs EDG attribute registration: set CERASTES_EDG_SRC (decision 0005) or pin the EDG fork (decision 0009)"
+// clang-format on
 #endif
 
 namespace cerastes {
 namespace {
 
-constexpr an_attr_registration_flag_set kContract = RAF_ENTITY_ATTACHED | RAF_MUST_MATCH;
+constexpr an_attr_registration_flag_set kContract {RAF_ENTITY_ATTACHED | RAF_MUST_MATCH};
 
 // The table lives for the life of the program (register_attribute_namespace
 // keeps the pointer).
-const an_attr_registration kAttributes[] = {
+const an_attr_registration kAttributes[] {
     {"requires", "(Xb)", "r", kContract},
     // "R": an optional first argument names the function's result (the fork's
     // result-name signature code, decision 0007 item 6); it needs RAF_ENTITY_ATTACHED.
@@ -55,30 +58,41 @@ const an_attr_registration kAttributes[] = {
     // compile time (a constexpr/consteval use is refused with EDG's own diagnostic, a defaulted function cannot
     // carry the marker).  It reads the attributes the routine has when it is called, so a marker that is only on a
     // later redeclaration does not stop an earlier use (first-declaration gap, M5b; decision 0007).
-    // owning (decisions 0029 item 1 and 0040 item 3): on a parameter, with no argument list or `owning(n)` (an unevaluated expression, M4.5e1:
-    // the encoder rejects it today).  The attribute lands on the parameter's `param_type.attributes` (P52); registration accepts a non-pointer
-    // parameter and a duplicate, and does not honour RAF_MUST_MATCH there, so the encoder checks every declaration.  A
+    // owning (decisions 0029 item 1, 0040 item 3 and 0052 item 3): on a parameter, with no argument list or `owning(n)`
+    // (an unevaluated expression, M4.5e1: the encoder rejects it today).  The attribute lands on the parameter's
+    // `param_type.attributes` (P52); registration accepts a non-pointer parameter and a duplicate, and does not honour
+    // RAF_MUST_MATCH there, so the encoder checks every declaration.  A
     // function (target `r`, M4.5d2a, decision 0047 item 5; RAF_ENTITY_ATTACHED, so its position is after the parameter list or in the leading
-    // attribute list) is accepted; a local, a global and a field wait for M4.5d2b, and EDG refuses them itself until then.
-    {"owning", "?(X)", "r|p", RAF_ENTITY_ATTACHED},
+    // attribute list) is accepted.  A variable (target `v`, M4.5d2b1, decision 0052 item 3) lands on its
+    // `source_corresp.attributes` in both positions (P74); registration accepts a global, a `static` local, a
+    // non-pointer and a `void *` too, and the encoder rejects each of them.  A field (target `d`) waits for M4.5d2b2,
+    // and EDG refuses it itself until then.
+    {"owning", "?(X)", "r|v|p", RAF_ENTITY_ATTACHED},
     // The initialization markers (decision 0042 item 2; P4222's markers in the cerastes spelling; P54, P64).  `uninit` is a declaration
     // attribute on the definition of an automatic local (`v:+a!`, like `invariant`'s `s:+i!`: EDG itself refuses it on a global, a static
-    // local (#1862), a parameter, a field and a function (#1835)).  `ref_to_uninit` and `must_init` are parameter markers like `owning`
-    // (`r|p` with RAF_ENTITY_ATTACHED from M4.5d2a: `p` alone with the flag aborts EDG at startup, `r|p` works, P52;
-    // `v` and `d` stay unregistered, so EDG refuses a local and a field); the attributes accumulate over redeclarations and registration accepts a non-pointer parameter, a duplicate and both markers on one parameter, so the encoder checks each declaration.
+    // local (#1862), a parameter, a field and a function (#1835)).  `ref_to_uninit` is a marker on a parameter, a
+    // function (target `r`, M4.5d2a: `p` alone with the flag aborts EDG at startup, `r|p` works, P52) and, from
+    // M4.5d2b1 (decision 0052 item 4), a variable (target `v`: the encoder accepts an automatic pointer local and
+    // rejects a global, a `static` local, a non-pointer and a `void *`).  `must_init` stays `p` (question 155: P4222
+    // defines it for parameters only; EDG refuses it on a local and a field, #1835).  The attributes accumulate over
+    // redeclarations and registration accepts a non-pointer parameter, a duplicate and both markers on one parameter,
+    // so the encoder checks each declaration.
     {"uninit", "", "v:+a!", RAF_NO_FLAGS},
-    {"ref_to_uninit", "", "r|p", RAF_ENTITY_ATTACHED},
+    {"ref_to_uninit", "", "r|v|p", RAF_ENTITY_ATTACHED},
     {"must_init", "", "p", RAF_NO_FLAGS},
     {"predicate", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {"pure", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {nullptr, nullptr, nullptr, RAF_NO_FLAGS},
 };
 
-an_attr_namespace_registration g_namespace = {"cerastes", RANF_CLOSED, kAttributes, nullptr};
+an_attr_namespace_registration g_namespace {"cerastes", RANF_CLOSED, kAttributes, nullptr};
 
-}  // namespace
+} // namespace
 
-void register_cerastes_annotations() { register_attribute_namespace(&g_namespace); }
+void register_cerastes_annotations()
+{
+    register_attribute_namespace(&g_namespace);
+}
 
 // EDG's handlers for the diagnostic pragmas are reached through the function_pointers table (mem_manage.h: an index in
 // a_pragma_kind_description, so that PCH files survive ASLR).  The table is a plain (non-const) array, filled statically
@@ -87,26 +101,38 @@ void register_cerastes_annotations() { register_attribute_namespace(&g_namespace
 namespace {
 std::vector<a_source_position> g_diag_pragma_sites;
 
-void record_diag_pragma(a_pending_pragma_ptr ppp) {
-  a_source_position p = ppp->pragma_position;  // the start of the directive (for _Pragma, its string literal is id_position)
-  if (p.seq == 0) p = ppp->id_position;
-  g_diag_pragma_sites.push_back(p);
+void record_diag_pragma(a_pending_pragma_ptr ppp)
+{
+    // the start of the directive (for _Pragma, its string literal is id_position)
+    a_source_position p {ppp->pragma_position};
+    if (p.seq == 0U)
+    {
+        p = ppp->id_position;
+    }
+    g_diag_pragma_sites.push_back(p);
 }
-void diag_pragma_recorder(a_pending_pragma_ptr ppp) {
-  record_diag_pragma(ppp);
-  diag_pragma(ppp);  // EDG's handler, unchanged
+void diag_pragma_recorder(a_pending_pragma_ptr ppp)
+{
+    record_diag_pragma(ppp);
+    diag_pragma(ppp); // EDG's handler, unchanged
 }
-void diagnostic_pragma_recorder(a_pending_pragma_ptr ppp) {
-  record_diag_pragma(ppp);
-  diagnostic_pragma(ppp);
+void diagnostic_pragma_recorder(a_pending_pragma_ptr ppp)
+{
+    record_diag_pragma(ppp);
+    diagnostic_pragma(ppp);
 }
-}  // namespace
+} // namespace
 
-void install_diag_pragma_recorder() {
-  function_pointers[fn_for_function(diag_pragma)] = reinterpret_cast<a_function_pointer>(&diag_pragma_recorder);
-  function_pointers[fn_for_function(diagnostic_pragma)] = reinterpret_cast<a_function_pointer>(&diagnostic_pragma_recorder);
+void install_diag_pragma_recorder()
+{
+    function_pointers[fn_for_function(diag_pragma)] = reinterpret_cast<a_function_pointer>(&diag_pragma_recorder);
+    function_pointers[fn_for_function(diagnostic_pragma)] =
+        reinterpret_cast<a_function_pointer>(&diagnostic_pragma_recorder);
 }
 
-const std::vector<a_source_position>& diag_pragma_sites() { return g_diag_pragma_sites; }
+const std::vector<a_source_position>& diag_pragma_sites()
+{
+    return g_diag_pragma_sites;
+}
 
-}  // namespace cerastes
+} // namespace cerastes

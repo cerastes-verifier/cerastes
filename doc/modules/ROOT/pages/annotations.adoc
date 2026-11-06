@@ -293,9 +293,9 @@ On a function that returns a pointer, `cerastes::owning` is the contract
 the result points to, or a null pointer (xref:memory.adoc#heap[Allocated
 memory]). It is read on a function declared in your files; on a member function,
 a template, a `predicate` or `pure` function, or a redeclaration of a function a
-system header declares, it is `cerastes-unsupported_annotation`, and on a local,
-a global or a structure's member the front end reports that it does not apply
-(planned for the next version).
+system header declares, it is `cerastes-unsupported_annotation`. On a pointer
+local it is an owner variable (<<marked-locals,Owning and marked locals>>); on a
+global or a structure's member see there as well.
 
 === Initialization markers
 
@@ -331,8 +331,75 @@ as `owning` does, and every declaration of the function carries the same ones
 (xref:memory.adoc#initialization[Initialization through pointers]). The option
 `--strict-init` asks for them as P4222 does (xref:verifying.adoc#strict-init[The
 strict initialization mode]). Elsewhere (`uninit` on a global, a `static` local or
-a parameter; the parameter attributes on a local or a function) the front end
-reports that they do not apply (`ref_to_uninit` on a function is read as above).
+a parameter; `must_init` on anything but a parameter) the front end reports that
+they do not apply (`ref_to_uninit` on a function is read as above, and on a pointer
+local as described next).
+
+[#marked-locals]
+=== Owning and marked locals
+
+`cerastes::owning` and `cerastes::ref_to_uninit` also apply to a pointer local, in
+either position: before the declaration (`CERASTES_OWNING int *p = ...;`), where
+the attribute covers every declarator of the declaration, or after the
+declarator's name (`int *p CERASTES_OWNING = ...;`), where it covers that one
+(`int *a CERASTES_OWNING, *b;` marks `a` only). Both are for variables of
+automatic storage that are not parameters.
+
+[source,c]
+----
+include::example$annotations/locals/owning_local.c[tag=source]
+----
+
+An owning local owns the allocation it points to: when its lifetime ends, or when
+it is assigned another value, the allocation must have been freed, handed to a
+function that takes it, or returned
+(xref:memory.adoc#owning-locals[Owning locals]). `cerastes::ref_to_uninit` on a local says
+that the object the pointer points to may have no value, as the result of `malloc` has;
+without `--strict-init` it documents that and changes no verdict
+(xref:verifying.adoc#strict-init-marked-locals[Pointers to objects without a
+value]).
+
+[source,c]
+----
+include::example$annotations/locals/marked_local.c[tag=source]
+----
+
+Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
+
+* either attribute on a variable that is not a pointer, on a `void *` and on a
+  pointer to a function (`void *` is the type of an untyped allocation: convert
+  it to `T *` first);
+* `owning` on a pointer to a `const` or `volatile` object (nothing may be written
+  through an owner);
+* `owning(n)`, an owned range, which comes with arrays;
+* either attribute twice on one variable;
+* `owning` on a global, on a `static` local or on a local whose address is taken,
+  and `ref_to_uninit` on a global or a `static` local: planned for a later
+  version, since they need the contracts of every function to say who owns the
+  variable's object.
+
+[source,c]
+----
+include::example$annotations/locals/owning_global.c[tag=source]
+----
+
+[source,c]
+----
+include::example$annotations/locals/owning_address_taken.c[tag=source]
+----
+
+[source,c]
+----
+include::example$annotations/locals/marked_global.c[tag=source]
+----
+
+`cerastes::must_init` stays a parameter attribute: P4222 defines it for parameters
+only, and the front end reports that it does not apply to a local.
+
+[source,c]
+----
+include::example$annotations/locals/must_init_local.c[tag=source]
+----
 
 === Members, constructors and destructors
 

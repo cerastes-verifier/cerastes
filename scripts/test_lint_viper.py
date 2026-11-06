@@ -1634,6 +1634,26 @@ class FlagTests(unittest.TestCase):
         self.assertEqual(self.strict(good_lines()), [])
 
 
+    def test_owner_ghosts_may_stand_between_a_write_and_its_flag(self):
+        """Decision 0052 item 3: an owning local's `held_<v> := ...` and `tv_<v> := ...` follow its write and precede its flag."""
+        x = self.X
+        body = [f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", "  held_v := y != 0",
+                "  tv_v := (y != 0) ? tv_v : tv_v", f"  d_{x} := true"]
+        self.assertEqual(self.probs(*body), [])
+
+    def test_another_assignment_between_a_write_and_its_flag_is_still_a_problem(self):
+        x = self.X
+        for other in ("  t__2 := 1", "  held := y", "  xheld_v := y", "  tvv := y", "  tv_v.f := y"):
+            with self.subTest(other=other):
+                probs = self.probs(f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", other, f"  d_{x} := true")
+                self.assertTrue(any("does not directly follow a write" in p for p in probs), probs)
+
+    def test_owner_ghosts_without_the_write_do_not_make_a_flag_legal(self):
+        x = self.X
+        probs = self.probs("  held_v := y != 0", "  tv_v := tv_v", f"  d_{x} := true")
+        self.assertTrue(any("does not directly follow a write" in p for p in probs), probs)
+
+
 class BitwisePreludeTests(unittest.TestCase):
     """The range postcondition of a bitwise prelude function (decision 0012 item 11 as amended for 0023, owner
     2026-10-24) is the one `ensures` line that needs no position map entry; everything else about it stays checked."""
@@ -2729,7 +2749,9 @@ class GhostAmountTests(unittest.TestCase):
         lines = self.fixture(header="method f__1(p: Ref, n: Int, amt_0: Perm, amt_1: Perm)")
         self.assertEqual(self.strict(lines), [])
         lines = self.fixture(header="method f__1(p: Ref, amt_0: Perm, amt_1: Perm) returns (res: Perm)")
-        self.assertEqual(self.strict(lines), [])
+        i = lines.index("  decreases")
+        lines[i:i] = [Check("  ensures none < res && res <= write", P, "internal")]
+        self.assertEqual(self.strict(lines), [], "a Perm result is no formal amount: it needs no `requires` bounds, only its ensures row")
 
     def test_a_header_over_several_lines_is_read(self):
         lines = self.fixture(header="method f__1(p: Ref,\n    amt_0: Perm, amt_1: Perm)",
@@ -2765,6 +2787,158 @@ class GhostAmountTests(unittest.TestCase):
         self.assertTrue(any("`assume` without" in p for p in self.strict(lines)))
 
 
+class GhostResultTests(unittest.TestCase):
+    """Decision 0052 item 5: a method's ghost `Perm` *results* are the output amounts of its partnerless `ensures` atoms.  Each has
+    exactly one `ensures none < o && o <= write` (parentheses and spaces ignored) and no clause mentions it before that line, so a
+    caller that receives it in `t, o := f(...)` receives an amount in `(none, write]` whatever the body, or a trusted
+    contract, says.  A call's `Perm` target is allowed where the callee is a method of the file whose result at that position
+    carries the row; every other `Perm` target of a call is still the rule of decision 0038 item 9.  Each rule has a twin that
+    breaks exactly it."""
+
+    ROW = "  ensures none < o_0 && o_0 <= write"
+    BOUNDS = "  requires (none < amt_0) && (amt_0 < write)"
+    ATOM = "  requires (p != null) && acc(lvloc(block_of(p)).lv, amt_0)"
+    POST = "  ensures acc(lvloc(block_of(p)).lv, o_0)"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def callee(self, header="method g__1(p: Ref, amt_0: Perm) returns (res: Ref, o_0: Perm)", ensures=None, body=True):
+        ensures = ensures if ensures is not None else [self.ROW, self.POST]
+        out = [header, Check(self.BOUNDS, WF, "internal"), Check(self.ATOM, WF, "internal")]
+        out += [Check(e, P, "permission") for e in ensures]
+        if body:
+            out += ["  decreases", "{", "  res := p", "  o_0 := amt_0", "}"]
+        else:
+            out += ["  decreases _"]
+        return out
+
+    def fixture(self, callee=None, caller_body=None, caller_vars=None):
+        return [
+            "field lv: Bool",
+            *(callee if callee is not None else self.callee()),
+            "method h__2(p: Ref, amt_0: Perm)",
+            Check(self.BOUNDS, WF, "internal"),
+            Check(self.ATOM, WF, "internal"),
+            "  decreases",
+            "{",
+            *(caller_vars if caller_vars is not None else ["  var t: Ref", "  var o: Perm"]),
+            *(caller_body if caller_body is not None else [Check("  t, o := g__1(p, amt_0)", PRE, "precondition")]),
+            "}",
+        ]
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_the_spelling_of_the_row_does_not_matter(self):
+        for row in ("  ensures (none < o_0) && (o_0 <= write)", "  ensures ((none < o_0) && (o_0 <= write))",
+                    "  ensures none<o_0&&o_0<=write"):
+            with self.subTest(row=row):
+                self.assertEqual(self.strict(self.fixture(callee=self.callee(ensures=[row, self.POST]))), [])
+
+    def test_a_missing_row_is_a_problem(self):
+        probs = self.strict(self.fixture(callee=self.callee(ensures=[self.POST])))
+        self.assertTrue(any("ghost amount result `o_0` must have exactly one `ensures none < o_0 && o_0 <= write`" in p and "found 0" in p
+                            for p in probs), probs)
+
+    def test_a_half_or_another_row_is_a_problem(self):
+        for row in ("  ensures none < o_0", "  ensures o_0 <= write", "  ensures (none < o_0) && (o_0 < write)",
+                    "  ensures (none <= o_0) && (o_0 <= write)", "  ensures (o_0 <= write) && (none < o_0)",
+                    "  ensures (none < o_0) && (o_0 <= write) && true", "  requires (none < o_0) && (o_0 <= write)",
+                    "  ensures (none < amt_0) && (amt_0 <= write)"):
+            with self.subTest(row=row):
+                probs = self.strict(self.fixture(callee=self.callee(ensures=[row, self.POST])))
+                self.assertTrue(any("ghost amount result `o_0` must have exactly one" in p for p in probs), probs)
+
+    def test_two_rows_are_a_problem(self):
+        probs = self.strict(self.fixture(callee=self.callee(ensures=[self.ROW, self.ROW, self.POST])))
+        self.assertTrue(any("found 2" in p for p in probs), probs)
+
+    def test_a_clause_that_reads_the_result_before_its_row_is_a_problem(self):
+        probs = self.strict(self.fixture(callee=self.callee(ensures=[self.POST, self.ROW])))
+        mentions = [p for p in probs if "mentions the ghost amount result `o_0` before its bounds" in p]
+        self.assertEqual(len(mentions), 1, probs)
+        self.assertTrue(any("`Perm` local `o` is assigned" in p for p in probs),
+                        "a row after a mention is no row: the caller's target is refused as well")
+        self.assertEqual(self.strict(self.fixture(callee=self.callee(ensures=["  ensures acc(lvloc(block_of(p)).lv, amt_0)", self.ROW, self.POST]))), [],
+                         "a clause that does not mention o_0 may come before its row")
+
+    def test_a_longer_name_that_contains_the_result_is_not_a_mention(self):
+        self.assertEqual(self.strict(self.fixture(callee=self.callee(ensures=["  ensures o_00 > none", self.ROW, self.POST]))), [])
+
+    def test_only_perm_results_have_the_rule(self):
+        header = "method g__1(p: Ref, amt_0: Perm) returns (res: Ref, n: Int)"
+        callee = self.callee(header=header, ensures=["  ensures n > 0"])
+        callee[callee.index("  res := p") + 1] = "  n := 1"
+        self.assertEqual(self.strict(self.fixture(callee=callee, caller_body=["  var u: Ref", "  var m: Int", Check("  u, m := g__1(p, amt_0)", PRE, "precondition")],
+                                                  caller_vars=[])), [])
+
+    def test_a_header_over_several_lines_is_read(self):
+        header = "method g__1(p: Ref, amt_0: Perm)\n    returns (res: Ref,\n    o_0: Perm)"
+        probs = self.strict(self.fixture(callee=self.callee(header=header, ensures=[self.POST])))
+        self.assertTrue(any("ghost amount result `o_0`" in p for p in probs), probs)
+
+    def test_a_bodyless_trusted_method_needs_the_row_too(self):
+        trusted = ["// cerastes:trusted-contract a function defined elsewhere", *self.callee(body=False)]
+        self.assertEqual(self.strict(self.fixture(callee=trusted)), [])
+        trusted = ["// cerastes:trusted-contract a function defined elsewhere", *self.callee(ensures=[self.POST], body=False)]
+        probs = self.strict(self.fixture(callee=trusted))
+        self.assertTrue(any("ghost amount result `o_0`" in p for p in probs), probs)
+
+    def test_a_call_target_is_allowed_where_the_callee_result_carries_the_row(self):
+        for body in (["  t, o := g__1(p, amt_0)"], ["  t,o := g__1(p, amt_0)"]):
+            with self.subTest(body=body):
+                self.assertEqual(self.strict(self.fixture(caller_body=[Check(b, PRE, "precondition") for b in body])), [])
+
+    def test_the_perm_target_may_come_first_or_last(self):
+        callee = self.callee(header="method g__1(p: Ref, amt_0: Perm) returns (o_0: Perm, res: Ref)")
+        callee[callee.index("  res := p") + 1] = "  o_0 := amt_0"
+        self.assertEqual(self.strict(self.fixture(callee=callee, caller_body=[Check("  o, t := g__1(p, amt_0)", PRE, "precondition")])), [])
+        self.assertTrue(any("`Perm` local `o` is assigned" in p for p in
+                            self.strict(self.fixture(callee=callee, caller_body=[Check("  t, o := g__1(p, amt_0)", PRE, "precondition")]))),
+                        "the position matters: `o` is the second target, and the callee's second result is a `Ref`")
+
+    def test_a_call_target_is_a_problem_where_the_callee_has_no_row(self):
+        probs = self.strict(self.fixture(callee=self.callee(ensures=[self.POST])))
+        self.assertTrue(any("`Perm` local `o` is assigned `g__1(p, amt_0)`" in p for p in probs), probs)
+
+    def test_a_call_target_is_a_problem_where_the_callee_result_is_not_a_perm(self):
+        header = "method g__1(p: Ref, amt_0: Perm) returns (res: Ref, o_0: Int)"
+        callee = self.callee(header=header, ensures=["  ensures o_0 > 0"])
+        probs = self.strict(self.fixture(callee=callee))
+        self.assertTrue(any("`Perm` local `o` is assigned" in p for p in probs), probs)
+
+    def test_a_call_target_is_a_problem_where_the_arity_differs(self):
+        header = "method g__1(p: Ref, amt_0: Perm) returns (res: Ref, o_0: Perm, o_1: Perm)"
+        callee = self.callee(header=header, ensures=[self.ROW, "  ensures none < o_1 && o_1 <= write", self.POST])
+        callee[callee.index("  o_0 := amt_0")] = "  o_0 := amt_0\n  o_1 := amt_0"
+        probs = self.strict(self.fixture(callee=callee))
+        self.assertTrue(any("`Perm` local `o` is assigned" in p for p in probs), probs)
+
+    def test_a_call_of_an_undeclared_method_is_still_a_problem(self):
+        probs = self.strict(self.fixture(caller_body=[Check("  t, o := other__9(p, amt_0)", PRE, "precondition")]))
+        self.assertTrue(any("`Perm` local `o` is assigned `other__9(p, amt_0)`" in p for p in probs), probs)
+
+    def test_arithmetic_on_the_received_amount_is_still_a_problem(self):
+        probs = self.strict(self.fixture(caller_body=[Check("  t, o := g__1(p, amt_0)", PRE, "precondition"), "  o := o / 2"]))
+        self.assertTrue(any("`Perm` local `o` is assigned `o / 2`" in p for p in probs), probs)
+
+    def test_a_call_target_in_a_loop_whose_invariant_uses_it_is_still_a_problem(self):
+        body = [
+            "  var i: Int := 0",
+            "  while (i < 3)",
+            Check("    invariant acc(lvloc(block_of(p)).lv, o)", INV, "internal"),
+            Check("    decreases 3 - i", "termination.failed", "termination"),
+            "  {",
+            Check("    t, o := g__1(p, amt_0)", PRE, "precondition"),
+            "    i := i + 1",
+            "  }",
+        ]
+        probs = self.strict(self.fixture(caller_body=body))
+        self.assertTrue(any("is assigned inside the loop of line" in p for p in probs), probs)
+
+
 class LoopAmountTests(unittest.TestCase):
     """Decision 0038 item 9 (amending 0037 item 14): the amounts of a loop's invariant are `Perm` locals that snapshot what the
     method holds.  A `Perm` local is assigned only `perm(...)`, `none`, `write` or a conditional of those; it is never assigned
@@ -2786,6 +2960,7 @@ class LoopAmountTests(unittest.TestCase):
             "field d_int: Bool",
             "method f__1(x: Ref, n: Int) returns (res: Perm)",
             Check("  requires n >= 0", WF, "internal"),
+            Check("  ensures none < res && res <= write", P, "internal"),
             "  decreases",
             "{",
             *(locals_ if locals_ is not None else ["  var kv: Perm", "  var kd: Perm", "  var vs: Int", "  var i: Int"]),
@@ -3972,6 +4147,261 @@ class HeapTokenTests(unittest.TestCase):
 
     def test_the_heap_rules_leave_programs_without_a_token_alone(self):
         self.assertEqual(lint(), [])
+
+
+class VlibcTokenTests(unittest.TestCase):
+    """Decision 0052 item 7 (0050 item 3): a program that names `cerastes_owns_vlibc_block` is a vlibc heap program, whose block
+    site holds the token's value `false`: `!loc(block_of(p), -1).tok` is the token slot like `loc(block_of(p), -1).tok` is, in the
+    conjuncts of a `requires`, `ensures`, `invariant` or `assert`.  It is no more than that: a condition, an assignment or
+    another slot is as refused as for the platform's token."""
+
+    SLOT = HeapTokenTests.SLOT
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, requires=None, body=None):
+        block = requires or f"p != null ==> acc({self.SLOT}) && !{self.SLOT}"
+        return HeapTokenTests("test_the_emitters_shape_is_clean").fixture(requires=block, body=body if body is not None else [
+            Check(f"  assert p == null || (perm({self.SLOT}) == write && !{self.SLOT})", A, "invalid-free"),
+            Check("  f_free__1(p)", PRE, "invalid-free"),
+            Check(HeapTokenTests.LEAK, A, "leak"),
+        ])
+
+    def test_a_negated_token_is_clean_in_a_block_site_and_a_row(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_a_negated_token_in_a_loop_place_is_clean(self):
+        body = [
+            "  var i: Int := 0",
+            "  while (i < 3)",
+            Check(f"    invariant p != null ==> acc({self.SLOT}, kt)", INV, "internal"),
+            Check(f"    invariant kt > none ==> !{self.SLOT}", INV, "internal"),
+            Check("    decreases 3 - i", "termination.failed", "termination"),
+            "  {",
+            "    i := i + 1",
+            Check(f"    assert perm({self.SLOT}) >= kt", A, "permission"),
+            "  }",
+            Check(HeapTokenTests.LEAK, A, "leak"),
+        ]
+        self.assertEqual(self.strict(self.fixture(body=body)), [])
+
+    def test_a_negated_token_at_another_slot_is_a_problem(self):
+        for slot in ("p.tok", "loc(block_of(p), 0).tok", "loc(block_of(p), (-2)).tok"):
+            with self.subTest(slot=slot):
+                probs = self.strict(self.fixture(body=[Check(f"  assert !{slot}", A, "invalid-free"),
+                                                       Check(HeapTokenTests.LEAK, A, "leak")]))
+                self.assertTrue(any("`tok` outside the token slot of a block" in p for p in probs), probs)
+
+    def test_a_negated_token_in_a_condition_is_a_problem(self):
+        probs = self.strict(self.fixture(body=[f"  if (!{self.SLOT}) {{", "  }", Check(HeapTokenTests.LEAK, A, "leak")]))
+        self.assertTrue(any("`tok` in `if`" in p for p in probs), probs)
+
+    def test_a_negated_token_in_an_assignment_is_a_problem(self):
+        probs = self.strict(self.fixture(body=["  var b: Bool", f"  b := !{self.SLOT}", Check(HeapTokenTests.LEAK, A, "leak")]))
+        self.assertTrue(any("`tok` in the right-hand side of an assignment" in p for p in probs), probs)
+
+    def test_a_negated_token_in_an_exhale_is_a_problem(self):
+        probs = self.strict(self.fixture(body=[f"  exhale !{self.SLOT}", Check(HeapTokenTests.LEAK, A, "leak")]))
+        self.assertTrue(any("`exhale` of a `tok` place" in p for p in probs), probs)
+
+
+class OwnerGhostTests(unittest.TestCase):
+    """Decision 0052 item 3: an owning local `v` has the method-level `Bool` ghosts `held_v` and `tv_v`.  The lint reads the shapes
+    the lowering emits (the real output of tests/memory/owning_local_free.c): the owner's token value
+    `tv_v := (t != null) ? loc(block_of(t), -1).tok : tv_v` is the one assignment that reads a token outside a `perm(...)`
+    snapshot (the same ghost on both sides, the same pointer in the guard and the slot); `held_o := held_o && o != null &&
+    perm(loc(block_of(o), -1).tok) > none` reads it inside `perm(...)`; the value row and the ending rows are `if (!(<row>)) {`,
+    `assert false`, `}`.  Each rule has a twin that breaks exactly it."""
+
+    SLOT = HeapTokenTests.SLOT
+    TV = f"  tv_v := (t != null) ? loc(block_of(t), (-1)).tok : tv_v"
+    HELD = f"  held_v := held_v && ((v != null) && (perm(loc(block_of(v), (-1)).tok) > none))"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, tv=None, extra=None):
+        return HeapTokenTests("test_the_emitters_shape_is_clean").fixture(body=[
+            "  var held_v: Bool",
+            "  var tv_v: Bool",
+            "  var v: Ref",
+            "  var t: Ref",
+            "  held_v := false",
+            "  t := p",
+            "  if (!((t != null) ==> (offset_of(t) == 0 && perm(loc(block_of(t), (-1)).tok) == write))) {",
+            Check("    assert false", A, "permission"),
+            "  }",
+            "  v := t",
+            "  held_v := t != null",
+            tv if tv is not None else self.TV,
+            self.HELD,
+            "  if (!(!held_v)) {",
+            Check("    assert false", A, "leak"),
+            "  }",
+            *(extra or []),
+            Check(HeapTokenTests.LEAK, A, "leak"),
+        ])
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_the_token_value_of_another_pointer_is_a_problem(self):
+        probs = self.strict(self.fixture(tv="  tv_v := (t != null) ? loc(block_of(v), (-1)).tok : tv_v"))
+        self.assertTrue(any("`tok` in the right-hand side of an assignment" in p for p in probs), probs)
+
+    def test_a_token_value_whose_else_branch_is_another_variable_is_a_problem(self):
+        for tv in ("  tv_v := (t != null) ? loc(block_of(t), (-1)).tok : false", "  tv_v := (t != null) ? loc(block_of(t), (-1)).tok : tv_w",
+                   "  tv_v := (t == null) ? tv_v : loc(block_of(t), (-1)).tok"):
+            with self.subTest(tv=tv):
+                probs = self.strict(self.fixture(tv=tv))
+                self.assertTrue(any("`tok` in the right-hand side of an assignment" in p for p in probs), probs)
+
+    def test_a_token_value_that_is_not_guarded_by_a_null_test_is_a_problem(self):
+        for tv in ("  tv_v := loc(block_of(t), (-1)).tok", "  tv_v := (held_v) ? loc(block_of(t), (-1)).tok : tv_v",
+                   "  tv_v := (t != null) ? loc(block_of(t), (-1)).tok : tv_v || true"):
+            with self.subTest(tv=tv):
+                probs = self.strict(self.fixture(tv=tv))
+                self.assertTrue(any("`tok` in the right-hand side of an assignment" in p for p in probs), probs)
+
+    def test_only_a_tv_ghost_may_take_a_token_value(self):
+        for name in ("flag", "held_v", "ktv_1x", "tvv"):
+            with self.subTest(name=name):
+                probs = self.strict(self.fixture(tv=f"  {name} := (t != null) ? loc(block_of(t), (-1)).tok : {name}"))
+                self.assertTrue(any("`tok` in the right-hand side of an assignment" in p for p in probs), probs)
+
+    def test_the_token_value_at_another_slot_is_a_problem(self):
+        for slot in ("loc(block_of(t), 0)", "loc(block_of(t), (-2))"):
+            with self.subTest(slot=slot):
+                probs = self.strict(self.fixture(tv=f"  tv_v := (t != null) ? {slot}.tok : tv_v"))
+                self.assertTrue(any("`tok` outside the token slot of a block" in p for p in probs), probs)
+
+    def test_the_held_update_reads_the_token_only_inside_perm(self):
+        probs = self.strict(self.fixture(extra=["  held_v := held_v && loc(block_of(v), (-1)).tok"]))
+        self.assertTrue(any("`tok` in the right-hand side of an assignment" in p for p in probs), probs)
+
+    def test_a_token_in_an_ordinary_condition_is_still_a_problem(self):
+        probs = self.strict(self.fixture(extra=["  if (loc(block_of(v), (-1)).tok) {", "  }"]))
+        self.assertTrue(any("`tok` in `if`" in p for p in probs), probs)
+
+
+class OwnerLoopTests(unittest.TestCase):
+    """Decision 0052 item 3, loops (the real output of tests/memory/owning_loop_replace.c and tests/vlibc/vlibc_owning_loop_replace.c):
+    an owning variable of a loop has entry and back-edge rows (`if (!(<row>)) {`, `assert false`, `}`, which read the token under
+    `perm(...)`), the invariants `held_v == (v != null)` and `(v != null) ==> (acc(<slot>.tok) && <slot>.tok == tve_...)`, and a
+    disjunct of the leak exemption.  In a vlibc heap program `tve_<v>__<loop> := (v != null) ? tv_<v> : true` is the allocator it held
+    at the entry.  The lint accepts exactly these shapes: the token rules read the rows and the conjuncts, and the `tve` rule is its own."""
+
+    SLOT = HeapTokenTests.SLOT
+    TVE = "  tve_v__0 := (p != null) ? tv_v : true"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def row(self, cond):
+        return [f"  if (!({cond})) {{", Check("    assert false", A, "permission"), "  }"]
+
+    def fixture(self, tve=None, entry=None, invariants=None, body=None, exempt=None):
+        slot = self.SLOT
+        inv = invariants if invariants is not None else [
+            "    invariant held_v == (p != null)",
+            f"    invariant (p != null) ==> (acc({slot}) && ({slot} == tve_v__0))",
+        ]
+        return HeapTokenTests("test_the_emitters_shape_is_clean").fixture(body=[
+            "  var held_v: Bool",
+            "  var tv_v: Bool",
+            "  var tve_v__0: Bool",
+            "  var i: Int",
+            "  held_v := false",
+            f"  tv_v := (p != null) ? {slot} : tv_v",
+            tve if tve is not None else self.TVE,
+            *(entry if entry is not None else [*self.row("(p != null) ==> held_v"),
+                                              *self.row(f"(p != null) ==> (!((perm({slot}) != write) || ({slot} != tve_v__0)))")]),
+            "  i := 0",
+            "  while (i < 3)",
+            *[Check(t, INV, "internal") for t in inv],
+            Check("    decreases 3 - i", "termination.failed", "termination"),
+            "  {",
+            *(body if body is not None else ["    i := i + 1"]),
+            *self.row("(p != null) ==> held_v"),
+            "  }",
+            Check(f"  assert forperm t: Ref [t.tok] :: {exempt or '(p != null) && (t == loc(block_of(p), (-1)))'}", A, "leak"),
+        ])
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_a_tve_ghost_is_assigned_only_the_owners_own_token_value(self):
+        for tve in ("  tve_v__0 := (p != null) ? " + self.SLOT + " : true", "  tve_v__0 := true", "  tve_v__0 := tv_v",
+                    "  tve_v__0 := (p != null) ? tv_v : false", "  tve_v__0 := (p != null) ? tv_v : tve_v__0", "  tve_v__0 := !tv_v"):
+            with self.subTest(tve=tve):
+                probs = self.strict(self.fixture(tve=tve))
+                self.assertTrue(any("`tve_v__0` is assigned something but" in p or "`tok` in the right-hand side" in p for p in probs), probs)
+
+    def test_a_tve_ghost_assigned_in_a_loop_that_mentions_it_is_a_problem(self):
+        for body in (["    tve_v__0 := (p != null) ? tv_v : true", "    i := i + 1"], ["    i := i + 1", "    tve_v__0 := (p != null) ? tv_v : true"]):
+            with self.subTest(body=body):
+                probs = self.strict(self.fixture(body=body))
+                self.assertEqual([p for p in probs if "is assigned inside the loop" in p].__len__(), 1, probs)
+
+    def test_a_tve_ghost_the_invariant_does_not_mention_may_be_assigned_in_a_loop(self):
+        inv = ["    invariant held_v == (p != null)"]
+        probs = self.strict(self.fixture(invariants=inv, body=["    tve_v__0 := (p != null) ? tv_v : true", "    i := i + 1"]))
+        self.assertEqual(probs, [])
+
+    def test_the_token_in_an_invariant_is_the_slot_of_a_block(self):
+        probs = self.strict(self.fixture(invariants=["    invariant held_v == (p != null)", "    invariant (p != null) ==> (loc(block_of(p), 0).tok == tve_v__0)"]))
+        self.assertTrue(any("`tok` outside the token slot of a block" in p for p in probs), probs)
+
+    def test_perm_in_an_invariant_is_still_a_problem(self):
+        probs = self.strict(self.fixture(invariants=["    invariant held_v == (perm(%s) > none)" % self.SLOT]))
+        self.assertTrue(any("`perm(...)` in a loop invariant" in p for p in probs), probs)
+
+    def test_an_entry_row_is_an_ending_row_or_it_may_not_read_a_token(self):
+        probs = self.strict(self.fixture(entry=[f"  if (perm({self.SLOT}) == write) {{", "  }"]))
+        self.assertTrue(any("`tok` in `if`" in p for p in probs), probs)
+        probs = self.strict(self.fixture(entry=[f"  if (!(perm({self.SLOT}) == write)) {{", Check("    assert false", A, "permission"), "    held_v := true", "  }"]))
+        self.assertTrue(any("`tok` in `if`" in p for p in probs), probs)
+
+    def test_the_alias_guards_of_a_place_are_plain_conjuncts(self):
+        """Shape L6: a loop place `a` of a pointer variable is guarded against each carried owner `v` (`gv`, `gl`, `gt`)."""
+        inv = ["    invariant held_v == (p != null)", f"    invariant (p != null) ==> (acc({self.SLOT}) && ({self.SLOT} == tve_v__0))",
+               "    invariant (p != null) ==> (lvloc(block_of(q)) != lvloc(block_of(p)))",
+               "    invariant (p != null) ==> (block_of(q) != block_of(p))",
+               "    invariant (p != null) ==> (q != p.v_int)"]
+        self.assertEqual(self.strict(self.fixture(invariants=inv)), [])
+
+    def test_a_vlibc_loop_class_without_tve_reads_the_token_in_its_rows_and_conjunct(self):
+        """Shape L8: an owner assigned in the loop only from one allocator has no `tve`: the conjunct is `tok` (platform) or `!tok`
+        (vlibc) and the class rows are `!(perm(tok) != write || !tok)` (vlibc) or `!(perm(tok) != write || tok)` (platform)."""
+        slot = self.SLOT
+        for cls in (f"!{slot}", slot):
+            with self.subTest(cls=cls):
+                inv = ["    invariant held_v == (p != null)", f"    invariant (p != null) ==> (acc({slot}) && {cls})"]
+                entry = [*self.row("(p != null) ==> held_v"), *self.row(f"(p != null) ==> (!((perm({slot}) != write) || !({cls})))")]
+                self.assertEqual(self.strict(self.fixture(tve="  held_v := held_v", invariants=inv, entry=entry)), [])
+
+    def test_a_class_row_or_conjunct_at_another_slot_is_a_problem(self):
+        inv = ["    invariant held_v == (p != null)", "    invariant (p != null) ==> (acc(loc(block_of(p), 0).tok) && !loc(block_of(p), 0).tok)"]
+        probs = self.strict(self.fixture(invariants=inv))
+        self.assertTrue(any("`tok` outside the token slot of a block" in x for x in probs), probs)
+        entry = self.row(f"(p != null) ==> (!((perm(p.tok) != write) || !p.tok))")
+        probs = self.strict(self.fixture(entry=entry))
+        self.assertTrue(any("`tok` outside the token slot of a block" in x for x in probs), probs)
+
+    def test_a_dropped_atom_is_an_unconditional_row_without_a_token(self):
+        """Shape L7: a written atom on a carried owner is replaced by `if (!false) { assert false }` before the loop."""
+        entry = ["  if (!false) {", Check("    assert false", A, "permission"), "  }"]
+        self.assertEqual(self.strict(self.fixture(entry=entry)), [])
+        probs = self.strict(self.fixture(entry=[f"  if (!false || {self.SLOT}) {{", "  }"]))
+        self.assertTrue(any("`tok` in `if`" in x for x in probs), probs)
+
+    def test_the_leak_exemption_does_not_read_a_token(self):
+        probs = self.strict(self.fixture(exempt=f"(p != null) && ({self.SLOT} == tve_v__0)"))
+        self.assertTrue(any("does not mention `tok`" in p for p in probs), probs)
 
 
 class HeapViewTests(unittest.TestCase):

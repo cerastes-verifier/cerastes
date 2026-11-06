@@ -12,9 +12,10 @@ namespace cerastes::args {
 
 // What checking one `cerastes-fe` argument found.  `message` is null when the argument is acceptable (it is
 // then passed on to EDG); `consumes_next` says that the following word is this option's value.
-struct FeCheck {
-  const char* message = nullptr;
-  bool consumes_next = false;
+struct FeCheck
+{
+    const char* message {nullptr};
+    bool consumes_next {false};
 };
 
 // `cerastes-fe` passes every EDG option through, so it refuses the ones cerastes cannot support (the list in
@@ -30,4 +31,4 @@ FeCheck check_fe_argument(const char* arg, const char* next);
 // `-U` is refused too, and a name that is not an identifier.
 std::string macro_refusal(std::string_view value, std::string_view option, bool verify_mode);
 
-}  // namespace cerastes::args
+} // namespace cerastes::args

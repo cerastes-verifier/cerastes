@@ -14,14 +14,16 @@ namespace cerastes {
 
 // A resolved source position.  `known` is false for compiler-generated
 // entities (sequence number 0).
-struct SrcPos {
-  bool known = false;
-  bool in_primary = false;  // not in an include file (system headers included)
-  bool in_system = false;   // in a system header: EDG's own notion, except that in verify mode a library file (0046 item 3) is not one
-  std::string file;         // display file name of the position, "" if unknown
-  unsigned long line = 0;
-  unsigned long col = 0;
-  std::string str() const;  // "L<line>:<col>"
+struct SrcPos
+{
+    bool known {false};
+    bool in_primary {false}; // not in an include file (system headers included)
+    // in a system header: EDG's own notion, except that in verify mode a library file (0046 item 3) is not one
+    bool in_system {false};
+    std::string file; // display file name of the position, "" if unknown
+    unsigned long line {0U};
+    unsigned long col {0U};
+    std::string str() const; // "L<line>:<col>"
 };
 SrcPos resolve(const a_source_position& p);
 
@@ -54,4 +56,4 @@ std::string render_attribute(an_attribute_ptr a);
 // Constraint expression: concept-ids, && and ||; anything else <expr:kind>.
 std::string render_constraint(an_expr_node_ptr e);
 
-}  // namespace cerastes
+} // namespace cerastes

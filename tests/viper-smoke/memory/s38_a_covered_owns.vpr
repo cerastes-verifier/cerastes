@@ -1,0 +1,118 @@
+// expect: verified
+// S38 (a') (record 0052 item 2): `ensures(r, owns(*r))` of `where()` returning the address of its static local, covered by the implicit `owns(s)` by place equality (`res == &s`): `out_0 := cov ? write : (perm(L) - R) / M`, the postcondition `!cov ==> (none < out_0 && atom)`; the caller receives `out_0` and reads and writes `*p` (the only atom it holds is its own on `s`).
+// Hand-written from the Viper that today's encoder emits for static_local_return_address_use.c; no inhale or assume.
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_where__s__0(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures (len(GB_where__s__0()) == 1) && (lvloc(GB_where__s__0()) == loc(GB_where__s__0(), (-2)))
+  ensures (((acc(loc(GB_where__s__0(), 0).v_int) && acc(loc(GB_where__s__0(), 0).d_int)) && loc(GB_where__s__0(), 0).d_int) && (loc(GB_where__s__0(), 0).v_int == 5)) && acc(lvloc(GB_where__s__0()).lv)
+  decreases _
+
+// C/C++ function `where`
+method f_where__0(amt_0: Perm) returns (res: Ref, o: Perm)
+  requires (len(GB_where__s__0()) == 1) && (lvloc(GB_where__s__0()) == loc(GB_where__s__0(), (-2)))
+  requires (none < amt_0) && (amt_0 < write)
+  requires (((((((loc(GB_where__s__0(), 0) != null) && ((loc(GB_where__s__0(), 0) == null) || (((loc(GB_where__s__0(), 0) == loc(block_of(loc(GB_where__s__0(), 0)), offset_of(loc(GB_where__s__0(), 0)))) && (0 <= offset_of(loc(GB_where__s__0(), 0)))) && (offset_of(loc(GB_where__s__0(), 0)) <= len(block_of(loc(GB_where__s__0(), 0))))))) && (offset_of(loc(GB_where__s__0(), 0)) < len(block_of(loc(GB_where__s__0(), 0))))) && acc(loc(GB_where__s__0(), 0).v_int)) && acc(loc(GB_where__s__0(), 0).d_int)) && loc(GB_where__s__0(), 0).d_int) && (((-2147483648) <= loc(GB_where__s__0(), 0).v_int) && (loc(GB_where__s__0(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_where__s__0(), 0))).lv, amt_0)
+  ensures none < o && o <= write
+  ensures (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  ensures (((((((loc(GB_where__s__0(), 0) != null) && ((loc(GB_where__s__0(), 0) == null) || (((loc(GB_where__s__0(), 0) == loc(block_of(loc(GB_where__s__0(), 0)), offset_of(loc(GB_where__s__0(), 0)))) && (0 <= offset_of(loc(GB_where__s__0(), 0)))) && (offset_of(loc(GB_where__s__0(), 0)) <= len(block_of(loc(GB_where__s__0(), 0))))))) && (offset_of(loc(GB_where__s__0(), 0)) < len(block_of(loc(GB_where__s__0(), 0))))) && acc(loc(GB_where__s__0(), 0).v_int)) && acc(loc(GB_where__s__0(), 0).d_int)) && loc(GB_where__s__0(), 0).d_int) && (((-2147483648) <= loc(GB_where__s__0(), 0).v_int) && (loc(GB_where__s__0(), 0).v_int <= 2147483647))) && acc(lvloc(block_of(loc(GB_where__s__0(), 0))).lv, amt_0)
+  ensures !(res == loc(GB_where__s__0(), 0)) ==> (none < o && (((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) < len(block_of(res)))) && acc(res.v_int)) && acc(res.d_int)) && res.d_int) && (((-2147483648) <= res.v_int) && (res.v_int <= 2147483647))) && acc(lvloc(block_of(res)).lv, o))
+  decreases
+{
+  res := loc(GB_where__s__0(), 0)
+  assert loc(GB_where__s__0(), 0) != null
+  assert (loc(GB_where__s__0(), 0) == null) || (((loc(GB_where__s__0(), 0) == loc(block_of(loc(GB_where__s__0(), 0)), offset_of(loc(GB_where__s__0(), 0)))) && (0 <= offset_of(loc(GB_where__s__0(), 0)))) && (offset_of(loc(GB_where__s__0(), 0)) <= len(block_of(loc(GB_where__s__0(), 0)))))
+  assert offset_of(loc(GB_where__s__0(), 0)) < len(block_of(loc(GB_where__s__0(), 0)))
+  assert perm(loc(GB_where__s__0(), 0).v_int) == write
+  assert perm(loc(GB_where__s__0(), 0).d_int) == write
+  assert loc(GB_where__s__0(), 0).d_int
+  assert !((loc(GB_where__s__0(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_where__s__0(), 0).v_int))
+  assert perm(lvloc(block_of(loc(GB_where__s__0(), 0))).lv) >= amt_0
+  assert (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  o := (res == loc(GB_where__s__0(), 0)) ? write : ((perm(lvloc(block_of(res)).lv) - ((lvloc(block_of(res)) == lvloc(GB_where__s__0())) ? amt_0 : none)) / 1)
+  assert (res == loc(GB_where__s__0(), 0)) || o > none
+  assert (res == loc(GB_where__s__0(), 0)) || perm(lvloc(block_of(res)).lv) >= o
+  goto l_end
+  assert false
+  label l_end
+}
+
+// C/C++ function `main`
+method f_main__1() returns (res: Int)
+  ensures ((-2147483648) <= res) && (res <= 2147483647)
+  decreases
+{
+  var v_p__0: Ref
+  var t__0: Ref
+  var o__0: Perm
+  program_start()
+  assert loc(GB_where__s__0(), 0) != null
+  assert (loc(GB_where__s__0(), 0) == null) || (((loc(GB_where__s__0(), 0) == loc(block_of(loc(GB_where__s__0(), 0)), offset_of(loc(GB_where__s__0(), 0)))) && (0 <= offset_of(loc(GB_where__s__0(), 0)))) && (offset_of(loc(GB_where__s__0(), 0)) <= len(block_of(loc(GB_where__s__0(), 0)))))
+  assert offset_of(loc(GB_where__s__0(), 0)) < len(block_of(loc(GB_where__s__0(), 0)))
+  assert perm(loc(GB_where__s__0(), 0).v_int) == write
+  assert perm(loc(GB_where__s__0(), 0).d_int) == write
+  assert loc(GB_where__s__0(), 0).d_int
+  assert !((loc(GB_where__s__0(), 0).v_int < (-2147483648)) || (2147483647 < loc(GB_where__s__0(), 0).v_int))
+  assert perm(lvloc(block_of(loc(GB_where__s__0(), 0))).lv) > none
+  assert none < (perm(lvloc(block_of(loc(GB_where__s__0(), 0))).lv) / 2)
+  assert (perm(lvloc(block_of(loc(GB_where__s__0(), 0))).lv) / 2) < write
+  assert perm(lvloc(block_of(loc(GB_where__s__0(), 0))).lv) >= (perm(lvloc(block_of(loc(GB_where__s__0(), 0))).lv) / 2)
+  t__0, o__0 := f_where__0(perm(lvloc(block_of(loc(GB_where__s__0(), 0))).lv) / 2)
+  if (t__0 == loc(GB_where__s__0(), 0)) { }
+  assert (t__0 != null) ==> ((perm(lvloc(block_of(t__0)).lv) > none) || (lvloc(block_of(t__0)) == lvloc(GB_where__s__0())))
+  v_p__0 := t__0
+  assert (v_p__0 != null) ==> ((perm(lvloc(block_of(v_p__0)).lv) > none) || (lvloc(block_of(v_p__0)) == lvloc(GB_where__s__0())))
+  assert v_p__0 != null
+  assert perm(v_p__0.v_int) > none
+  assert perm(v_p__0.d_int) > none
+  assert v_p__0.d_int
+  assert perm(lvloc(block_of(v_p__0)).lv) > none
+  var rd__0: Int
+  rd__0 := v_p__0.v_int
+  assert perm(v_p__0.v_int) == write
+  v_p__0.v_int := rd__0 + 1
+  assert v_p__0.v_int == rd__0 + 1
+  if (((v_p__0 == null) ? 1 : 0) != 0) {
+    res := 1
+    goto l_end
+  }
+  res := 0
+  goto l_end
+  assert false
+  label l_end
+}
+
+// well-formedness of the contract of C/C++ function `where`
+method f_where__0__wf(amt_0: Perm, res: Ref)
+  requires (len(GB_where__s__0()) == 1) && (lvloc(GB_where__s__0()) == loc(GB_where__s__0(), (-2)))
+  requires (none < amt_0) && (amt_0 < write)
+  requires (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  decreases
+{
+  // the contract has nothing that can be undefined
+}

@@ -26,4 +26,4 @@ void guard_back_end_ran();
 // The refusal line: `cerastes-fe: error: <message>`.
 void print_refusal(const char* message);
 
-}  // namespace cerastes
+} // namespace cerastes

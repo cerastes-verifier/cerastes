@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L10
 // mode: c23, c++20
 // twin: tests/memory/owns_inc.c
-// Pins: 0037 items 6 and 15: an ensures atom with no requires atom of the same kind on the same place is rejected (re-expected by M4.5d2b: M4.5d2a lifts only a result's owns_block, record 0047 item 11)
+// Pins: 0037 items 6 and 15, record 0052 item 2: an ensures atom with no requires atom of the same kind on the same place is rejected where a partnered atom already holds that place (owns(*p) given beside live(p): a partnerless atom on a place a partnered one holds would be a second chunk; message and Pins only, the expectation is unchanged)
 #include <cerastes.h>
 #include <stddef.h>
 

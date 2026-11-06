@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L13
 // mode: c23, c++20
 // twin: tests/memory/heap_borrow_then_free.c
-// Pins: 0047 item 4: the `owns_block` forms of item 4 that stay rejected: a written owns_block in a loop invariant (d2b)
+// Pins: 0047 item 4: the `owns_block` forms of item 4 that stay rejected: a written owns_block in a loop invariant: moved to M4.5d2b2 (record 0052 item 6(a), cut from M4.5d2b1; the tests for it are kept for d2b2)
 // Pre-registered from record 0047 item 4: rejected unsupported_annotation at the marked line (tag guessed: the nearest existing analogue)
 #include <cerastes.h>
 

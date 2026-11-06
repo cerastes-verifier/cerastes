@@ -15,10 +15,11 @@
 
 namespace cerastes {
 
-enum class Diag {
-#define CERASTES_DIAG(tag, severity, message) tag,
-#include "diagnostics.def"
-#undef CERASTES_DIAG
+enum class Diag
+{
+    #define CERASTES_DIAG(tag, severity, message) tag,
+    #include "diagnostics.def"
+    #undef CERASTES_DIAG
 };
 
 // The tag of a diagnostic, as tests name it (without the `cerastes-` prefix).
@@ -27,14 +28,15 @@ const char* tag_of(Diag d);
 // Where a diagnostic about the text at `p` points: the original position of the
 // text when it lies in a user file (a macro argument, 0006 item 10), else the
 // position in the source file (the start of the macro invocation).
-struct DiagPos {
-  bool known = false;
-  bool in_primary = false;  // the position is not in an include file
-  unsigned long seq = 0;  // for ordering
-  unsigned long line = 0;
-  unsigned long col = 0;
-  std::string file;       // display file name
-  std::string full_name;  // path used to read the source line, "" if unknown
+struct DiagPos
+{
+    bool known {false};
+    bool in_primary {false}; // the position is not in an include file
+    unsigned long seq {0U};  // for ordering
+    unsigned long line {0U};
+    unsigned long col {0U};
+    std::string file;      // display file name
+    std::string full_name; // path used to read the source line, "" if unknown
 };
 DiagPos diag_position(const a_source_position& p);
 
@@ -57,4 +59,4 @@ size_t reported_count();
 // to EDG's error count.  Does nothing when none were recorded.
 void flush_diagnostics();
 
-}  // namespace cerastes
+} // namespace cerastes

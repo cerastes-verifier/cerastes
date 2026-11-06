@@ -49,7 +49,7 @@ status 1) on:
   `while` body, an `if` or `else` branch) that also encloses the `goto`, so a jump goes outward or
   stays in its block, never into a loop (which would skip the invariant check on entry) or a branch
   (which would skip its condition);
-* the flags of locals without an initializer (decision 0019 item 5: only a write sets a flag, and a
+* the flags of locals without an initializer (decision 0019 item 5; `held_<v> := ...` and `tv_<v> := ...` lines of an owning local, decision 0052 item 3, may stand between a write and its flag: only a write sets a flag, and a
   declaration, a block entry or a switch dispatch resets it): in a method, every `d_<name> := true` must
   directly follow (the previous line that is neither blank nor a comment) an assignment `<name> := ...` of
   the variable it flags, so a flag cannot be set without the write; every `d_<name> := false` (a reset) must
@@ -73,6 +73,11 @@ status 1) on:
   before it (a clause that reads the amount before its bounds is not well-formed for Silicon, and an amount without
   the bounds could be `write` or `none`); `wildcard` (an amount Silicon chooses, which is an unchecked assumption) is
   refused anywhere.  The case split `if (<condition>) { }` is plain Viper and needs no rule;
+* the ghost amount results of a method (decision 0052 item 5: the output amount of a partnerless `ensures` atom): a result of type
+  `Perm` has exactly one `ensures none < o && o <= write` (parentheses and spaces ignored) and no clause of the method mentions
+  it before that line (the postcondition that keeps the amount positive and at most `write` whatever the body, or a trusted
+  contract, says); a call's `Perm` target (`t, o := f(...)`) is allowed only where `f` is a method of the file whose result at
+  that position is such a `Perm` (otherwise the rule of the next paragraph flags it);
 * the ghost amounts of loops (decision 0038 item 9, amending 0037 item 14): a `Perm` **local** (`var k: Perm`; the
   snapshots `kv := perm(x.v_int)` that a loop's invariant uses as the amount of an `acc`) is assigned only `perm(...)`,
   `none`, `write` or a conditional `c ? a : b` of those (never `wildcard`, never arithmetic, never another variable:
@@ -89,6 +94,15 @@ status 1) on:
   site: nothing in the body may make or take one); `forperm` appears only as the statement `assert forperm t: Ref [t.tok] :: <E>`
   (one binder, the field `tok`, no `tok` in `<E>`) whose position-map entries are all category `leak`: the one assertion that
   reads every token the method holds (the rest of the heap rule is not checked here: the exemption `<E>` is the encoder's);
+* the owner ghosts of an owning local (decision 0052 item 3): `tv_<v> := (<x> != null) ? loc(block_of(<x>), -1).tok : tv_<v>` is the
+  one assignment that reads a token outside a `perm(...)` snapshot (the same ghost on both sides, the same pointer in the guard and
+  the slot); `held_<v> := ... perm(loc(block_of(<o>), -1).tok) > none` reads it inside `perm(...)`, and the ending rows
+  `if (!(<row>)) { assert false }` read no token;
+* the allocator ghost of an owning loop variable in a vlibc heap program (decision 0052 item 3, loops): a `tve_<...>` is assigned only
+  `(<x> != null) ? tv_<y> : true` and never inside a loop whose invariant mentions it; the entry and back-edge rows of an owner
+  (`if (!(<row>)) { assert false }`, which read the token under `perm(...)` and compare it with `tve_...`) and its invariants (`held_v
+  == (v != null)`, `(v != null) ==> (acc(<slot>.tok) && <slot>.tok == tve_...)`) need no rule of their own: they are the ending rows
+  and the conjuncts the token rules above already read;
 * the typed views of the allocation functions (decision 0047 items 2, 4 and 7): a bodyless method whose trusted-contract tag is
   vlibc's `malloc`, `calloc` or `free` with `typed view:` in its reason is the trusted view of one allocation type, and its text is
   pinned as `alloc_<t>`'s is, built from the type's leaves: `method f_<routine>__<n>() returns (res: Ref)` (`(p_ptr__0: Ref)` for
@@ -1138,18 +1152,19 @@ PERM_FORMAL_RE = re.compile(r"^\s*(?P<name>[A-Za-z_$][\w$']*)\s*:\s*Perm\s*$")
 CLAUSE_START_RE = re.compile(r"^\s*(requires|ensures|invariant|decreases)\b")
 
 
-def method_formals(src: Source, d: Decl) -> list[str]:
-    """The text of each formal of a method (the first parenthesis of its header, split at top-level commas)."""
+def method_header_text(src: Source, d: Decl) -> str:
+    """The header of a method: its lines up to the first clause or the opening brace, joined."""
     header = []
     for n in range(d.line, d.end_line + 1):
         line = src.code[n - 1]
         if CLAUSE_START_RE.match(line) or line.strip().startswith("{"):
             break
         header.append(line)
-    text = " ".join(header)
-    start = text.find("(", text.find(d.name) + len(d.name))
-    if start < 0:
-        return []
+    return " ".join(header)
+
+
+def parenthesized_list(text: str, start: int) -> list[str]:
+    """The top-level comma-separated parts of the parenthesis that opens at `text[start]`."""
     depth, parts, cur = 0, [], []
     for ch in text[start:]:
         if ch == "(":
@@ -1167,6 +1182,51 @@ def method_formals(src: Source, d: Decl) -> list[str]:
             cur.append(ch)
     parts.append("".join(cur))
     return [x for x in parts if x.strip()]
+
+
+def method_formals(src: Source, d: Decl) -> list[str]:
+    """The text of each formal of a method (the first parenthesis of its header, split at top-level commas)."""
+    text = method_header_text(src, d)
+    start = text.find("(", text.find(d.name) + len(d.name))
+    if start < 0:
+        return []
+    return parenthesized_list(text, start)
+
+
+RESULT_PART_RE = re.compile(r"^\s*(?P<name>[A-Za-z_$][\w$']*)\s*:\s*(?P<type>.+?)\s*$")
+
+
+def method_results(src: Source, d: Decl) -> list[tuple[str, str]]:
+    """The (name, type) of each result of a method: the parenthesis after `returns` in its header."""
+    text = method_header_text(src, d)
+    after = text.find(d.name) + len(d.name)
+    m = re.search(r"\)\s*returns\s*\(", text[after:])
+    if m is None:
+        return []
+    start = after + m.end() - 1
+    return [(r.group("name"), r.group("type")) for part in parenthesized_list(text, start) if (r := RESULT_PART_RE.match(part))]
+
+
+def perm_result_rows(src: Source, d: Decl, o: str) -> tuple[list[int], int]:
+    """(the lines of the `ensures none < o && o <= write` of a ghost `Perm` result, the first other clause that mentions it)."""
+    word = re.compile(r"(?<![\w$'.])" + re.escape(o) + r"(?![\w$'])")
+    bounds = re.sub(r"[\s()]", "", f"none<{o}&&{o}<=write")
+    rows, first_mention = [], 0
+    for n in range(d.line + 1, d.end_line + 1):
+        line = src.code[n - 1]
+        if not CLAUSE_START_RE.match(line):
+            continue
+        if line.strip().startswith("ensures") and re.sub(r"[\s()]", "", line.strip()[len("ensures"):]) == bounds:
+            rows.append(n)
+        elif word.search(line) and not first_mention:
+            first_mention = n
+    return rows, first_mention
+
+
+def perm_result_has_row(src: Source, d: Decl, o: str) -> bool:
+    """Whether the ghost `Perm` result `o` has exactly one `ensures none < o && o <= write` and no clause before it mentions it."""
+    rows, first_mention = perm_result_rows(src, d, o)
+    return len(rows) == 1 and not (first_mention and first_mention < rows[0])
 
 
 def lint_ghost_amounts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
@@ -1198,6 +1258,19 @@ def lint_ghost_amounts(src: Source, decls: list[Decl], add: Callable[[int, str],
                 add(first_mention, f"`method {d.name}`: a clause mentions the ghost amount `{a}` before its bounds "
                                    f"`requires none < {a} && {a} < write` (line {bound_lines[0]}; Silicon's well-formedness check "
                                    "needs the bounds first, decision 0037 item 6)")
+        # Decision 0052 item 5: a ghost `Perm` *result* (the output amount of a partnerless `ensures` atom) has exactly one
+        # `ensures none < o && o <= write`, before any clause that mentions it: the amount is positive and at most `write`
+        # whatever the body or a trusted contract says, so a caller's `t, o := f(...)` receives a bounded amount.
+        for o, typ in method_results(src, d):
+            if typ != "Perm":
+                continue
+            rows, first_mention = perm_result_rows(src, d, o)
+            if len(rows) != 1:
+                add(d.line, f"`method {d.name}`: the ghost amount result `{o}` must have exactly one `ensures none < {o} && {o} <= write` "
+                            f"(decision 0052 item 5), found {len(rows)}")
+            elif first_mention and first_mention < rows[0]:
+                add(first_mention, f"`method {d.name}`: a clause mentions the ghost amount result `{o}` before its bounds "
+                                   f"`ensures none < {o} && {o} <= write` (line {rows[0]}; decision 0052 item 5)")
 
 
 # The ghost amounts of loops (decision 0038 item 9): snapshots of `perm(...)` in `Perm` locals, used as amounts in invariants.
@@ -1475,12 +1548,39 @@ def lint_ghost_refs(src: Source, decls: list[Decl], add: Callable[[int, str], No
 
 
 
+CALL_RHS_RE = re.compile(r"^(?P<callee>[A-Za-z_$][\w$']*)\s*\(.*\)$", re.S)
+
+
+def perm_call_target_ok(src: Source, by_name: dict[str, Decl], code: str, start: int, end: int, rhs: str) -> bool:
+    """Decision 0052 item 5 (amending 0038 item 9): a `Perm` local that is a target of a multi-target call `t, o := f(...)` is the
+    output amount of a partnerless atom when the callee is a method of this file whose result at that position is a `Perm` with
+    exactly one `ensures none < o && o <= write` before any clause that mentions it (the amount a caller receives is bounded
+    whatever the callee does).  The target is `code[start:end]`; every other call target, and every other right-hand side, is
+    the rule of decision 0038 item 9."""
+    m = CALL_RHS_RE.match(rhs)
+    callee = by_name.get(m.group("callee")) if m else None
+    if callee is None:
+        return False
+    colon = code.index(":=", end)
+    targets = re.search(r"((?:[A-Za-z_$][\w$']*\s*,\s*)*[A-Za-z_$][\w$']*)\s*$", code[:colon])
+    if targets is None:
+        return False
+    names = [t.strip() for t in targets.group(1).split(",")]
+    results = method_results(src, callee)
+    position = len(re.findall(r"[A-Za-z_$][\w$']*", code[targets.start():start]))
+    if len(results) != len(names) or position >= len(results):
+        return False
+    o, typ = results[position]
+    return typ == "Perm" and perm_result_has_row(src, callee, o)
+
+
 def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
     """Decision 0038 item 9: the amounts of a loop's invariant are `Perm` locals that snapshot what the method holds.  A
     local is assigned only `perm(...)`, `none`, `write` or a conditional of those (an assignment of anything else, `wildcard`
     included, could give the invariant an amount that the method does not hold or above `write`); it is never assigned inside
     a loop whose invariant mentions it (the loop head havocs what the body assigns, so the amount could exceed `write`
     and make the body vacuous); and `perm(...)` is not written in an invariant (Viper refuses it: the snapshot is the way)."""
+    by_name = {x.name: x for x in decls if x.kind == "method"}
     for d in decls:
         if d.kind != "method" or not d.has_body:
             continue
@@ -1498,6 +1598,8 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
                 for a in re.finditer(r"(?<![\w$'.])" + re.escape(name) + r"\s*(?=(?:,\s*[A-Za-z_$][\w$']*\s*)*:=)", code):
                     rhs = _statement_rhs(code, code.index(":=", a.end()) + 2)
                     if not perm_value_ok(rhs) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
+                        if perm_call_target_ok(src, by_name, code, a.start(), a.end(), rhs):
+                            continue
                         add(n, f"`Perm` local `{name}` is assigned `{rhs}`: a snapshot is `perm(...)`, `none`, `write` or a "
                                "conditional of those, never arithmetic or another variable (decision 0038 item 9; `wildcard` has its own rule)")
         for line, inv, body in while_loops(src, d):
@@ -1513,6 +1615,32 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
                 if t in used and j < len(body) and body[j][0] == ":=" and (k == 0 or body[k - 1][0] != "."):
                     add(ln, f"`Perm` local `{t}` is assigned inside the loop of line {line}, whose invariant uses it as an "
                             "amount: the loop head havocs what the body assigns (decision 0038 item 9)")
+
+
+# The allocator ghost of an owning loop variable in a vlibc heap program (decision 0052 item 3 Loops, shapes L1-L3): `tve_<v>__<loop> :=
+# (<x> != null) ? tv_<y> : true` is the token value the owner held at the loop's entry, a method-level `Bool` that the loop's invariant and
+# its rows compare with the token.  It is assigned only that way (the value is the owner's own ghost, never a read of a token), and never
+# inside a loop whose invariant mentions it (the loop head would havoc it and the invariant would no longer say which allocator's block
+# the owner holds).
+TVE_WORD_RE = re.compile(r"(?<![\w$'.])tve_[\w$']*")
+TVE_ASSIGN_RE = re.compile(r"^\s*tve_[\w$']*\s*:=\s*\(\s*[A-Za-z_$][\w$']*\s*!=\s*null\s*\)\s*\?\s*tv_[\w$']*\s*:\s*true\s*$")
+
+
+def lint_owner_loop_ghosts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    for lineno, code in enumerate(src.code, start=1):
+        m = re.match(r"^\s*(?P<name>tve_[\w$']*)\s*:=", code)
+        if m and not TVE_ASSIGN_RE.match(code):
+            add(lineno, f"`{m.group('name')}` is assigned something but `(<x> != null) ? tv_<y> : true`: the allocator ghost of an owning loop "
+                        "variable is its own token value, never a read of a token or another expression (decision 0052 item 3)")
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        for line, inv, body in while_loops(src, d):
+            used = {t for t, _ln in inv if TVE_WORD_RE.fullmatch(t)}
+            for k, (t, ln) in enumerate(body):
+                if t in used and k + 1 < len(body) and body[k + 1][0] == ":=" and (k == 0 or body[k - 1][0] != "."):
+                    add(ln, f"`{t}` is assigned inside the loop of line {line}, whose invariant mentions it: the loop head havocs what "
+                            "the body assigns (decision 0052 item 3)")
 
 
 # The heap's free token (decision 0047 items 6, 7 and 10).  `field tok: Bool` is the ghost token of a heap block at slot -1: held at
@@ -1539,6 +1667,14 @@ KTV_IF_LINE_RE = re.compile(rf"^\s*{KTV_IF}\s*$")
 # conjuncts (a `tok` in it only as `loc(block_of(...), -1).tok`); an `if` with anything else in its body, or a condition that is not
 # the negation of one parenthesised row, is an ordinary `if` and may not read `tok`.
 ENDING_IF_RE = re.compile(r"^\s*if\s*\(\s*!\s*(?P<row>\(.*\))\s*\)\s*\{\s*$", re.S)
+
+
+# The owner's token value (decision 0052 item 3, 0050 item 5): `tv_<v> := (<x> != null) ? loc(block_of(<x>), -1).tok : tv_<v>`, taken
+# at the initialization or assignment of an owning local right after its value row (which checks the whole block is held where `<x>`
+# is not null).  It is the second read of a token's value that is stored: a method-level `Bool` that only the owner's ending rows and
+# the loop's place compare with the cell.  Only this exact shape: the same ghost on both sides, the same pointer in the guard and the slot.
+TV_ASSIGN_RE = re.compile(r"^\s*(?P<v>tv_[\w$']*)\s*:=\s*\(\s*(?P<x>[A-Za-z_$][\w$']*)\s*!=\s*null\s*\)\s*\?\s*"
+                          r"loc\(\s*block_of\(\s*(?P=x)\s*\)\s*,\s*\(?\s*-\s*1\s*\)?\s*\)\.tok\s*:\s*(?P=v)\s*$")
 
 
 def is_ending_row(src: Source, lineno: int) -> bool:
@@ -1895,6 +2031,8 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
                     add(lineno, f"`{km.group('v')}` is taken under the guard of `{guard}`: the snapshot of a place's value is taken where "
                                 "that same place's `kt_<n>` is held, so its name is `ktv_<n>` for the guard `kt_<n> > none` "
                                 "(decision 0050 item 5)")
+            elif TV_ASSIGN_RE.match(code):
+                pass  # an owner's token value (decision 0052 item 3): the one conditional read of a token that is stored
             elif re.search(r"\.tok\s*:=", code):
                 add(lineno, "assignment to `tok`: a token is created only by a postcondition (decision 0047 item 2)")
             elif TOK_STATEMENT_RE.match(code):
@@ -2003,6 +2141,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     has_globals, global_facts = lint_globals(src, decls, add)
     lint_ghost_amounts(src, decls, add)
     lint_perm_locals(src, decls, add)
+    lint_owner_loop_ghosts(src, decls, add)
     lint_ghost_refs(src, decls, add)
     forperm_lines = lint_heap_token(src, decls, add)
     lint_views(src, decls, add, has_globals, global_facts)
@@ -2158,6 +2297,11 @@ GLOBAL_CELL_RE = r"loc\(\s*GB_[\w$']+\(\)\s*,\s*0\s*\)"
 FIELD_FLAG_RE = re.compile(r"^\s*(?P<recv>[A-Za-z_$][\w$']*|" + GLOBAL_CELL_RE + r")\.d_(?P<name>[A-Za-z_$][\w$']*)\s*:=(?P<value>.*)$")
 
 
+# The owner ghosts of an owning local (decision 0052 item 3) are assigned between its write and its flag: `held_<v> := ...` and
+# `tv_<v> := ...` are writes of other variables, so a flag set after them still directly follows the write of its variable.
+OWNER_GHOST_ASSIGN_RE = re.compile(r"^\s*(?:held|tv)_[\w$']*\s*:=")
+
+
 def lint_flags(src: Source, add: Callable[[int, str], None]) -> None:
     """Decision 0019 item 5: the ghost flag `d_<name>` of a local without an initializer is set only by a
     write of that local, and a reset gives the local its dummy value.  A flag that could be set without
@@ -2198,7 +2342,10 @@ def lint_flags(src: Source, add: Callable[[int, str], None]) -> None:
             continue
         name, value = m.group("name"), m.group("value").strip().rstrip(";").strip()
         if value == "true":
-            prev = lines[k - 1][1] if k > 0 else ""
+            j = k - 1
+            while j > 0 and OWNER_GHOST_ASSIGN_RE.match(lines[j][1]):  # the owner ghosts of an owning local (decision 0052 item 3)
+                j -= 1
+            prev = lines[j][1] if j >= 0 else ""
             if not re.match(r"^\s*" + re.escape(name) + r"\s*:=", prev):
                 add(lineno, f"`d_{name} := true` does not directly follow a write `{name} := ...`: a flag is "
                             "set only by the write of its variable (decision 0019 item 5)")

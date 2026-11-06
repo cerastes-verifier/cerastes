@@ -38,32 +38,46 @@
 // EDG's entry point, renamed from main by EDG_MAIN (host_envir.h).
 extern int edg_main(int argc, char** argv);
 
-int main(int argc, char** argv) {
-  std::vector<char*> args{argv[0]};
-  // cerastes defines __CERASTES__ itself, so that a direct run of this binary
-  // cannot silently drop every contract (decision 0008).  It comes before the
-  // user's options.
-  static char define_cerastes[] = "-D__CERASTES__=1";
-  args.push_back(define_cerastes);
-  for (int i = 1; i < argc; ++i) {
-    if (std::strcmp(argv[i], "--cerastes_walk") == 0) {
-      cerastes::options().walk = true;
-    } else if (std::strcmp(argv[i], "--cerastes_walk_selftest") == 0) {
-      cerastes::options().walk = cerastes::options().walk_selftest = true;
-    } else if (std::strcmp(argv[i], "--cerastes_checks_selftest") == 0) {
-      cerastes::options().checks_selftest = true;
-    } else {
-      cerastes::args::FeCheck check = cerastes::args::check_fe_argument(argv[i], i + 1 < argc ? argv[i + 1] : nullptr);
-      if (check.message != nullptr) {
-        cerastes::print_refusal(check.message);
-        return 2;
-      }
-      args.push_back(argv[i]);
-      if (check.consumes_next) args.push_back(argv[++i]);
+int main(int argc, char** argv)
+{
+    std::vector<char*> args {argv[0]};
+    // cerastes defines __CERASTES__ itself, so that a direct run of this binary
+    // cannot silently drop every contract (decision 0008).  It comes before the
+    // user's options.
+    static char define_cerastes[] {"-D__CERASTES__=1"};
+    args.push_back(define_cerastes);
+    for (int i {1}; i < argc; ++i)
+    {
+        if (std::strcmp(argv[i], "--cerastes_walk") == 0)
+        {
+            cerastes::options().walk = true;
+        }
+        else if (std::strcmp(argv[i], "--cerastes_walk_selftest") == 0)
+        {
+            cerastes::options().walk = cerastes::options().walk_selftest = true;
+        }
+        else if (std::strcmp(argv[i], "--cerastes_checks_selftest") == 0)
+        {
+            cerastes::options().checks_selftest = true;
+        }
+        else
+        {
+            cerastes::args::FeCheck check {
+                cerastes::args::check_fe_argument(argv[i], i + 1 < argc ? argv[i + 1] : nullptr)};
+            if (check.message != nullptr)
+            {
+                cerastes::print_refusal(check.message);
+                return 2;
+            }
+            args.push_back(argv[i]);
+            if (check.consumes_next)
+            {
+                args.push_back(argv[++i]);
+            }
+        }
     }
-  }
-  args.push_back(nullptr);
-  cerastes::register_cerastes_annotations();
-  std::atexit(cerastes::guard_back_end_ran);
-  return edg_main(static_cast<int>(args.size()) - 1, args.data());
+    args.push_back(nullptr);
+    cerastes::register_cerastes_annotations();
+    std::atexit(cerastes::guard_back_end_ran);
+    return edg_main(static_cast<int>(args.size()) - 1, args.data());
 }

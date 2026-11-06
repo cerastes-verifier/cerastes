@@ -38,6 +38,8 @@ for script in scripts/*.sh; do
 done
 command -v shellcheck >/dev/null || { echo "check.sh: shellcheck missing; run scripts/bootstrap.sh" >&2; exit 1; }
 shellcheck scripts/*.sh
+# the tool code keeps the owner's Boost style (decision 0051), checked with the pinned clang-format
+scripts/format.sh --check
 python3 -m py_compile scripts/*.py
 python3 scripts/run_tests.py --check-headers
 python3 scripts/check_doc_examples.py
@@ -63,6 +65,7 @@ python3 scripts/test_walker_oracle.py
 python3 scripts/test_lint_viper.py
 python3 scripts/test_mutate.py
 python3 scripts/test_vlibc_contracts.py
+python3 scripts/test_object_identity.py
 
 step "tests"
 python3 scripts/run_tests.py --pr-base="$pr_base"
@@ -77,7 +80,7 @@ step "vir self-test"
 # The case count is pinned twice: the tool must state at least VIR_CASES_MIN cases (a smaller
 # set must not pass), and the harness must pass exactly the number it stated (a case lost on
 # the way, or a file that is not run, must not pass either).
-VIR_CASES_MIN=1561
+VIR_CASES_MIN=1642
 rm -rf build/vir-selftest
 mkdir -p build/vir-selftest
 vir_out="$(build/cerastes-vir-selftest build/vir-selftest)"

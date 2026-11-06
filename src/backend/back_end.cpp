@@ -16,24 +16,32 @@
 #include "verify_config.h"
 #include "walker.h"
 
-void back_end(void) {
-  cerastes::note_back_end_ran();
-  cerastes::refuse_unsupported_mode();
-  // EDG accepts unambiguous abbreviations of --remove_unneeded_entities, so the
-  // driver's own check on the option string can be bypassed.  Check the runtime
-  // state itself: with pruning on, never-instantiated templates and unused
-  // entities are missing from the IL, which the walker would then report as
-  // genuinely absent.
-  if (remove_unneeded_entities || okay_to_eliminate_unneeded_il_entries) {
-    std::fprintf(stderr, "error: cerastes requires --no_remove_unneeded_entities\n");
-    std::exit(2);
-  }
-  // The back end's own checks run on every invocation, after EDG's (this
-  // function is only reached when EDG reported no errors).  Their diagnostics are
-  // printed after the walk so that --cerastes_walk still lists the IL.
-  cerastes::check_annotations();
-  if (cerastes::options().walk) cerastes::walk_il_and_print();
-  // `cerastes verify` (decision 0011): encode the IL when the annotation checks found nothing wrong.
-  if (cerastes::verify_config().on && cerastes::reported_count() == 0) cerastes::verify_encode();
-  cerastes::flush_diagnostics();
+void back_end(void)
+{
+    cerastes::note_back_end_ran();
+    cerastes::refuse_unsupported_mode();
+    // EDG accepts unambiguous abbreviations of --remove_unneeded_entities, so the
+    // driver's own check on the option string can be bypassed.  Check the runtime
+    // state itself: with pruning on, never-instantiated templates and unused
+    // entities are missing from the IL, which the walker would then report as
+    // genuinely absent.
+    if (remove_unneeded_entities || okay_to_eliminate_unneeded_il_entries)
+    {
+        std::fprintf(stderr, "error: cerastes requires --no_remove_unneeded_entities\n");
+        std::exit(2);
+    }
+    // The back end's own checks run on every invocation, after EDG's (this
+    // function is only reached when EDG reported no errors).  Their diagnostics are
+    // printed after the walk so that --cerastes_walk still lists the IL.
+    cerastes::check_annotations();
+    if (cerastes::options().walk)
+    {
+        cerastes::walk_il_and_print();
+    }
+    // `cerastes verify` (decision 0011): encode the IL when the annotation checks found nothing wrong.
+    if (cerastes::verify_config().on && cerastes::reported_count() == 0U)
+    {
+        cerastes::verify_encode();
+    }
+    cerastes::flush_diagnostics();
 }

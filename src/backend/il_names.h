@@ -7,10 +7,10 @@
 
 #include "edg_il.h"
 
-const char* name_of(an_expr_operator_kind v);   // eok_*
-const char* name_of(an_expr_node_kind v);       // enk_*
-const char* name_of(a_type_kind v);             // tk_*
-const char* name_of(a_statement_kind v);        // stmk_*
-const char* name_of(a_template_param_constant_kind v);  // tpck_*
-const char* name_of(a_constant_repr_kind v);    // ck_*
-const char* name_of(a_template_param_type_kind v);  // tptk_*
+const char* name_of(an_expr_operator_kind v);          // eok_*
+const char* name_of(an_expr_node_kind v);              // enk_*
+const char* name_of(a_type_kind v);                    // tk_*
+const char* name_of(a_statement_kind v);               // stmk_*
+const char* name_of(a_template_param_constant_kind v); // tpck_*
+const char* name_of(a_constant_repr_kind v);           // ck_*
+const char* name_of(a_template_param_type_kind v);     // tptk_*
