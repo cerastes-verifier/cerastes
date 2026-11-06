@@ -50,7 +50,7 @@ the loops, and a targeted check of its fixes)
 - **Checks:** the final run of `tests/memory tests/vlibc tests/annotations doc/modules/ROOT/examples` (6326 passed; the
   23 failures were the six retired pins and three issues fixed and re-run as a delta: 248 passed); `vprdiff.py` against
   S7's baseline: every existing output byte-identical but four map-only message changes (allow-listed); the lint clean;
-  `scripts/format.sh --check` clean; `check.sh` (the full check, `CERASTES_CHECK_BASE` unset, run once at `268fb17`'s tree): all green (1642 passed, 0 failed, 0 skipped; lint 4338 files clean; VIR self-test 1642 lowering cases, 273 rejection cases, 0 problems; docs and walker oracle clean; `build/m4.5d2b/check1.log`).
+  `scripts/format.sh --check` clean; `check.sh` (the full check, `CERASTES_CHECK_BASE` unset, run once at `268fb17`'s tree): all green (the suite 11072 passed, 0 failed, 10 skipped, native-ok runs Apple clang 2085, GCC 2085; lint 4338 files clean; VIR self-test 1642 lowering cases, 273 rejection cases, 0 problems, all 1642 through Silicon; docs and walker oracle clean; `build/m4.5d2b/check1.log`).
 
 **Not done:** written `owns_block` in loop invariants (cut (a), to d2b2); the Linux run on the x86-64 box (CI decides
 when the owner pushes); the documented false alarms of handoff §3 "From M4.5d2b1".
