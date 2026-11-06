@@ -81,7 +81,7 @@ def problems_of(data, root=None):
     problems = []
     if set(data) - {"schema", "profile"}:
         problems.append(f"unknown top-level keys: {sorted(set(data) - {'schema', 'profile'})}")
-    if data.get("schema") != SCHEMA:
+    if type(data.get("schema")) is not int or data["schema"] != SCHEMA:
         problems.append(f"`schema` must be {SCHEMA}")
     profiles = data.get("profile")
     if not isinstance(profiles, list) or not profiles:
@@ -101,7 +101,7 @@ def problems_of(data, root=None):
                 problems.append(f"{where}: the name is used twice")
             seen.add(name)
         platform = p.get("platform")
-        if platform not in FIELDS:
+        if not isinstance(platform, str) or platform not in FIELDS:
             problems.append(f"{where}: `platform` must be one of {sorted(FIELDS)}")
             continue
         found = _check_fields(where, p, FIELDS[platform], OPTIONAL)
