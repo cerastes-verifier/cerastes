@@ -90,15 +90,22 @@ emulates and which warnings exist. That is where a profile should say what it ru
    prints two matrices with `ci_profile.py matrix`. `check-macos` and `check-linux` run one job per selected profile
    (`fail-fast: false`, `runs-on`, the job name and `CERASTES_JOBS` from the matrix; a job is skipped when its matrix
    is empty), each running `scripts/ci.sh <profile>` or `scripts/ci-linux.sh <profile>` and then `check.sh` unchanged.
-   The artifact names and the Silicon cache key carry the profile's name. Triggers, permissions, concurrency, the
+   The artifact names and the Silicon cache key carry the profile's name. The dispatch input reaches the script
+   through the environment, never through the command line. Triggers, permissions, concurrency, the
    tiers of 0016 item 14 and `timeout-minutes: 220` are unchanged. The Linux jobs keep the image's own Python (0031
    item 2: `setup-python` exports `LD_LIBRARY_PATH` on Linux); ubuntu-24.04's 3.12 satisfies the scripts' 3.9 and
    `tomllib`'s 3.11.
 6. **Bootstrap inputs** (from S8b). `scripts/bootstrap.sh` takes `CERASTES_CLANG_MAJOR` (Linux: chooses `clang-N`
    and libc++ N, default 21 as today; macOS: asserts Apple clang's major), `CERASTES_GCC_MAJOR` (the native-ok GCC;
-   default the highest, as today) and `CERASTES_BUILD_COMPILER` (item 10). Unset, it behaves exactly as before. The
-   values go into `build/env.sh` and the build stamps, so changing one rebuilds. The CI scripts set them from the
-   profile and refuse them from the environment (0016 item 7's list grows by these three and `CERASTES_CI_PROFILE`).
+   default the highest, as today) and `CERASTES_BUILD_COMPILER` (item 10). Unset, it behaves exactly as before. A
+   full bootstrap records the three in `build/toolchain.env`; `--build-only` (what `check.sh` runs) builds with the
+   recorded values and stops when one of the variables names another compiler, so the check step builds with what the
+   setup step chose. `build/compilers.stamp` records the compilers that built EDG and cerastes, and a build made by
+   others is removed (EDG configures once, so its cache would keep the old ones); a build from before this record has
+   no stamp and was made by the defaults. `build/env.sh` gains `CERASTES_BUILD_COMPILER`, `CERASTES_BUILD_CC` and
+   `CERASTES_BUILD_CXX`. The CI scripts set the three inputs from the profile and refuse them from the environment
+   (0016 item 7's list grows by these three). `CERASTES_CI_PROFILE` is the job's (item 7 reads it), so the scripts
+   require it to equal their argument instead.
 7. **Divergence** (from S8b). A test whose outcome on a toolchain differs from its `expect:` lines fails that job. It
    is fixed in cerastes, or the profile records an exclusion: the test's path, optionally the mode, and a reason. An
    excluded test still runs and must still fail (reported as `diverges (profile <name>: <reason>)`); one that passes
@@ -125,10 +132,27 @@ emulates and which warnings exist. That is where a profile should say what it ru
     `-Wall -Wextra -Werror` finds in `src/` is fixed in the code style (0051), proved behaviour-neutral by
     `scripts/object_identity.py` on the clang build. What it finds in cerastes's EDG flags (`EdgFrontEnd.cmake`) gets
     flags per compiler. What it finds in EDG's sources becomes small fork commits (invariant 5).
+    *Found in S8 (GCC 15.2, Ubuntu 26.04):* EDG compiles cleanly in both configurations (the stock preset build and
+    `edg_fe` with cerastes's flags); no fork commit. cerastes's own sources gave one family, `-Wdangling-pointer` (in
+    `-Wall`), reporting pointers to the temporaries of a `?:` whose arms are copied into a stored value
+    (`src/vir/lower.cpp`'s heap holders, two VIR self-test cases). Every value involved is held by copy (`Cell`,
+    `HeapHolder`, the `fn` helper's parameter list), so the reports are false (the soundness audit read every type
+    involved and found no reference, pointer or view into a temporary). They are all of level 2 ("may be used"). The
+    six targets now share `CERASTES_WARNINGS` (the top-level `CMakeLists.txt`), `-Wall -Wextra -Werror` with
+    `-Wdangling-pointer=1` for GCC only: level 1 still reports definite dangling uses, and both files compile cleanly
+    with it under GCC 15.2 and 16.2 (the audit's suggestion over turning the warning off); clang's 104 compile commands
+    are unchanged. The first full run then failed 165 tests: EDG's CMake takes its default `EDG_BASE` (the predefined
+    macros of the emulated compiler) from the compiler that builds it, so the GCC build got `bases/docker/dev-env/gcc`
+    and emulated clang without clang's macros (libc++ stops at its `__BYTE_ORDER__` check). `bootstrap.sh` names the
+    clang base on Linux, the one EDG chooses for a clang build, so a clang build is unchanged.
 11. **ubuntu-24.04** (from S8c). glibc 2.39, clang 18 with libc++ 18, GCC 14, CMake 3.31, ShellCheck 0.9.0. The
     encoder matches glibc 2.43's `assert` expansions exactly (0031 item 5). A 2.39 shape that differs is an encoding
     rule, with its must-verify and must-fail tests (invariant 2), an item here, and the soundness audit. Anything
     larger stays an exclusion or keeps the profile at `dispatch`, and goes to the owner.
+    *Found in S8:* clang 18 refuses `const bool is_break {l->break_label};` (`src/backend/encode.cpp`, a one-bit EDG
+    bit-field narrowed to `bool` in a braced initializer), which clang 21 accepts; it is now `{l->break_label != 0}`,
+    like the line after it (object file and IR identical under Apple clang 21, `object_identity.py`). Nothing else in
+    the build differs.
 12. **Out of scope** (M8 entries):
     - arm64 Linux runners (`ubuntu-*-arm`): plain `char` and `wchar_t` are unsigned there, which the encoder's target
       facts do not model;

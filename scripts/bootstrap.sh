@@ -272,7 +272,10 @@ if [[ "$PLATFORM" == Linux-* ]]; then
     BUILD_CXX="$(command -v "clang++-$CLANG_MAJOR")"
   fi
   EDG_COMPILERS=("-DCMAKE_C_COMPILER=$BUILD_CC" "-DCMAKE_CXX_COMPILER=$BUILD_CXX")
-  EDG_STOCK_OPTIONS=(-DEDG_CPFE_USE_ASAN=OFF -DEDG_BUILD_LIB=OFF)
+  # EDG's CMake takes its default EDG_BASE (the predefined macros of the emulated compiler) from the compiler that
+  # builds it: a GCC build would get the gcc base and emulate clang without clang's macros (no __BYTE_ORDER__, so
+  # libc++ stops).  The clang base is named, as EDG chooses it for a clang build (decision 0053 item 10).
+  EDG_STOCK_OPTIONS=(-DEDG_CPFE_USE_ASAN=OFF -DEDG_BUILD_LIB=OFF "-DEDG_BASE=$EDG_SRC/bases/docker/dev-env/clang")
 else
   BUILD_CC="$(command -v clang)"
   BUILD_CXX="$(command -v clang++)"
@@ -288,7 +291,7 @@ elif [[ "$BUILD_COMPILER" == clang && ( "$PLATFORM" == Darwin-* || "$CLANG_MAJOR
 else
   compilers_built="(the defaults)"
 fi
-if [[ "$compilers_built" != "$compilers_now" ]]; then
+if [[ "$compilers_built" != "$compilers_now" && ( -d "$EDG_BUILD" || -d "$CERASTES_BUILD" ) ]]; then
   log "the build compilers changed ($compilers_built -> $compilers_now); removing $(rel "$EDG_BUILD") and $(rel "$CERASTES_BUILD")"
   rm -rf "$EDG_BUILD" "$CERASTES_BUILD"
 fi
