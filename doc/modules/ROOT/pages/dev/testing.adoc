@@ -174,6 +174,11 @@ toolchain the expectations were made on and bootstraps, and then `scripts/check.
 GitHub's `xcode-27` image, and `check-linux` on `ubuntu-26.04` x86-64, set up by `scripts/ci-linux.sh` (decision
 {gh}/internal/decisions/0031-linux-ci.md[0031]); every test must give the same outcome on both.
 
+The setup scripts check each compiler, the SDK and the Command Line Tools by major version (Apple clang 21, SDK 27
+and GCC 16 on macOS; clang 21 with pass:[libc++] 21, GCC 16 and glibc 2.43 on Linux). They write the exact builds to the
+job log and to `build/ci-toolchain.txt` (decision {gh}/internal/decisions/0053-ci-toolchain-profiles.md[0053]). An
+image update within those majors does not stop a job, but a test whose result changes still does.
+
 Two tiers (decision {gh}/internal/decisions/0016-ci.md[0016], item 14):
 
 * Pull requests and pushes to `main` run the PR tier. Tests that reach Silicon run only if they changed relative to

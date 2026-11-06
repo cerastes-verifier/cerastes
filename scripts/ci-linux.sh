@@ -9,26 +9,24 @@
 # has), builds everything and writes build/ci-toolchain.txt.  scripts/check.sh is a
 # separate workflow step that runs after this one.
 #
-# An assertion that fails is never loosened here; the expected values are the constants
-# below, recorded in decisions 0001 and 0031, and they change together with those records.
+# The compilers are asserted at their majors (decision 0053 item 1) and glibc exactly;
+# the package versions and banners are printed and written to the toolchain report, not
+# asserted.  An assertion that fails is never loosened here; the expected values are the
+# constants below, recorded in decisions 0001, 0031 and 0053, and they change together
+# with those records.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# ---- Expected values (decisions 0001 and 0031: change them together) -----------
+# ---- Expected values (decisions 0001, 0031 and 0053: change them together) -----
 OS_ID=ubuntu
 OS_VERSION=26.04
 ARCH=x86_64
 GLIBC_VERSION=2.43
 CLANG_MAJOR=21
-CLANG_BANNER='Ubuntu clang version 21.1.8 (6ubuntu1)'
-LLVM_PACKAGE_VERSION=1:21.1.8-6ubuntu1
 GCC_MAJOR=16
-GCC_PACKAGE_VERSION=16-20260322-1ubuntu1
-GCC_VERSION=16.0.1
-EDG_CLANG_VER=210108
 MIN_FREE_GB=6
 
 export DEBIAN_FRONTEND=noninteractive
@@ -75,14 +73,17 @@ step "packages"
 sudo apt-get update -q
 sudo apt-get install -y -q --no-install-recommends "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR" \
   "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev" shellcheck
-for pkg in "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev"; do
+# One LLVM build for the compiler and the library headers, one GCC build for both drivers.
+llvm_package_version="$(pkg_version "clang-$CLANG_MAJOR")"
+[[ -n "$llvm_package_version" ]] || want "clang-$CLANG_MAJOR is not installed"
+for pkg in "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev"; do
   got="$(pkg_version "$pkg")"
-  [[ "$got" == "$LLVM_PACKAGE_VERSION" ]] || want "$pkg is '${got:-<not installed>}', expected $LLVM_PACKAGE_VERSION"
+  [[ "$got" == "$llvm_package_version" ]] || want "$pkg is '${got:-<not installed>}', expected $llvm_package_version (the version of clang-$CLANG_MAJOR)"
 done
-for pkg in "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR"; do
-  got="$(pkg_version "$pkg")"
-  [[ "$got" == "$GCC_PACKAGE_VERSION" ]] || want "$pkg is '${got:-<not installed>}', expected $GCC_PACKAGE_VERSION"
-done
+gcc_package_version="$(pkg_version "gcc-$GCC_MAJOR")"
+[[ -n "$gcc_package_version" ]] || want "gcc-$GCC_MAJOR is not installed"
+got="$(pkg_version "g++-$GCC_MAJOR")"
+[[ "$got" == "$gcc_package_version" ]] || want "g++-$GCC_MAJOR is '${got:-<not installed>}', expected $gcc_package_version (the version of gcc-$GCC_MAJOR)"
 
 step "toolchain"
 glibc="$(ldd --version | sed -n '1s/.* //p')" || want "ldd --version failed"
@@ -91,20 +92,20 @@ clang_cc="$(command -v "clang-$CLANG_MAJOR")" || want "clang-$CLANG_MAJOR is not
 clang_cxx="$(command -v "clang++-$CLANG_MAJOR")" || want "clang++-$CLANG_MAJOR is not on PATH"
 [[ "$clang_cc" == "/usr/bin/clang-$CLANG_MAJOR" && "$clang_cxx" == "/usr/bin/clang++-$CLANG_MAJOR" ]] \
   || want "clang-$CLANG_MAJOR is $clang_cc and clang++-$CLANG_MAJOR $clang_cxx, expected the packages' /usr/bin ones"
-for tool in "$clang_cc" "$clang_cxx"; do
-  banner="$("$tool" --version | sed -n 1p)" || want "$tool --version failed"
-  [[ "$banner" == "$CLANG_BANNER" ]] || want "$tool is '$banner', expected '$CLANG_BANNER'"
-done
+clang_banner="$("$clang_cxx" --version | sed -n 1p)" || want "$clang_cxx --version failed"
+[[ "$clang_banner" == *"clang version $CLANG_MAJOR."* ]] || want "$clang_cxx is '$clang_banner', expected clang $CLANG_MAJOR"
+banner="$("$clang_cc" --version | sed -n 1p)" || want "$clang_cc --version failed"
+[[ "$banner" == "$clang_banner" ]] || want "$clang_cc is '$banner', expected the banner of $clang_cxx, '$clang_banner'"
 gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"
 gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"
-for tool in "$gcc_cc" "$gxx"; do
-  got="$("$tool" -dumpfullversion)" || want "$tool -dumpfullversion failed"
-  [[ "$got" == "$GCC_VERSION" ]] || want "$tool is $got, expected $GCC_VERSION"
-done
+gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"
+[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "$gxx is $gcc_version, expected $GCC_MAJOR.*"
+got="$("$gcc_cc" -dumpfullversion)" || want "$gcc_cc -dumpfullversion failed"
+[[ "$got" == "$gcc_version" ]] || want "$gcc_cc is $got, expected $gcc_version (the version of $gxx)"
 # bootstrap's native-ok search takes the highest gcc-NN on PATH: it must be this one.
 gcc_highest="$(compgen -c gcc- | sed -n 's/^gcc-\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)" || want "cannot list the gcc-NN on PATH"
 [[ "$gcc_highest" == "$GCC_MAJOR" ]] || want "the highest gcc-NN on PATH is gcc-$gcc_highest, expected gcc-$GCC_MAJOR (the native-ok runs use the highest)"
-printf 'clang:   %s %s\ng++:     %s %s\nglibc:   %s\n' "$clang_cxx" "$CLANG_BANNER" "$gxx" "$GCC_VERSION" "$glibc"
+printf 'clang:   %s %s (%s)\ng++:     %s %s (%s)\nglibc:   %s\n' "$clang_cxx" "$clang_banner" "$llvm_package_version" "$gxx" "$gcc_version" "$gcc_package_version" "$glibc"
 ver python3 --version
 ver bash --version
 ver git --version
@@ -128,7 +129,8 @@ step "build/env.sh"
 . build/env.sh
 [[ "$CERASTES_CLANG_CXX" == "$clang_cxx" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $clang_cxx"
 [[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"
-[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"
+[[ "$EDG_CLANG_VER_SCRAPE" =~ ^[1-9][0-9]{4,}$ ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, not a clang version"
+[[ "$((EDG_CLANG_VER_SCRAPE / 10000))" == "$CLANG_MAJOR" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected clang $CLANG_MAJOR (${CLANG_MAJOR}0000 to ${CLANG_MAJOR}9999)"
 [[ ":$EDG_CLANG_INCL_SCRAPE:" == *":/usr/lib/llvm-$CLANG_MAJOR/include/c++/v1:"* ]] \
   || want "the C++ include directories do not name libc++ $CLANG_MAJOR: $EDG_CLANG_INCL_SCRAPE"
 [[ "$EDG_CLANG_INCL_SCRAPE" != *"/c++/$GCC_MAJOR"* && "$EDG_CLANG_INCL_SCRAPE" != *"include/c++/1"[0-9]* ]] \
@@ -139,8 +141,8 @@ step "toolchain report"
   printf 'image:   %s %s\n' "${ImageOS:-local}" "${ImageVersion:-local}"
   printf 'os:      %s %s %s\n' "$os_id" "$os_version" "$(uname -m)"
   printf 'glibc:   %s (libc6-dev %s, linux-libc-dev %s)\n' "$glibc" "$(pkg_version libc6-dev)" "$(pkg_version linux-libc-dev)"
-  printf 'clang:   %s (%s)\n' "$CLANG_BANNER" "$LLVM_PACKAGE_VERSION"
-  printf 'gcc:     %s %s (%s)\n' "$gxx" "$GCC_VERSION" "$GCC_PACKAGE_VERSION"
+  printf 'clang:   %s (%s)\n' "$clang_banner" "$llvm_package_version"
+  printf 'gcc:     %s %s (%s)\n' "$gxx" "$gcc_version" "$gcc_package_version"
   printf 'cxx inc: %s\n' "$EDG_CLANG_INCL_SCRAPE"
   printf 'c inc:   %s\n' "$EDG_CLANG_CINCL_SCRAPE"
   printf 'java:    %s\n' "$("$CERASTES_JAVA" -version 2>&1 | sed -n 2p)"

@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   check:
-    name: check (macOS, Command Line Tools 27.0)
+    name: check (macOS, Command Line Tools 27)
     runs-on: xcode-27
     timeout-minutes: 220
     env:

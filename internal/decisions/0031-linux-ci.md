@@ -4,7 +4,8 @@
   should be adding Linux support to the CI. If MSVC is easy add it, if not defer", 2026-10-27; MSVC and arm64 Linux are
   M8 entries); the runner is `ubuntu-26.04` ("ubuntu-26.04 is available with github actions. If this doesn't work, then
   use the newest toolchains available in that container", handoff §8 question 57, 2026-10-28); the box may be used for
-  any testing (question 58).
+  any testing (question 58). Amended by 0053 (S8, owner, 2026-11-06): item 2's exact versions become majors (0053
+  item 1).
 - **Milestone:** S5 (2026-10-28), after M4.5a, before M4.5b1.
 - **Amends:** 0001 (the Linux pins), 0015 item 6 (glibc's `assert`), 0016 (item 13's fallback is built; items 1, 7,
   10 and 14 apply to both jobs).
@@ -70,6 +71,9 @@ Facts checked while planning (2026-10-28):
      is: `check.sh` runs in the job's environment too, and the binaries it builds and runs must not depend on a
      library path. Node comes from the same `setup-node` step as on macOS (it changes only `PATH`); CMake and Ninja
      are the image's, recorded in the log, not pinned (as in 0001).
+   - *S8 (record 0053 item 1): the banner, the packages and GCC are asserted at their majors (clang 21, its `libc++-21-dev`
+     and `libc++abi-21-dev` at clang's own package version, `gcc-16`/`g++-16` at one version and `16.*`), the
+     scrape within clang 21's range; glibc stays exact. The versions go to the report.*
 3. **EDG on Linux.** `bootstrap.sh` uses EDG's `linux-clang-debug` preset (Clang emulation, as 0002 chose on macOS;
    target `linux-x86_64`, EDG_BASE `bases/docker/dev-env/clang`, EDG's default for that preset) and passes
    `/usr/bin/clang-21` and `/usr/bin/clang++-21` as the compilers (the preset names plain `clang`, which the image may

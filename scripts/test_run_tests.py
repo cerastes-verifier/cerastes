@@ -4092,7 +4092,8 @@ class GoldenListingHtmlTests(DocLintCase):
 
 # ci.sh, line by line.  The expected values are pinned here, in the self-test, and not read from
 # the file under test: loosening an assertion (an SDK, a GCC major, a toolchain path) must fail
-# this self-test.  Whole lines (leading indentation stripped), in file order.
+# this self-test.  The toolchain is asserted at its majors (decision 0053 item 1).  Whole lines
+# (leading indentation stripped), in file order.
 CI_SH_ENV_LOOP = ('for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS SBT_OPTS SDKROOT '
                   'MACOSX_DEPLOYMENT_TARGET CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CPATH C_INCLUDE_PATH '
                   'CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH GCC_EXEC_PREFIX COMPILER_PATH '
@@ -4108,13 +4109,10 @@ CI_SH_PINNED = (
     'cd "$ROOT"',
     # the expected values
     'CLT=/Library/Developer/CommandLineTools',
-    'CLT_VERSION=27.0.0.0.1788430756',
-    "CLANG_BANNER='Apple clang version 21.0.0 (clang-2100.3.34.2)'",
-    'SDK_VERSION=27.0',
-    'SDK_BUILD=26A425',
+    'CLT_MAJOR=27',
+    'CLANG_MAJOR=21',
+    'SDK_MAJOR=27',
     'GCC_MAJOR=16',
-    'GCC_VERSION=16.2.0',
-    'EDG_CLANG_VER=210000',
     'MIN_FREE_GB=6',
     # Homebrew must not change on a developer machine's rehearsal
     'export HOMEBREW_NO_AUTO_UPDATE=1',
@@ -4133,7 +4131,7 @@ CI_SH_PINNED = (
     # the toolchain
     '[[ "${DEVELOPER_DIR:-}" == "$CLT" ]] || want "DEVELOPER_DIR must be $CLT (is \'${DEVELOPER_DIR:-}\')"',
     'clt_version="$(pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | sed -n \'s/^version: //p\')" || want "pkgutil cannot find the Command Line Tools package"',
-    '[[ "$clt_version" == "$CLT_VERSION" ]] || want "Command Line Tools $clt_version, expected $CLT_VERSION"',
+    '[[ "$clt_version" == "$CLT_MAJOR".* ]] || want "Command Line Tools $clt_version, expected $CLT_MAJOR.*"',
     'clang_path="$(command -v clang)" || want "clang is not on PATH"',
     '[[ "$clang_path" == /usr/bin/clang ]] || want "clang on PATH is $clang_path, expected /usr/bin/clang"',
     CI_SH_TOOL_LOOP,
@@ -4142,14 +4140,14 @@ CI_SH_PINNED = (
     'xcrun_clang="$(xcrun -f clang)" || want "xcrun cannot find clang"',
     '[[ "$xcrun_clang" == "$CLT/usr/bin/clang" ]] || want "xcrun selects $xcrun_clang, expected $CLT/usr/bin/clang"',
     'clang_banner="$(clang --version | sed -n 1p)" || want "clang --version failed"',
-    '[[ "$clang_banner" == "$CLANG_BANNER" ]] || want "clang is \'$clang_banner\', expected \'$CLANG_BANNER\'"',
+    '[[ "$clang_banner" == "Apple clang version $CLANG_MAJOR."* ]] || want "clang is \'$clang_banner\', expected Apple clang $CLANG_MAJOR"',
     'sdk_version="$(xcrun --show-sdk-version)" || want "xcrun cannot report the SDK version"',
-    '[[ "$sdk_version" == "$SDK_VERSION" ]] || want "SDK $sdk_version, expected $SDK_VERSION"',
+    '[[ "$sdk_version" =~ ^$SDK_MAJOR(\\.[0-9]+)*$ ]] || want "SDK $sdk_version, expected $SDK_MAJOR or $SDK_MAJOR.*"',
     'sdk_build="$(xcrun --show-sdk-build-version)" || want "xcrun cannot report the SDK build version"',
-    '[[ "$sdk_build" == "$SDK_BUILD" ]] || want "SDK build $sdk_build, expected $SDK_BUILD (the headers EDG parses)"',
+    '[[ -n "$sdk_build" ]] || want "xcrun reports an empty SDK build version"',
     'sdk_path="$(xcrun --show-sdk-path)" || want "xcrun cannot report the SDK path"',
     'sdk_real="$(realpath "$sdk_path")" || want "cannot resolve the SDK path $sdk_path"',
-    '[[ "$sdk_real" == "$CLT/SDKs/MacOSX$SDK_VERSION.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$SDK_VERSION.sdk"',
+    '[[ "$sdk_real" == "$CLT/SDKs/MacOSX$sdk_version.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$sdk_version.sdk"',
     # the EDG tree: before anything is built
     'edg_shallow="$(git -C third_party/edg rev-parse --is-shallow-repository)" || want "third_party/edg is not an initialized submodule"',
     '[[ "$edg_shallow" == false ]] || want "third_party/edg is a shallow clone; the checkout needs fetch-depth: 0"',
@@ -4160,7 +4158,7 @@ CI_SH_PINNED = (
     'gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"',
     'gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"',
     'gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"',
-    '[[ "$gcc_version" == "$GCC_VERSION" ]] || want "g++ is $gcc_version, expected $GCC_VERSION"',
+    '[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "g++ is $gcc_version, expected $GCC_MAJOR.*"',
     'gcc_sysroot="$("$gcc_cc" -print-sysroot)" || want "$gcc_cc -print-sysroot failed"',
     'gcc_sysroot_real="$(realpath "$gcc_sysroot")" || want "the sysroot \'$gcc_sysroot\' of $gcc_cc does not exist"',
     '[[ "$gcc_sysroot_real" == "$sdk_real" ]] || want "the sysroot of $gcc_cc is $gcc_sysroot_real, expected the SDK $sdk_real"',
@@ -4169,11 +4167,10 @@ CI_SH_PINNED = (
     '. build/env.sh',
     '[[ "$CERASTES_CLANG_CXX" == "$CLT/usr/bin/clang++" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $CLT/usr/bin/clang++"',
     '[[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"',
-    '[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"',
+    '[[ "$EDG_CLANG_VER_SCRAPE" =~ ^[1-9][0-9]{4,}$ ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, not a clang version"',
+    '[[ "$((EDG_CLANG_VER_SCRAPE / 10000))" == "$CLANG_MAJOR" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected clang $CLANG_MAJOR (${CLANG_MAJOR}0000 to ${CLANG_MAJOR}9999)"',
 )
-CI_SH_CONSTANTS = ("CLT", "CLT_VERSION", "CLANG_BANNER", "SDK_VERSION", "SDK_BUILD", "GCC_MAJOR",
-                   "GCC_VERSION", "EDG_CLANG_VER",
-                   "MIN_FREE_GB")
+CI_SH_CONSTANTS = ("CLT", "CLT_MAJOR", "CLANG_MAJOR", "SDK_MAJOR", "GCC_MAJOR", "MIN_FREE_GB")
 CI_SH_FUNCTIONS = ("step", "want", "ver")
 CI_SH_LOCALS = ("free_gb", "clt_version", "clang_path", "xcrun_clang", "clang_banner", "sdk_version",
                 "sdk_build", "sdk_path", "sdk_real", "edg_shallow", "gxx", "gcc_cc", "gcc_version",
@@ -4191,13 +4188,10 @@ CI_SH_CANONICAL = (
     'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
     'cd "$ROOT"',
     'CLT=/Library/Developer/CommandLineTools',
-    'CLT_VERSION=27.0.0.0.1788430756',
-    "CLANG_BANNER='Apple clang version 21.0.0 (clang-2100.3.34.2)'",
-    'SDK_VERSION=27.0',
-    'SDK_BUILD=26A425',
+    'CLT_MAJOR=27',
+    'CLANG_MAJOR=21',
+    'SDK_MAJOR=27',
     'GCC_MAJOR=16',
-    'GCC_VERSION=16.2.0',
-    'EDG_CLANG_VER=210000',
     'MIN_FREE_GB=6',
     'export HOMEBREW_NO_AUTO_UPDATE=1',
     'export HOMEBREW_NO_INSTALL_UPGRADE=1',
@@ -4230,7 +4224,7 @@ CI_SH_CANONICAL = (
     'step "toolchain"',
     '[[ "${DEVELOPER_DIR:-}" == "$CLT" ]] || want "DEVELOPER_DIR must be $CLT (is \'${DEVELOPER_DIR:-}\')"',
     'clt_version="$(pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | sed -n \'s/^version: //p\')" || want "pkgutil cannot find the Command Line Tools package"',
-    '[[ "$clt_version" == "$CLT_VERSION" ]] || want "Command Line Tools $clt_version, expected $CLT_VERSION"',
+    '[[ "$clt_version" == "$CLT_MAJOR".* ]] || want "Command Line Tools $clt_version, expected $CLT_MAJOR.*"',
     'clang_path="$(command -v clang)" || want "clang is not on PATH"',
     '[[ "$clang_path" == /usr/bin/clang ]] || want "clang on PATH is $clang_path, expected /usr/bin/clang"',
     'for tool in clang++ cc c++; do',
@@ -4239,15 +4233,15 @@ CI_SH_CANONICAL = (
     'xcrun_clang="$(xcrun -f clang)" || want "xcrun cannot find clang"',
     '[[ "$xcrun_clang" == "$CLT/usr/bin/clang" ]] || want "xcrun selects $xcrun_clang, expected $CLT/usr/bin/clang"',
     'clang_banner="$(clang --version | sed -n 1p)" || want "clang --version failed"',
-    '[[ "$clang_banner" == "$CLANG_BANNER" ]] || want "clang is \'$clang_banner\', expected \'$CLANG_BANNER\'"',
+    '[[ "$clang_banner" == "Apple clang version $CLANG_MAJOR."* ]] || want "clang is \'$clang_banner\', expected Apple clang $CLANG_MAJOR"',
     'sdk_version="$(xcrun --show-sdk-version)" || want "xcrun cannot report the SDK version"',
-    '[[ "$sdk_version" == "$SDK_VERSION" ]] || want "SDK $sdk_version, expected $SDK_VERSION"',
+    '[[ "$sdk_version" =~ ^$SDK_MAJOR(\\.[0-9]+)*$ ]] || want "SDK $sdk_version, expected $SDK_MAJOR or $SDK_MAJOR.*"',
     'sdk_build="$(xcrun --show-sdk-build-version)" || want "xcrun cannot report the SDK build version"',
-    '[[ "$sdk_build" == "$SDK_BUILD" ]] || want "SDK build $sdk_build, expected $SDK_BUILD (the headers EDG parses)"',
+    '[[ -n "$sdk_build" ]] || want "xcrun reports an empty SDK build version"',
     'sdk_path="$(xcrun --show-sdk-path)" || want "xcrun cannot report the SDK path"',
     'sdk_real="$(realpath "$sdk_path")" || want "cannot resolve the SDK path $sdk_path"',
-    '[[ "$sdk_real" == "$CLT/SDKs/MacOSX$SDK_VERSION.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$SDK_VERSION.sdk"',
-    'printf \'clang:   %s\\nsdk:     %s %s (%s)\\n\' "$clang_banner" "$sdk_version" "$sdk_build" "$sdk_real"',
+    '[[ "$sdk_real" == "$CLT/SDKs/MacOSX$sdk_version.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$sdk_version.sdk"',
+    'printf \'clt:     %s\\nclang:   %s\\nsdk:     %s %s (%s)\\n\' "$clt_version" "$clang_banner" "$sdk_version" "$sdk_build" "$sdk_real"',
     'ver python3 --version',
     'ver bash --version',
     'ver git --version',
@@ -4265,7 +4259,7 @@ CI_SH_CANONICAL = (
     'gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"',
     'gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"',
     'gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"',
-    '[[ "$gcc_version" == "$GCC_VERSION" ]] || want "g++ is $gcc_version, expected $GCC_VERSION"',
+    '[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "g++ is $gcc_version, expected $GCC_MAJOR.*"',
     'gcc_sysroot="$("$gcc_cc" -print-sysroot)" || want "$gcc_cc -print-sysroot failed"',
     'gcc_sysroot_real="$(realpath "$gcc_sysroot")" || want "the sysroot \'$gcc_sysroot\' of $gcc_cc does not exist"',
     '[[ "$gcc_sysroot_real" == "$sdk_real" ]] || want "the sysroot of $gcc_cc is $gcc_sysroot_real, expected the SDK $sdk_real"',
@@ -4276,7 +4270,8 @@ CI_SH_CANONICAL = (
     '. build/env.sh',
     '[[ "$CERASTES_CLANG_CXX" == "$CLT/usr/bin/clang++" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $CLT/usr/bin/clang++"',
     '[[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"',
-    '[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"',
+    '[[ "$EDG_CLANG_VER_SCRAPE" =~ ^[1-9][0-9]{4,}$ ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, not a clang version"',
+    '[[ "$((EDG_CLANG_VER_SCRAPE / 10000))" == "$CLANG_MAJOR" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected clang $CLANG_MAJOR (${CLANG_MAJOR}0000 to ${CLANG_MAJOR}9999)"',
     'step "toolchain report"',
     '{',
     '  printf \'image:   %s %s\\n\' "${ImageOS:-local}" "${ImageVersion:-local}"',
@@ -4301,8 +4296,8 @@ CI_SH_SPEC = {"canonical": CI_SH_CANONICAL, "pinned": CI_SH_PINNED, "constants":
               "or_lines": (CI_SH_GCC_INSTALL,), "env_loop": CI_SH_ENV_LOOP}
 
 # ci-linux.sh (decision 0031), pinned the same way as ci.sh: the expected values (Ubuntu 26.04 on
-# x86-64, glibc 2.43, the clang 21 and GCC 16 packages and banners, EDG's emulated clang version)
-# are literal lines here, not read from the file under test.
+# x86-64, glibc 2.43, the clang 21 and GCC 16 majors, decision 0053 item 1) are literal lines here,
+# not read from the file under test.
 # BEGIN CI_LINUX_SH
 CI_LINUX_SH_WANT = 'want() { printf \'ci-linux.sh: %s\\n\' "$*" >&2; exit 1; }'
 CI_LINUX_SH_ENV_LOOP = 'for var in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS SBT_OPTS CC CXX CFLAGS CXXFLAGS CPPFLAGS LDFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH LD_LIBRARY_PATH LD_PRELOAD GCC_EXEC_PREFIX COMPILER_PATH CERASTES_EDG_SRC; do'
@@ -4315,12 +4310,7 @@ CI_LINUX_SH_PINNED = (
     'ARCH=x86_64',
     'GLIBC_VERSION=2.43',
     'CLANG_MAJOR=21',
-    "CLANG_BANNER='Ubuntu clang version 21.1.8 (6ubuntu1)'",
-    'LLVM_PACKAGE_VERSION=1:21.1.8-6ubuntu1',
     'GCC_MAJOR=16',
-    'GCC_PACKAGE_VERSION=16-20260322-1ubuntu1',
-    'GCC_VERSION=16.0.1',
-    'EDG_CLANG_VER=210108',
     'MIN_FREE_GB=6',
     'export DEBIAN_FRONTEND=noninteractive',
     'want() { printf \'ci-linux.sh: %s\\n\' "$*" >&2; exit 1; }',
@@ -4335,20 +4325,30 @@ CI_LINUX_SH_PINNED = (
     '[[ -n "${JAVA_HOME_17_X64:-}" ]] || want "JAVA_HOME_17_X64 is not set; the image\'s JDK 17 is the one bootstrap uses"',
     'sudo apt-get update -q',
     'sudo apt-get install -y -q --no-install-recommends "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR" \\',
-    '[[ "$got" == "$LLVM_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $LLVM_PACKAGE_VERSION"',
-    '[[ "$got" == "$GCC_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $GCC_PACKAGE_VERSION"',
+    'llvm_package_version="$(pkg_version "clang-$CLANG_MAJOR")"',
+    '[[ -n "$llvm_package_version" ]] || want "clang-$CLANG_MAJOR is not installed"',
+    'for pkg in "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev"; do',
+    '[[ "$got" == "$llvm_package_version" ]] || want "$pkg is \'${got:-<not installed>}\', expected $llvm_package_version (the version of clang-$CLANG_MAJOR)"',
+    'gcc_package_version="$(pkg_version "gcc-$GCC_MAJOR")"',
+    '[[ -n "$gcc_package_version" ]] || want "gcc-$GCC_MAJOR is not installed"',
+    'got="$(pkg_version "g++-$GCC_MAJOR")"',
+    '[[ "$got" == "$gcc_package_version" ]] || want "g++-$GCC_MAJOR is \'${got:-<not installed>}\', expected $gcc_package_version (the version of gcc-$GCC_MAJOR)"',
     'glibc="$(ldd --version | sed -n \'1s/.* //p\')" || want "ldd --version failed"',
     '[[ "$glibc" == "$GLIBC_VERSION" ]] || want "glibc is $glibc, expected $GLIBC_VERSION (the headers EDG parses)"',
     'clang_cc="$(command -v "clang-$CLANG_MAJOR")" || want "clang-$CLANG_MAJOR is not on PATH"',
     'clang_cxx="$(command -v "clang++-$CLANG_MAJOR")" || want "clang++-$CLANG_MAJOR is not on PATH"',
     '[[ "$clang_cc" == "/usr/bin/clang-$CLANG_MAJOR" && "$clang_cxx" == "/usr/bin/clang++-$CLANG_MAJOR" ]] \\',
     '|| want "clang-$CLANG_MAJOR is $clang_cc and clang++-$CLANG_MAJOR $clang_cxx, expected the packages\' /usr/bin ones"',
-    'banner="$("$tool" --version | sed -n 1p)" || want "$tool --version failed"',
-    '[[ "$banner" == "$CLANG_BANNER" ]] || want "$tool is \'$banner\', expected \'$CLANG_BANNER\'"',
+    'clang_banner="$("$clang_cxx" --version | sed -n 1p)" || want "$clang_cxx --version failed"',
+    '[[ "$clang_banner" == *"clang version $CLANG_MAJOR."* ]] || want "$clang_cxx is \'$clang_banner\', expected clang $CLANG_MAJOR"',
+    'banner="$("$clang_cc" --version | sed -n 1p)" || want "$clang_cc --version failed"',
+    '[[ "$banner" == "$clang_banner" ]] || want "$clang_cc is \'$banner\', expected the banner of $clang_cxx, \'$clang_banner\'"',
     'gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"',
     'gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"',
-    'got="$("$tool" -dumpfullversion)" || want "$tool -dumpfullversion failed"',
-    '[[ "$got" == "$GCC_VERSION" ]] || want "$tool is $got, expected $GCC_VERSION"',
+    'gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"',
+    '[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "$gxx is $gcc_version, expected $GCC_MAJOR.*"',
+    'got="$("$gcc_cc" -dumpfullversion)" || want "$gcc_cc -dumpfullversion failed"',
+    '[[ "$got" == "$gcc_version" ]] || want "$gcc_cc is $got, expected $gcc_version (the version of $gxx)"',
     'gcc_highest="$(compgen -c gcc- | sed -n \'s/^gcc-\\([0-9][0-9]*\\)$/\\1/p\' | sort -n | tail -1)" || want "cannot list the gcc-NN on PATH"',
     '[[ "$gcc_highest" == "$GCC_MAJOR" ]] || want "the highest gcc-NN on PATH is gcc-$gcc_highest, expected gcc-$GCC_MAJOR (the native-ok runs use the highest)"',
     'edg_shallow="$(git -C third_party/edg rev-parse --is-shallow-repository)" || want "third_party/edg is not an initialized submodule"',
@@ -4359,15 +4359,18 @@ CI_LINUX_SH_PINNED = (
     '. build/env.sh',
     '[[ "$CERASTES_CLANG_CXX" == "$clang_cxx" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $clang_cxx"',
     '[[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"',
-    '[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"',
+    '[[ "$EDG_CLANG_VER_SCRAPE" =~ ^[1-9][0-9]{4,}$ ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, not a clang version"',
+    '[[ "$((EDG_CLANG_VER_SCRAPE / 10000))" == "$CLANG_MAJOR" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected clang $CLANG_MAJOR (${CLANG_MAJOR}0000 to ${CLANG_MAJOR}9999)"',
     '[[ ":$EDG_CLANG_INCL_SCRAPE:" == *":/usr/lib/llvm-$CLANG_MAJOR/include/c++/v1:"* ]] \\',
     '|| want "the C++ include directories do not name libc++ $CLANG_MAJOR: $EDG_CLANG_INCL_SCRAPE"',
     '[[ "$EDG_CLANG_INCL_SCRAPE" != *"/c++/$GCC_MAJOR"* && "$EDG_CLANG_INCL_SCRAPE" != *"include/c++/1"[0-9]* ]] \\',
     '|| want "the C++ include directories name libstdc++: $EDG_CLANG_INCL_SCRAPE"',
 )
-CI_LINUX_SH_CONSTANTS = ('OS_ID', 'OS_VERSION', 'ARCH', 'GLIBC_VERSION', 'CLANG_MAJOR', 'CLANG_BANNER', 'LLVM_PACKAGE_VERSION', 'GCC_MAJOR', 'GCC_PACKAGE_VERSION', 'GCC_VERSION', 'EDG_CLANG_VER', 'MIN_FREE_GB')
+CI_LINUX_SH_CONSTANTS = ('OS_ID', 'OS_VERSION', 'ARCH', 'GLIBC_VERSION', 'CLANG_MAJOR', 'GCC_MAJOR', 'MIN_FREE_GB')
 CI_LINUX_SH_FUNCTIONS = ('step', 'want', 'ver', 'pkg_version')
-CI_LINUX_SH_LOCALS = ('clang_cc', 'clang_cxx', 'edg_shallow', 'free_gb', 'gcc_cc', 'gcc_highest', 'glibc', 'gxx', 'os_id', 'os_version')
+CI_LINUX_SH_LOCALS = ('banner', 'clang_banner', 'clang_cc', 'clang_cxx', 'edg_shallow', 'free_gb', 'gcc_cc', 'gcc_highest',
+                      'gcc_package_version', 'gcc_version', 'glibc', 'got', 'gxx', 'llvm_package_version', 'os_id',
+                      'os_version')
 CI_LINUX_SH_CANONICAL = (
     'set -euo pipefail',
     'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
@@ -4377,12 +4380,7 @@ CI_LINUX_SH_CANONICAL = (
     'ARCH=x86_64',
     'GLIBC_VERSION=2.43',
     'CLANG_MAJOR=21',
-    "CLANG_BANNER='Ubuntu clang version 21.1.8 (6ubuntu1)'",
-    'LLVM_PACKAGE_VERSION=1:21.1.8-6ubuntu1',
     'GCC_MAJOR=16',
-    'GCC_PACKAGE_VERSION=16-20260322-1ubuntu1',
-    'GCC_VERSION=16.0.1',
-    'EDG_CLANG_VER=210108',
     'MIN_FREE_GB=6',
     'export DEBIAN_FRONTEND=noninteractive',
     'step() { printf \'\\n==== %s\\n\' "$*"; }',
@@ -4419,14 +4417,16 @@ CI_LINUX_SH_CANONICAL = (
     'sudo apt-get update -q',
     'sudo apt-get install -y -q --no-install-recommends "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR" \\',
     '  "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev" shellcheck',
-    'for pkg in "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev"; do',
+    'llvm_package_version="$(pkg_version "clang-$CLANG_MAJOR")"',
+    '[[ -n "$llvm_package_version" ]] || want "clang-$CLANG_MAJOR is not installed"',
+    'for pkg in "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev"; do',
     '  got="$(pkg_version "$pkg")"',
-    '  [[ "$got" == "$LLVM_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $LLVM_PACKAGE_VERSION"',
+    '  [[ "$got" == "$llvm_package_version" ]] || want "$pkg is \'${got:-<not installed>}\', expected $llvm_package_version (the version of clang-$CLANG_MAJOR)"',
     'done',
-    'for pkg in "gcc-$GCC_MAJOR" "g++-$GCC_MAJOR"; do',
-    '  got="$(pkg_version "$pkg")"',
-    '  [[ "$got" == "$GCC_PACKAGE_VERSION" ]] || want "$pkg is \'${got:-<not installed>}\', expected $GCC_PACKAGE_VERSION"',
-    'done',
+    'gcc_package_version="$(pkg_version "gcc-$GCC_MAJOR")"',
+    '[[ -n "$gcc_package_version" ]] || want "gcc-$GCC_MAJOR is not installed"',
+    'got="$(pkg_version "g++-$GCC_MAJOR")"',
+    '[[ "$got" == "$gcc_package_version" ]] || want "g++-$GCC_MAJOR is \'${got:-<not installed>}\', expected $gcc_package_version (the version of gcc-$GCC_MAJOR)"',
     'step "toolchain"',
     'glibc="$(ldd --version | sed -n \'1s/.* //p\')" || want "ldd --version failed"',
     '[[ "$glibc" == "$GLIBC_VERSION" ]] || want "glibc is $glibc, expected $GLIBC_VERSION (the headers EDG parses)"',
@@ -4434,19 +4434,19 @@ CI_LINUX_SH_CANONICAL = (
     'clang_cxx="$(command -v "clang++-$CLANG_MAJOR")" || want "clang++-$CLANG_MAJOR is not on PATH"',
     '[[ "$clang_cc" == "/usr/bin/clang-$CLANG_MAJOR" && "$clang_cxx" == "/usr/bin/clang++-$CLANG_MAJOR" ]] \\',
     '  || want "clang-$CLANG_MAJOR is $clang_cc and clang++-$CLANG_MAJOR $clang_cxx, expected the packages\' /usr/bin ones"',
-    'for tool in "$clang_cc" "$clang_cxx"; do',
-    '  banner="$("$tool" --version | sed -n 1p)" || want "$tool --version failed"',
-    '  [[ "$banner" == "$CLANG_BANNER" ]] || want "$tool is \'$banner\', expected \'$CLANG_BANNER\'"',
-    'done',
+    'clang_banner="$("$clang_cxx" --version | sed -n 1p)" || want "$clang_cxx --version failed"',
+    '[[ "$clang_banner" == *"clang version $CLANG_MAJOR."* ]] || want "$clang_cxx is \'$clang_banner\', expected clang $CLANG_MAJOR"',
+    'banner="$("$clang_cc" --version | sed -n 1p)" || want "$clang_cc --version failed"',
+    '[[ "$banner" == "$clang_banner" ]] || want "$clang_cc is \'$banner\', expected the banner of $clang_cxx, \'$clang_banner\'"',
     'gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"',
     'gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"',
-    'for tool in "$gcc_cc" "$gxx"; do',
-    '  got="$("$tool" -dumpfullversion)" || want "$tool -dumpfullversion failed"',
-    '  [[ "$got" == "$GCC_VERSION" ]] || want "$tool is $got, expected $GCC_VERSION"',
-    'done',
+    'gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"',
+    '[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "$gxx is $gcc_version, expected $GCC_MAJOR.*"',
+    'got="$("$gcc_cc" -dumpfullversion)" || want "$gcc_cc -dumpfullversion failed"',
+    '[[ "$got" == "$gcc_version" ]] || want "$gcc_cc is $got, expected $gcc_version (the version of $gxx)"',
     'gcc_highest="$(compgen -c gcc- | sed -n \'s/^gcc-\\([0-9][0-9]*\\)$/\\1/p\' | sort -n | tail -1)" || want "cannot list the gcc-NN on PATH"',
     '[[ "$gcc_highest" == "$GCC_MAJOR" ]] || want "the highest gcc-NN on PATH is gcc-$gcc_highest, expected gcc-$GCC_MAJOR (the native-ok runs use the highest)"',
-    'printf \'clang:   %s %s\\ng++:     %s %s\\nglibc:   %s\\n\' "$clang_cxx" "$CLANG_BANNER" "$gxx" "$GCC_VERSION" "$glibc"',
+    'printf \'clang:   %s %s (%s)\\ng++:     %s %s (%s)\\nglibc:   %s\\n\' "$clang_cxx" "$clang_banner" "$llvm_package_version" "$gxx" "$gcc_version" "$gcc_package_version" "$glibc"',
     'ver python3 --version',
     'ver bash --version',
     'ver git --version',
@@ -4466,7 +4466,8 @@ CI_LINUX_SH_CANONICAL = (
     '. build/env.sh',
     '[[ "$CERASTES_CLANG_CXX" == "$clang_cxx" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $clang_cxx"',
     '[[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"',
-    '[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"',
+    '[[ "$EDG_CLANG_VER_SCRAPE" =~ ^[1-9][0-9]{4,}$ ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, not a clang version"',
+    '[[ "$((EDG_CLANG_VER_SCRAPE / 10000))" == "$CLANG_MAJOR" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected clang $CLANG_MAJOR (${CLANG_MAJOR}0000 to ${CLANG_MAJOR}9999)"',
     '[[ ":$EDG_CLANG_INCL_SCRAPE:" == *":/usr/lib/llvm-$CLANG_MAJOR/include/c++/v1:"* ]] \\',
     '  || want "the C++ include directories do not name libc++ $CLANG_MAJOR: $EDG_CLANG_INCL_SCRAPE"',
     '[[ "$EDG_CLANG_INCL_SCRAPE" != *"/c++/$GCC_MAJOR"* && "$EDG_CLANG_INCL_SCRAPE" != *"include/c++/1"[0-9]* ]] \\',
@@ -4476,8 +4477,8 @@ CI_LINUX_SH_CANONICAL = (
     '  printf \'image:   %s %s\\n\' "${ImageOS:-local}" "${ImageVersion:-local}"',
     '  printf \'os:      %s %s %s\\n\' "$os_id" "$os_version" "$(uname -m)"',
     '  printf \'glibc:   %s (libc6-dev %s, linux-libc-dev %s)\\n\' "$glibc" "$(pkg_version libc6-dev)" "$(pkg_version linux-libc-dev)"',
-    '  printf \'clang:   %s (%s)\\n\' "$CLANG_BANNER" "$LLVM_PACKAGE_VERSION"',
-    '  printf \'gcc:     %s %s (%s)\\n\' "$gxx" "$GCC_VERSION" "$GCC_PACKAGE_VERSION"',
+    '  printf \'clang:   %s (%s)\\n\' "$clang_banner" "$llvm_package_version"',
+    '  printf \'gcc:     %s %s (%s)\\n\' "$gxx" "$gcc_version" "$gcc_package_version"',
     '  printf \'cxx inc: %s\\n\' "$EDG_CLANG_INCL_SCRAPE"',
     '  printf \'c inc:   %s\\n\' "$EDG_CLANG_CINCL_SCRAPE"',
     '  printf \'java:    %s\\n\' "$("$CERASTES_JAVA" -version 2>&1 | sed -n 2p)"',
@@ -4639,7 +4640,7 @@ CI_YML_CANONICAL = (
     "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
     'jobs:',
     '  check:',
-    '    name: check (macOS, Command Line Tools 27.0)',
+    '    name: check (macOS, Command Line Tools 27)',
     '    runs-on: xcode-27',
     '    timeout-minutes: 220',
     '    env:',
@@ -5020,7 +5021,7 @@ class CiGuardTests(unittest.TestCase):
                 ("permissions", "permissions:\n  contents: read\n"), ("contents: read", "  contents: read\n"),
                 ("concurrency group", line_with("  group:")),
                 ("cancel-in-progress", line_with("  cancel-in-progress:")),
-                ("jobs", "jobs:\n"), ("job name", "    name: check (macOS, Command Line Tools 27.0)\n"),
+                ("jobs", "jobs:\n"), ("job name", "    name: check (macOS, Command Line Tools 27)\n"),
                 ("runs-on", "    runs-on: xcode-27\n"), ("timeout", "    timeout-minutes: 220\n"),
                 ("schedule", "  schedule:\n    - cron: '0 7 * * *'\n"), ("cron", "    - cron: '0 7 * * *'\n"),
                 ("CERASTES_CHECK_BASE", line_with("      CERASTES_CHECK_BASE:")),
@@ -5295,15 +5296,25 @@ class CiGuardTests(unittest.TestCase):
         sub("a top-level if", "step \"gcc\"\n", "step \"gcc\"\nif false; then\n")
         sub("a trap", "step \"machine\"\n", "step \"machine\"\ntrap 'exit 0' ERR\n")
         sub("exec", "step \"machine\"\n", "step \"machine\"\nexec true\n")
-        sub("SDK_VERSION 27.2", "SDK_VERSION=27.0", "SDK_VERSION=27.2")
+        sub("SDK_MAJOR 26", "SDK_MAJOR=27", "SDK_MAJOR=26")
         sub("GCC_MAJOR 15", "GCC_MAJOR=16", "GCC_MAJOR=15")
         sub("CLT an Xcode path", "CLT=/Library/Developer/CommandLineTools",
             "CLT=/Applications/Xcode_27.app/Contents/Developer")
-        sub("CLT_VERSION changed", "CLT_VERSION=27.0.0.0.1788430756", "CLT_VERSION=27.0.0.0.1")
-        sub("CLANG_BANNER changed", "clang-2100.3.34.2", "clang-2100.3.34.3")
-        sub("EDG_CLANG_VER changed", "EDG_CLANG_VER=210000", "EDG_CLANG_VER=0")
+        sub("CLT_MAJOR changed", "CLT_MAJOR=27", "CLT_MAJOR=26")
+        sub("CLANG_MAJOR changed", "CLANG_MAJOR=21", "CLANG_MAJOR=2")
+        sub("the CLT pattern without its dot", '"$CLT_MAJOR".* ]]', '"$CLT_MAJOR"* ]]')
+        sub("the CLT pattern matching anything", '"$CLT_MAJOR".* ]]', '* ]]')
+        sub("the banner pattern without its dot", '"Apple clang version $CLANG_MAJOR."*', '"Apple clang version $CLANG_MAJOR"*')
+        sub("the banner pattern matching anywhere", '== "Apple clang version $CLANG_MAJOR."* ]]',
+            '== *"clang version $CLANG_MAJOR."* ]]')
+        sub("the SDK pattern without its anchor", '=~ ^$SDK_MAJOR(', '=~ $SDK_MAJOR(')
+        sub("the SDK pattern widened", '(\\.[0-9]+)*$ ]]', '.*$ ]]')
+        sub("the SDK path from the major", 'MacOSX$sdk_version.sdk" ]]', 'MacOSX$SDK_MAJOR.sdk" ]]')
+        sub("the empty SDK build accepted", '[[ -n "$sdk_build" ]]', '[[ -n "$sdk_path" ]]')
+        sub("the scrape's major unchecked", '/ 10000))" == "$CLANG_MAJOR" ]]', '/ 10000))" != "0" ]]')
+        sub("the scrape's number check widened", '=~ ^[1-9][0-9]{4,}$ ]]', '=~ ^[0-9]*$ ]]')
         sub("MIN_FREE_GB 0", "MIN_FREE_GB=6", "MIN_FREE_GB=0")
-        sub("a constant assigned again later", "step \"bootstrap\"\n", "step \"bootstrap\"\nSDK_VERSION=27.2\n")
+        sub("a constant assigned again later", "step \"bootstrap\"\n", "step \"bootstrap\"\nSDK_MAJOR=26\n")
         sub("a constant exported again later", "step \"bootstrap\"\n", "step \"bootstrap\"\nexport GCC_MAJOR=15\n")
         out["a constant assigned after its first use"] = S.replace("MIN_FREE_GB=6\n", "", 1).replace(
             "step \"environment\"\n", "MIN_FREE_GB=6\nstep \"environment\"\n", 1)
@@ -5338,11 +5349,9 @@ class CiGuardTests(unittest.TestCase):
         sub("the tool assertion never failing", '"/usr/bin/$tool" ]] || want', '"/usr/bin/$tool" ]] || :; want')
         out["the tool loop after the xcrun lines"] = S.replace(tool_loop, "", 1).replace(
             'clang_banner="$(clang --version', tool_loop + 'clang_banner="$(clang --version', 1)
-        sub("SDK_BUILD changed", "SDK_BUILD=26A425", "SDK_BUILD=26A426")
-        sub("GCC_VERSION 16.1.0", "GCC_VERSION=16.2.0", "GCC_VERSION=16.1.0")
-        sub("the GCC version back to the major pattern",
-            '[[ "$gcc_version" == "$GCC_VERSION" ]] || want "g++ is $gcc_version, expected $GCC_VERSION"',
-            '[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "g++ is $gcc_version, expected $GCC_MAJOR.x"')
+        sub("the GCC pattern without its dot", '[[ "$gcc_version" == "$GCC_MAJOR".* ]]',
+            '[[ "$gcc_version" == "$GCC_MAJOR"* ]]')
+        sub("the GCC pattern matching anything", '[[ "$gcc_version" == "$GCC_MAJOR".* ]]', '[[ "$gcc_version" == * ]]')
         sub("the sysroot checked only for existence",
             '[[ "$gcc_sysroot_real" == "$sdk_real" ]] || want "the sysroot of $gcc_cc is $gcc_sysroot_real, expected the SDK $sdk_real"',
             '[[ -d "$gcc_sysroot" ]] || want "the sysroot \'$gcc_sysroot\' of $gcc_cc does not exist"')
@@ -5385,9 +5394,9 @@ class CiGuardTests(unittest.TestCase):
             "step \"toolchain\"\nfunction realpath { printf \"%s\\n\" \"$sdk_real\"; }\n")
         sub("a command function", "step \"toolchain\"\n", "step \"toolchain\"\nfunction command { :; }\n")
         sub("a xcrun function", "step \"toolchain\"\n", "step \"toolchain\"\nfunction xcrun { echo 27.0; }\n")
-        sub("SDK_BUILD set by printf -v", "step \"toolchain\"\n", "step \"toolchain\"\nprintf -v SDK_BUILD %s x\n")
-        sub("GCC_VERSION set by read", "step \"gcc\"\n", "step \"gcc\"\nread -r GCC_VERSION < /dev/null\n")
-        sub("SDK_VERSION set by declare -g", "step \"toolchain\"\n", "step \"toolchain\"\ndeclare -g SDK_VERSION=27.2\n")
+        sub("SDK_MAJOR set by printf -v", "step \"toolchain\"\n", "step \"toolchain\"\nprintf -v SDK_MAJOR %s 2\n")
+        sub("GCC_MAJOR set by read", "step \"gcc\"\n", "step \"gcc\"\nread -r GCC_MAJOR < /dev/null\n")
+        sub("SDK_MAJOR set by declare -g", "step \"toolchain\"\n", "step \"toolchain\"\ndeclare -g SDK_MAJOR=26\n")
         sub("PATH set by declare -x", "step \"machine\"\n", "step \"machine\"\ndeclare -x PATH=/x:$PATH\n")
         sub("another script sourced", "step \"machine\"\n", "step \"machine\"\n. /tmp/x\n")
         sub("another script sourced with source", "step \"machine\"\n", "step \"machine\"\nsource /tmp/x\n")
@@ -5529,14 +5538,7 @@ class CiGuardTests(unittest.TestCase):
                                 ("ARCH", "ARCH=x86_64", "ARCH=aarch64"),
                                 ("GLIBC_VERSION", "GLIBC_VERSION=2.43", "GLIBC_VERSION=2.39"),
                                 ("CLANG_MAJOR", "CLANG_MAJOR=21", "CLANG_MAJOR=22"),
-                                ("CLANG_BANNER", "(6ubuntu1)'", "(7ubuntu1)'"),
-                                ("LLVM_PACKAGE_VERSION", "LLVM_PACKAGE_VERSION=1:21.1.8-6ubuntu1",
-                                 "LLVM_PACKAGE_VERSION=1:21.1.8-7ubuntu1"),
                                 ("GCC_MAJOR", "GCC_MAJOR=16", "GCC_MAJOR=15"),
-                                ("GCC_PACKAGE_VERSION", "GCC_PACKAGE_VERSION=16-20260322-1ubuntu1",
-                                 "GCC_PACKAGE_VERSION=16.2.0-3ubuntu1"),
-                                ("GCC_VERSION", "GCC_VERSION=16.0.1", "GCC_VERSION=16.2.0"),
-                                ("EDG_CLANG_VER", "EDG_CLANG_VER=210108", "EDG_CLANG_VER=210000"),
                                 ("MIN_FREE_GB", "MIN_FREE_GB=6", "MIN_FREE_GB=0")):
             sub(f"{const} changed", old, new)
         sub("a constant assigned again later", 'step "bootstrap"\n', 'step "bootstrap"\nGCC_MAJOR=15\n')
@@ -5551,9 +5553,20 @@ class CiGuardTests(unittest.TestCase):
         sub("another package installed", " shellcheck\n", " shellcheck gcc-15\n")
         sub("the OS assertion never failing", '|| want "the OS is', '|| :; want "the OS is')
         sub("the glibc assertion warns only", '|| want "glibc is', '|| echo "glibc is')
-        sub("the banner loop over clang only", 'for tool in "$clang_cc" "$clang_cxx"; do', 'for tool in "$clang_cc"; do')
-        sub("the package loop without libc++", 'for pkg in "clang-$CLANG_MAJOR" "libc++-$CLANG_MAJOR-dev" ',
-            'for pkg in "clang-$CLANG_MAJOR" ')
+        sub("the cc banner unchecked", '[[ "$banner" == "$clang_banner" ]]', '[[ -n "$banner" ]]')
+        sub("the banner pattern without its dot", '*"clang version $CLANG_MAJOR."*', '*"clang version $CLANG_MAJOR"*')
+        sub("the banner pattern matching anything", '[[ "$clang_banner" == *"clang version $CLANG_MAJOR."* ]]',
+            '[[ "$clang_banner" == * ]]')
+        sub("the package loop without libc++", 'for pkg in "libc++-$CLANG_MAJOR-dev" "libc++abi-$CLANG_MAJOR-dev"; do',
+            'for pkg in "libc++abi-$CLANG_MAJOR-dev"; do')
+        sub("the LLVM packages not compared", '[[ "$got" == "$llvm_package_version" ]]', '[[ -n "$got" ]]')
+        sub("clang not required to be installed", '[[ -n "$llvm_package_version" ]]', '[[ -n "$CLANG_MAJOR" ]]')
+        sub("the g++ package not compared", '[[ "$got" == "$gcc_package_version" ]]', '[[ -n "$got" ]]')
+        sub("gcc not required to be installed", '[[ -n "$gcc_package_version" ]]', '[[ -n "$GCC_MAJOR" ]]')
+        sub("the GCC pattern without its dot", '[[ "$gcc_version" == "$GCC_MAJOR".* ]]',
+            '[[ "$gcc_version" == "$GCC_MAJOR"* ]]')
+        sub("the gcc driver's version not compared", '[[ "$got" == "$gcc_version" ]]', '[[ -n "$got" ]]')
+        sub("the scrape's major unchecked", '/ 10000))" == "$CLANG_MAJOR" ]]', '/ 10000))" != "0" ]]')
         sub("the highest GCC unchecked", '[[ "$gcc_highest" == "$GCC_MAJOR" ]]', '[[ -n "$gcc_highest" ]]')
         sub("libstdc++ allowed", '[[ "$EDG_CLANG_INCL_SCRAPE" != *"/c++/$GCC_MAJOR"*', '[[ -n "$EDG_CLANG_INCL_SCRAPE"')
         sub("CERASTES_EDG_SRC dropped from the loop", " COMPILER_PATH CERASTES_EDG_SRC; do", " COMPILER_PATH; do")

@@ -9,24 +9,25 @@
 # separate workflow step that runs after this one.
 #
 # Nothing is ever upgraded or removed: the Homebrew variables below keep a rehearsal
-# on a developer machine from changing it.  An assertion that fails is never loosened
-# here; the expected values are the constants below, recorded in decisions 0001 and
-# 0016, and they change together with those records.
+# on a developer machine from changing it.  The toolchain is asserted at the majors
+# below (decision 0053 item 1): the Command Line Tools, Apple clang, the SDK and GCC;
+# the exact builds are printed and written to the toolchain report, not asserted, so
+# an image update within a major does not stop the job (the tests decide whether a
+# result moved).  An assertion that fails is never loosened here; the expected values
+# are the constants below, recorded in decisions 0001, 0016 and 0053, and they change
+# together with those records.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# ---- Expected values (decisions 0001 and 0016: change them together) -----------
+# ---- Expected values (decisions 0001, 0016 and 0053: change them together) -----
 CLT=/Library/Developer/CommandLineTools
-CLT_VERSION=27.2.0.0.1792721180
-CLANG_BANNER='Apple clang version 21.0.0 (clang-2100.3.34.2)'
-SDK_VERSION=27.2
-SDK_BUILD=26A425
+CLT_MAJOR=27
+CLANG_MAJOR=21
+SDK_MAJOR=27
 GCC_MAJOR=16
-GCC_VERSION=16.2.0
-EDG_CLANG_VER=210000
 MIN_FREE_GB=6
 
 export HOMEBREW_NO_AUTO_UPDATE=1
@@ -65,7 +66,7 @@ printf 'CERASTES_JOBS=%s\n' "${CERASTES_JOBS:-<unset>}"
 step "toolchain"
 [[ "${DEVELOPER_DIR:-}" == "$CLT" ]] || want "DEVELOPER_DIR must be $CLT (is '${DEVELOPER_DIR:-}')"
 clt_version="$(pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | sed -n 's/^version: //p')" || want "pkgutil cannot find the Command Line Tools package"
-[[ "$clt_version" == "$CLT_VERSION" ]] || want "Command Line Tools $clt_version, expected $CLT_VERSION"
+[[ "$clt_version" == "$CLT_MAJOR".* ]] || want "Command Line Tools $clt_version, expected $CLT_MAJOR.*"
 clang_path="$(command -v clang)" || want "clang is not on PATH"
 [[ "$clang_path" == /usr/bin/clang ]] || want "clang on PATH is $clang_path, expected /usr/bin/clang"
 # EDG's preset also builds with CXX=clang++, and cerastes's CMake with the default cc and c++.
@@ -75,15 +76,15 @@ done
 xcrun_clang="$(xcrun -f clang)" || want "xcrun cannot find clang"
 [[ "$xcrun_clang" == "$CLT/usr/bin/clang" ]] || want "xcrun selects $xcrun_clang, expected $CLT/usr/bin/clang"
 clang_banner="$(clang --version | sed -n 1p)" || want "clang --version failed"
-[[ "$clang_banner" == "$CLANG_BANNER" ]] || want "clang is '$clang_banner', expected '$CLANG_BANNER'"
+[[ "$clang_banner" == "Apple clang version $CLANG_MAJOR."* ]] || want "clang is '$clang_banner', expected Apple clang $CLANG_MAJOR"
 sdk_version="$(xcrun --show-sdk-version)" || want "xcrun cannot report the SDK version"
-[[ "$sdk_version" == "$SDK_VERSION" ]] || want "SDK $sdk_version, expected $SDK_VERSION"
+[[ "$sdk_version" =~ ^$SDK_MAJOR(\.[0-9]+)*$ ]] || want "SDK $sdk_version, expected $SDK_MAJOR or $SDK_MAJOR.*"
 sdk_build="$(xcrun --show-sdk-build-version)" || want "xcrun cannot report the SDK build version"
-[[ "$sdk_build" == "$SDK_BUILD" ]] || want "SDK build $sdk_build, expected $SDK_BUILD (the headers EDG parses)"
+[[ -n "$sdk_build" ]] || want "xcrun reports an empty SDK build version"
 sdk_path="$(xcrun --show-sdk-path)" || want "xcrun cannot report the SDK path"
 sdk_real="$(realpath "$sdk_path")" || want "cannot resolve the SDK path $sdk_path"
-[[ "$sdk_real" == "$CLT/SDKs/MacOSX$SDK_VERSION.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$SDK_VERSION.sdk"
-printf 'clang:   %s\nsdk:     %s %s (%s)\n' "$clang_banner" "$sdk_version" "$sdk_build" "$sdk_real"
+[[ "$sdk_real" == "$CLT/SDKs/MacOSX$sdk_version.sdk" ]] || want "SDK is $sdk_real, expected $CLT/SDKs/MacOSX$sdk_version.sdk"
+printf 'clt:     %s\nclang:   %s\nsdk:     %s %s (%s)\n' "$clt_version" "$clang_banner" "$sdk_version" "$sdk_build" "$sdk_real"
 ver python3 --version
 ver bash --version
 ver git --version
@@ -103,7 +104,7 @@ command -v "g++-$GCC_MAJOR" >/dev/null || env -u HOMEBREW_NO_INSTALL_UPGRADE bre
 gxx="$(command -v "g++-$GCC_MAJOR")" || want "g++-$GCC_MAJOR not found"
 gcc_cc="$(command -v "gcc-$GCC_MAJOR")" || want "gcc-$GCC_MAJOR not found"
 gcc_version="$("$gxx" -dumpfullversion)" || want "$gxx -dumpfullversion failed"
-[[ "$gcc_version" == "$GCC_VERSION" ]] || want "g++ is $gcc_version, expected $GCC_VERSION"
+[[ "$gcc_version" == "$GCC_MAJOR".* ]] || want "g++ is $gcc_version, expected $GCC_MAJOR.*"
 gcc_sysroot="$("$gcc_cc" -print-sysroot)" || want "$gcc_cc -print-sysroot failed"
 # The native-ok runs compile against GCC's own sysroot: it must be the SDK asserted above
 # (a macOS 26 bottle names MacOSX26.sdk, which the Command Line Tools 27 also ship).
@@ -119,7 +120,8 @@ step "build/env.sh"
 . build/env.sh
 [[ "$CERASTES_CLANG_CXX" == "$CLT/usr/bin/clang++" ]] || want "build/env.sh has CERASTES_CLANG_CXX=$CERASTES_CLANG_CXX, expected $CLT/usr/bin/clang++"
 [[ "$CERASTES_GCC_CXX" == "$gxx" ]] || want "build/env.sh has CERASTES_GCC_CXX=$CERASTES_GCC_CXX, expected $gxx"
-[[ "$EDG_CLANG_VER_SCRAPE" == "$EDG_CLANG_VER" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected $EDG_CLANG_VER"
+[[ "$EDG_CLANG_VER_SCRAPE" =~ ^[1-9][0-9]{4,}$ ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, not a clang version"
+[[ "$((EDG_CLANG_VER_SCRAPE / 10000))" == "$CLANG_MAJOR" ]] || want "build/env.sh has EDG_CLANG_VER_SCRAPE=$EDG_CLANG_VER_SCRAPE, expected clang $CLANG_MAJOR (${CLANG_MAJOR}0000 to ${CLANG_MAJOR}9999)"
 
 step "toolchain report"
 {

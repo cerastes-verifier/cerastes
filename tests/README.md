@@ -1016,7 +1016,11 @@ so the examples run as tests there too (every one, in both tiers), on GitHub's `
 `CERASTES_JOBS=3` (decision 0016). A second job, `check-linux`, runs `scripts/ci-linux.sh` and then the same
 `scripts/check.sh` in both tiers on GitHub's `ubuntu-26.04` x86-64 runner with `CERASTES_JOBS=4` (decision 0031):
 every test must give the same outcome on both platforms. There the native-ok runs use `clang-21` (labelled
-`clang` instead of `Apple clang`, `CLANG_FAMILY` in `run_tests.py`) and Ubuntu's `gcc-16`. The harness self-test
+`clang` instead of `Apple clang`, `CLANG_FAMILY` in `run_tests.py`) and Ubuntu's `gcc-16`. The two setup scripts
+assert the toolchain at its majors (decision 0053 item 1: the Command Line Tools 27, Apple clang 21, SDK 27 and
+GCC 16 on macOS; clang 21 with libc++ 21, GCC 16 and glibc 2.43 on Linux) and write the exact builds to the job log
+and `build/ci-toolchain.txt`, so an image update within a major does not stop a job; a test whose result moves
+does. The harness self-test
 pins the active text of the three files: `ci_workflow_problems` and `ci_sh_problems` (given `CI_LINUX_SH_SPEC` for
 `ci-linux.sh`) compare every active line (comments and blank lines dropped) with a pinned copy, so an extra step,
 an extra command, a `break` in a loop or a reassigned constant fails it; only comments, the `uses:` SHAs, the step
