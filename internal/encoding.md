@@ -557,6 +557,65 @@ then the guarded value naming the heap) and each loop token place carries its va
 `tok == ktv` replacing `tok`; a program that calls no `vlibc_` routine has none of this (its Viper is 0047's, with
 the ending and mirror rows above in its loops).
 
+**Results that give a place, owning locals and marked locals (M4.5d2b1, decision 0052).** The exact Viper is in
+`build/m4.5d2b/shapes.md` (the VIR self-test cases `po_*`, `ol_*`, `bg_*`, `vs_*`, `fu_*`, `er_*`).
+
+*Atoms without a partner (item 2).* An `ensures` atom with no `requires` partner of its kind and place is numbered
+`nreq + k` in clause order (the encoder's `finish_atoms`; `add_static_local_atoms` shifts the numbers when it adds
+`requires` atoms and puts the implicit `ensures` atoms first in such a method, audit B5). Only IMPLICIT atoms cover (a
+`static` local's `owns(s)` and the atoms an `owning` parameter stands for, both marked `Expr::implicit_atom`; question
+159): `cov_k` is the disjunction of `g_j && place_j == place_k` over them in the post-state (the value cell for `owns` and
+`reads`, the liveness cell for `live`). Where `g_k && !cov_k` the atom GIVES an output amount, a ghost `Perm` result of
+the method `out_<k>`, with `ensures none < out && out <= write` before every user clause; before the return rows `out_k :=
+(cov_k || !g_k) ? write : (perm(L_k) - R_k) / M_k` (`R_k` the amounts returned for partnered atoms on that cell, `M_k` the
+given atoms on it; for `reads` the least over value, flag and liveness cells). The ending row (`if (!(g ==> (cov || (out
+> none && cells held)))) { assert false }`, `permission`: "returns `*r` without holding it") reports an atom the function
+does not hold once; the existing per-cell rows follow with `out_k` in the sums. The postcondition of the atom is `pure &&
+(!cov ==> (none < out && perms)) && facts`; a caller receives the outputs in ghost `Perm` temps of a multi-target call.
+`atom_place` gives a result-rooted place the key `kResultSiteKey`. A bodiless contract (item 2a, `finish_atoms`) may carry
+one only on its result and only if no clause equates the result, or a pointer read through it, with a non-null value
+(`contract_equates_result`); a formal's partnerless atom, a block site with no partner on a formal and `owns_block(r) && r
+== p` are rejected (`unsupported_annotation`, the contract manifest, M6). An atom nested with a partnered `ensures` atom on
+one root is rejected before lowering (audit N7), and the lint pins the `out` rows (`lint_viper.py`).
+
+*Owning locals (item 3).* `Var::owning` (set by the encoder only on an automatic, non-address-taken pointer local of
+object type). Each owner `v` has two method-level ghosts: `held_v` (false at method entry and at the declaration) and
+`tv_v` (the token's value). The value rule at every `Decl` with an initializer and every `Assign` (`owning_write`) checks
+`new != null ==> offset_of(new) == 0 && perm(tok) == write` (`permission`), then `held_v := new != null`, `tv_v :=
+tok(block_of(new))`. After every call and free `held_o := held_o && o != null && perm(tok(block_of(o))) > none` for each
+owner in scope (a consumed block holds nothing, audit S5). Owners at an exit: the owners of the outer scopes and the
+earlier ones of the scope, and at a `return`/the function's last statement the entry value of each formal with an
+`ensures` block site (a parked borrow, S11) and the returned value when the function has a result block site. The ENDING
+ROW (`if (!(held_v ==> owners)) { assert false }`, `leak`, once per block) is emitted at a block's end, `break`, `continue`,
+`goto` out of the scope and `return` (`Fn::Scope::owners`, `owners_exit`), and before a reassignment with the new value
+counted among the owners. The end-of-function `forperm` stays. A loop carries each owner declared outside it that it uses or assigns (`loop_owners`) by its CURRENT value, not by
+0047 item 10's entry-keyed place: the invariant `held_v == (v != null)` with the whole block (token at `write` with the
+value `tv_v`, full liveness, every cell) under `v != null`, explicit entry and back-edge ENDING rows `v != null ==>
+held_v` and whole-block permission rows (`permission`, "set it to `NULL` after freeing it or handing it on") ahead of the
+invariant, and the back-edge leak exemption `v != null && t == loc(block_of(v), -1)`. An owner the loop neither uses nor
+assigns but whose body calls a function carries only `held_v` and its token. In a vlibc heap program the token's value is
+the invariant's constant where every assignment to the owner in the loop comes from one allocator's views or is `NULL`
+(`assigned_class`), with a `permission` row at entry for an owner that enters with the other allocator's block, and the
+loop-entry snapshot otherwise. A non-owning alias of the owner's block keeps its 0047 item 10 place, with guards that
+exclude the owner's block. A user invariant or measure that reads `*v` of a carried owner is framed by the owner's cells,
+and a written atom on them is a `permission` at the atom ("which the loop already owns through its owning local"). Programs
+with no owner keep their Viper. Owners on globals, `static` locals, address-taken locals and fields: M4.5d2b2.
+
+*Marked locals (item 4).* `ref_to_uninit` on an automatic pointer local changes no VIR; the encoder records it
+(`Ctx::ref_marked`). Under `--strict-init` a call whose result is `ref_to_uninit` is accepted only where its node is in
+`Ctx::strict_result_ok` (a marked local's initializer or assignment, a `ref_to_uninit` argument, a marked function's
+return, filled before the value is encoded); a marked local receives only a null pointer, a `ref_to_uninit` call, `&x` of
+an `uninit` local or another marked pointer; a marked function returns a marked local, a `ref_to_uninit` call or a null
+pointer (question 154).
+
+*Block-site guards and vlibc blocks (items 6 (b), 7).* A block site's guard that reads the heap, a global or `old` is
+lowered like an atom guard (0045 item 11): `site_guard` frames it by the atoms before the site (`atoms_before_`), in the
+contract, at the call and return rows and in the leak exemption (an `ensures` guard read at the end label). A site with
+`Expr::vlibc_block` (`cerastes_owns_vlibc_block`, C only) states `!tok`, its rows read the token's value (`want ==
+Vlibc`), and a contract that names one makes the program a vlibc heap program. `restrict_backed`/`restrict_hazard` count a
+block site (6 (d)). A pointer argument's liveness use is registered at the argument's own place, so `two((free(p), 0), p)`
+is `unsequenced` (6 (e)). Cut to M4.5d2b2: a written `owns_block` in a loop invariant (6 (a)), rejected by `spec_block_atom`.
+
 ## 4. Viper shape
 
 ```

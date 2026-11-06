@@ -409,6 +409,10 @@ written in the source:
   `cerastes::ref_to_uninit` is the address of such a local (`&x`), or the calling
   function's own marked parameter passed on unchanged
   (`cerastes-uninit_ref_initialized` otherwise).
+* the result of a function that gives an object without a value (`malloc`, a
+  function marked `ref_to_uninit`) goes to a pointer local marked
+  `cerastes::ref_to_uninit`, and a function marked `ref_to_uninit` returns only
+  what such a pointer may hold (<<strict-init-marked-locals>>).
 
 [source,c]
 ----
@@ -424,7 +428,10 @@ include::example$verifying/strict_init_unmarked.c[tag=source]
 
 Both rules read the declarations, not the paths, so the mode accepts a few
 programs that pass an object that already has a value (`x = 1; init(&x);`, a second
-`init(&x)`, a marked parameter passed on after it was written) and rejects a few
+`init(&x)`, a marked parameter passed on after it was written, a pointer local
+marked `ref_to_uninit` that is written through and then passed to a marked
+parameter or returned by a marked function, and an address-taken marked local that
+receives a pointer to an initialized object through a callee) and rejects a few
 harmless ones (a null pointer, a pointer variable holding `&x`, a marked parameter
 that is reassigned, `init(c ? &x : &y)`). Without the option every program means
 the same; the option only rejects more. The checks of the default mode, on every
@@ -434,6 +441,87 @@ path, apply in both.
 ----
 include::example$verifying/strict_init_initialized_argument.c[tag=source]
 ----
+
+[#strict-init-marked-locals]
+==== Pointers to objects without a value
+
+A function can hand its caller an object that has no value yet: the result of `malloc`,
+or any function marked `cerastes::ref_to_uninit` that returns an allocation
+(xref:memory.adoc#initialization[Initialization through pointers]). Under
+`--strict-init`, P4222R3 asks that the pointer that receives such a result is
+marked too. `cerastes::ref_to_uninit` on a pointer local (`CERASTES_REF_TO_UNINIT`,
+before the declaration or after the name) says so, and it applies to every
+declarator that carries it
+(xref:annotations.adoc#marked-locals[Owning and marked locals]):
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_local.c[tag=source]
+----
+
+A call whose result has no value is accepted where the result goes to a marked
+local (its initializer or an assignment), is returned by a function marked
+`ref_to_uninit`, or is the argument of a `ref_to_uninit` parameter. Anywhere else,
+including a local without the marker, a member, a store through a pointer and a
+parameter that is not marked, it is `cerastes-unsupported_annotation`. The
+result of `calloc` has a value, so its local needs no marker.
+
+[source,c]
+----
+include::example$verifying/strict_init_malloc_unmarked.c[tag=source]
+----
+
+A marked local may receive only a null pointer, the result of a `ref_to_uninit`
+call, the address of a local marked `uninit`, or another marked pointer or
+parameter. Anything else may point to an object that has a value, and is
+`cerastes-uninit_ref_initialized`:
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_source.c[tag=source]
+----
+
+A function marked `ref_to_uninit` returns a marked local, a null pointer or a
+call of another function marked `ref_to_uninit`. A null pointer is allowed
+although P4416 counts it as initialized: there is no object behind it, nothing can
+be read through it, and the rule would otherwise reject the `return NULL;` of every
+allocation wrapper.
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_returns.c[tag=source]
+----
+
+Returning a pointer parameter, an unmarked local or any other value is
+`cerastes-uninit_ref_initialized`, since the caller was told the object it points
+to has no value:
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_return_rejected.c[tag=source]
+----
+
+A marked local may be the argument of a `ref_to_uninit` or `must_init` parameter,
+like the address of a local marked `uninit`. Passed to a parameter that is not
+marked, it is checked on every path as in the default mode: the call fails with
+`uninitialized` where the object may have no value, so after `*p = 1;` it may be
+passed. `free` and `vlibc_free` take any object, marked or not, so they are not
+subject to the rule. A null pointer as the argument of a marked parameter stays
+rejected, as it did before marked locals:
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_argument.c[tag=source]
+----
+
+[source,c]
+----
+include::example$verifying/strict_init_null_argument.c[tag=source]
+----
+
+Without `--strict-init` the marker on a local documents the intent and changes
+nothing: the checks of the default mode, on every path, already report a read of
+an object that has no value.
 
 [#side-effects]
 == Side effects in expressions

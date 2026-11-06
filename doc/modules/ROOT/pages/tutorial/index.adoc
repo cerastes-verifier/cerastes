@@ -82,7 +82,7 @@ text says. The messages in the output blocks are copied from a run.
   `old`, null pointers and dangling ones.
 . xref:tutorial/structures.adoc[Structures]: members through pointers, and
   structures as values.
-. xref:tutorial/heap.adoc[The heap]: `malloc`, `free` and leaks.
+. xref:tutorial/heap.adoc[The heap]: `malloc`, `free`, leaks and owning locals.
 
 Arrays, predicates over linked structures, and pass:[C++] templates are not
 supported yet; each gets its chapter in the version that supports it. Until
