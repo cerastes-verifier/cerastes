@@ -187,4 +187,4 @@ void define_owning_locals()
        });
 }
 
-}
+} // namespace

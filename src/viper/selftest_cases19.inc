@@ -449,4 +449,4 @@ void define_partnerless_atoms()
        });
 }
 
-}
+} // namespace

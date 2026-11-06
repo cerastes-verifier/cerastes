@@ -149,8 +149,7 @@ void define_owning_loops()
        {
            simple(k, 5, true, false);
        });
-    lc("olp_beside_call_leak",
-       "the same with an allocated v that is never freed: leak at the end of the function",
+    lc("olp_beside_call_leak", "the same with an allocated v that is never freed: leak at the end of the function",
        [=](Kit& k)
        {
            k.fail("leak", simple(k, 5, false, false).fn_end);
@@ -298,7 +297,8 @@ void define_owning_loops()
        {
            alias(k, 1);
        });
-    lc("olp_alias_used", "the alias and the owner both used: the owner's cells are in the invariant beside the alias's place, not twice",
+    lc("olp_alias_used",
+       "the alias and the owner both used: the owner's cells are in the invariant beside the alias's place, not twice",
        [=](Kit& k)
        {
            alias(k, 2);
@@ -350,7 +350,8 @@ void define_owning_loops()
         k.done(f);
         return where;
     };
-    lc("olp_user_invariant_reads_owner", "a user invariant that reads `*v` of an owning loop variable is framed by the loop's own clauses",
+    lc("olp_user_invariant_reads_owner",
+       "a user invariant that reads `*v` of an owning loop variable is framed by the loop's own clauses",
        [=](Kit& k)
        {
            user_inv(k, 0);
@@ -360,7 +361,8 @@ void define_owning_loops()
        {
            k.fail("invariant-entry", user_inv(k, 1));
        });
-    lc("olp_user_atom_on_owner", "a written atom on an owning loop variable: an error at the atom (permission), the block is carried by the loop already",
+    lc("olp_user_atom_on_owner",
+       "a written atom on an owning loop variable: an error at the atom (permission), the block is carried by the loop already",
        [=](Kit& k)
        {
            k.fail("permission", user_inv(k, 2));
@@ -453,12 +455,14 @@ void define_owning_loops()
        {
            vloop(k, 3);
        });
-    lc("olp_vlibc_used", "an owner used but not assigned by a loop of a vlibc heap program: the allocator of its block at the entry is carried (tve)",
+    lc("olp_vlibc_used",
+       "an owner used but not assigned by a loop of a vlibc heap program: the allocator of its block at the entry is carried (tve)",
        [=](Kit& k)
        {
            vloop(k, 4);
        });
-    lc("olp_vlibc_used_freed", "the loop frees it without resetting it: the back-edge row fails (permission) at the end of the body",
+    lc("olp_vlibc_used_freed",
+       "the loop frees it without resetting it: the back-edge row fails (permission) at the end of the body",
        [=](Kit& k)
        {
            const Built b {vloop(k, 5)};
@@ -467,7 +471,7 @@ void define_owning_loops()
        });
 }
 
-}
+} // namespace
 
 namespace {
 
@@ -533,7 +537,8 @@ void define_owning_loops_audit2()
         k.done(f);
         return en->loc;
     };
-    lc("pb_block_path", "a bodiless borrow that returns its block on a path where its requires took none: the f__wf partner row fails at the ensures atom (permission)",
+    lc("pb_block_path",
+       "a bodiless borrow that returns its block on a path where its requires took none: the f__wf partner row fails at the ensures atom (permission)",
        [=](Kit& k)
        {
            k.fail("permission", lend(k, false));
@@ -559,7 +564,8 @@ void define_owning_loops_audit2()
     //     void f() { int *p = malloc(); if (p != NULL) { int *q = same(p); peek(q); } }
     // the given live(r) may share its liveness cell with the caller's chunk: the call is followed by the case split on
     // the cells, never Silicon's own check (an exit 3 before)
-    lc("pg_live_given", "the result of a callee that gives live(r) is used after the call: the liveness cells are split against the arguments",
+    lc("pg_live_given",
+       "the result of a callee that gives live(r) is used after the call: the liveness cells are split against the arguments",
        [=](Kit& k)
        {
            Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
@@ -583,7 +589,6 @@ void define_owning_loops_audit2()
            k.fail_only("leak", f->end_loc, 1U, 0U);
        });
 
-
     // S3: void touch(int *p) requires(owns_block(p)) ensures(owns_block(p)) { { owning int *v = p; *v = 1; } *p = 2; }
     // (a borrowed block parked in an owner of an inner block)
     // the formal outlives the inner block, so the owner's exit there is no leak; the twin: owning int *v = malloc() in
@@ -606,7 +611,8 @@ void define_owning_loops_audit2()
         k.done(f);
         return inner->end_loc;
     };
-    lc("pe_parked_inner", "a borrowed block parked in an owning local of an inner block: the formal outlives the block's end (no leak there)",
+    lc("pe_parked_inner",
+       "a borrowed block parked in an owning local of an inner block: the formal outlives the block's end (no leak there)",
        [=](Kit& k)
        {
            parked(k, false);
@@ -645,7 +651,8 @@ void define_owning_loops_audit2()
         k.done(f);
         return Built {as->loc, fb->end_loc};
     };
-    lc("px_assign_expr", "`if ((v = malloc()) == NULL)` of an owning local: the value row holds (a held block), the block is freed after",
+    lc("px_assign_expr",
+       "`if ((v = malloc()) == NULL)` of an owning local: the value row holds (a held block), the block is freed after",
        [=](Kit& k)
        {
            assigned_in_expr(k, true, false);
@@ -655,7 +662,8 @@ void define_owning_loops_audit2()
        {
            k.fail("leak", assigned_in_expr(k, false, false).fn_end);
        });
-    lc("px_assign_expr_cell", "`(v = &x) == NULL` of an owning local, x a cell: the value row fails (permission), the function holds no block there",
+    lc("px_assign_expr_cell",
+       "`(v = &x) == NULL` of an owning local, x a cell: the value row fails (permission), the function holds no block there",
        [=](Kit& k)
        {
            k.fail("permission", assigned_in_expr(k, false, true).at);
@@ -665,7 +673,8 @@ void define_owning_loops_audit2()
     // covered by the implicit owns(s) on the first path only)
     // the pure rows (`r != NULL`) are guarded by the atom's own guard, not by `!cov`: the NULL path is a permission
     // error, never Silicon's own check
-    lc("ps_cov_live_null", "a covered live(r) whose body returns NULL on one path: the pure row of the atom fails (permission) at that return",
+    lc("ps_cov_live_null",
+       "a covered live(r) whose body returns NULL on one path: the pure row of the atom fails (permission) at that return",
        [=](Kit& k)
        {
            Function* f {k.fn("where", PT(k), {{"c", k.i32}})};
@@ -782,14 +791,16 @@ void define_owning_loops_audit2()
         // the leak row after the end label, or the owner's exit row
         return Built {bs->end_loc, via_owner ? fb->end_loc : f->end_loc};
     };
-    lc("olp_becomes_shared_owner", "an owner that was NULL at the entry takes another owner's block in the loop: the pair row at the back edge fails (permission)",
+    lc("olp_becomes_shared_owner",
+       "an owner that was NULL at the entry takes another owner's block in the loop: the pair row at the back edge fails (permission)",
        [=](Kit& k)
        {
            const Built b {shared(k, true)};
            k.fail_only("permission", b.at, 10U, 3U);
            k.fail_only("leak", b.fn_end, 2U, 0U); // the exit row of b fails (a still holds the block b took)
        });
-    lc("olp_becomes_shared_place", "an owner that was NULL at the entry takes the block of a non-owning pointer the loop uses: the pair row names the pointer (permission)",
+    lc("olp_becomes_shared_place",
+       "an owner that was NULL at the entry takes the block of a non-owning pointer the loop uses: the pair row names the pointer (permission)",
        [=](Kit& k)
        {
            const Built b {shared(k, false)};
@@ -798,4 +809,4 @@ void define_owning_loops_audit2()
        });
 }
 
-}
+} // namespace

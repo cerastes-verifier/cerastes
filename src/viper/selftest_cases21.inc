@@ -216,4 +216,4 @@ void define_block_guards_and_vlibc_sites()
        });
 }
 
-}
+} // namespace
