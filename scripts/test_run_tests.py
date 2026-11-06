@@ -50,15 +50,15 @@ REAL_ROOT = rt.ROOT  # before any test patches it
 
 def scrub_inherited_environment(environ=None, env_sh=None):
     """Remove from the process environment every variable that build/env.sh
-    defines, and CERASTES_EDG_SRC, so that the self-test does not depend on the
-    shell that runs it (`. build/env.sh` is what CLAUDE.md tells developers to
-    do).  Tests that need such a variable set it explicitly (mock.patch.dict,
+    defines, CERASTES_EDG_SRC and CERASTES_CI_PROFILE (CI's jobs set it, decision
+    0053 item 7), so that the self-test does not depend on the shell that runs it
+    (`. build/env.sh` is what CLAUDE.md tells developers to do).  Tests that need such a variable set it explicitly (mock.patch.dict,
     set_env); the tests of the real tools read the values from build/env.sh with
     rt.load_env().  CERASTES_REQUIRE_E2E is the caller's switch and stays.
     Returns the names removed."""
     environ = os.environ if environ is None else environ
     env_sh = Path(env_sh) if env_sh is not None else REAL_ROOT / "build" / "env.sh"
-    names = {"CERASTES_EDG_SRC"}
+    names = {"CERASTES_EDG_SRC", "CERASTES_CI_PROFILE"}
     if env_sh.exists():
         names |= set(re.findall(r"^export (\w+)=", env_sh.read_text(), re.MULTILINE))
     names.discard("CERASTES_REQUIRE_E2E")

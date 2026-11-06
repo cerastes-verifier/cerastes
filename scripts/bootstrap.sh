@@ -20,6 +20,13 @@
 #                    documentation dependencies (doc/node_modules) are an
 #                    error that points here.  Used by scripts/check.sh.
 #   --force-silicon  rebuild silicon.jar even if the build stamp is current.
+#
+# The compilers (decision 0053 item 6), from the environment on a full bootstrap and from
+# build/toolchain.env with --build-only:
+#   CERASTES_CLANG_MAJOR     Linux: the clang-N (and libc++ N) that scrapes, runs the native-ok
+#                            checks and builds (default 21); macOS: the major Apple clang must have
+#   CERASTES_GCC_MAJOR       the native-ok GCC, gcc-N and g++-N (default: the highest on PATH)
+#   CERASTES_BUILD_COMPILER  clang (the default) or, on Linux, gcc: what compiles EDG and cerastes
 
 set -euo pipefail
 
@@ -47,10 +54,10 @@ case "$PLATFORM" in
     CLANG_FORMAT_BIN_SHA256=5fd9412265516d41a7d0147c18254f78fffbc57554539be1497e4c33d82ee70c ;;
   Linux-x86_64)
     # decision 0031: EDG's Linux preset in Clang emulation, built and scraped with
-    # clang-$LINUX_CLANG_MAJOR over libc++ (the C++ library macOS has); JDK 17 and the
+    # clang-$CLANG_MAJOR over libc++ (the C++ library macOS has); JDK 17 and the
     # sbt launcher of the owner's Mac, which Homebrew provides there.
     EDG_PRESET=linux-clang-debug
-    LINUX_CLANG_MAJOR=21
+    DEFAULT_LINUX_CLANG_MAJOR=21
     Z3_ASSET=z3-4.16.0-x64-glibc-2.39
     Z3_SHA256=7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e
     CLANG_FORMAT_URL=https://files.pythonhosted.org/packages/11/d1/658d3da4dcbca98620956868c7cf6f4ba19fccecbdfc30cc055e19c9d4a7/clang_format-23.1.3-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
@@ -72,7 +79,7 @@ for arg in "$@"; do
   case "$arg" in
     --build-only) BUILD_ONLY=1 ;;
     --force-silicon) FORCE_SILICON=1 ;;
-    -h|--help) sed -n '5,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '5,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bootstrap.sh: unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -82,6 +89,41 @@ warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'bootstrap.sh: error: %s\n' "$*" >&2; exit 1; }
 
 mkdir -p "$BUILD" "$TOOLS"
+
+# ---- 0. The compilers (decision 0053 item 6) -------------------------------------
+# A full bootstrap takes CERASTES_CLANG_MAJOR, CERASTES_GCC_MAJOR and CERASTES_BUILD_COMPILER
+# from the environment (unset: the defaults above) and records them in build/toolchain.env;
+# --build-only (check.sh) builds with the recorded ones and refuses a variable that contradicts
+# them, so the check builds with what the setup step chose.
+TOOLCHAIN_ENV="$BUILD/toolchain.env"
+if [[ $BUILD_ONLY -eq 1 && -f "$TOOLCHAIN_ENV" ]]; then
+  for name in CERASTES_CLANG_MAJOR CERASTES_GCC_MAJOR CERASTES_BUILD_COMPILER; do
+    recorded="$(sed -n "s/^$name=//p" "$TOOLCHAIN_ENV")"
+    [[ -z "${!name:-}" || "${!name}" == "$recorded" ]] \
+      || die "$name=${!name}, but build/ was bootstrapped with $name=${recorded:-<unset>}; run scripts/bootstrap.sh"
+    printf -v "$name" '%s' "$recorded"
+  done
+fi
+CLANG_MAJOR="${CERASTES_CLANG_MAJOR:-}"
+if [[ "$PLATFORM" == Linux-* && -z "$CLANG_MAJOR" ]]; then
+  CLANG_MAJOR="$DEFAULT_LINUX_CLANG_MAJOR"
+fi
+GCC_MAJOR="${CERASTES_GCC_MAJOR:-}"
+BUILD_COMPILER="${CERASTES_BUILD_COMPILER:-clang}"
+[[ -z "$CLANG_MAJOR" || "$CLANG_MAJOR" =~ ^[1-9][0-9]*$ ]] || die "CERASTES_CLANG_MAJOR=$CLANG_MAJOR is not a major version"
+[[ -z "$GCC_MAJOR" || "$GCC_MAJOR" =~ ^[1-9][0-9]*$ ]] || die "CERASTES_GCC_MAJOR=$GCC_MAJOR is not a major version"
+case "$BUILD_COMPILER" in
+  clang) ;;
+  gcc) [[ "$PLATFORM" == Linux-* ]] || die "CERASTES_BUILD_COMPILER=gcc is for Linux only (decision 0053 item 10)"
+       [[ -n "$GCC_MAJOR" ]] || die "CERASTES_BUILD_COMPILER=gcc needs CERASTES_GCC_MAJOR" ;;
+  *) die "CERASTES_BUILD_COMPILER=$BUILD_COMPILER: clang or gcc" ;;
+esac
+if [[ "$PLATFORM" == Darwin-* && -n "$CLANG_MAJOR" ]]; then
+  clang --version 2>&1 | head -1 | grep -q "^Apple clang version $CLANG_MAJOR\." \
+    || die "clang is not Apple clang $CLANG_MAJOR: $(clang --version 2>&1 | head -1)"
+fi
+printf 'CERASTES_CLANG_MAJOR=%s\nCERASTES_GCC_MAJOR=%s\nCERASTES_BUILD_COMPILER=%s\n' \
+  "$CLANG_MAJOR" "$GCC_MAJOR" "$BUILD_COMPILER" > "$TOOLCHAIN_ENV"
 
 # The SHA-256 of a file (shasum on macOS, coreutils on Linux).
 sha256_of() {
@@ -100,7 +142,8 @@ fetch_pinned() {
 # ---- 1. Prerequisites (Homebrew on macOS; checked on Linux) ------------------
 if [[ "$PLATFORM" == Linux-* ]]; then
   # Installed by the system's packages (scripts/ci-linux.sh on the runner); never here.
-  for tool in cmake ninja python3 shellcheck node npm curl unzip "clang-$LINUX_CLANG_MAJOR" "clang++-$LINUX_CLANG_MAJOR"; do
+  for tool in cmake ninja python3 shellcheck node npm curl unzip "clang-$CLANG_MAJOR" "clang++-$CLANG_MAJOR" \
+              ${GCC_MAJOR:+"gcc-$GCC_MAJOR" "g++-$GCC_MAJOR"}; do
     command -v "$tool" >/dev/null || die "$tool is missing (on the runner scripts/ci-linux.sh installs it; decision 0031)"
   done
   JAVA_HOME="${JAVA_HOME_17_X64:-/usr/lib/jvm/java-17-openjdk-amd64}"
@@ -212,18 +255,42 @@ if { [[ -n "$stamped_tree" && "$stamped_tree" != "$EDG_SRC" ]]; } \
   rm -rf "$EDG_BUILD" "$CERASTES_BUILD"
 fi
 
-# The compilers: Apple clang through the preset's CC and CXX on macOS; clang-$LINUX_CLANG_MAJOR
-# by path on Linux (the preset names plain clang, which may be another version there).  Two
-# stock settings that differ by platform are set as on macOS (decision 0031 item 3): no
-# AddressSanitizer (EDG's default for Linux debug builds), and no EDG C++ runtime library,
-# which nothing here links (the Linux preset builds it for eight targets, with a plain
-# `clang` that rejects its bf16 literals).
+# The compilers: Apple clang through the preset's CC and CXX on macOS; on Linux clang-$CLANG_MAJOR,
+# or gcc-$GCC_MAJOR for a GCC build (decision 0053 item 10), by path (the preset names plain clang,
+# which may be another version there).  Two stock settings that differ by platform are set as on
+# macOS (decision 0031 item 3): no AddressSanitizer (EDG's default for Linux debug builds), and no
+# EDG C++ runtime library, which nothing here links (the Linux preset builds it for eight targets,
+# with a plain `clang` that rejects its bf16 literals).
 EDG_COMPILERS=()
 EDG_STOCK_OPTIONS=()
 if [[ "$PLATFORM" == Linux-* ]]; then
-  EDG_COMPILERS=("-DCMAKE_C_COMPILER=$(command -v "clang-$LINUX_CLANG_MAJOR")"
-                 "-DCMAKE_CXX_COMPILER=$(command -v "clang++-$LINUX_CLANG_MAJOR")")
+  if [[ "$BUILD_COMPILER" == gcc ]]; then
+    BUILD_CC="$(command -v "gcc-$GCC_MAJOR")"
+    BUILD_CXX="$(command -v "g++-$GCC_MAJOR")"
+  else
+    BUILD_CC="$(command -v "clang-$CLANG_MAJOR")"
+    BUILD_CXX="$(command -v "clang++-$CLANG_MAJOR")"
+  fi
+  EDG_COMPILERS=("-DCMAKE_C_COMPILER=$BUILD_CC" "-DCMAKE_CXX_COMPILER=$BUILD_CXX")
   EDG_STOCK_OPTIONS=(-DEDG_CPFE_USE_ASAN=OFF -DEDG_BUILD_LIB=OFF)
+else
+  BUILD_CC="$(command -v clang)"
+  BUILD_CXX="$(command -v clang++)"
+fi
+# A build made by other compilers is wiped (EDG configures once, so its cache would keep the
+# old ones).  Builds from before decision 0053 have no stamp and were made by the defaults.
+COMPILERS_STAMP="$OUT/compilers.stamp"
+compilers_now="$BUILD_COMPILER $BUILD_CC $BUILD_CXX"
+if [[ -f "$COMPILERS_STAMP" ]]; then
+  compilers_built="$(cat "$COMPILERS_STAMP")"
+elif [[ "$BUILD_COMPILER" == clang && ( "$PLATFORM" == Darwin-* || "$CLANG_MAJOR" == "$DEFAULT_LINUX_CLANG_MAJOR" ) ]]; then
+  compilers_built="$compilers_now"
+else
+  compilers_built="(the defaults)"
+fi
+if [[ "$compilers_built" != "$compilers_now" ]]; then
+  log "the build compilers changed ($compilers_built -> $compilers_now); removing $(rel "$EDG_BUILD") and $(rel "$CERASTES_BUILD")"
+  rm -rf "$EDG_BUILD" "$CERASTES_BUILD"
 fi
 if [[ ! -f "$EDG_BUILD/build.ninja" ]]; then
   log "cmake --preset $EDG_PRESET (out of tree: $(rel "$EDG_BUILD"))"
@@ -369,16 +436,16 @@ ANTORA_VERSION="$(cd "$DOC_DIR" && npx --no-install antora --version 2>/dev/null
 # ---- 6. build/env.sh --------------------------------------------------------------
 # EDG has no standard library of its own; it parses the system libc++ and C
 # headers (the SDK's on macOS, glibc's on Linux) while emulating the installed
-# clang.  On Linux the scrape runs clang-$LINUX_CLANG_MAJOR, for C++ through a wrapper
+# clang.  On Linux the scrape runs clang-$CLANG_MAJOR, for C++ through a wrapper
 # that adds -stdlib=libc++ (decision 0031 item 3; clang's default there is libstdc++).
 SCRAPE="$EDG_SRC/dev_tools/bin/edg-scrape-compiler"
 SCRAPE_CC=()
 SCRAPE_CXX=()
 if [[ "$PLATFORM" == Linux-* ]]; then
-  printf '#!/usr/bin/env bash\nexec %q -stdlib=libc++ "$@"\n' "$(command -v "clang++-$LINUX_CLANG_MAJOR")" \
+  printf '#!/usr/bin/env bash\nexec %q -stdlib=libc++ "$@"\n' "$(command -v "clang++-$CLANG_MAJOR")" \
     > "$TOOLS/clang++-libc++"
   chmod +x "$TOOLS/clang++-libc++"
-  SCRAPE_CC=(--compiler-path "$(command -v "clang-$LINUX_CLANG_MAJOR")")
+  SCRAPE_CC=(--compiler-path "$(command -v "clang-$CLANG_MAJOR")")
   SCRAPE_CXX=(--compiler-path "$TOOLS/clang++-libc++")
 fi
 EDG_CLANG_INCL_SCRAPE="$(python3 "$SCRAPE" clang ${SCRAPE_CXX[@]+"${SCRAPE_CXX[@]}"} --lang c++ includes)"
@@ -412,14 +479,16 @@ ninja -C "$CERASTES_BUILD" > "$OUT/cerastes-build.log" 2>&1 \
 # Both builds succeeded: record which tree state they were built from.
 python3 "$ROOT/scripts/edg_tree.py" stamp "$EDG_SRC" > "$EDG_STAMP.part"
 mv "$EDG_STAMP.part" "$EDG_STAMP"
+printf '%s\n' "$compilers_now" > "$COMPILERS_STAMP"
 
-# Native compilers for `// expect: native-ok` tests: Apple clang (clang-$LINUX_CLANG_MAJOR on
-# Linux), and the highest-numbered GCC (gcc-NN with a g++-NN of the same number) if any.
+# Native compilers for `// expect: native-ok` tests: Apple clang (clang-$CLANG_MAJOR on
+# Linux), and gcc-$CERASTES_GCC_MAJOR or else the highest-numbered GCC (gcc-NN with a g++-NN of
+# the same number) if any.
 if [[ "$PLATFORM" == Linux-* ]]; then
-  CLANG_CC="$(command -v "clang-$LINUX_CLANG_MAJOR")"
-  CLANG_CXX="$(command -v "clang++-$LINUX_CLANG_MAJOR")"
-  "$CLANG_CXX" --version 2>&1 | head -1 | grep -q "clang version $LINUX_CLANG_MAJOR\\." \
-    || die "$CLANG_CXX is not clang $LINUX_CLANG_MAJOR"
+  CLANG_CC="$(command -v "clang-$CLANG_MAJOR")"
+  CLANG_CXX="$(command -v "clang++-$CLANG_MAJOR")"
+  "$CLANG_CXX" --version 2>&1 | head -1 | grep -q "clang version $CLANG_MAJOR\\." \
+    || die "$CLANG_CXX is not clang $CLANG_MAJOR"
 else
   CLANG_CC="$(xcrun -f clang)"
   CLANG_CXX="$(xcrun -f clang++)"
@@ -443,6 +512,7 @@ for dir in "${path_dirs[@]}"; do
     num="${cand##*/gcc-}"
     [[ "$num" =~ ^[0-9]+$ ]] || continue
     (( num > gcc_best )) || continue
+    [[ -z "$GCC_MAJOR" || "$num" == "$GCC_MAJOR" ]] || continue
     gxx="$(command -v "g++-$num" || true)"
     [[ -n "$gxx" ]] || continue
     is_gcc "$cand" || continue
@@ -450,6 +520,8 @@ for dir in "${path_dirs[@]}"; do
     gcc_best="$num"; GCC_CC="$cand"; GCC_CXX="$gxx"
   done
 done
+
+[[ -z "$GCC_MAJOR" || -n "$GCC_CXX" ]] || die "no GCC $GCC_MAJOR (gcc-$GCC_MAJOR and g++-$GCC_MAJOR) on PATH"
 
 cat > "$BUILD/env.sh" <<EOF
 # Generated by scripts/bootstrap.sh; do not edit.  Source it to use the
@@ -469,6 +541,9 @@ export CERASTES_CLANG_CC="$CLANG_CC"
 export CERASTES_CLANG_CXX="$CLANG_CXX"
 export CERASTES_GCC_CC="$GCC_CC"
 export CERASTES_GCC_CXX="$GCC_CXX"
+export CERASTES_BUILD_COMPILER="$BUILD_COMPILER"
+export CERASTES_BUILD_CC="$BUILD_CC"
+export CERASTES_BUILD_CXX="$BUILD_CXX"
 export EDG_BUILD_DIR="$EDG_BUILD"
 export CPFE="$EDG_BUILD/bin/cpfe"
 export CERASTES_FE="$OUT/cerastes-fe"
@@ -491,6 +566,7 @@ printf '    %-8s %s\n' \
   cerastes "$(rel "$OUT")/cerastes" \
   clang "$CLANG_CXX" \
   gcc "${GCC_CXX:-<none>}" \
+  build "$BUILD_COMPILER ($BUILD_CXX)" \
   silicon "$(rel "$SILICON_JAR")" \
   node "$(node -v), npm $(npm -v)" \
   antora "$ANTORA_VERSION"
