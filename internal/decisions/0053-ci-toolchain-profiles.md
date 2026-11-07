@@ -1,7 +1,10 @@
 # 0053 — CI toolchain profiles: declared majors, a matrix of toolchains, GCC builds (S8)
 
-- **Status:** accepted for S8a (items 1–3); items 4–9 from S8b, items 10–11 from S8c, as the approved plan
-  (`.claude/plans/s8-ci-toolchains.md`) gives them; each is marked accepted when its branch lands. Owner decisions
+- **Status:** accepted for S8 (2026-11-06): items 1–3 in S8a, 4–9 in S8b, 10–11 in S8c, on branch `s8b-ci-profiles`
+  (PR #33), as the approved plan (`.claude/plans/s8-ci-toolchains.md`) gives them, with the findings each item records.
+  At the session's end the `nightly` profiles are `ubuntu-26.04-clang20-gcc15`, `ubuntu-26.04-clang22-gcc14`,
+  `ubuntu-26.04-gcc15-build` and `ubuntu-24.04` (each green in a full check on the x86-64 box); `ubuntu-24.04-clang18`
+  and `macos-26` are `dispatch` (questions 169, 172). Owner decisions
   (2026-11-06, S8 planning): "These scripts should be far more robust and allow different versions of clang and gcc on
   linux to be tested in the future. Like using default macos-16, 26, ubuntu-26.04, ubuntu-24.04 etc."; then, asked:
   a job asserts the majors its profile declares and records the exact builds (item 1); a different outcome on another
