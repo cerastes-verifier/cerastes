@@ -5819,6 +5819,16 @@ def ci_toml_blocks(text):
     return re.split(r"(?m)^(?=\[\[profile\]\])", text)
 
 
+def ci_fixture_profile(path):
+    """The first Linux profile of the file at `path` whose cadence is `dispatch` and that has no exclusions."""
+    profiles = tomllib.loads(Path(path).read_text(encoding="utf-8")).get("profile", [])
+    name = next((p["name"] for p in profiles
+                 if p.get("platform") == "linux" and p.get("cadence") == "dispatch" and not p.get("exclusions")), None)
+    if name is None:
+        raise AssertionError(f"{path} has no Linux profile at `dispatch` without exclusions for the CI profile tests")
+    return name
+
+
 def ci_toml_edit(text, profile, old, new):
     """`text` with `old` replaced by `new` in the table of `profile`."""
     blocks = ci_toml_blocks(text)
@@ -5848,7 +5858,9 @@ class CiProfileTests(unittest.TestCase):
     TOML_PATH = REAL_ROOT / "scripts" / "ci_toolchains.toml"
     # a test that exists, for the exclusions
     TEST = "tests/scalar/abs_value.c"
-    DISPATCH = "ubuntu-26.04-clang20-gcc15"
+    # the profile the tests add their exclusions to and promote: the real file's first Linux profile at `dispatch`
+    # without exclusions of its own, so that a promotion or a recorded exclusion never changes what they expect
+    DISPATCH = ci_fixture_profile(TOML_PATH)
 
     @classmethod
     def setUpClass(cls):
