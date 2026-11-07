@@ -108,6 +108,26 @@ clang_major = 20
 gcc_major = 14
 build = "clang"
 
+[[profile.exclusions]]
+test = "tests/scalar/negative/reject_assert_comma_call.c"
+mode = "c23"
+reason = "glibc 2.39's assert is not glibc 2.43's C23 form that the encoder matches (decision 0031 item 5), so the call to __assert_fail is rejected as call_without_contract instead of unsupported_expression; still a rejection"
+
+[[profile.exclusions]]
+test = "tests/vlibc/negative/reject_assert_glibc_callee.c"
+mode = "c23"
+reason = "the test calls glibc 2.43's __assert_single_arg, which glibc 2.39 does not declare (implicit_func_decl)"
+
+[[profile.exclusions]]
+test = "tests/vlibc/negative/reject_assert_glibc_third.c"
+mode = "c23"
+reason = "the test calls glibc 2.43's __assert_single_arg, which glibc 2.39 does not declare (implicit_func_decl)"
+
+[[profile.exclusions]]
+test = "tests/scalar/negative/reject_coroutine.cpp"
+mode = "c++20"
+reason = "with libc++ 20's <coroutine>, vlibc's <stdlib.h> shim redeclares abort, exit, _Exit, malloc, calloc and free with a linkage incompatible with glibc's first declarations (incompatible_linkage_specifier); libc++ 21 and 22 do not (vlibc's to fix, handoff question 170)"
+
 # The image's default clang 18: cerastes builds with it, but EDG emulating clang 18 is another language for some tests
 # (no standard [[assume]], non-constant enumerator values accepted, linkage conflicts between vlibc's shim and
 # clang 18's headers; S8, internal/handoff.md).  Dispatch only, until the owner decides (handoff question 169).
