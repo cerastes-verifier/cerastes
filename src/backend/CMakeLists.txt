@@ -42,4 +42,4 @@ target_link_libraries(cerastes_backend PUBLIC edg_config cerastes_vir cerastes_v
 # names the annotations depend on are not an error (annotation_macro_changed, decision 0008 item 2).
 target_compile_definitions(cerastes_backend PRIVATE CERASTES_SOURCE_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/include")
 target_compile_features(cerastes_backend PUBLIC cxx_std_20)
-target_compile_options(cerastes_backend PRIVATE -Wall -Wextra -Werror)
+target_compile_options(cerastes_backend PRIVATE ${CERASTES_WARNINGS})

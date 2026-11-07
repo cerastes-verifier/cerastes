@@ -169,17 +169,85 @@ the IR, compares the IR, and reports that the objects were not compared. S7's re
 [#ci]
 == Continuous integration
 
-{gh}/.github/workflows/ci.yml[`.github/workflows/ci.yml`] runs `scripts/ci.sh`, which asserts that the runner has the
-toolchain the expectations were made on and bootstraps, and then `scripts/check.sh`. There are two jobs: macOS on
-GitHub's `xcode-27` image, and `check-linux` on `ubuntu-26.04` x86-64, set up by `scripts/ci-linux.sh` (decision
-{gh}/internal/decisions/0031-linux-ci.md[0031]); every test must give the same outcome on both.
+{gh}/.github/workflows/ci.yml[`.github/workflows/ci.yml`] runs one job per toolchain profile (decision
+{gh}/internal/decisions/0053-ci-toolchain-profiles.md[0053]). The profiles are listed in
+{gh}/scripts/ci_toolchains.toml[`scripts/ci_toolchains.toml`]. Each job runs a setup script for its profile, then
+`scripts/check.sh`:
 
-Two tiers (decision {gh}/internal/decisions/0016-ci.md[0016], item 14):
+* `scripts/ci.sh <profile>` on macOS;
+* `scripts/ci-linux.sh <profile>` on x86-64 Linux (decision {gh}/internal/decisions/0031-linux-ci.md[0031]).
 
-* Pull requests and pushes to `main` run the PR tier. Tests that reach Silicon run only if they changed relative to
-  the base, are documentation examples, or fall in a fixed one-in-eight sample; everything else runs. You can rehearse it
+The setup script checks that the runner has the profile's toolchain, installs the compilers it names, and bootstraps.
+
+Two profiles are the references, the toolchains the expectations were made on:
+
+* `macos-27`: GitHub's `xcode-27` image, the Command Line Tools 27, Apple clang 21, SDK 27, Homebrew GCC 16;
+* `ubuntu-26.04`: clang 21 with pass:[libc++] 21, GCC 16, glibc 2.43.
+
+The setup scripts check each version by its major and write the exact builds to the job log and to
+`build/ci-toolchain.txt`. An image update within those majors does not stop a job; a test whose result changes still
+does. Every test must give the same outcome on every profile, unless the profile records an exclusion for it (below).
+
+Which profiles run depends on the trigger. A profile's `cadence` field is `every`, `nightly` or `dispatch`:
+
+* Pull requests and pushes to `main` run the `every` profiles, the two references, in the PR tier (decision
+  {gh}/internal/decisions/0016-ci.md[0016], item 14). Tests that reach Silicon run only if they changed relative to the
+  base, are documentation examples, or fall in a fixed one-in-eight sample; everything else runs. You can rehearse it
   with `CERASTES_CHECK_BASE=main scripts/check.sh`, which ends with `check.sh: green in the PR tier (not the full check)`.
-* The nightly run (07:00 UTC) and manual dispatch run the full check.
+* The nightly run (07:00 UTC) runs the full check on the `every` and `nightly` profiles.
+* A manual dispatch runs the full check. With an empty `profiles` input it runs the same profiles as the nightly run;
+  `all` runs every profile; a list of names (separated by commas or spaces) runs exactly those.
+
+[#toolchain-profiles]
+=== Adding a toolchain
+
+A toolchain is one `[[profile]]` table in `scripts/ci_toolchains.toml`. The comment at the top of that file lists the
+fields. Here is a Linux profile:
+
+[source,text]
+----
+[[profile]]
+name = "ubuntu-26.04-clang20-gcc15"
+platform = "linux"
+runner = "ubuntu-26.04"
+cadence = "dispatch"
+jobs = 4
+ubuntu_version = "26.04"
+glibc = "2.43"
+clang_major = 20
+gcc_major = 15
+build = "clang"
+----
+
+`python3 -I scripts/ci_profile.py check` validates the file, and the harness self-test runs the same check. The
+script rejects runners it does not know, a runner whose OS version differs from the profile's, GCC older than 14 (GCC
+13 has no `-std=c23`), clang older than 18 on Linux, and a GCC build on macOS. `build = "gcc"` compiles EDG and
+cerastes with `pass:[g++]-<gcc_major>`. EDG still emulates clang, so the scrape and the native-ok clang stay `clang-<clang_major>`.
+
+A new profile starts as `dispatch`. Run a full check on it, either as a dispatch naming it or, for Linux, in an
+`ubuntu` container on an x86-64 machine (`scripts/ci-linux.sh <profile>`, then `scripts/check.sh`). Move it to
+`nightly` once that check is green.
+
+To run the same setup locally, use `scripts/bootstrap.sh`. It takes the profile's compilers from
+`CERASTES_CLANG_MAJOR`, `CERASTES_GCC_MAJOR` and `CERASTES_BUILD_COMPILER` and records them in `build/toolchain.env`.
+`check.sh` builds with the recorded values (`bootstrap.sh --build-only`). It stops if one of those variables names a
+different compiler.
+
+A test whose outcome on a profile differs from its `expect:` lines fails that job. Fix it in cerastes if you can.
+Otherwise add an exclusion to the profile:
+
+[source,text]
+----
+[[profile.exclusions]]
+test = "tests/scalar/assert_basic.c"
+mode = "c23"
+reason = "glibc 2.39's assert expands to a shape the encoder does not match"
+----
+
+The `mode` field is optional. In that profile's jobs (`CERASTES_CI_PROFILE`), the excluded test still runs, and at
+least one of its runs must fail. Those runs are reported as `DIVERGES`, with the reason. If none of them fails, the
+job fails with "remove the exclusion", so an exclusion cannot outlive its cause. The references carry no exclusions,
+and no test has an `expect:` line for a particular toolchain.
 
 The documentation has its own workflow, {gh}/.github/workflows/docs.yml[`.github/workflows/docs.yml`], which builds
 and lints the pages on pull requests and deploys them from `main` (xref:dev/documentation.adoc[Writing documentation]).

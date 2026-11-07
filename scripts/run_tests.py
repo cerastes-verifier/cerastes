@@ -108,6 +108,14 @@ compilations) is made as usual.  The summary counts the Silicon runs left to
 the full check, and `--expect-passed` counts them as passed.  An empty <ref>
 (check.sh's default) is the full run.
 
+When CERASTES_CI_PROFILE names a profile of scripts/ci_toolchains.toml (CI's
+jobs set it; decision 0053 item 7), that profile's exclusions apply: an excluded
+test (optionally one mode of it) still runs, and at least one of its runs must
+fail; those runs are reported as DIVERGES with the profile's reason and count as
+passed.  An excluded test none of whose runs fails is a failure ("remove the
+exclusion"), so an exclusion cannot outlive its cause.  Unset, nothing is
+excluded.
+
 The exit status is 1 if any test fails and 2 on usage or environment errors
 (including when no test is selected).
 """
@@ -2228,6 +2236,71 @@ class RunOptions:
     unselected: frozenset[Path] = frozenset()  # resolved tests whose Silicon runs the PR tier leaves out
 
 
+# ---------------------------------------------------------------------------
+# A CI profile's exclusions (decision 0053 item 7)
+# ---------------------------------------------------------------------------
+
+PROFILE_VARIABLE = "CERASTES_CI_PROFILE"
+DIVERGES = "DIVERGES"
+
+
+@dataclasses.dataclass(frozen=True)
+class Exclusion:
+    test: Path  # resolved
+    mode: str | None
+    reason: str
+
+
+def profile_exclusions(environ: "dict[str, str] | os._Environ[str] | None" = None,
+                       toolchains: Path | None = None) -> tuple[str | None, list[Exclusion]]:
+    """The profile CERASTES_CI_PROFILE names and its exclusions; (None, []) when it is unset or
+    empty.  A name that is not a profile, or a profile file that does not validate, is a usage
+    error."""
+    environ = os.environ if environ is None else environ
+    name = environ.get(PROFILE_VARIABLE, "")
+    if not name:
+        return None, []
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import ci_profile
+    finally:
+        sys.path.pop(0)
+    try:
+        profile = ci_profile.profile(name, toolchains or ci_profile.TOOLCHAINS)
+    except ci_profile.ProfileError as err:
+        raise UsageError(f"{PROFILE_VARIABLE}={name}: {err}") from err
+    return name, [Exclusion((ROOT / e["test"]).resolve(), e.get("mode"), e["reason"])
+                  for e in profile.get("exclusions", [])]
+
+
+def apply_exclusions(path: Path, outcomes: list[Outcome], exclusions: list[Exclusion],
+                     profile: str | None) -> list[Outcome]:
+    """The outcomes of `path` under its profile's exclusions: a failing run that an exclusion
+    covers becomes DIVERGES (passed, the problems kept as notes); an exclusion none of whose runs
+    fails adds a failure."""
+    mine = [e for e in exclusions if e.test == path.resolve()]
+    if not mine:
+        return outcomes
+
+    def covering(o: Outcome) -> Exclusion | None:
+        return next((e for e in mine if e.mode is None or f"[{e.mode}]" in o.name), None)
+    out, diverged = [], set()
+    for o in outcomes:
+        e = covering(o)
+        if e is not None and o.problems:
+            diverged.add(e)
+            out.append(Outcome(o.name, [], o.output, DIVERGES,
+                               [f"profile {profile}: {e.reason}"] + o.problems + o.notes))
+        else:
+            out.append(o)
+    for e in mine:
+        if e not in diverged:
+            what = f"{rel(path)}" + (f" [{e.mode}]" if e.mode else "")
+            out.append(Outcome(what, [f"no run fails on the profile {profile}: remove its exclusion from "
+                                      f"scripts/ci_toolchains.toml (decision 0053 item 7)"]))
+    return out
+
+
 ENV_SH: Path | None = None  # the env file; None: ROOT/build/env.sh (self-tests point it elsewhere)
 _ignored_inherited: set[str] = set()
 
@@ -3022,6 +3095,14 @@ def main(argv: list[str] | None = None) -> int:
         del headers[f]
     sel.tests = [f for f in sel.tests if f in headers]
 
+    try:
+        profile, exclusions = profile_exclusions()
+    except UsageError as err:
+        print(f"run_tests.py: {err}", file=sys.stderr)
+        return 2
+    if exclusions:
+        print(f"profile {profile}: {len(exclusions)} exclusions (decision 0053 item 7)")
+
     opts = RunOptions(verbose=args.verbose, update_golden=args.update_golden)
     left = 0  # the Silicon runs the PR tier leaves to the full check
     if args.pr_base:
@@ -3067,7 +3148,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"run_tests.py: {err}", file=sys.stderr)
         return 2
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        for result in pool.map(lambda f: run_one(f, headers[f], env, opts), sel.tests):
+        for result in pool.map(lambda f: apply_exclusions(f, run_one(f, headers[f], env, opts), exclusions,
+                                                          profile), sel.tests):
             for o in result:
                 outcomes.append(o)
                 print_outcome(o, args.verbose)
@@ -3090,6 +3172,9 @@ def main(argv: list[str] | None = None) -> int:
     unchanged = sum(1 for o in outcomes if not o.problems and o.label == "UNCHANGED")
     passed = len(outcomes) - failed - updated - unchanged
     summary = f"{passed} passed, {failed} failed, {len(sel.skipped) + len(elsewhere)} skipped"
+    if exclusions:
+        diverging = sum(1 for o in outcomes if o.label == DIVERGES)
+        summary += f", {diverging} diverging as the profile {profile} records"
     if opts.native is not None:
         summary += ", native-ok runs: " + ", ".join(
             f"{c.family} {opts.native.runs.get(c.family, 0)}" for c in opts.native.compilers)

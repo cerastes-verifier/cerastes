@@ -1008,23 +1008,49 @@ pairs (they render as well-formed HTML). Only the source lint catches those,
 so the two checks are both required.
 
 `check.sh` runs the examples as tests, both checks, and the docs build. Two
-workflows run in CI. `.github/workflows/ci.yml` runs `scripts/ci.sh` (the
-runner's setup and toolchain assertions) and then `scripts/check.sh`, the full
-check every night at 07:00 UTC and on `workflow_dispatch`, the PR tier on pull
-requests and pushes to `main` ([The PR tier](#the-pr-tier---pr-base-cerastes_check_base)),
-so the examples run as tests there too (every one, in both tiers), on GitHub's `xcode-27` runner with
-`CERASTES_JOBS=3` (decision 0016). A second job, `check-linux`, runs `scripts/ci-linux.sh` and then the same
-`scripts/check.sh` in both tiers on GitHub's `ubuntu-26.04` x86-64 runner with `CERASTES_JOBS=4` (decision 0031):
-every test must give the same outcome on both platforms. There the native-ok runs use `clang-21` (labelled
-`clang` instead of `Apple clang`, `CLANG_FAMILY` in `run_tests.py`) and Ubuntu's `gcc-16`. The harness self-test
-pins the active text of the three files: `ci_workflow_problems` and `ci_sh_problems` (given `CI_LINUX_SH_SPEC` for
-`ci-linux.sh`) compare every active line (comments and blank lines dropped) with a pinned copy, so an extra step,
-an extra command, a `break` in a loop or a reassigned constant fails it; only comments, the `uses:` SHAs, the step
-and job names, `timeout-minutes` and `CERASTES_JOBS` may change in ci.yml, and only comments in the two scripts.
-Structured rules (the triggers, `contents: read`, exactly the jobs `check` and `check-linux`, each with only five
-keys, its runner and its environment, SHA-pinned actions, the checkout options, plain setup-script then
-`scripts/check.sh` steps; every toolchain assertion as a pinned line, in order, with no early `exit` or
-`|| true`) give the diagnostics.
+workflows run in CI. `.github/workflows/ci.yml` runs `scripts/check.sh` once for every toolchain profile
+its event selects: the full check every night at 07:00 UTC and on `workflow_dispatch`, the PR tier on pull
+requests and pushes to `main` ([The PR tier](#the-pr-tier---pr-base-cerastes_check_base)), so the examples
+run as tests there too (every one, in both tiers). The toolchains are the toolchain profiles of
+`scripts/ci_toolchains.toml` (decision 0053), read and validated by `scripts/ci_profile.py`: a name, a
+GitHub runner label, a cadence (`every`: pull requests, pushes, the nightly run and dispatches; `nightly`:
+the nightly run and dispatches; `dispatch`: only a dispatch that names it, or `all`), `CERASTES_JOBS`, the
+declared majors (the Command Line Tools, Apple clang, the SDK and GCC on macOS; Ubuntu's release, glibc,
+clang with libc++ and GCC on Linux), the compiler that builds EDG and cerastes (`clang`, or `gcc` on Linux)
+and optional exclusions. A first job, `profiles`, prints the two job matrices (`ci_profile.py matrix`);
+the jobs `check` (macOS, `scripts/ci.sh <profile>`) and `check-linux` (Linux, `scripts/ci-linux.sh <profile>`,
+decision 0031) run one job per profile of their matrix, each then running the same `scripts/check.sh`, with
+`CERASTES_CI_PROFILE` and `CERASTES_JOBS` from the matrix. The two reference profiles are the only `every`
+ones: `macos-27` (GitHub's `xcode-27` runner, `CERASTES_JOBS=3`, decision 0016) and `ubuntu-26.04` (x86-64,
+`CERASTES_JOBS=4`), and every test must give the same outcome on both platforms. There the native-ok runs
+use `clang-21` (labelled `clang` instead of `Apple clang`, `CLANG_FAMILY` in `run_tests.py`) and Ubuntu's
+`gcc-16`. The setup scripts assert the toolchain at the majors their profile declares (decision 0053 item 1)
+and write the exact builds to the job log and `build/ci-toolchain.txt`, so an image update within a major
+does not stop a job; a test whose result moves does. A test whose outcome on a toolchain differs from its
+`expect:` lines fails that job: it is fixed, or the profile records an exclusion (the test, optionally one
+mode, and a reason). An excluded test still runs and must still fail (reported as `DIVERGES`); one that
+passes fails the run, so an exclusion cannot outlive its cause, and the references carry none.
+`run_tests.py` reads the profile from `CERASTES_CI_PROFILE` (the jobs set it); unset, nothing is excluded.
+
+The harness self-test guards the three CI files and the profile file without a copy of their text
+(decision 0053 item 8). `ci_sh_problems` (given `CI_LINUX_SH_SPEC` for `ci-linux.sh`) pins every assertion
+line, in order, as a pattern (the expected values come from the profile, so the only literals left are the
+Command Line Tools path, `MIN_FREE_GB`, the OS id and the architecture) and holds a line-shape allow-list:
+every other active line must be a harmless reporting shape (a `step "..."` label, `ver <tool> --version`,
+`uname -a`, a `printf` of variables and a few read-only commands), so an extra command, a `break` in a
+loop, a redirection, a reassigned constant or a function shadowing a command fails it; the rules about
+`set -euo pipefail`, `||` only as `|| want`, no early `exit`, `|| true` or background `&`, `trap`,
+constants assigned once before use, bootstrap run once and the environment ban hold on the lines too.
+`ci_workflow_problems` reads `ci.yml` as the small YAML subset it uses and compares it with a pattern tree:
+exactly the jobs `profiles`, `check` and `check-linux`, each with its keys, `needs`, the pinned `if`,
+`fail-fast: false`, the matrix of its own output, `runs-on` from the matrix, its environment and its steps in
+order, every action SHA-pinned with its `with:` values; only the SHAs, the step and job names,
+`timeout-minutes` (at most 220) and the dispatch input's description may change without the self-test, and
+the dispatch input may reach a command only through an environment variable. The profile file is checked by
+`ci_profile.py check` (the schema) in the self-test, and `ci_reference_problems` pins the two references'
+declared facts (`CI_REFERENCE_PROFILES`) and that exactly they are `every`: a new toolchain is one profile
+entry, and changing a reference is a reviewed change of the profile file and the self-test. Each rule has
+mutation twins (`CiGuardTests`, `CiProfileTests`, `CiSelectionTests`, `ProfileExclusionTests`).
 The docs workflow (`docs.yml`) still builds
 and deploys the docs: it runs the source lint, `scripts/build_docs.sh` (which
 fails on any Antora warning) and the `--html` check, but not the examples as

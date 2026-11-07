@@ -1,12 +1,12 @@
-# Handoff at M4.5d2b1's planning — partnerless results, owning locals, marked locals (record 0052) (2026-11-05)
+# Handoff at S8's end — CI toolchain profiles (record 0053) (2026-11-06); M4.5d2b2 next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
 rediscover, and holds only what is live (owner, 2026-10-26; consolidated again at M4.5b2b's start, 2026-11-02: §3 is
 regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
 by S6, a docs session that changed no code: its additions are marked "S6"; at M4.5d2v's start, 2026-11-04; at S7's
-planning, 2026-11-05; at S7's end, the same day: §1, §2, §3's "From S7", §8; and at M4.5d2b1's planning, the same
-day: §1, §2, §3, §4.2, §8). The text before M4.5d2b1 is `git show a660abc:internal/handoff.md`, before S7
+planning, 2026-11-05; at S7's end, the same day: §1, §2, §3's "From S7", §8; at M4.5d2b1's planning, the same
+day: §1, §2, §3, §4.2, §8; and at S8's end, 2026-11-06: §1, §2, §3's "From S8", §8). The text before M4.5d2b1 is `git show a660abc:internal/handoff.md`, before S7
 `git show c2bc48d:internal/handoff.md`, before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
 `git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
@@ -14,6 +14,13 @@ every earlier version (each note below keeps its origin in brackets, so its full
 plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan.
 
 ## 1. State
+
+- **S8** (2026-11-06; record 0053; plan `.claude/plans/s8-ci-toolchains.md`, questions 162–168): done on branch
+  `s8b-ci-profiles`, which holds S8a's two commits first (`bdefc29`, `d0e318a`); the owner pushed it at `3fcbf92` as PR
+  #33 (its PR tier ran on GitHub: `profiles` and `check (macos-27)` green on the CLT 27.2 image). Result in
+  `internal/status.md`. CI now runs toolchain profiles (`scripts/ci_toolchains.toml`): the references `macos-27` and
+  `ubuntu-26.04` on every event, other toolchains nightly or on dispatch. M4.5d2b1 and S7 are merged (PR #32 on
+  `origin/main` `8227bf0`); **M4.5d2b2 is next** (§4.2, §3 "From M4.5d2b1" and "M4.5d2b2").
 
 - **M4.5d2b1** (2026-11-05; record 0052; plan `.claude/plans/m4-5d2b1-results-locals.md`, questions 150–161): done on
   branch `m4.5d2b1-results-locals`, from S7's tip `a660abc` (S7 is not merged yet and the owner was away: "make your next
@@ -72,6 +79,22 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 
 ## 2. Owner steps
 
+S8's (2026-11-06):
+1. **PR #33** (`s8b-ci-profiles`): push the branch's tip (the commits after `fc499cc`: the self-test fixture fix
+   `32c4ee9`, without which both jobs fail five CI profile self-tests; the exclusions; the promotions; the status) and
+   merge it once the PR tier is green; it fixes `main`, red since `c1b691d`. Then dispatch the workflow once with
+   `profiles` = `all`: every Linux profile was rehearsed on the box (§3 "From S8"), but `macos-26` has never run
+   (question 172), and the `nightly` profiles have not yet run on GitHub's runners (the first nightly after the merge
+   runs them).
+2. **Your Mac's Command Line Tools** (question 171): 27.0 today, the image's 27.2 since `20261104.0337`; nothing in the
+   repository changes when you update.
+3. **The box** (`matt@clang4.cpp.al`): `~/cerastes-s8` (a base checkout, one checkout and one container
+   `cerastes-s8-<profile>` per profile, images `cerastes-s8:26.04` and `cerastes-s8:24.04`) can stay for the next Linux
+   rehearsal or be removed (`docker rm -f` the six containers, `rm -rf ~/cerastes-s8`); `~/cerastes-m4.5d1` and its
+   container `cerastes-m4.5d1-p71` (idle since 2026-11-04) likewise.
+
+The steps before S8: steps 3 and 4 below (S7, M4.5d2b1) are done (PR #32 merged); the rest as written.
+
 The steps before M4.5d2v (PRs #27–#30, S6's website push) are in `git show 9255b93:internal/handoff.md` §2; the ones not
 done yet still apply.
 
@@ -96,6 +119,30 @@ done yet still apply.
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
+
+**From S8** (record 0053)
+- **Every session that changes CI:** a new toolchain is one `[[profile]]` in `scripts/ci_toolchains.toml` at `dispatch`,
+  promoted to `nightly` after a green full check; the developer guide's "Adding a toolchain" has the fields. The guard
+  pins every assertion line of `ci.sh`/`ci-linux.sh` literally (messages included) and `ci.yml` as a pattern tree, so a
+  changed assertion or step is a self-test change too; the two references are pinned in `CI_REFERENCE_PROFILES`. [S8]
+- **Linux rehearsals on the box:** `~/cerastes-s8/run.sh setup|update|check <profile>` (a fresh copy of `base`, a
+  container per profile from a clean `ubuntu` image without compilers, `ci-linux.sh <profile>` then `check.sh`). Ship
+  commits as a git bundle (`git bundle create … <branch>`, then `run.sh update`). Never pipe a macOS `tar` into the
+  trees (it adds AppleDouble `._*` files, and `scripts/._*.sh` breaks `check.sh`'s lint), and never clean them with
+  `find -name "._*"`: EDG's test tree has directories named `._…`. [S8]
+- **Toolchain-dependent facts found:** EDG's CMake takes `EDG_BASE` from the building compiler (bootstrap names the clang
+  base); EDG's clang-18 emulation differs on eight tests (record 0053 item 11); with clang 18 and 20 vlibc's `<stdlib.h>`
+  shim meets glibc's declarations with an incompatible linkage through libc++'s `<coroutine>` (question 170); glibc
+  2.39 has no `__assert_single_arg`, the C23 one-argument `assert` the encoder matches (0031 item 5); ShellCheck 0.9.0
+  (Ubuntu 24.04) adds SC2015. [S8]
+- **Argument order:** GCC evaluates a call's arguments in another order than clang; `f(g(x), std::move(x))` lost
+  `x` in the GCC build (`vir.cpp`'s builder, fixed). The GCC-built profile now catches such code, and clang-tidy's
+  `bugprone-use-after-move` finds it on any compiler (the audit ran Homebrew's clang-tidy 23.1.1 over all 29 TUs of
+  `build/cmake/compile_commands.json`: only the two fixed lines); a lint step would need a pinned clang-tidy. [S8 audit]
+- **The position map accepts a row without a file** (`src/viper/posmap.cpp:25` stops the run, exit 3, only for a row
+  without a line or column): adding `e.file.empty()` (and an empty `note_file` when there is a note) would make a lost
+  file fail safe on every compiler, must-verify tests included (invariant 7). Not done in S8: the VIR self-test's
+  synthetic programs may have rows without a file, so it needs a full-suite run. [S8 audit, should-fix 2]
 Notes that a session consumes move into its plan's "Inputs" (M4.5b2b took the call's flag row, the registration rule for
 P4222's markers, P54 and the b2b design points).
 
@@ -981,6 +1028,26 @@ d2a), 159 (only implicit atoms cover: `&&` between written atoms stays separatin
 expect line may be corrected after its first run when it fails for its designed reason at another line or a neighbouring
 category, listed in the status entry), 161 (two flipped pins expect two real errors each).
 
-**Open, for the next session:** none. M4.5d2b2's planning decides its own questions (P4418R0's spellings, a strict
-profile mode, borrow against transfer on parameters, static owners at `main`'s end; §3).
+At S8's planning (2026-11-06; recorded in its plan `.claude/plans/s8-ci-toolchains.md` and record 0053): 162 (CI
+asserts the majors a profile declares and records the exact builds), 163 (a different outcome on another toolchain fails
+the job, fixed or recorded as a named exclusion; no per-toolchain `expect:` lines), 164 (the references in both tiers,
+other toolchains nightly and on dispatch), 165 (the guard as structural rules and a profile schema, only the references'
+facts pinned), 166 (a small fix first, the profiles stacked), 167 (the first other toolchains: other ubuntu-26.04 majors,
+ubuntu-24.04, macos-26; there is no `macos-16` label), 168 (GCC builds of cerastes and EDG in this work; not the
+recommendation, a later session). Each but 168 the recommendation.
+
+**Open, from S8** (each with a recommended answer):
+- **169** `ubuntu-24.04-clang18` (EDG emulating clang 18 differs on eight tests, record 0053 item 11): (a,
+  recommended) keep it at `dispatch` as the record of what the clang-18 emulation changes, and revisit at M8's
+  inventory; (b) exclusions for its eight tests and `nightly`; (c) remove it.
+- **170** vlibc's `<stdlib.h>` shim under libc++ 20 and 18 (`reject_coroutine.cpp`'s `incompatible_linkage_specifier`):
+  (a, recommended) a vlibc session (or M4.6, which works in vlibc's headers) finds the cause and fixes the shim, then the
+  clang-20 profiles drop their exclusion; (b) leave the exclusion.
+- **171** Your Mac's Command Line Tools: (a, recommended) update to 27.2 once GitHub's rollout has finished, so the Mac
+  and CI agree to the build; (b) stay on 27.0 (both satisfy the profile; a result that differs is drift).
+- **172** `macos-26`: (a, recommended) after your `profiles=all` dispatch, the next session promotes it to `nightly` if
+  its job is green, or records what differs; (b) leave it at `dispatch`.
+
+**Open, for the next session:** M4.5d2b2's planning decides its own questions (P4418R0's spellings, a strict profile
+mode, borrow against transfer on parameters, static owners at `main`'s end; §3).
 

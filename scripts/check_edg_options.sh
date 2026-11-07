@@ -32,7 +32,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 expected="$work/expected"
 while IFS= read -r name; do
-  out="$(cd "$work" && "$FE" "--$name" </dev/null 2>&1 || true)"
+  out="$({ cd "$work" && "$FE" "--$name" </dev/null 2>&1; } || true)"
   if ! grep -q 'invalid option' <<<"$out"; then printf '    "%s",\n' "$name"; fi
 done < <(extract) > "$expected"
 

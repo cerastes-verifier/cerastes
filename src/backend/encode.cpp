@@ -13088,7 +13088,7 @@ private:
     // end puts the label of an enclosing loop or switch (so it is the C jump), and rejected otherwise.
     void jump_statement(a_statement_ptr s, a_label_ptr l, Out& out)
     {
-        const bool is_break {l->break_label};
+        const bool is_break {l->break_label != 0};
         for (auto it {cx_.targets.rbegin()}; it != cx_.targets.rend(); ++it)
         {
             const bool hit {is_break ? (it->break_label == l && it->is_switch == (l->switch_break_label != 0))

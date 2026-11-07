@@ -23,6 +23,11 @@ endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_EXTENSIONS OFF)  # our sources: strict C++20; edg_fe overrides (EDG builds as gnu++14)
 
+# The warnings of our own targets, all errors.  GCC's -Wdangling-pointer is at level 1 (definite uses), not -Wall's 2:
+# level 2's "may be used" reports pointers that do not exist on a `?:` whose arms build temporaries copied into a
+# stored value (GCC 15 and 16, src/vir/lower.cpp's heap holders and two VIR self-test cases; decision 0053 item 10).
+set(CERASTES_WARNINGS -Wall -Wextra -Werror $<$<CXX_COMPILER_ID:GNU>:-Wdangling-pointer=1>)
+
 include(cmake/EdgFrontEnd.cmake)
 
 add_subdirectory(src/vir)

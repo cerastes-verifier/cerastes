@@ -1,0 +1,157 @@
+# Part of cerastes, under the Apache License v2.0 with LLVM Exceptions.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# The toolchains CI runs (decision 0053), read by scripts/ci_profile.py, which validates every field.
+# One [[profile]] per toolchain:
+#   name          the job name's suffix, the artifact's, and CERASTES_CI_PROFILE
+#   platform      macos or linux (scripts/ci.sh or scripts/ci-linux.sh sets the runner up)
+#   runner        a GitHub label; ci_profile.py knows each one's OS version
+#   cadence       every (pull requests, pushes to main, the nightly run, dispatches), nightly (the nightly run
+#                 and dispatches) or dispatch (only a dispatch that names it, or `all`)
+#   jobs          CERASTES_JOBS (3 on GitHub's macOS runners, 4 on its Linux ones)
+#   clang_major   Apple clang on macOS; clang-N and libc++ N on Linux (the scrape, the native-ok runs and, with
+#                 build = "clang", the build)
+#   gcc_major     the native-ok GCC (Homebrew's gcc@N or gcc on macOS, Ubuntu's gcc-N on Linux), at least 14
+#   build         clang, or gcc (Linux only): the compiler that builds EDG and cerastes (decision 0053 item 10)
+#   macOS only:   macos_major, clt_major (the Command Line Tools), sdk_major
+#   Linux only:   ubuntu_version, glibc (exact: one per Ubuntu release)
+#   exclusions    [[profile.exclusions]] tables: test, optional mode (c23 or c++20), reason.  An excluded test
+#                 still runs and must fail; one that passes fails the run (decision 0053 item 7).  The `every`
+#                 profiles carry none.
+# The jobs assert these majors and record the exact builds (decision 0053 item 1).  A new toolchain starts as
+# `dispatch` and becomes `nightly` once a full check on it is green.  The two references (`every`) are pinned
+# in the harness self-test too: changing one is a reviewed change of both files.
+
+schema = 1
+
+# ---- the references -------------------------------------------------------------------------------------------
+
+[[profile]]
+name = "macos-27"
+platform = "macos"
+runner = "xcode-27"
+cadence = "every"
+jobs = 3
+macos_major = 27
+clt_major = 27
+clang_major = 21
+sdk_major = 27
+gcc_major = 16
+build = "clang"
+
+[[profile]]
+name = "ubuntu-26.04"
+platform = "linux"
+runner = "ubuntu-26.04"
+cadence = "every"
+jobs = 4
+ubuntu_version = "26.04"
+glibc = "2.43"
+clang_major = 21
+gcc_major = 16
+build = "clang"
+
+# ---- other toolchains -----------------------------------------------------------------------------------------
+
+[[profile]]
+name = "ubuntu-26.04-clang20-gcc15"
+platform = "linux"
+runner = "ubuntu-26.04"
+cadence = "nightly"
+jobs = 4
+ubuntu_version = "26.04"
+glibc = "2.43"
+clang_major = 20
+gcc_major = 15
+build = "clang"
+
+[[profile.exclusions]]
+test = "tests/scalar/negative/reject_coroutine.cpp"
+mode = "c++20"
+reason = "with libc++ 20's <coroutine>, vlibc's <stdlib.h> shim redeclares abort, exit, _Exit, malloc, calloc and free with a linkage incompatible with glibc's first declarations (incompatible_linkage_specifier); libc++ 21 and 22 do not (vlibc's to fix, handoff question 170)"
+
+[[profile]]
+name = "ubuntu-26.04-clang22-gcc14"
+platform = "linux"
+runner = "ubuntu-26.04"
+cadence = "nightly"
+jobs = 4
+ubuntu_version = "26.04"
+glibc = "2.43"
+clang_major = 22
+gcc_major = 14
+build = "clang"
+
+[[profile]]
+name = "ubuntu-26.04-gcc15-build"
+platform = "linux"
+runner = "ubuntu-26.04"
+cadence = "nightly"
+jobs = 4
+ubuntu_version = "26.04"
+glibc = "2.43"
+clang_major = 21
+gcc_major = 15
+build = "gcc"
+
+# Ubuntu 24.04's glibc 2.39 and GCC 14, with clang 20 from its archive (noble-updates): EDG emulates clang 20, whose
+# language is clang 21's for every test (ubuntu-26.04-clang20-gcc15), so what differs is the C library.
+[[profile]]
+name = "ubuntu-24.04"
+platform = "linux"
+runner = "ubuntu-24.04"
+cadence = "nightly"
+jobs = 4
+ubuntu_version = "24.04"
+glibc = "2.39"
+clang_major = 20
+gcc_major = 14
+build = "clang"
+
+[[profile.exclusions]]
+test = "tests/scalar/negative/reject_assert_comma_call.c"
+mode = "c23"
+reason = "glibc 2.39's assert is not glibc 2.43's C23 form that the encoder matches (decision 0031 item 5), so the call to __assert_fail is rejected as call_without_contract instead of unsupported_expression; still a rejection"
+
+[[profile.exclusions]]
+test = "tests/vlibc/negative/reject_assert_glibc_callee.c"
+mode = "c23"
+reason = "the test calls glibc 2.43's __assert_single_arg, which glibc 2.39 does not declare (implicit_func_decl)"
+
+[[profile.exclusions]]
+test = "tests/vlibc/negative/reject_assert_glibc_third.c"
+mode = "c23"
+reason = "the test calls glibc 2.43's __assert_single_arg, which glibc 2.39 does not declare (implicit_func_decl)"
+
+[[profile.exclusions]]
+test = "tests/scalar/negative/reject_coroutine.cpp"
+mode = "c++20"
+reason = "with libc++ 20's <coroutine>, vlibc's <stdlib.h> shim redeclares abort, exit, _Exit, malloc, calloc and free with a linkage incompatible with glibc's first declarations (incompatible_linkage_specifier); libc++ 21 and 22 do not (vlibc's to fix, handoff question 170)"
+
+# The image's default clang 18: cerastes builds with it, but EDG emulating clang 18 is another language for some tests
+# (no standard [[assume]], non-constant enumerator values accepted, linkage conflicts between vlibc's shim and
+# clang 18's headers; S8, internal/handoff.md).  Dispatch only, until the owner decides (handoff question 169).
+[[profile]]
+name = "ubuntu-24.04-clang18"
+platform = "linux"
+runner = "ubuntu-24.04"
+cadence = "dispatch"
+jobs = 4
+ubuntu_version = "24.04"
+glibc = "2.39"
+clang_major = 18
+gcc_major = 14
+build = "clang"
+
+[[profile]]
+name = "macos-26"
+platform = "macos"
+runner = "macos-26"
+cadence = "dispatch"
+jobs = 3
+macos_major = 26
+clt_major = 26
+clang_major = 21
+sdk_major = 26
+gcc_major = 15
+build = "clang"

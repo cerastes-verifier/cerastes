@@ -12,7 +12,7 @@ endif()
 add_executable(cerastes-fe main.cpp edg_args.cpp)
 target_link_libraries(cerastes-fe PRIVATE ${CERASTES_FE_LIBS})
 target_compile_features(cerastes-fe PRIVATE cxx_std_20)
-target_compile_options(cerastes-fe PRIVATE -Wall -Wextra -Werror)
+target_compile_options(cerastes-fe PRIVATE ${CERASTES_WARNINGS})
 
 # `cerastes verify` (decision 0011).  The tool locations are fixed at configure time (0011 item 3): scripts/bootstrap.sh
 # passes them once it has found them (it configures twice: the first time without them, to build cerastes-fe).
@@ -43,7 +43,7 @@ if(CERASTES_JAVA AND CERASTES_SILICON_JAR AND CERASTES_Z3_EXE AND CERASTES_CLANG
   target_include_directories(cerastes PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_link_libraries(cerastes PRIVATE ${CERASTES_VERIFY_LIBS})
   target_compile_features(cerastes PRIVATE cxx_std_20)
-  target_compile_options(cerastes PRIVATE -Wall -Wextra -Werror)
+  target_compile_options(cerastes PRIVATE ${CERASTES_WARNINGS})
 else()
   message(STATUS "cerastes verify: tool locations not given (CERASTES_JAVA, CERASTES_SILICON_JAR, "
                  "CERASTES_Z3_EXE, CERASTES_CLANG_VERSION, CERASTES_*_SYS_INCLUDES, CERASTES_EDG_BASE): target `cerastes` not defined")
