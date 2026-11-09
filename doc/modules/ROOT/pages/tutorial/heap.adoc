@@ -132,6 +132,33 @@ The same words appear when the variable is assigned a new allocation while it
 holds one. A variable that is not marked is checked at the end of the function
 only, which is why this chapter's earlier leak is reported at the closing brace.
 
+== An owner that outlives a call
+
+A global can own an allocation too. `cerastes::owning` on a global says that the
+block it points to belongs to it across calls. So a function whose contract
+names the global with `cerastes_owns(g)` receives that block with it, and must give
+back a global that is null or holds a whole block:
+
+[source,c]
+----
+include::example$tutorial/heap_global_owner.c[tag=source]
+----
+
+`main` calls `install` twice: the second call frees the first block before it
+allocates another. `main` then returns while `g` still holds its block. That is not a
+leak: a global owner may keep its block for the whole program. A function that frees
+the block and forgets to reset the global is reported at its return:
+
+[source,c]
+----
+include::example$tutorial/heap_global_owner_error.c[tag=source]
+----
+
+[source,console]
+----
+heap_global_owner_error.c:16: error: permission: returns while owning global `g` does not hold its block: set it to `NULL` after freeing it
+----
+
 == What you have learned
 
 * The result of `malloc` must be tested against `NULL` before it is used.
@@ -141,11 +168,14 @@ only, which is why this chapter's earlier leak is reported at the closing brace.
   `leak`, at the end of the function that loses it.
 * A local marked `CERASTES_OWNING` owns its allocation, and a path that leaves
   its scope while it still holds the block is a `leak` at that path.
+* A global marked `CERASTES_OWNING` owns its allocation across calls: a contract's
+  `cerastes_owns(g)` carries the block with it, and `main` may end while it holds one.
 
 That is the end of the tutorial for this version. The
 xref:memory.adoc#heap[reference on allocated memory] covers `calloc`, loops
 over allocations, the attribute `cerastes::owning`
-(xref:memory.adoc#owning-locals[owning locals] in full) and
+(xref:memory.adoc#owning-locals[owning locals] and
+xref:memory.adoc#owning-globals[owning globals] in full) and
 xref:memory.adoc#vlibc-allocator[vlibc's own allocator] (`vlibc_malloc` and
 `vlibc_free`, a heap of its own whose blocks only `vlibc_free` frees), and
 xref:memory.adoc#not-yet[What is not supported yet] says what is still

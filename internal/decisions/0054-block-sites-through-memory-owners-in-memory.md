@@ -1,9 +1,13 @@
 # 0054 — Block sites through memory, owners in memory (M4.5d2b2a)
 
-- **Status:** draft (2026-11-09, M4.5d2b2a), written before code (invariant 6). Revised after spike S39
+- **Status:** accepted (2026-11-09, M4.5d2b2a), written before code (invariant 6). Revised after spike S39
   (`build/m4.5d2b2a/s39/README.md`) and audit round 1 (Opus; blocking B1 bodiless sites through memory, B2 the initial
   value of an owning global, B3 the carrier guards, settled by S39 part 2; should-fix items 4–14 and notes 16–20
-  taken in items 2–8 and 10; the re-audit resolved B1–B3 and its S1, S2 and notes are taken in item 3). Owner
+  taken in items 2–8 and 10; the re-audit resolved B1–B3 and its S1, S2 and notes are taken in item 3; audit round 2 on
+  Part A, B1 and items 3, 9, 10 taken in items 2 and 5; items 3(c) and 4 state what Part B built; audit round 2 on Part
+  B, B1 and N1–N3 taken in items 3 and 4; audit round 2 on Parts C and D: B1, B2 and S1–S7 fixed or tested, N1 and N3 in
+  items 5 and 3). Owner questions
+  184 and 185 (tests). Owner
   questions during the session: 180, 181 and 182. Owner decisions are from M4.5d2b2a's planning, 2026-11-09; plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`;
   handoff questions 173–179, each the recommendation:
   - **173:** M4.5d2b2 is two sessions. This record is d2b2a's; d2b2b takes owning fields and P4418R0.
@@ -98,6 +102,14 @@ Written block invariants and owners in memory use the same carriers.
        is a `permission` error: "the contract of `f` returns the block of `*pp` without saying it is the one its
        `requires` took (write `*pp == old(*pp)`)". Each pair of `ensures` block sites, one of which loads, gets 0045
        item 5's distinctness assert, as an assert and not a fact.
+     - **The partner's guard** (audit round 2, B1). The tie also requires the partner's guard: `prior ==> (g_ens ==>
+       (g_partner_pre && E_post == E_partner_pre))`. A site through a load has no at-atom partner row, because its
+       guards read two states, so without this a contract whose `requires` took nothing (its guard false) could hand
+       a block back. The auditor's probe verified a double free after such a call.
+     - **Distinct partners** (audit round 2, item 3). `f__wf` receives the pairwise separation of the `requires`
+       sites, which every caller's rows prove. Two borrowed, tied sites (`*pp`, `*qq`) or a formal beside a load are
+       then distinct on return. A fresh result beside a tied load cannot be proved distinct, so such a contract is
+       reported (sound; documented).
      - **Partnerless sites.** A partnerless site on a place reached from a formal or a global stays rejected
        (`unsupported_annotation`, naming M6's contract manifest; 0052 item 2a, which named formals only).
      - **The result.** Sites through the result keep 2a's allow-list (fresh results only).
@@ -133,7 +145,8 @@ Written block invariants and owners in memory use the same carriers.
      with 0047 item 10's token place. Because the place is keyed on its entry snapshot, a loop that replaces `*pp`'s
      block hits `heap_loop_replace_false_alarm.c`'s limit (audit note 18); a written invariant (item 4) is the way out.
      The back-edge leak trigger of 0047 item 7 also counts calls whose callee gives a site through a load or carries a
-     deep atom of item 5 (audit note 17).
+     deep atom of item 5 (audit note 17). For the same reason, a loop that calls a borrower tied on `*pp` needs `*pp ==
+     keep` in its invariant: the call havocs the cell (audit round 2, note 9; documented).
    - **The dormant holder stays dormant** (S39 (h)). The holder `loop_places` builds for a formal with a block site is
      never reached today, because `fa.sites` holds no block site. The local copy's heap place already gives the same
      case splits. `heap_loop_param_block.c`, `heap_loop_call_borrow.c` and five probes verify today. Activating the
@@ -179,7 +192,9 @@ Written block invariants and owners in memory use the same carriers.
        - the invariant `o == ev_o || o == null || o == x_1 || …`.
 
        An owner with any other written value gets no value set: an allocation, a call's result, an owner the loop
-       writes, an expression, or a local declared in the body. Without the value set, an owner's value after the loop
+       writes, an expression, or a local declared in the body. As built, the value set is emitted only in a loop
+       that has another carrier or heap place. A lone owner written only with `NULL` needs none, and keeping it
+       out leaves such loops' Viper unchanged (`owning_loop_free_on_last.c`, the doc example `owning_loop_reset.c`). Without the value set, an owner's value after the loop
        is unconstrained. S39 `d1`: the loop verifies, but the return row fails. The re-audit reproduced the same on
        `owning_loop_stops_shared` (`a = NULL;` is not a sharing write, and its value set is needed).
      - **The sharing test is syntactic** (re-audit note 5). `int *t = a; b = t;` is not a sharing write, so it keeps the
@@ -219,7 +234,25 @@ Written block invariants and owners in memory use the same carriers.
    - **Soundness.** Every piece is an invariant clause or a row that Viper checks: a guard, an exclusivity clause, a
      value set, or a flag clause. The ghosts are entry snapshots of real values and permissions. The exemption covers
      only carried tokens, after the ending rows have ended every failing path (audit note 15).
-   - **The cost** is O(n²) pair clauses in the number of carriers. A test with three owners in one loop is timed in
+   - **Limits** (audit round 2 on Part B, N2; documented, sound).
+     - The `owning_loop_becomes_shared` body inside an outer loop is a false alarm: a place shared with an owner at
+       the inner loop's entry stays off (re-audit S2).
+     - `b = a; continue;` is not a sharing write the syntactic test sees, which gives a false alarm.
+     - `owning_loop_stops_shared_drop.c`'s first expected line is a false alarm pinned by question 185.
+     - A block shared between an owning global and an owning local inside a loop is a pair-row `permission` false
+       alarm (audit round 2 on Part C, N3).
+     - **Framing an owner** (the re-audit of round 2, N2). An owner in memory is framed out of a loop only when no
+       callee in the loop has an atom on a place of the owner's cell type (`owns(*pg)` for an `int **pg`). Otherwise
+       its ghost is updated after each call, so the leak exemption never reads a cell the function lost (an exit 3
+       before the fix). The price is a false `leak` for an owning global reached only through an alias invariant whose
+       callee frees it before a `break` (probe t5).
+     - **Splits after a `break`** (the re-audit's N3). The written-block case splits after a loop with a `break` are
+       guarded by the current permissions of the fields they read. A split assumes nothing, so a guarded-off split
+       loses nothing.
+   - **The cost** is O(n²) pair clauses in the number of carriers. Two written sites through loads over parameter
+     places are the expensive case: about 33 s for the loop alone and about 148 s with one drop in its body, after the
+     site reads were hoisted into temps before the rows and the `forperm` (question 186; for M4.8's cost work with
+     question 66). The tests pin the cheaper shapes. A test with three owners in one loop is timed in
      Part B.
 
 4. **Written `owns_block` in loop invariants** (0052 item 6(a); audit S10).
@@ -230,8 +263,18 @@ Written block invariants and owners in memory use the same carriers.
      (0052 item 3).
    - **Rows.** Entry and back-edge ending rows, written `if (!c) { assert false }`, report a missing block as
      `permission` at the loop, never as Silicon's own invariant check.
-   - **Guards.** NOTAUTO guards keep it apart from the heap, parameter and cell places (0040 item 5).
-   - **Exemption.** Its token term joins the back-edge leak exemption (0047 item 7).
+   - **Guards** (as built, Part B). The carrier has no NOTAUTO guards: Silicon cannot decide a guard over a loaded
+     pointer, and `free(s->q)` then failed. Instead, pair rows at entry and at the back edge separate the site from
+     every place, owner and other site, and the invariant states the matching disequalities. These invariant clauses
+     are checked like any other. A site that shares a cell with a place is therefore reported (`permission`) rather
+     than switched off, which costs completeness and not soundness.
+   - **The mode.** The carrier is plain, as every block site in a contract is (item 2, "The mode"): it claims the cells'
+     flags, not just `flag ==> range`. A loop over a block that may hold no value states a marked pointer instead.
+   - **Exemption and the leak row** (audit round 2 on Part B, B1). Its token term joins the back-edge leak exemption
+     (0047 item 7). The back-edge `forperm` row is emitted in every loop that has a written site, or a current-value
+     carrier of an owner in memory, not only where the loop may allocate. Such a carrier is keyed on the current
+     value, so a body that repoints or nulls the pointer leaves the old token in the body's state, and the invariant
+     would drop it with no row. The auditor's probes verified real leaks before the fix.
    - **Merging.** A written site on an owning loop variable's value merges with that variable's carrier: one carrier per
      block. The merged carrier keeps the written site's meaning, so it is **not** guarded against earlier carriers
      (audit item 7). The current-value guard would remove exactly the distinctness the user wrote.
@@ -273,8 +316,11 @@ Written block invariants and owners in memory use the same carriers.
 
      **Merging and allocators.** The deep atom names the platform's allocator, as `owning` does (0052 item 7, question
      153). For a written `owns(g)`, the user may write the deep clause with `cerastes_owns_vlibc_block(g)` instead, and
-     the encoder merges it. An owning `static` local, whose atom is implicit, holds only a platform block: a vlibc
-     block stored in it is `permission` at the store (the value rule). The encoder appends the deep clause after each
+     the encoder merges it. An owning `static` local, whose atom is implicit, holds only a platform block. As built
+     (audit round 2 on Part C, N1), the value rule at the store does not check the allocator. A vlibc block stored
+     in it is reported at the function's return, by the deep atom's return row, which names the platform's token
+     value. In `main`, which returns nothing through the atom, nothing is reported: the static-owner exemption
+     (question 174) covers any block the owner holds. The encoder appends the deep clause after each
      written `owns(g)` before `finish_atoms` reads the list, so its duplicate and "beside" rules see it. The implicit
      clauses of `static` locals are paired by construction: in both lists, except in a `noreturn` function, which has
      only the `requires` site.
@@ -283,7 +329,9 @@ Written block invariants and owners in memory use the same carriers.
      `*g` needs `reads(*g)` or `owns(*g)` after it (0045). `owns(*g)` beside the deep atom names a cell of the block,
      so it is rejected as "beside" (0047 item 4).
    - **In the body:**
-     - **Ghosts.** The ghosts are those of 0052 item 3: `held_g` and `tv_g`. At method entry, in a function whose
+     - **Ghosts.** The ghost is 0052 item 3's `held_g` (as built, no `tv_g`: nothing reads it for an owner in memory).
+       A loop that does not carry the owner leaves `held_g` in its frame: the body does not update it (audit round 2
+       on Part C, S1). At method entry, in a function whose
        `requires` holds the deep atom, `held_g := g != null`, and `tv_g` is read from the token, both under the deep
        atom. In a function that holds `g` only through `reads(g)`, or not at all, `held_g := false`.
      - **Stores.** At every store to `g` by name, including one inside an expression, the value rule (`permission`) and
@@ -312,14 +360,29 @@ Written block invariants and owners in memory use the same carriers.
      holds the cell, and a consuming callee clears it (above), so the read is framed. A block reachable only from a
      non-owning global is still a `leak` at `main`'s end. Every other function returns the block through its `ensures`
      atom on `g`, or frees it.
-   - **Loops.** An owning global the function holds is a loop place (0041 item 10). Its block is carried by the current
-     value (item 3's carrier), with `held_g` loop-carried.
+   - **Loops** (as built). An owning global or `static` local the function holds, and that the loop names or whose
+     `owns(g)` a callee in the loop takes, gets a synthetic loop site `g == NULL || owns_block(g)`. Item 4's carrier
+     then gives it its rows, its exemption term and its pair rows, with the invariant `held_g == (g != NULL)` and its
+     entry and back-edge rows. A site the user wrote on the same pointer takes precedence. A loop that does not touch
+     the owner leaves it in the frame. An owning address-taken local that the loop names, or may reach through a
+     store or load of its own pointer type, gets the same treatment. One that the loop reaches only through a pointer
+     hidden elsewhere stays in the frame, so a write to it there is `permission` (conservative).
+   - **Flags in a synthetic site.** A synthetic site does not claim its cells' flags, since a block allocated in the
+     loop has no value until it is written. A ghost `wef` per site keeps them: it starts as the entry flag when the
+     block is held at entry, and otherwise as "the loop stores a value of the pointee type, or a callee in the loop takes
+     the owner's atom" (audit round 2 on Part C, S2). The invariant `known &&
+     wef ==> flag`, with an `uninitialized` back-edge row, is checked like every invariant. So a loop that starts from
+     `NULL` and stores into what it allocates must initialize it. A loop that stores nothing and then reads `*g` after
+     the loop gets `uninitialized` at that read, which is the heuristic's price. A synthetic site names the platform's allocator, so a loop over an
+     owner that holds a vlibc block is a false alarm (conservative; the re-audit).
    - **Marked globals and `static` locals** (`ref_to_uninit`, amends 0052 items 4 and 8).
      - In the default mode the marker documents intent, and the Viper does not change.
      - Under `--strict-init`, a store to a marked global follows 0052 item 4's rule for a marked local. It may receive
        only a null pointer, the result of a `ref_to_uninit` call, `&x` of an `uninit` local, or another marked
        variable or parameter.
      - Its initializer must be absent or null.
+     - A store to a marked global through an alias is not checked under `--strict-init` (audit round 2, note 10). This is
+       the same gap 0052 item 4 leaves for address-taken marked locals, and the Viper does not change.
 
 6. **Owning address-taken locals** (amends 0052 items 3 and 8; S39 (f) verifies the shape and its three twins).
    - The ghosts and rows of 0052 item 3 apply, with the value read from the local's cell (0032).
@@ -329,10 +392,12 @@ Written block invariants and owners in memory use the same carriers.
      - With `owns(*pp)` alone, the callee may change `v`. After the call, `held_v := held_v && v != null && perm(tok(block_of(v))) > none`, and
        `v`'s ending rows check its new value.
      - With `owns(*pp) && (*pp == NULL || owns_block(*pp))` in both lists, the callee borrows the block (item 2).
-     - With an `ensures` site on `*pp` alone, the callee gives a block (item 2), and `v` owns it: after the call,
-       `held_v := v != null && offset_of(v) == 0 && perm(tok(block_of(v))) == write`, as item 5 does for `owns(g)`
-       (audit item 11). Then `tv_v` is read from the token. The `&&` form above would leave `held_v` false and report
-       the received block at a later row.
+     - With an `ensures` site on `*pp` (given or borrowed), the callee hands a block back through `v`, and `v` owns
+       it. As built: `held_v := held_v || (v != null && offset_of(v) == 0 && perm(tok(block_of(v))) == write)`, then
+       `tv_v` is read from the token (audit item 11). It is an `||` rather than the plain assignment, so `v = NULL;
+       renew(&v);` still reports `v`'s exit row at the return (`owning_address_taken_renew_leak.c`). A `held_v` left
+       true while `v` holds nothing can only make an ending row fail, which is a false alarm and never a wrong
+       verdict. The `&&` form above would leave `held_v` false and report the received block at a later row.
    - **Positions.** A callee given `&v` with `owns(*pp)` alone that sets `*pp = NULL` while `v` holds a block is
      reported `leak` at the caller's end label, not at the call (S39 `f2x`). The message names the block, not the call.
    - **The IL** (P75 (e)). `&v` stays an `eok_address_of`, while `&g` folds to a `ck_address` constant. A store `*pp = x`
@@ -358,7 +423,8 @@ Written block invariants and owners in memory use the same carriers.
    - the carrier ghosts of item 3 and their rows;
    - `main`'s exemption terms, admitted only as `held_g && t == loc(block_of(<the global's cell value>), −1)`, and only
      for a `GB_` block the program declares owning. The lint reads only Viper (audit note 19), so `program_start` carries
-     a tag line `// cerastes:owning-global GB_<name>` per owning global and owning `static` local. The lint pins the tags
+     a tag line `// cerastes:owning-global GB_<name>` per owning global and owning `static` local, printed right after the
+     method's head (`LMethod::tags`). The lint pins the tags
      against the `GB_` declarations, and admits an exemption term only for a tagged block.
 
 9. **Categories:** none new. `leak` and `permission` gain the messages of items 5 and 6.
@@ -383,4 +449,14 @@ Written block invariants and owners in memory use the same carriers.
 
 ## Consequences
 
-*(Written when the record is accepted.)*
+- **Handing a block over through memory.** A function can hand a block to its caller through `*pp`, a member or a
+  global, take one, or borrow one. Bodiless contracts must tie a borrowed block to the one they took.
+- **Owners in memory.** A global, a `static` local or an address-taken local can own a block across calls. Its
+  ownership travels in `owns(g)`, its stores are checked where they happen, and `main` may end while it holds its block.
+- **Loops.** A loop can say which pointer holds which block (`p == NULL || owns_block(p)` in its invariant). Owners
+  that share or hand over blocks inside a loop are tracked by their current values, and d2b1's four pinned false
+  alarms are gone.
+- **Viper.** Every existing program's Viper is unchanged except the ten owner-loop tests whose carriers changed shape,
+  each with its old outcome.
+- **What is left for M4.5d2b2b:** owning fields and P4418R0's rest (`not_invalidating`, `--strict-owner`, the
+  `[[owner]]` mapping).

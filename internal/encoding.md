@@ -616,6 +616,79 @@ Vlibc`), and a contract that names one makes the program a vlibc heap program. `
 block site (6 (d)). A pointer argument's liveness use is registered at the argument's own place, so `two((free(p), 0), p)`
 is `unsequenced` (6 (e)). Cut to M4.5d2b2: a written `owns_block` in a loop invariant (6 (a)), rejected by `spec_block_atom`.
 
+**Block sites through memory, owners in memory, block carriers in loops (M4.5d2b2a, decision 0054).** The Viper
+shapes are pinned by `tests/viper-smoke/memory/s39_*` (spike S39) and the VIR self-test cases `hbl_*`, `olp_*`, `owg_*`.
+
+*Block sites through memory (item 2).*
+- **Keys.** `atom_place` no longer special-cases `OwnsBlock`: a block site's place is the place of its pointer value,
+  `*pp` → `(pp, [load], [])` (the key of `owns(**pp)`), `g` → `(global, [load], [])`. `block_key` is gone. Consumers use
+  `block_formal(s)` (a formal's index only when the pointer is the parameter itself), `block_is_result(s)`, `site_key`,
+  `same_place` and `site_root`. `block_ptr` lowers through `site_root` in every mode. In the return state,
+  `block_ptr_ret` serves `leak_exemption` and `returned_owners`. `block_arg_text` replaces `e.args[key]` in call
+  messages.
+- **Duplicates and "beside".** `finish_atoms` and `check_program`'s `block_atoms` compare whole keys, so
+  `owns(*pp) && owns_block(*pp)` is a cell and its block, while `owns(**pp) && owns_block(*pp)` is "beside".
+- **Snapshots.** `entry_snapshots` takes `eb_N` for `requires` sites through loads. The sequencing registration takes
+  0045's pre-call snapshot. Loops treat such a site as an automatic place with a token place.
+- **Bodiless contracts.** `f__wf` asserts the tie `prior && clause ==> (g_ens ==> (g_partner && E_post ==
+  E_partner_pre))` for each `ensures` site that loads or rests on a global. The at-atom partner row is skipped for
+  sites with `via`, whose guards read two states. The pairwise distinctness assert is skipped for pairs tied to distinct
+  `requires` partners.
+
+*Loop carriers (item 3).* `LoopOwner` carries:
+- `pairs` (`OwnerPair{snap, kind}`), `written`, `share`, `unmentioned`, `hs`, `rank`, `ev`, `vals`, `valset` and
+  `merged`;
+- `carrier_guard`, which is `!cur` (current state) for owner–owner pairs a loop writes, `!snap && !cur` for a heap place
+  paired with a written owner, and `!snap` otherwise;
+- the exclusivity clause `snap || !cur` with its back-edge row, which replaces 0052's pair row, except for pairs with a
+  syntactic sharing write (`owner_values`);
+- value sets `o == ev_o || o == null || o == x…`, emitted only in a loop that has another carrier or place;
+- unmentioned owners, carried under `held_v == hs_v` with the row `hs_v ==> held_v`;
+- the flag clause on `hb_w` (`owner_flag_rows`).
+
+*Written and synthetic block sites (items 4, 5, 6).*
+- **Written sites.** `loop_atoms` lists written `owns_block` sites, and `loop_block_atoms` lists them alone.
+  `WBlock`/`resolve_blocks` build a whole-block carrier keyed on the current value, plain mode (flags claimed). Its
+  entry and back-edge rows come from `block_rows`, and pair rows separate it from sites, owners and places (no NOTAUTO
+  guards).
+- **Merges and takeovers.** A site on an owner merges with the owner's carrier. A site through a load on a parameter
+  copy takes over the derived `requires` place (`wsite_keys_`, `wsite_vars_`).
+- **The back-edge `forperm`.** It is emitted when `loop_may_allocate(s) || !wbs.empty()`. The site pointers and guards
+  are hoisted into temps before it.
+- **Synthetic sites.** `owner_loop_sites` adds a synthetic site `x == NULL || owns_block(x)` for each held owning
+  global or `static` local the loop names (or whose `owns(g)` a callee in it takes), and for each owning address-taken
+  local the loop names or may reach through a store or load of its type. Each comes with `held_x == (x != NULL)`. Its
+  flags are kept by `wef_*` ghosts: `known && wef ==> flag`, with an `uninitialized` back-edge row.
+
+*Owners in memory (items 5, 6).*
+- **Owning globals.** `Global::owning` and `Global::ref_to_uninit` are set by the encoder's `read_variable_markers`
+  (per-declaration lists from `il_query`'s `variable_secondary_attrs`). `apply_owning_globals` joins `owns(g)` with
+  `g == NULL || owns_block(g)` as one conjunct, and has an internal-error fallback. `add_static_local_atoms` appends the
+  deep clause after a `static` local's implicit atom.
+- **Ghosts.** `Fn::gowners` declares `held_GB_x` in every method of a program with an owning global; there is no `tv_`
+  ghost for owners in memory (only owning automatic locals keep `tv_`, which the loop code reads). `main` starts with
+  `held` false. Another function starts with `held := cell != null` under a deep `requires` site. `is_heap_program`
+  counts owning globals. An owner that a loop does not carry is framed out of it (`framed_ghosts_`, `FramedScope`):
+  `held_updates` skips its ghost in the body. A synthetic site's `wef` also starts true when a callee in the loop
+  takes the owner's atom (`callee_takes_owner`). Written-block case splits (`bws`) stand after the place snapshots
+  (`snap_mark`).
+- **Rows at stores.** `global_owner_rows` writes the leak row and the value rule at stores by name (`Store`, `StoreE`).
+  There are no rows for stores through aliases.
+- **After calls.** `held := held && perm(cell) > none && cell != null && perm(tok) > none`, or `held := cell != null`
+  when the callee's `ensures` has `owns(g)`.
+- **`main` and `program_start`.** `main`'s leak exemption gains `held_GB && t == loc(block_of(cell), -1)`.
+  `program_start` prints `// cerastes:owning-global GB_x` (`LMethod::tags`), which the lint requires for every
+  exemption term.
+- **Address-taken owners.** These read `owner_value` from the cell, through `owning_rows`/`owning_after` at
+  `write_cell`, `cell_write` and owner writes, with guarded `if (recv == v)` rows at stores through a `T**`. After a
+  callee that hands a block back through `*pp`, `held_v := held_v || (v != null && offset_of(v) == 0 && perm(tok) ==
+  write)`.
+
+*The leaf cover (item 7).* `cov_of` covers an atom on a scalar leaf of a `static` struct through its implicit `owns(s)`,
+over the leaves of the atom's pointee type: `cov := res == leaf_0 || …`. Value facts and permissions stand under `!cov`
+only for leaf covers. A contract read of `*res` after a leaf-covered atom is routed through the covering leaf when two
+or more leaves of the type exist.
+
 ## 4. Viper shape
 
 ```

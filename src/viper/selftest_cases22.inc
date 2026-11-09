@@ -490,6 +490,16 @@ void define_owning_loops_audit2()
     {
         return k.num(k.i32, v);
     };
+    auto notnull = [](Kit& k, const Var* p)
+    {
+        return k.ne(k.pn(p), k.nul(k.ptr(k.i32)));
+    };
+    auto owning_local = [](Kit& k, Function* f, const char* name)
+    {
+        Var* v {k.local(f, name, k.ptr(k.i32))};
+        v->owning = true;
+        return v;
+    };
     // ======== audit round 2 (M4.5d2b1): partners of block sites, given liveness, pure rows, owners assigned in
     // expressions, parked formals ========
     auto FP = [](Kit& k, Function* f, int i)
@@ -791,21 +801,164 @@ void define_owning_loops_audit2()
         // the leak row after the end label, or the owner's exit row
         return Built {bs->end_loc, via_owner ? fb->end_loc : f->end_loc};
     };
+    // Decision 0054 item 3: the carriers are keyed by the CURRENT state, so the block that becomes shared inside the loop is carried by the earlier carrier
+    // (the pinned false alarm of M4.5d2b1 verifies): the guard `!cur`, the exclusivity clause `snap || !cur` (none with a sharing write) and the value set
+    // `b == ev_b || b == NULL || b == a`.
     lc("olp_becomes_shared_owner",
-       "an owner that was NULL at the entry takes another owner's block in the loop: the pair row at the back edge fails (permission)",
+       "an owner that was NULL at the entry takes another owner's block in the loop: the current-state carriers hand it to the earlier one (verifies)",
        [=](Kit& k)
        {
-           const Built b {shared(k, true)};
-           k.fail_only("permission", b.at, 10U, 3U);
-           k.fail_only("leak", b.fn_end, 2U, 0U); // the exit row of b fails (a still holds the block b took)
+           shared(k, true);
        });
     lc("olp_becomes_shared_place",
-       "an owner that was NULL at the entry takes the block of a non-owning pointer the loop uses: the pair row names the pointer (permission)",
+       "an owner that was NULL at the entry takes the block of a non-owning pointer the loop uses: the place is switched off where it is the owner's; the loop may end with v NULL, so w's block leaks at the end unless the invariant says v != NULL (question 180)",
        [=](Kit& k)
        {
            const Built b {shared(k, false)};
-           k.fail_only("permission", b.at, 9U, 2U);
            k.fail("leak", b.fn_end);
+       });
+
+    // void f() { owning int *a = malloc(); if (a == NULL) return; *a = 0; owning int *b = a; int i = 0;
+    //   while (i < 3) { if (a != NULL) { a = NULL; } i++; } [free(b);] }
+    // a is written (NULL only: the value set), b is not named by the loop and is a full carrier guarded by `held_b`.
+    // mode 0: verifies (b is freed after the loop); 1: b is not freed: the block is still held at the end (leak at the closing brace)
+    const auto stops_shared = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Var* a {owning_local(k, f, "a")};
+        Var* b {owning_local(k, f, "b")};
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* bs {
+            k.blkc({k.iff(notnull(k, a), k.blk({k.asg(a, k.nul(PT(k)))})), k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))}, bs)};
+        std::vector<const Stmt*> top {
+            k.decl(a, k.call(m, {})),    k.iff(k.eq(k.pn(a), k.nul(PT(k))), k.blk({k.ret(nullptr)})),
+            k.store(k.pn(a), N(k, "0")), k.decl(b, k.pn(a)),
+            k.decl(i, N(k, "0")),        lp};
+        if (mode == 0)
+        {
+            top.push_back(k.es(k.call(fr, {k.pn(b)})));
+        }
+        const Stmt* fb {k.blkc(top)};
+        f->body = fb;
+        k.done(f);
+        return fb->end_loc;
+    };
+    lc("olp_stops_shared",
+       "two owners of one block, one lets go in the loop: the remaining carrier keeps the block, freed through b after it",
+       [=](Kit& k)
+       {
+           stops_shared(k, 0);
+       });
+    lc("olp_stops_shared_not_freed", "the same without the free of b: the block is still held at the end (leak)",
+       [=](Kit& k)
+       {
+           const SrcLoc end {stops_shared(k, 1)};
+           k.fail_only("leak", end, 2U, 0U);
+           k.fail_only("leak", end, 2U, 1U);
+       });
+
+    // void f() { owning int *a = malloc(); if (a == NULL) return; *a = 0; int *al = a; free(al); int i = 0; while (i < 3) { g(); i++; } }
+    // a is freed through an alias before the loop and left non-null (held_a is false): the loop does not newly fail at its entry
+    lc("olp_freed_alias_call",
+       "an owner freed through an alias before a loop with a call and left non-null: a full carrier guarded by held_a, nothing is held at the exit",
+       [=](Kit& k)
+       {
+           Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+           Function* fr {heap_free_view(k, k.i32)};
+           Function* g {k.fn("g", k.vd)};
+           g->body = k.blkc({});
+           k.done(g);
+           Function* f {k.fn("f", k.vd)};
+           Var* a {owning_local(k, f, "a")};
+           Var* al {k.local(f, "al", PT(k))};
+           Var* i {k.local(f, "i", k.i32)};
+           const Stmt* bs {k.blkc({k.es(k.call(g, {})), k.asg(i, k.add(k.v(i), N(k, "1")))})};
+           const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                                 {k.cl(k.sub(N(k, "3"), k.v(i)))}, bs)};
+           f->body = k.blkc({k.decl(a, k.call(m, {})), k.iff(k.eq(k.pn(a), k.nul(PT(k))), k.blk({k.ret(nullptr)})),
+                             k.store(k.pn(a), N(k, "0")), k.decl(al, k.pn(a)), k.es(k.call(fr, {k.pn(al)})),
+                             k.decl(i, N(k, "0")), lp});
+           k.done(f);
+       });
+
+    // Decision 0054 item 4: a written `owns_block` site in an invariant is a whole-block carrier keyed on the pointer's current value.
+    // void f() { int *p = malloc(); if (p == NULL) return; *p = 0; int *q = malloc(); if (q == NULL) { free(p); return; } *q = 1; int i = 0;
+    //   while (i < 3) INV { [swap p and q through t | q = p]; i++; } free(p); free(q); }
+    // INV: (p == NULL || owns_block(p)) && (q == NULL || owns_block(q))
+    // mode 0: the swap (verifies); 1: q = p (the body makes both name one block: the pair row at the back edge, permission at the body's end);
+    // 2: q = p before the loop (the pair row at the entry, permission at the atom)
+    const auto site_pair = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", PT(k))};
+        Var* q {k.local(f, "q", PT(k))};
+        Var* t {k.local(f, "t", PT(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        auto site = [&](const Var* v)
+        {
+            return k.b.atom(AtomKind::OwnsBlock, k.pn(v), -1, k.at());
+        };
+        const Expr* sp {site(p)};
+        const Expr* sq {site(q)};
+        std::vector<const Stmt*> body;
+        if (mode == 0)
+        {
+            body = {k.decl(t, k.pn(p)), k.asg(p, k.pn(q)), k.asg(q, k.pn(t))};
+        }
+        else if (mode == 1)
+        {
+            body = {k.asg(q, k.pn(p))};
+        }
+        body.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
+        const Stmt* bs {k.blkc(body)};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")),
+                              {k.cl(k.range(k.v(i), k.i32, "0", "3")), k.cl(k.lor(k.eq(k.pn(p), k.nul(PT(k))), sp)),
+                               k.cl(k.lor(k.eq(k.pn(q), k.nul(PT(k))), sq))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))}, bs)};
+        std::vector<const Stmt*> top {k.decl(p, k.call(m, {})),
+                                      k.iff(k.eq(k.pn(p), k.nul(PT(k))), k.blk({k.ret(nullptr)})),
+                                      k.store(k.pn(p), N(k, "0")), k.decl(q, k.call(m, {}))};
+        top.push_back(k.iff(k.eq(k.pn(q), k.nul(PT(k))), k.blk({k.es(k.call(fr, {k.pn(p)})), k.ret(nullptr)})));
+        top.push_back(k.store(k.pn(q), N(k, "1")));
+        if (mode == 2)
+        {
+            top.push_back(k.es(k.call(fr, {k.pn(q)})));
+            top.push_back(k.asg(q, k.pn(p)));
+        }
+        top.push_back(k.decl(i, N(k, "0")));
+        top.push_back(lp);
+        top.push_back(k.es(k.call(fr, {k.pn(p)})));
+        if (mode != 2)
+        {
+            top.push_back(k.es(k.call(fr, {k.pn(q)})));
+        }
+        f->body = k.blkc(top);
+        k.done(f);
+        return mode == 1 ? bs->end_loc : sq->loc;
+    };
+    lc("olp_site_swap",
+       "two written owns_block sites in the invariant, the swap through a temporary: each site's block is carried at its current value",
+       [=](Kit& k)
+       {
+           site_pair(k, 0);
+       });
+    lc("olp_site_collapse",
+       "the body makes both pointers name one block: the pair row fails at the back edge (permission)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", site_pair(k, 1), 11U, 10U);
+       });
+    lc("olp_site_shared_entry",
+       "two sites that name one block at the entry: the pair row fails at the atom (permission)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", site_pair(k, 2), 6U, 5U);
        });
 }
 

@@ -846,9 +846,22 @@ is a leak too, reported at the end of the loop's body.
 
 *Loops.* A loop may use an allocation made before it, through a pointer variable
 declared before the loop: the loop keeps the allocation as it found it, and may
-read, write or free it. Two pointers to allocations that the loop swaps are not
-supported yet: after the loop nothing says which variable holds which
-allocation, and the program is reported (planned for the next version).
+read, write or free it. When the loop moves allocations between pointers (two
+pointers swapped, a pointer given a new allocation), the allocation is no longer
+the one it found, and the loop's invariant says which pointer holds one:
+`CERASTES_INVARIANT(p == NULL || cerastes_owns_block(p))` keeps the whole
+allocation `p` points to, whichever it is, at the start of every iteration. Two
+such pointers in one invariant name two different allocations.
+
+[source,c]
+----
+include::example$memory/heap_loop_swap_invariant.c[tag=source]
+----
+
+Without the invariant, the swap is reported: after the loop nothing says which
+variable holds which allocation. An owning local
+(<<owning-locals,below>>) needs no such invariant, since the loop keeps its block
+by its value.
 
 *Handing an allocation over.* `cerastes_owns_block(p)` (`cerastes::owns_block`
 in pass:[C++]) in a contract is ownership of the whole allocation `p` points to
@@ -864,11 +877,33 @@ function says the caller receives an object without a value, as from `malloc`:
 include::example$memory/heap_cell.c[tag=source]
 ----
 
-In this version a function can hand over only the allocation of its result, or
-the allocation a parameter points to: `owns_block` of an object reached through
-another pointer (`+*pp+`, `p->next`) or of a global, and owning globals and
-structure members, are planned for the next version. A local that owns an
-allocation is <<owning-locals,an owning local>>.
+[#blocks-through-memory]
+*Through a pointer or a global.* The pointer that `cerastes_owns_block` takes may
+also be read from memory:
+
+* `cerastes_owns_block(*pp)` is the allocation `+*pp+` points to the start of;
+* `cerastes_owns_block(p->next)` is the one a member points to;
+* `cerastes_owns_block(g)` is the one a global pointer points to.
+
+The pointer itself must be owned or read earlier in the same clause list
+(`cerastes_owns(*pp) && cerastes_owns_block(*pp)`), as every read in a contract
+must. In a `requires` it names the allocation the pointer holds when the function
+is called; in an `ensures`, the one it holds when the function returns. So a
+function can allocate into `+*pp+` and hand the allocation to its caller:
+
+[source,c]
+----
+include::example$memory/heap_block_through_pointer.c[tag=source]
+----
+
+Nothing checks what a function without a body in the program returns. So when
+such a function borrows an allocation through a pointer or a global, its contract
+must say that it gives back the same one (`+*pp == cerastes_old(*pp)+`). A function
+without a body that takes or hands over an allocation through a pointer or a
+global is rejected: that needs the contracts of other translation units, which
+are planned. A local that owns an allocation is
+<<owning-locals,an owning local>>, and a global that does is
+<<owning-globals,an owning global>>.
 
 [#vlibc-allocator]
 *vlibc's allocator.* vlibc also has an allocator of its own,
@@ -1049,9 +1084,68 @@ allocator, so a vlibc loop may start from a `NULL` owner; an owner that enters
 the loop with a block of the other allocator is `permission` at the loop's entry,
 even when the loop would free it before the first assignment.
 
-An owner that is a global, a `static` local, a local whose address is taken or a
-structure's member is planned for the next version
+*Owners that change hands inside a loop.* Two owning locals may share a block for
+a while inside a loop (`b = a;`, then `a = NULL;`), and a plain pointer's block
+may be handed to an owner (`v = w;`). The loop tracks which variable holds each
+block at the end of every iteration. An owner that takes its block on only some
+iterations needs an invariant that says when, since after the loop it could
+otherwise still be null:
+
+[source,c]
+----
+include::example$memory/owning_loop_handoff.c[tag=source]
+----
+
+An owner that is a structure's member is planned for the next version
 (<<not-yet,What is not supported yet>>).
+
+[#owning-globals]
+== Owning globals and `static` locals
+
+A global or a `static` local marked `cerastes::owning` holds the block it points
+to across calls. It starts null. An owning global with external linkage in
+pass:[C++], or a C global declared without an initializer, starts with a value
+cerastes cannot know: another translation unit may set it. So `main` must assign
+such a global before it hands it on. Its initializer, when it has one, must be a
+null pointer.
+
+*Who holds it.* A function that names `cerastes_owns(g)` of an owning global in
+its contract also receives and returns the block `g` points to, when `g` is not
+null. It is as if the contract said `cerastes_owns(g) && (g == NULL ||
+cerastes_owns_block(g))`. So when the function returns, `g` is null or holds
+a whole block the function holds. `cerastes_reads(g)` gives only the pointer's
+value. A `static` local's block travels the same way, through the implicit
+`owns` of the `static` local that its function and every caller already have:
+
+[source,c]
+----
+include::example$memory/owning_global.c[tag=source]
+----
+
+*Assigning it.* As for an owning local, a block that the global already holds
+must be freed or handed on before the global is assigned another value
+(xref:error-messages.adoc#_leak[`leak`] at the assignment). The value it receives
+must be null or the start of a block the function holds whole
+(xref:error-messages.adoc#_permission[`permission`]). A function that frees the
+block and returns while `g` still points to it is `permission` at the return: set
+`g` to `NULL` after freeing it.
+
+[source,c]
+----
+include::example$memory/owning_global_return_after_free.c[tag=source]
+----
+
+*The end of `main`.* `main` may return while an owning global or `static` local
+still holds its block. An owner with static storage keeps its object for the
+whole program, as P4417R0 allows. A block that only a global without
+`cerastes::owning` points to is still a `leak` when `main` returns.
+
+*Owning locals whose address is taken.* An owning local whose address is taken is
+an owner like any other. A write through a pointer to it is a write to the owner,
+checked like an assignment. A function that receives its address decides by its
+contract what happens to the block: with `cerastes_owns(*pp)` alone it may change
+the pointer, and with `cerastes_owns(*pp) && (*pp == NULL ||
+cerastes_owns_block(*pp))` in both lists it borrows the block too.
 
 [#block-guards]
 == A block that depends on memory
@@ -1118,20 +1212,26 @@ These are rejected with a diagnostic, never approximated
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and of
   a global itself in an invariant (`cerastes_owns(g)`: the loop holds it
   already);
-* the attribute `cerastes::owning` on a global variable, a `static` local, a
-  local whose address is taken and a structure's member (planned for the next
-  version: they need block sites reached through a pointer read from memory, and
-  contracts that say who owns a variable), and `owning(n)`;
-* `cerastes::ref_to_uninit` on a global variable or a `static` local,
-  `cerastes::uninit` on anything but a local, and `cerastes::must_init` on
+* the attribute `cerastes::owning` on a structure's member (planned for the next
+  version), an owning or marked global or `static` local whose initializer is not
+  a null pointer, and `owning(n)`;
+* `cerastes::uninit` on anything but a local, and `cerastes::must_init` on
   anything but a parameter (P4222 defines it for parameters only);
-* the attributes of the P4417R0 and P4418R0 invalidation profile (an owner
-  parameter that transfers its object to the callee, a pointer parameter the
-  function does not invalidate, a suppression for a pointer that dangles on
-  purpose): planned for the next version;
-* allocations of more than one object (`n * sizeof(T)`), `realloc`, and
-  `cerastes_owns_block` of an object reached through another pointer, of a
-  structure's member or of a global (<<heap>>);
+* the attributes of the P4417R0 and P4418R0 invalidation profile: a pointer
+  parameter the function does not invalidate (`cerastes::not_invalidating`) and an
+  opt-in mode for the profile's syntactic owner rules (`--strict-owner`) are planned
+  for the next version. An owner parameter that transfers its object to the callee is
+  the contract `requires(p == NULL || cerastes_owns_block(p))`, and there is no
+  suppression for a pointer that dangles on purpose: cerastes proves or reports
+  each use;
+* allocations of more than one object (`n * sizeof(T)`) and `realloc` (<<heap>>);
+* in a function whose body is not in the file, an allocation that its contract
+  takes or hands over through a pointer or a global (<<blocks-through-memory>>);
+* two pointers in a loop's invariant that each own an allocation through a
+  parameter's pointee (`+*pp+` and `+*qq+`) verify, but slowly; a loop that calls a
+  function borrowing the allocation of `+*pp+` needs `+*pp == keep+` in its invariant;
+  and an owner that takes a block in a loop on some iterations only needs an
+  invariant that says when (<<owning-locals>>);
 * `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized` and
   `vlibc_free_aligned_sized`, which have no contract yet
   (`call_without_contract`), a block of vlibc's allocator named by

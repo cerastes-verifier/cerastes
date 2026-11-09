@@ -8,7 +8,7 @@
 // expect: error leak @ L41
 // mode: c23, c++20
 // twin: tests/memory/heap_loop_two_blocks.c
-// Pins: 0047 item 10 (the false alarm it names): a loop that swaps the two pointers that hold two blocks: the places are the blocks the variables designated at entry, and after the loop nothing says which variable points to which, so the frees (and the uses in the body) are reported; the user needs written owns_block atoms in invariants, which M4.5d2b adds
+// Pins: 0047 item 10 (the false alarm it names): a loop that swaps the two pointers that hold two blocks: the places are the blocks the variables designated at entry, and after the loop nothing says which variable points to which, so the frees (and the uses in the body) are reported; the user needs written owns_block atoms in invariants, which M4.5d2b adds; M4.5d2b2a (record 0054 item 4): the same loop with a written owns_block invariant verifies (tests/memory/owns_block_invariant_swap.c and doc example memory/heap_loop_swap_invariant.c); this pin, with no invariant, stays
 #include <cerastes.h>
 #include <stdlib.h>
 

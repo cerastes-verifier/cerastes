@@ -205,6 +205,8 @@ void collect_entry(char* entry, an_il_entry_kind kind)
             {
                 g_collect_out->variable_secondary_decls[reinterpret_cast<a_variable_ptr>(sd->entity.ptr)].push_back(
                     sd->decl_position);
+                g_collect_out->variable_secondary_attrs[reinterpret_cast<a_variable_ptr>(sd->entity.ptr)].push_back(
+                    sd->attributes);
             }
             break;
         }

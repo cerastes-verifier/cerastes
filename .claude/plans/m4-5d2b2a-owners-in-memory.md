@@ -86,6 +86,24 @@ d2b1 landed about 3,900 lines and needed a cut, so the owner split d2b2 in two (
 
   Also: the three doc examples that flip gain the contracts they need in their bodies.
 
+- **183:** the three unframed Part A twins (`owns_block_global_unframed.c`, `owns_block_load_given_unframed.c`,
+  `owns_block_load_member_unframed.c`) expect both `permission` lines: the contract clause (`f__wf`) and the return
+  row, as an unframed `owns(**pp)` gives today.
+
+- **184:** the VIR self-test cases `olp_becomes_shared_owner` (now verified) and `olp_becomes_shared_place` (now only the
+  leak at `main`'s end, the question-180 shape) are accepted as part of the approved flips of the pinned false alarms.
+- **185** (not the recommendation, which was to redesign them): the two new twins `owning_loop_becomes_shared_drop.c`
+  and `owning_loop_stops_shared_drop.c` list every reported line, the consequential ones included, as question 183 did.
+
+- **186** (stop rule): `owns_block_invariant_load_two_sites_drop.c` took about 148 s quiet, even after the il-analyst
+  hoisted the site reads into temps. It is replaced by a cheaper twin: one written site through a load, plus a local
+  site. The cost of two written load-sites over parameter places (33 s without a drop, about 148 s with one) goes to
+  handoff §3 "Costs to watch" and the record, for M4.8 with question 66.
+- **187:** `owning_address_taken_owns_only_clear_leak.c` (`leak` at L21 and at L22) and
+  `owning_global_unknown_init_unassigned.c` with its `.cpp` twin (two `permission` at the call's line) list every line.
+  Applied by the same rule to question 186's replacement `owns_block_invariant_load_and_local_drop.c`: `leak` at the
+  loop body's closing brace and, as a consequence, at the function's (listed in the status entry).
+
 **Standing:**
 - 69: the EDG merge waits for the box; no EDG work.
 - 77: one context.

@@ -975,10 +975,6 @@ void define_heap_rejections()
     {
         return k.ptr(k.i32);
     };
-    auto PPT = [](Kit& k)
-    {
-        return k.ptr(k.ptr(k.i32));
-    };
     auto N = [](Kit& k, const char* v)
     {
         return k.num(k.i32, v);
@@ -992,38 +988,21 @@ void define_heap_rejections()
         return k.b.atom(AtomKind::OwnsBlock, ptr, -1, k.at());
     };
 
-    // an owns_block atom in a loop invariant (M4.5d2b)
-    rc("hb_rej_invariant", "an `owns_block` atom in a loop invariant",
+    // an owns_block atom in a loop invariant is a written block site (decision 0054 item 4; it was refused until M4.5d2b2a): the lowering case that replaces
+    // the rejection.  void f(int *p) { int i = 1; while (i > 0) INV { i = i - 1; } } with INV = owns_block(p): nothing owns the block, so the site's rows fail
+    // at the entry, at the atom (permission).
+    lc("hb_rej_invariant",
+       "an `owns_block` atom in a loop invariant: a written site, its rows fail where the function holds no block",
        [=](Kit& k)
        {
            Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
-           Var* q {k.local(f, "q", PT(k))};
            Var* i {k.local(f, "i", k.i32)};
-           f->body = k.blk({k.decl(q, k.pn(f->param_var(0))), k.decl(i, N(k, "1")),
-                            k.whl(k.gt(k.v(i), N(k, "0")), {k.cl(block(k, k.pn(q)))}, {k.cl(k.v(i))},
-                                  k.blk({k.asg(i, k.sub(k.v(i), N(k, "1")))}))});
+           const Expr* atom {block(k, k.pn(f->param_var(0)))};
+           f->body = k.blk({k.decl(i, N(k, "1")), k.whl(k.gt(k.v(i), N(k, "0")), {k.cl(atom)}, {k.cl(k.v(i))},
+                                                        k.blk({k.asg(i, k.sub(k.v(i), N(k, "1")))}))});
            k.done(f);
-       });
-    // on something that is not a pointer parameter or the result: a load (`*pp`)
-    rc("hb_rej_load", "something other than a pointer parameter or",
-       [=](Kit& k)
-       {
-           Function* f {k.fn("f", k.vd, {{"pp", PPT(k)}})};
-           k.req(f, block(k, k.deref(FP(k, f, 0))));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    // on a global
-    rc("hb_rej_global", "something other than a pointer parameter or",
-       [=](Kit& k)
-       {
-           Global* g {k.prog.add_global("g", k.i32, k.at(), nullptr)};
-           g->init = N(k, "0");
-           g->value = "0";
-           Function* f {k.fn("f", k.vd)};
-           k.req(f, block(k, k.b.global_addr(g, k.at())));
-           f->body = k.blk({});
-           k.done(f);
+           k.fail_only("permission", atom->loc, 5U, 0U);
+           k.fail_only("permission", atom->loc, 5U, 1U);
        });
     // the result in a requires (it has no value there)
     rc("hb_rej_result_in_requires", "the result outside an `ensures`",
@@ -1169,6 +1148,430 @@ void define_heap_rejections()
            f->deallocates = true;
            f->body = k.blk({});
            k.done(f);
+       });
+}
+
+// ---- block sites through loads and on globals (decision 0054 item 2): `owns_block(*pp)` and `owns_block(g)` with the cell `owns(*pp)` / `owns(g)` that frames the load ----
+void define_heap_memory()
+{
+    auto PT = [](Kit& k)
+    {
+        return k.ptr(k.i32);
+    };
+    auto PPT = [](Kit& k)
+    {
+        return k.ptr(k.ptr(k.i32));
+    };
+    auto FP = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    auto block = [](Kit& k, const Expr* ptr)
+    {
+        return k.b.atom(AtomKind::OwnsBlock, ptr, -1, k.at());
+    };
+    auto owns = [](Kit& k, const Expr* place, int amount)
+    {
+        return k.b.atom(AtomKind::Owns, place, amount, k.at());
+    };
+    auto notnull = [](Kit& k, const Var* p, Type t)
+    {
+        return k.ne(k.pn(p), k.nul(t));
+    };
+
+    // void set(int **pp) requires(owns(*pp) && owns_block(*pp)) ensures(owns(*pp) && owns_block(*pp)) { [free(*pp);] }   (mode 1: the borrower frees what it promises back)
+    // void f(void) { int *p = malloc(); if (p != NULL) { set(&p); [free(p);] } }                                          (mode 2: the caller never frees)
+    const auto borrow = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* set {k.fn("set", k.vd, {{"pp", PPT(k)}})};
+        k.req(set, k.land(owns(k, FP(k, set, 0), 0), block(k, k.deref(FP(k, set, 0)))));
+        k.ens(set, k.land(owns(k, FP(k, set, 0), 0), block(k, k.deref(FP(k, set, 0)))));
+        if (mode == 1)
+        {
+            set->body = k.blk({k.es(k.call(fr, {k.deref(k.pn(set->param_var(0)))}))});
+        }
+        else
+        {
+            set->body = k.blk({});
+        }
+        k.done(set);
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.cell(f, "p", PT(k))};
+        std::vector<const Stmt*> in {k.store(k.pn(p), k.num(k.i32, "0")), k.es(k.call(set, {k.addr(p)}))};
+        if (mode != 2)
+        {
+            in.push_back(k.es(k.call(fr, {k.pn(p)})));
+        }
+        f->body = k.blkc({k.decl(p, k.call(m, {})), k.iff(notnull(k, p, PT(k)), k.blk(in))});
+        k.done(f);
+        return mode == 1 ? set->end_loc : f->end_loc;
+    };
+    lc("hbl_borrow", "set(&p) borrows the block of *pp and returns it: the caller frees it",
+       [=](Kit& k)
+       {
+           borrow(k, 0);
+       });
+    lc("hbl_borrow_frees", "the borrower frees the block it promises back (permission at its closing brace)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", borrow(k, 1), 12U, 8U);
+       });
+    lc("hbl_borrow_leak", "the caller never frees the block set() returned (leak at the closing brace)",
+       [=](Kit& k)
+       {
+           k.fail("leak", borrow(k, 2));
+       });
+
+    // void eat(int **pp) requires(owns(*pp) && owns_block(*pp)) ensures(owns(*pp)) { free(*pp); }
+    // void f(void) { int *p = malloc(); if (p != NULL) { eat(&p); [free(p);] } }                    (mode 1: the block is gone: invalid-free)
+    const auto consume = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* eat {k.fn("eat", k.vd, {{"pp", PPT(k)}})};
+        k.req(eat, k.land(owns(k, FP(k, eat, 0), 0), block(k, k.deref(FP(k, eat, 0)))));
+        k.ens(eat, owns(k, FP(k, eat, 0), 0));
+        eat->body = k.blk({k.es(k.call(fr, {k.deref(k.pn(eat->param_var(0)))}))});
+        k.done(eat);
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.cell(f, "p", PT(k))};
+        std::vector<const Stmt*> in {k.store(k.pn(p), k.num(k.i32, "0")), k.es(k.call(eat, {k.addr(p)}))};
+        SrcLoc where;
+        if (mode == 1)
+        {
+            const Expr* bad {k.call(fr, {k.pn(p)})};
+            where = bad->loc;
+            in.push_back(k.es(bad));
+        }
+        f->body = k.blkc({k.decl(p, k.call(m, {})), k.iff(notnull(k, p, PT(k)), k.blk(in))});
+        k.done(f);
+        return where;
+    };
+    lc("hbl_consume", "eat(&p) takes the block of *pp: nothing is held afterwards",
+       [=](Kit& k)
+       {
+           consume(k, 0);
+       });
+    lc("hbl_consume_free_after",
+       "free(p) after eat(&p) took the block: the dangling pointer has no token (invalid-free)",
+       [=](Kit& k)
+       {
+           k.fail_only("invalid-free", consume(k, 1), 4U, 0U);
+       });
+
+    // void make(int **pp) requires(owns(*pp)) ensures(owns(*pp) && (*pp == NULL || owns_block(*pp))) { *pp = malloc(); }
+    // void f(void) { int *p = NULL; make(&p); [free(p);] }                                           (mode 1: the caller never frees)
+    const auto given = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* make {k.fn("make", k.vd, {{"pp", PPT(k)}})};
+        k.req(make, owns(k, FP(k, make, 0), 0));
+        k.ens(make, k.land(owns(k, FP(k, make, 0), 0),
+                           k.lor(k.eq(k.deref(FP(k, make, 0)), k.nul(PT(k))), block(k, k.deref(FP(k, make, 0))))));
+        Var* t {k.local(make, "t", PT(k))};
+        make->body =
+            k.blk({k.decl(t, k.call(m, {})), k.iff(notnull(k, t, PT(k)), k.blk({k.store(k.pn(t), k.num(k.i32, "0"))})),
+                   k.store(k.pn(make->param_var(0)), k.pn(t))});
+        k.done(make);
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.cell(f, "p", PT(k))};
+        std::vector<const Stmt*> body {k.decl(p, k.nul(PT(k))), k.es(k.call(make, {k.addr(p)}))};
+        if (mode == 0)
+        {
+            body.push_back(k.es(k.call(fr, {k.pn(p)})));
+        }
+        f->body = k.blkc(body);
+        k.done(f);
+        return f->end_loc;
+    };
+    lc("hbl_given", "make(&p) hands the caller the block it allocated into *pp (or NULL): the caller frees it",
+       [=](Kit& k)
+       {
+           given(k, 0);
+       });
+    lc("hbl_given_leak", "the caller never frees the block make() gave it (leak at the closing brace)",
+       [=](Kit& k)
+       {
+           k.fail("leak", given(k, 1));
+       });
+
+    // void f(int **pp) requires(owns_block(*pp)) {}      the load of *pp is not framed by any atom: nothing says the function holds the cell
+    lc("hbl_unframed",
+       "owns_block(*pp) with no owns(*pp) before it reads a cell the contract does not give (permission at the atom)",
+       [=](Kit& k)
+       {
+           Function* f {k.fn("f", k.vd, {{"pp", PPT(k)}})};
+           const Expr* load {k.deref(FP(k, f, 0))};
+           k.req(f, block(k, load));
+           f->body = k.blk({});
+           k.done(f);
+           k.fail("permission", load->loc);
+       });
+
+    // static int *g = NULL;  void consume_g(void) requires(owns(g) && (g == NULL || owns_block(g))) ensures(owns(g)) [trusted]
+    // void f(void) requires(owns(g)) ensures(owns(g)) { g = malloc(); consume_g(); }     (mode 1: g = &x of a local: not a block, permission at the call)
+    const auto global_site = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Global* g {k.prog.add_global("g", PT(k), k.at())};
+        g->init_kind = Global::Init::Null;
+        auto gval = [&](Kit& kk)
+        {
+            return kk.deref(kk.b.global_addr(g, kk.at()));
+        };
+        Function* use {k.fn("consume_g", k.vd)};
+        k.req(use,
+              k.land(owns(k, k.b.global_addr(g, k.at()), 0), k.lor(k.eq(gval(k), k.nul(PT(k))), block(k, gval(k)))));
+        k.ens(use, owns(k, k.b.global_addr(g, k.at()), 0));
+        k.trusted(use);
+        Function* f {k.fn("f", k.vd)};
+        k.req(f, owns(k, k.b.global_addr(g, k.at()), 0));
+        k.ens(f, owns(k, k.b.global_addr(g, k.at()), 0));
+        std::vector<const Stmt*> body;
+        SrcLoc where;
+        if (mode == 1)
+        {
+            Var* x {k.cell(f, "x", k.i32)};
+            body = {k.decl(x, k.num(k.i32, "0")), k.store(k.b.global_addr(g, k.at()), k.addr(x))};
+            const Expr* bad {k.call(use, {})};
+            where = bad->loc;
+            body.push_back(k.es(bad));
+            f->body = k.blkc(body);
+        }
+        else
+        {
+            body = {k.store(k.b.global_addr(g, k.at()), k.call(m, {})),
+                    k.iff(k.ne(gval(k), k.nul(PT(k))), k.blk({k.store(gval(k), k.num(k.i32, "0"))})),
+                    k.es(k.call(use, {}))};
+            f->body = k.blk(body);
+        }
+        k.done(f);
+        return where;
+    };
+    lc("hbl_global", "g = malloc(); consume_g(): the callee takes the block g points to (or g is NULL)",
+       [=](Kit& k)
+       {
+           global_site(k, 0);
+       });
+    lc("hbl_global_not_a_block", "g = &x; consume_g(): g does not point to a block (permission at the call)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", global_site(k, 1), 16U, 12U);
+       });
+
+    // Decision 0054 item 5: an owning global `static int *g = NULL;` ([[cerastes::owning]]) with the deep atom `g == NULL || owns_block(g)` in both lists.
+    // void f(void) requires(owns(g) && deep) ensures(owns(g) && deep) { [free(g);] [g = malloc();] }
+    // mode 0: free(g); g = malloc();  (verifies)     1: g = malloc();  (the old block is dropped: leak at the store)
+    // 2: free(g);  (g is left pointing at the freed block: the return row, permission at the closing brace)    3: g = &x of a local (value rule: permission at the store)
+    const auto owning_global = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Global* g {k.prog.add_global("g", PT(k), k.at())};
+        g->init_kind = Global::Init::Null;
+        g->owning = true;
+        auto gval = [&](Kit& kk)
+        {
+            return kk.deref(kk.b.global_addr(g, kk.at()));
+        };
+        auto deep = [&](Kit& kk)
+        {
+            return kk.land(owns(kk, kk.b.global_addr(g, kk.at()), 0),
+                           kk.lor(kk.eq(gval(kk), kk.nul(PT(kk))), block(kk, gval(kk))));
+        };
+        Function* f {k.fn("f", k.vd)};
+        k.req(f, deep(k));
+        k.ens(f, deep(k));
+        SrcLoc where;
+        std::vector<const Stmt*> body;
+        if (mode == 0 || mode == 2)
+        {
+            body.push_back(k.es(k.call(fr, {gval(k)})));
+        }
+        if (mode == 0 || mode == 1)
+        {
+            const Stmt* st {k.store(k.b.global_addr(g, k.at()), k.call(m, {}))};
+            where = st->loc;
+            body.push_back(st);
+            body.push_back(k.iff(k.ne(gval(k), k.nul(PT(k))), k.blk({k.store(gval(k), k.num(k.i32, "0"))})));
+        }
+        if (mode == 3)
+        {
+            Var* x {k.cell(f, "x", k.i32)};
+            body.push_back(k.decl(x, k.num(k.i32, "0")));
+            const Stmt* st {k.store(k.b.global_addr(g, k.at()), k.addr(x))};
+            where = st->loc;
+            body.push_back(st);
+        }
+        f->body = k.blkc(body);
+        k.done(f);
+        if (mode == 2)
+        {
+            where = f->end_loc;
+        }
+        return where;
+    };
+    lc("owg_cycle", "free(g); g = malloc(): the old block is freed, the new one is the global's (verifies)",
+       [=](Kit& k)
+       {
+           owning_global(k, 0);
+       });
+    lc("owg_reassign_leak", "g = malloc() while g may hold a block: the block is dropped (leak at the store)",
+       [=](Kit& k)
+       {
+           k.fail("leak", owning_global(k, 1));
+       });
+    lc("owg_return_after_free",
+       "free(g) without setting g to NULL: g does not hold its block at the return (permission)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", owning_global(k, 2), 12U, 8U);
+       });
+
+    // int main(void) { f(); } with the global of the cases above: main holds nothing at its start; f takes and returns g's block; at main's end g's block is exempt
+    // void f(void) requires(owns(g) && deep) ensures(owns(g) && deep) { int i = 0; while (i < 3) { [free(g);] g = malloc(); i++; } }   (no invariant about g)
+    // decision 0054 item 5 (Loops): the loop uses g, so its block is carried by a synthetic written site; mode 0 verifies, mode 1 (no free) drops the block at the store
+    const auto owning_global_loop = [=](Kit& k, int mode) -> SrcLoc
+    {
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Global* g {k.prog.add_global("g", PT(k), k.at())};
+        g->init_kind = Global::Init::Null;
+        g->owning = true;
+        auto gval = [&](Kit& kk)
+        {
+            return kk.deref(kk.b.global_addr(g, kk.at()));
+        };
+        auto deep = [&](Kit& kk)
+        {
+            return kk.land(owns(kk, kk.b.global_addr(g, kk.at()), 0),
+                           kk.lor(kk.eq(gval(kk), kk.nul(PT(kk))), block(kk, gval(kk))));
+        };
+        Function* f {k.fn("f", k.vd)};
+        k.req(f, deep(k));
+        k.ens(f, deep(k));
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> inner;
+        if (mode == 0)
+        {
+            inner.push_back(k.es(k.call(fr, {gval(k)})));
+        }
+        const Stmt* st {k.store(k.b.global_addr(g, k.at()), k.call(m, {}))};
+        inner.push_back(st);
+        inner.push_back(k.iff(k.ne(gval(k), k.nul(PT(k))), k.blk({k.store(gval(k), k.num(k.i32, "0"))})));
+        inner.push_back(k.asg(i, k.add(k.v(i), k.num(k.i32, "1"))));
+        const Stmt* lp {k.whl(k.lt(k.v(i), k.num(k.i32, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(k.num(k.i32, "3"), k.v(i)))}, k.blkc(inner))};
+        f->body = k.blkc({k.decl(i, k.num(k.i32, "0")), lp});
+        k.done(f);
+        return st->loc;
+    };
+    lc("owg_loop_cycle", "free(g); g = malloc() in a loop with no invariant about g: carried automatically (verifies)",
+       [=](Kit& k)
+       {
+           owning_global_loop(k, 0);
+       });
+    lc("owg_loop_no_free", "g = malloc() in such a loop without the free: the block is dropped (leak at the store)",
+       [=](Kit& k)
+       {
+           k.fail("leak", owning_global_loop(k, 1));
+       });
+
+    lc("owg_main_exempt", "main ends holding the block of an owning global (exempt); the same global not owning leaks",
+       [=](Kit& k)
+       {
+           Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+           Function* fr {heap_free_view(k, k.i32)};
+           Global* g {k.prog.add_global("g", PT(k), k.at())};
+           g->init_kind = Global::Init::Null;
+           g->owning = true;
+           auto gval = [&](Kit& kk)
+           {
+               return kk.deref(kk.b.global_addr(g, kk.at()));
+           };
+           auto deep = [&](Kit& kk)
+           {
+               return kk.land(owns(kk, kk.b.global_addr(g, kk.at()), 0),
+                              kk.lor(kk.eq(gval(kk), kk.nul(PT(kk))), block(kk, gval(kk))));
+           };
+           Function* f {k.fn("f", k.vd)};
+           k.req(f, deep(k));
+           k.ens(f, deep(k));
+           f->body = k.blk({k.es(k.call(fr, {gval(k)})), k.store(k.b.global_addr(g, k.at()), k.call(m, {})),
+                            k.iff(k.ne(gval(k), k.nul(PT(k))), k.blk({k.store(gval(k), k.num(k.i32, "0"))}))});
+           k.done(f);
+           Function* mn {k.fn("main", k.i32)};
+           mn->body = k.blk({k.es(k.call(f, {})), k.ret(k.num(k.i32, "0"))});
+           k.done(mn);
+           k.prog.set_entry(mn);
+       });
+
+    // int main(void) { g = malloc(); int i = 0; while (i < 3) { noop(); i++; } }   (the loop does not name g: it is framed out, its ghost is not assigned there)
+    // decision 0054 item 5 (Loops), audit round 2 S1: a call in a loop that does not touch the owning global leaves `held_g` alone; main ends holding g's block (exempt)
+    lc("owg_loop_unrelated_call",
+       "a loop that calls an unrelated function leaves the owning global in the frame (verifies)",
+       [=](Kit& k)
+       {
+           Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+           Global* g {k.prog.add_global("g", PT(k), k.at())};
+           g->init_kind = Global::Init::Null;
+           g->owning = true;
+           Function* noop {k.fn("noop", k.vd)};
+           k.trusted(noop);
+           Function* mn {k.fn("main", k.i32)};
+           Var* i {k.local(mn, "i", k.i32)};
+           const Stmt* lp {k.whl(k.lt(k.v(i), k.num(k.i32, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                                 {k.cl(k.sub(k.num(k.i32, "3"), k.v(i)))},
+                                 k.blk({k.es(k.call(noop, {})), k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))};
+           mn->body = k.blk({k.store(k.b.global_addr(g, k.at()), k.call(m, {})), k.decl(i, k.num(k.i32, "0")), lp,
+                             k.ret(k.num(k.i32, "0"))});
+           k.done(mn);
+           k.prog.set_entry(mn);
+       });
+
+    // int main(void) { g = NULL; }   with an owning global and no block site in any contract (audit round 2 S3): the program is a heap program all the same
+    lc("owg_no_block_site",
+       "an owning global in a program with no block site in a contract: the token field is declared (verifies)",
+       [=](Kit& k)
+       {
+           Global* g {k.prog.add_global("g", PT(k), k.at())};
+           g->init_kind = Global::Init::Null;
+           g->owning = true;
+           Function* mn {k.fn("main", k.i32)};
+           mn->body = k.blk({k.store(k.b.global_addr(g, k.at()), k.nul(PT(k))), k.ret(k.num(k.i32, "0"))});
+           k.done(mn);
+           k.prog.set_entry(mn);
+       });
+
+    // void f(void) { owning int *v = malloc(); int **pp = &v; [free(v);] } with v's address taken (decision 0054 item 6): its exit row reads its cell
+    lc("owc_cell_owner",
+       "an owning local whose address is taken: freed through the name, the exit row finds nothing held (verifies); not freed, leak at the scope's end",
+       [=](Kit& k)
+       {
+           Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+           Function* fr {heap_free_view(k, k.i32)};
+           Function* f {k.fn("f", k.vd)};
+           Var* v {k.cell(f, "v", PT(k))};
+           v->owning = true;
+           Var* pp {k.local(f, "pp", k.ptr(PT(k)))};
+           f->body = k.blkc({k.decl(v, k.call(m, {})), k.decl(pp, k.addr(v)), k.es(k.call(fr, {k.pn(v)}))});
+           k.done(f);
+       });
+    lc("owc_cell_owner_leak", "the same without the free: owning v still holds its block at the end (leak)",
+       [=](Kit& k)
+       {
+           Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+           Function* f {k.fn("f", k.vd)};
+           Var* v {k.cell(f, "v", PT(k))};
+           v->owning = true;
+           Var* pp {k.local(f, "pp", k.ptr(PT(k)))};
+           const Stmt* bs {k.blkc({k.decl(v, k.call(m, {})), k.decl(pp, k.addr(v))})};
+           f->body = bs;
+           k.done(f);
+           k.fail("leak", bs->end_loc);
        });
 }
 

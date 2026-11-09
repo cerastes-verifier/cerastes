@@ -1667,7 +1667,7 @@ private:
                 {
                     // Report at the first declaration without it, naming the first with it.
                     reject_args(Diag::annotation_mismatch, decls[without].pos,
-                                {rname(r), an, pname,
+                                {rname(r), an, "parameter " + pname,
                                  "the declaration at " + where(decls[with].pos) + " has it, this one does not"});
                     bad = true;
                 }
@@ -1802,7 +1802,8 @@ private:
             // decision 0047 item 4: the whole block is `owns(*p)` and more
             for (const vir::AtomSite& st : vir::contract_block_atoms(*f))
             {
-                if (st.atom->a != nullptr && st.atom->a->kind == Expr::Kind::Formal && st.atom->a->index == m.index)
+                // only a site on the parameter itself: one through a load (`owns_block(*pp)`) names another block (decision 0054 item 2)
+                if (vir::atom_place(*st.atom) == vir::PlaceKey {m.index, {}, {}})
                 {
                     (st.in_ensures ? owns_out : owns_in) = true;
                 }
@@ -1974,7 +1975,8 @@ private:
             std::vector<vir::AtomSite> out;
             for (const vir::AtomSite& st : vir::contract_block_atoms(*f))
             {
-                if (st.in_ensures && vir::atom_place(*st.atom).root == vir::kResultSiteKey)
+                // the site on the result itself; one through a load of it (`owns_block(r->q)`, decision 0054 item 2) is another block
+                if (st.in_ensures && vir::atom_place(*st.atom) == vir::PlaceKey {vir::kResultSiteKey, {}, {}})
                 {
                     out.push_back(st);
                 }
@@ -2092,6 +2094,182 @@ private:
         }
     }
 
+    // ---- the deep atom of an owning global (decision 0054 item 5) ----------------------------------------------------------------
+    // The block site that follows every `owns(g)` of an owning global or `static` local `g`: `g == NULL || owns_block(g)`, the same guarded form as a
+    // written one (a block site through a load on the global, item 2).  `where` is the position its messages name.
+    const Expr* deep_expr(const vir::Global* g, const SrcLoc& l, const a_source_position* where)
+    {
+        const Expr* v1 {b_.deref(b_.global_addr(g, l), l)};
+        const Expr* eq {b_.binary(vir::BinaryOp::Eq, v1, b_.null_const(g->type, l), l)};
+        const Expr* v2 {b_.deref(b_.global_addr(g, l), l)};
+        const Expr* atom {b_.atom(vir::AtomKind::OwnsBlock, v2, -1, l)};
+        if (where != nullptr)
+        {
+            atom_pos_[atom] = *where;
+            deep_atoms_.insert(atom);
+        }
+        return b_.binary(vir::BinaryOp::LOr, eq, atom, l);
+    }
+    vir::Clause deep_clause(const vir::Global* g, const SrcLoc& l)
+    {
+        return vir::Clause {deep_expr(g, l, nullptr), l};
+    }
+    // the block sites apply_owning_globals added for a written `owns(g)`: finish_atoms words its messages for them
+    std::set<const Expr*> deep_atoms_;
+
+    // Whether `c` is `g == NULL` (either order, C's `bool_to_int`/`to_bool` wrapping accepted): the guard of a deep atom as the user writes it.
+    static bool is_global_null_guard(const Expr* c, const vir::Global* g)
+    {
+        while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt))
+        {
+            c = c->a;
+        }
+        if (c == nullptr || c->kind != Expr::Kind::Binary || c->bop != vir::BinaryOp::Eq)
+        {
+            return false;
+        }
+        const Expr* l {c->a};
+        const Expr* r {c->b};
+        if (l != nullptr && l->kind == Expr::Kind::Null)
+        {
+            std::swap(l, r);
+        }
+        return l != nullptr && r != nullptr && r->kind == Expr::Kind::Null && l->kind == Expr::Kind::Deref &&
+               l->a != nullptr && l->a->kind == Expr::Kind::GlobalAddr && l->a->global == g;
+    }
+
+    // Decision 0054 item 5: a written `owns(g)` of an owning global, in a `requires` or an `ensures`, gets the deep atom `g == NULL || owns_block(g)` as the
+    // conjunct right after it in the same clause (`owns(g) && g != NULL && *g == 0` becomes `owns(g) && deep && g != NULL && *g == 0`, so the reads after it
+    // are framed by the block site too), unless the user wrote that clause too (they merge, as `owning` merges with `owns` in 0040 item 3).  It must stand
+    // as a clause or a top-level conjunct: a guard on the `owns(g)` would need the same guard on the deep atom.  `reads(g)` gets none.  A written block
+    // site on `g`'s value of another shape is rejected: `owns(g)` already includes it.
+    void apply_owning_globals(vir::Function* f)
+    {
+        bool any {false};
+        for (const vir::Global& g : prog_.globals())
+        {
+            any = any || g.owning;
+        }
+        if (!any)
+        {
+            return;
+        }
+        const std::vector<vir::AtomSite> sites {vir::contract_atoms(*f)};
+        const std::vector<vir::AtomSite> blocks {vir::contract_block_atoms(*f)};
+        for (int list {0}; list < 2; ++list)
+        {
+            std::vector<vir::Clause>& cl {list == 0 ? f->requires_ : f->ensures_};
+            struct Deep
+            {
+                const Expr* atom;
+                const vir::Global* g;
+                a_source_position pos;
+                int clause;
+            };
+            std::vector<Deep> after;
+            std::set<const vir::Global*> done;
+            for (const vir::AtomSite& st : sites)
+            {
+                if (st.in_ensures != (list == 1) || st.atom->atom != vir::AtomKind::Owns || st.atom->a == nullptr ||
+                    st.atom->a->kind != Expr::Kind::GlobalAddr || st.atom->a->global == nullptr ||
+                    !st.atom->a->global->owning)
+                {
+                    continue;
+                }
+                const vir::Global* g {st.atom->a->global};
+                auto at {atom_pos_.find(st.atom)};
+                const a_source_position pos {at != atom_pos_.end() ? at->second : cx_.stmt_pos};
+                if (!st.guards.empty())
+                {
+                    reject(
+                        Diag::unsupported_annotation, pos,
+                        "\"owns\" of the owning global `" + g->c_name + "` in a guarded position (its block site `" +
+                            g->c_name + " == NULL || owns_block(" + g->c_name +
+                            ")` follows the clause it stands in: write `owns` as a clause or a top-level conjunct, decision 0054 item 5)");
+                    continue;
+                }
+                if (!done.insert(g).second)
+                {
+                    continue; // twice in one list: finish_atoms reports it
+                }
+                bool exact {false};
+                bool other {false};
+                for (const vir::AtomSite& b : blocks)
+                {
+                    const vir::PlaceKey k {vir::atom_place(*b.atom)};
+                    if (b.in_ensures != (list == 1) || k.root != vir::kGlobalSiteBase + g->id ||
+                        k.via != std::vector<int> {vir::kLoadStep} || !k.path.empty())
+                    {
+                        continue;
+                    }
+                    if (b.guards.size() == 1U && !b.guards[0U].holds && is_global_null_guard(b.guards[0U].cond, g))
+                    {
+                        exact = true;
+                    }
+                    else
+                    {
+                        other = true;
+                    }
+                }
+                if (other)
+                {
+                    reject(Diag::unsupported_annotation, pos,
+                           "\"owns_block\" of the owning global `" + g->c_name + "` beside `owns(" + g->c_name +
+                               ")` that is not `" + g->c_name + " == NULL || owns_block(" + g->c_name +
+                               ")` (`owns` of an owning global already includes that clause, decision 0054 item 5)");
+                    continue;
+                }
+                if (!exact)
+                {
+                    after.push_back(Deep {st.atom, g, pos, st.clause});
+                }
+            }
+            for (const Deep& d : after)
+            {
+                vir::Clause& c {cl[static_cast<size_t>(d.clause)]};
+                const SrcLoc l {c.loc};
+                const Expr* joined {b_.binary(vir::BinaryOp::LAnd, d.atom, deep_expr(d.g, l, &d.pos), l)};
+                if (c.expr == d.atom)
+                {
+                    c.expr = joined;
+                    continue;
+                }
+                // the atom is a top-level conjunct (no guards): reach it through the `&&` chain and replace it by the pair
+                bool replaced {false};
+                std::vector<const Expr*> todo {c.expr};
+                while (!todo.empty())
+                {
+                    Expr* x {const_cast<Expr*>(todo.back())};
+                    todo.pop_back();
+                    if (x == nullptr || x->kind != Expr::Kind::Binary || x->bop != vir::BinaryOp::LAnd)
+                    {
+                        continue;
+                    }
+                    for (const Expr** child : {&x->a, &x->b})
+                    {
+                        if (*child == d.atom)
+                        {
+                            *child = joined;
+                            replaced = true;
+                        }
+                        else
+                        {
+                            todo.push_back(*child);
+                        }
+                    }
+                }
+                if (!replaced)
+                {
+                    // never silent (decision 0054 item 5): a missing deep atom beside a present one in the other list would duplicate a token
+                    lib_internal_error(
+                        d.pos,
+                        "the deep atom of the owning global `" + d.g->c_name +
+                            "` could not be placed after its `owns` (the atom is not reachable through the clause's `&&` chain)");
+                }
+            }
+        }
+    }
+
     // The `owns(*p)` atoms an `owning` parameter stands for (the added ones and the user's own that they merged with,
     // decision 0040 item 3): decision 0052 item 2 (question 159) lets only these and a `static` local's atoms cover a
     // partnerless atom.
@@ -2123,7 +2301,8 @@ private:
             const vir::AtomSite* block_in[2] {nullptr, nullptr};
             for (const vir::AtomSite& bs : blocks)
             {
-                if (bs.atom->a != nullptr && bs.atom->a->kind == Expr::Kind::Formal && bs.atom->a->index == o.index)
+                // a site through a load never merges with the parameter's `owning` (decision 0054 item 2)
+                if (vir::atom_place(*bs.atom) == vir::PlaceKey {o.index, {}, {}})
                 {
                     block_in[bs.in_ensures ? 1 : 0] = &bs;
                 }
@@ -2517,6 +2696,7 @@ private:
             (k == Annot::requires_ ? f->requires_ : f->ensures_).push_back(cl);
         }
         apply_owning(r, f);
+        apply_owning_globals(f);
         finish_atoms(f);
         cx_ = std::move(saved);
     }
@@ -3675,7 +3855,7 @@ private:
             // `section` change what the object holds, an unknown one may.
             const auto before {reported_count()};
             check_attributes(v->source_corresp.attributes);
-            if (reported_count() != before || reject_variable_markers(v, "a global variable"))
+            if (reported_count() != before || reject_variable_markers(v, MarkSite::global))
             {
                 rejected_globals_.insert(v);
                 return;
@@ -3858,6 +4038,11 @@ private:
         }
         vir::Global* g {prog_.add_global(nm ? nm : "?", vt.t, loc_of(p), owner)};
         g->c_type_name = vt.name;
+        if (auto mk {var_marks_.find(v)}; mk != var_marks_.end())
+        {
+            g->owning = mk->second.owning; // decision 0054 item 5
+            g->ref_to_uninit = mk->second.ref;
+        }
         gmap_[v] = g;
         return g;
     }
@@ -4578,16 +4763,19 @@ private:
                 const SrcLoc l {f->loc};
                 f->requires_.push_back(
                     vir::Clause {b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l});
+                if (g->owning)
+                {
+                    // decision 0054 item 5: the deep atom follows the implicit `owns(s)` of an owning `static` local, in both lists
+                    f->requires_.push_back(deep_clause(g, l));
+                }
                 if (!f->noreturn)
                 {
                     vir::Clause c {b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l};
-                    if (outputs.empty())
+                    std::vector<vir::Clause>& dest {outputs.empty() ? f->ensures_ : implicit_ensures};
+                    dest.push_back(c);
+                    if (g->owning)
                     {
-                        f->ensures_.push_back(c);
-                    }
-                    else
-                    {
-                        implicit_ensures.push_back(c);
+                        dest.push_back(deep_clause(g, l));
                     }
                 }
                 ++n;
@@ -6149,6 +6337,27 @@ private:
                     ok = false;
                     break;
                 }
+                // Decision 0054 item 4: a block site beside an `owns`, `reads` or `live` atom naming the same block (the block holds every cell and its
+                // liveness): the pointer variable itself, or one place (the steps and the root) reached through loads.
+                if ((a.atom == vir::AtomKind::OwnsBlock) != (b.atom == vir::AtomKind::OwnsBlock) && a.a != nullptr &&
+                    b.a != nullptr)
+                {
+                    const Expr& blk {a.atom == vir::AtomKind::OwnsBlock ? a : b};
+                    const Expr& oth {a.atom == vir::AtomKind::OwnsBlock ? b : a};
+                    const vir::PlaceKey pb {vir::atom_place(blk)};
+                    const vir::PlaceKey po {vir::atom_place(oth)};
+                    const bool same_var {blk.a->kind == Expr::Kind::Local && oth.a->kind == Expr::Kind::Local &&
+                                         blk.a->var == oth.a->var};
+                    const bool same_place {pb.valid() && po.valid() && pb.root == po.root && pb.via == po.via};
+                    if (same_var || same_place)
+                    {
+                        reject(
+                            Diag::unsupported_annotation, pos_of(a.atom == vir::AtomKind::OwnsBlock ? &a : &b),
+                            "\"owns_block\" beside \"owns\", \"reads\" or \"live\" of the same pointer in the invariants of a loop (the block already holds every cell and its liveness; record 0054 item 4)");
+                        ok = false;
+                        break;
+                    }
+                }
                 // Decision 0045 item 2: a place with a key of its own (a cell, a member, a load) twice.
                 if (a.atom == b.atom && vir::atom_place(a).valid() && vir::atom_place(a) == vir::atom_place(b))
                 {
@@ -6679,11 +6888,14 @@ private:
                 }
             }
         }
-        // Decision 0047 item 4: the rules of the `owns_block` atoms (check_program repeats them).  The operand's key is the parameter's index, or the result's.
+        // Decision 0047 item 4 and 0054 item 2: the rules of the `owns_block` atoms (check_program repeats them).  A site's key is its place (root, steps),
+        // compared whole: `owns(*pp) && owns_block(*pp)` names a pointer cell and the block it points to, and `owns_block(pp)` and `owns_block(*pp)` are
+        // two sites.
         for (size_t i {0U}; i < block_sites.size(); ++i)
         {
             const vir::AtomSite& b {block_sites[i]};
-            const int key {vir::atom_place(*b.atom).root};
+            const vir::PlaceKey bk {vir::atom_place(*b.atom)};
+            const int key {bk.root};
             if (key == vir::kNoPlaceKey)
             {
                 continue;
@@ -6691,7 +6903,7 @@ private:
             bool dup {false};
             for (size_t j {0U}; j < i; ++j)
             {
-                if (block_sites[j].in_ensures == b.in_ensures && vir::atom_place(*block_sites[j].atom).root == key)
+                if (block_sites[j].in_ensures == b.in_ensures && vir::atom_place(*block_sites[j].atom) == bk)
                 {
                     dup = true;
                 }
@@ -6706,7 +6918,7 @@ private:
             bool mixed {false};
             for (size_t j {0U}; j < i; ++j)
             {
-                mixed = mixed || (vir::atom_place(*block_sites[j].atom).root == key &&
+                mixed = mixed || (vir::atom_place(*block_sites[j].atom) == bk &&
                                   block_sites[j].atom->vlibc_block != b.atom->vlibc_block);
             }
             if (mixed)
@@ -6721,13 +6933,26 @@ private:
             for (const vir::AtomSite& o : sites)
             {
                 const vir::PlaceKey ok {vir::atom_place(*o.atom)};
-                if (ok.root == key && ok.via.empty())
+                if (ok.root == key && ok.via == bk.via)
                 {
                     beside = true;
                 }
             }
             // An atom on the result (decision 0052 item 2) is beside the result's block site like a parameter's atoms
             // are.
+            if (beside && deep_atoms_.count(b.atom) != 0U)
+            {
+                const std::string gname {b.atom->a != nullptr && b.atom->a->a != nullptr &&
+                                                 b.atom->a->a->global != nullptr
+                                             ? b.atom->a->a->global->c_name
+                                             : std::string("g")};
+                reject(Diag::unsupported_annotation, pos_of(b.atom),
+                       "`owns(*" + gname + ")`, `reads(*" + gname + ")` or `live(" + gname +
+                           ")` of the owning global `" + gname + "` that also has `owns(" + gname +
+                           ")`: its block site `" + gname + " == NULL || owns_block(" + gname +
+                           ")` already holds every cell of the block and its liveness (decision 0054 item 5)");
+                continue;
+            }
             if (beside)
             {
                 reject(
@@ -6749,17 +6974,20 @@ private:
                 bool taken {false};
                 for (const vir::AtomSite& r : block_sites)
                 {
-                    if (!r.in_ensures && vir::atom_place(*r.atom).root == key)
+                    if (!r.in_ensures && vir::atom_place(*r.atom) == bk)
                     {
                         taken = true;
                     }
                 }
+                // Decision 0054 item 2 (audit B1): a partnerless site on a place reached from a parameter or a global, through loads or not, is not
+                // promised by a contract nothing verifies.
                 if (!taken && bodiless)
                 {
                     reject(Diag::unsupported_annotation, pos_of(b.atom),
-                           "an `ensures` \"owns_block\" of a parameter with no \"owns_block\" of it in the `requires`, "
-                           "in a contract "
-                           "with no body in this unit: " +
+                           std::string("an `ensures` \"owns_block\" of ") +
+                               (bk.via.empty() ? "a parameter" : "a place reached through a load or a global") +
+                               " with no \"owns_block\" of it in the `requires`, in a contract "
+                               "with no body in this unit: " +
                                manifest_reason(key));
                 }
             }
@@ -7289,91 +7517,255 @@ private:
         return r;
     }
 
-    // `owning` or `ref_to_uninit` on a global or a `static` local (`what` names it): registered with target `v`,
-    // rejected until M4.5d2b2 (decision 0052 item 8). True when it rejected.
-    bool reject_variable_markers(a_variable_ptr v, const std::string& what)
-    {
-        bool bad {false};
-        for (Annot k : {Annot::owning, Annot::ref_to_uninit})
-        {
-            const std::vector<an_attribute_ptr> ns {variable_markers(v, k)};
-            if (ns.empty())
-            {
-                continue;
-            }
-            reject(
-                Diag::unsupported_annotation, ns[0U]->position,
-                std::string("\"cerastes::") + marker_name(k) + "\" on " + what + " (" +
-                    (k == Annot::owning ? "an owning global or `static` local" : "a marked global or `static` local") +
-                    ": M4.5d2b2, decision 0052 item 8)");
-            bad = true;
-        }
-        return bad;
-    }
-
     struct LocalMarks
     {
         bool owning {false};
         bool ref {false};
         // the variable is not a pointer, or is one the type rules explain: the declaration encodes nothing more
         bool skip {false};
+        // something was rejected (a global or `static` local with a rejected marker is not encoded at all)
+        bool bad {false};
     };
 
-    // Reads and checks `owning` and `ref_to_uninit` on an automatic local (decision 0052 items 3 and 4).  Rejects
-    // (unsupported_annotation) a non-pointer, a pointer to a function, a `void *`, twice, `owning(n)` (M4.5e1),
-    // `owning` on a pointer to a `const` or `volatile` object and on an address-taken local (M4.5d2b2).  A marker that
-    // was rejected is not set.
-    LocalMarks read_local_markers(a_variable_ptr v)
+    enum class MarkSite
+    {
+        local,       // an automatic local (decision 0052 items 3 and 4; 0054 item 6 lifts its address-taken rule)
+        global,      // a mutable file-scope variable (decision 0054 item 5)
+        static_local // a `static` local (decision 0054 item 5)
+    };
+
+    // The marks of the globals and `static` locals that read_variable_markers accepted, by variable (make_global puts them on the Global).
+    std::map<a_variable_ptr, LocalMarks> var_marks_;
+
+    // The constant a variable's initializer is, or null: none, or not static (a dynamic initializer is `dynamic`).
+    a_constant_ptr storage_initializer(a_variable_ptr v, bool* dynamic) const
+    {
+        *dynamic = false;
+        switch (v->init_kind)
+        {
+            case initk_static:
+                return v->initializer.constant;
+            case initk_dynamic:
+                *dynamic = true;
+                return nullptr;
+            case initk_function_local:
+            {
+                if (ents_ == nullptr)
+                {
+                    return nullptr;
+                }
+                auto it {ents_->static_local_inits.find(v)};
+                if (it == ents_->static_local_inits.end() || it->second == nullptr)
+                {
+                    return nullptr;
+                }
+                *dynamic = it->second->init_kind == initk_dynamic;
+                return it->second->init_kind == initk_static ? it->second->initializer.constant : nullptr;
+            }
+            default:
+                return nullptr;
+        }
+    }
+
+    // The nodes of kind `k` of each declaration of a variable (decision 0054 item 5, P75 (a)).  A variable's attribute list is the union over its
+    // declarations and EDG raises no mismatch, so a declaration's own list is: the nodes with `on_primary_declaration` for the defining declaration, the
+    // `attributes` of each secondary declaration (those in verified files; a system file's makes the variable the runtime's, which make_global refuses).  A
+    // variable with one declaration, or whose secondary lists are not recorded, is one entry holding the union.  An `extern` with no definition has no
+    // primary declaration (no `declared_type`): its own declaration is the secondary one.
+    struct DeclMarks
+    {
+        a_source_position pos;
+        std::vector<an_attribute_ptr> nodes;
+    };
+    std::vector<DeclMarks> declaration_markers(a_variable_ptr v, Annot k)
+    {
+        const std::vector<a_source_position>* sd {nullptr};
+        const std::vector<an_attribute_ptr>* sa {nullptr};
+        if (ents_ != nullptr)
+        {
+            if (auto it {ents_->variable_secondary_decls.find(v)}; it != ents_->variable_secondary_decls.end())
+            {
+                sd = &it->second;
+            }
+            if (auto it {ents_->variable_secondary_attrs.find(v)}; it != ents_->variable_secondary_attrs.end())
+            {
+                sa = &it->second;
+            }
+        }
+        if (sd == nullptr || sa == nullptr || sd->size() != sa->size())
+        {
+            return {DeclMarks {v->source_corresp.decl_position, variable_markers(v, k)}};
+        }
+        auto collect = [&](an_attribute_ptr list, bool primary_only)
+        {
+            std::vector<an_attribute_ptr> r;
+            for (an_attribute_ptr a {list}; a != nullptr; a = a->next)
+            {
+                if (!is_registered_cerastes(a) || classify(a) != k || (primary_only && a->on_primary_declaration == 0U))
+                {
+                    continue;
+                }
+                bool dup {false};
+                for (an_attribute_ptr o : r)
+                {
+                    dup = dup || o == a || same_spelling(o->position, a->position);
+                }
+                if (!dup)
+                {
+                    r.push_back(a);
+                }
+            }
+            return r;
+        };
+        std::vector<DeclMarks> ds;
+        const bool defined {v->declared_type != nullptr};
+        if (defined)
+        {
+            ds.push_back({v->source_corresp.decl_position, collect(v->source_corresp.attributes, true)});
+        }
+        for (size_t i {0U}; i < sd->size(); ++i)
+        {
+            if (!in_verified_file((*sd)[i]) || (defined && same_spelling((*sd)[i], v->source_corresp.decl_position)))
+            {
+                continue;
+            }
+            ds.push_back({(*sd)[i], collect((*sa)[i], false)});
+        }
+        return ds;
+    }
+
+    // True when every declaration carries a node (or the variable has one declaration); else annotation_mismatch at the first declaration without it,
+    // naming the first with it.
+    bool declarations_agree(const std::vector<DeclMarks>& ds, const std::string& an, const std::string& name)
+    {
+        size_t with {ds.size()};
+        size_t without {ds.size()};
+        for (size_t i {0U}; i < ds.size(); ++i)
+        {
+            if (!ds[i].nodes.empty() && with == ds.size())
+            {
+                with = i;
+            }
+            if (ds[i].nodes.empty() && without == ds.size())
+            {
+                without = i;
+            }
+        }
+        if (with == ds.size() || without == ds.size())
+        {
+            return true;
+        }
+        auto where = [&](const a_source_position& p)
+        {
+            const DiagPos d {diag_position(p)};
+            return d.known ? d.file + ":" + std::to_string(d.line) : std::string("an unknown position");
+        };
+        reject_args(
+            Diag::annotation_mismatch, ds[without].pos,
+            {name, an, "the variable",
+             "the declaration at " + where(ds[with].pos) + " has it, this one does not (decision 0054 item 5)"});
+        return false;
+    }
+
+    // Reads and checks `owning` and `ref_to_uninit` on a variable (decision 0052 items 3 and 4; 0054 items 5, 6 and 10).  Rejects
+    // (unsupported_annotation) a non-pointer, a pointer to a function, a `void *`, twice, `owning(n)` (M4.5e1) and `owning` on a pointer to a `const` or
+    // `volatile` object; on a global or `static` local also a `const` object, a declaration without the attribute beside one with it
+    // (annotation_mismatch) and an initializer that is not a null pointer constant (P75 (d)).  A marker that was rejected is not set.
+    LocalMarks read_variable_markers(a_variable_ptr v, MarkSite site)
     {
         LocalMarks r;
         const std::string name {v->source_corresp.name != nullptr ? v->source_corresp.name : "?"};
+        const bool storage {site != MarkSite::local};
         a_type_ptr vt {v->type != nullptr ? skip_typerefs(v->type) : nullptr};
         const bool is_ptr {vt != nullptr && vt->kind == tk_pointer && !vt->variant.pointer.is_reference};
         a_type_ptr pe {is_ptr && vt->variant.pointer.type != nullptr ? skip_typerefs(vt->variant.pointer.type)
                                                                      : nullptr};
+        bool mismatched {false};
         for (Annot k : {Annot::owning, Annot::ref_to_uninit})
         {
-            const std::vector<an_attribute_ptr> ns {variable_markers(v, k)};
-            if (ns.empty())
+            // twice is twice on ONE declaration: a global's declarations that each carry it agree (decision 0054 item 5)
+            const std::vector<DeclMarks> decls {
+                storage ? declaration_markers(v, k)
+                        : std::vector<DeclMarks> {DeclMarks {v->source_corresp.decl_position, variable_markers(v, k)}}};
+            const DeclMarks* first {nullptr};
+            const DeclMarks* twice {nullptr};
+            for (const DeclMarks& d : decls)
+            {
+                first = first == nullptr && !d.nodes.empty() ? &d : first;
+                twice = twice == nullptr && d.nodes.size() > 1U ? &d : twice;
+            }
+            if (first == nullptr)
             {
                 continue;
             }
             const std::string an {std::string("cerastes::") + marker_name(k)};
-            const a_source_position at {ns[0U]->position};
-            if (ns.size() > 1U)
+            const a_source_position at {first->nodes[0U]->position};
+            if (twice != nullptr)
             {
-                reject(Diag::unsupported_annotation, ns[1U]->position, "\"" + an + "\" twice on `" + name + "`");
+                reject(Diag::unsupported_annotation, twice->nodes[1U]->position,
+                       "\"" + an + "\" twice on `" + name + "`");
+                r.bad = true;
                 continue;
             }
             if (!is_ptr)
             {
                 reject(Diag::unsupported_annotation, at, "\"" + an + "\" on `" + name + "` (it is not a pointer)");
-                r.skip = true;
+                r.skip = r.bad = true;
                 continue;
             }
             if (pe != nullptr && pe->kind == tk_routine)
             {
                 reject(Diag::unsupported_annotation, at,
                        "\"" + an + "\" on `" + name + "` (a pointer to a function: M4.7)");
-                r.skip = true;
+                r.skip = r.bad = true;
                 continue;
             }
             if (pe != nullptr && pe->kind == tk_void)
             {
                 reject(Diag::unsupported_annotation, at,
                        "\"" + an + "\" on `" + name + "` (a `void *`: a pointer to an untyped object)");
-                r.skip = true;
+                r.skip = r.bad = true;
                 continue;
+            }
+            if (storage)
+            {
+                if (is_const_object(v))
+                {
+                    reject(Diag::unsupported_annotation, at,
+                           "\"" + an + "\" on `" + name +
+                               "`, a `const` object (a named constant holds no block, decision 0054 item 5)");
+                    r.bad = true;
+                    continue;
+                }
+                // one report per variable: the first kind whose declarations disagree (the second kind's would name the same pair)
+                if (mismatched || !declarations_agree(decls, an, name))
+                {
+                    mismatched = true;
+                    r.bad = true;
+                    continue;
+                }
+                bool dynamic {false};
+                a_constant_ptr c {storage_initializer(v, &dynamic)};
+                if (dynamic || (c != nullptr && !(c->kind == ck_integer && decimal_value(c) == "0")))
+                {
+                    reject(
+                        Diag::unsupported_annotation, at,
+                        "\"" + an + "\" on `" + name +
+                            "`, which has an initializer that is not a null pointer constant (an owning or marked variable starts null; it owns only what it is given, decision 0054 item 5)");
+                    r.bad = true;
+                    continue;
+                }
             }
             if (k == Annot::ref_to_uninit)
             {
                 r.ref = true;
                 continue;
             }
-            if (!arguments_of(ns[0U]).empty())
+            if (!arguments_of(first->nodes[0U]).empty())
             {
                 reject(Diag::unsupported_annotation, at,
                        "\"cerastes::owning(n)\" on `" + name + "` (an owned range: M4.5e1)");
+                r.bad = true;
             }
             else if (pointee_qualified(v->type))
             {
@@ -7381,19 +7773,29 @@ private:
                        "\"cerastes::owning\" on `" + name +
                            "` (a pointer to a `const` or `volatile` object: nothing may be written through an "
                            "owner, decision 0052 item 3)");
-            }
-            else if (v->address_taken)
-            {
-                reject(Diag::unsupported_annotation, at,
-                       "\"cerastes::owning\" on `" + name +
-                           "`, whose address is taken (an owning cell: M4.5d2b2, decision 0052 item 8)");
+                r.bad = true;
             }
             else
             {
                 r.owning = true;
             }
         }
+        if (storage && !r.bad && (r.owning || r.ref))
+        {
+            var_marks_[v] = r;
+        }
         return r;
+    }
+
+    // A global or `static` local: true when a marker was rejected (the variable is not encoded).
+    bool reject_variable_markers(a_variable_ptr v, MarkSite site)
+    {
+        return read_variable_markers(v, site).bad;
+    }
+
+    LocalMarks read_local_markers(a_variable_ptr v)
+    {
+        return read_variable_markers(v, MarkSite::local);
     }
 
     // Under `--strict-init` the nodes through which a value reaches its receiver unchanged, from `e` down to the call
@@ -7441,6 +7843,27 @@ private:
                    ", which may point to an initialized object: only a null pointer, the result of a `ref_to_uninit` "
                    "call, `&x` of an `uninit` local or another marked pointer may be stored in it");
     }
+    // `--strict-init`, a store to a global or `static` local marked `ref_to_uninit` (decision 0054 item 5): the rule of a marked local, with a marked
+    // global also accepted as the source.
+    static const vir::Global* marked_global_target(const Expr* addr)
+    {
+        return addr != nullptr && addr->kind == Expr::Kind::GlobalAddr && addr->global != nullptr &&
+                       addr->global->ref_to_uninit
+                   ? addr->global
+                   : nullptr;
+    }
+    void check_marked_global_source(const vir::Global* g, const Expr* x, const a_source_position& at)
+    {
+        if (!verify_config().strict_init || g == nullptr || strict_value_uninit_ok(x))
+        {
+            return;
+        }
+        reject(Diag::uninit_ref_initialized, at,
+               "`" + g->c_name + "` is marked `ref_to_uninit` but receives " +
+                   (x != nullptr && !x->c_text.empty() ? "`" + x->c_text + "`" : std::string("a value")) +
+                   ", which may point to an initialized object: only a null pointer, the result of a `ref_to_uninit` "
+                   "call, `&x` of an `uninit` local or another marked pointer may be stored in it");
+    }
     // `--strict-init`, a `ref_to_uninit` function's returns (question 154, decision 0052 item 4): a marked local, a
     // call to a `ref_to_uninit` function or a null pointer constant.  P4416R0 [profiles.init.ref] p6 counts null as
     // initialized, which would reject every allocation wrapper's `return NULL;`.
@@ -7484,6 +7907,9 @@ private:
                 return x->callee != nullptr && x->callee->result_init == vir::InitMarker::RefToUninit;
             case Expr::Kind::AddrOf:
                 return x->var != nullptr && cx_.uninit_marked.count(x->var) != 0U;
+            case Expr::Kind::Deref:
+                // another marked global or `static` local, read by name (decision 0054 item 5)
+                return marked_global_target(x->a) != nullptr;
             case Expr::Kind::Local:
                 if (x->var == nullptr)
                 {
@@ -10565,20 +10991,27 @@ private:
         return b_.call(v, {a}, loc_of(e->position));
     }
 
-    // `cerastes_owns_block(p)` / `cerastes::owns_block(p)` / `cerastes_owns_vlibc_block(p)` in a contract (decision
-    // 0047 item 4, 0052 item 7): an atom on a pointer parameter or, in an `ensures`, the result.  In the `invariant` of
-    // a loop it is rejected until M4.5d2b2 (decision 0052 item 6 (a)).
+    // `cerastes_owns_block(E)` / `cerastes::owns_block(E)` / `cerastes_owns_vlibc_block(E)` in a contract (decision 0047 item 4, 0052 item 7, 0054 item 2):
+    // an atom on a pointer VALUE `E` that place_pointer reads: a parameter, in an `ensures` the result, or a global, reached through loads, member steps
+    // and by-value fields (`p`, `*pp`, `p->q`, `**ppp`, `s.q`, `g`, `*gp`, `r->q`).  Its place is `E`'s (vir::atom_place).  In the `invariant` of a loop
+    // it is rejected until record 0054 item 4's lowering.
     const Expr* spec_block_atom(an_expr_node_ptr e, const std::string& name, const std::vector<an_expr_node_ptr>& ops,
                                 bool vlibc = false)
     {
         if (!cx_.contract)
         {
-            // Decision 0052 item 6 (a) is cut to M4.5d2b2: a written `owns_block` in a loop invariant, a measure or a
-            // `do ... while (0)`.
+            // Decision 0054 item 4 (0052 item 6 (a)): a written `owns_block` in the invariant of a loop; a measure and a `do ... while (0)` hold none.
+            if (cx_.loop_invariant && cx_.invariant_atoms_ok)
+            {
+                return invariant_block_atom(e, name, ops, vlibc);
+            }
             reject(
                 Diag::unsupported_annotation, e->position,
-                "\"" + name +
-                    "\" in a loop invariant or a termination measure (a loop place for a whole block: M4.5d2b2, decision 0052 item 6 (a))");
+                cx_.loop_invariant
+                    ? "\"" + name +
+                          "\" in the invariant of a `do ... while (0)` (straight-line code, asserted once like a `check`; never lifted, record 0054 item 4)"
+                    : "\"" + name +
+                          "\" in a loop's termination measure (a measure holds no permission atom, record 0054 item 4, decision 0038 item 10)");
             return nullptr;
         }
         if (cx_.annot == Annot::decreases)
@@ -10606,17 +11039,16 @@ private:
         }
         if (cx_.old_depth > 0)
         {
-            reject(Diag::unsupported_annotation, e->position,
-                   "\"" + name + "\" under \"old\" (decision 0047 item 4: M4.5d2b2)");
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "\"" + name +
+                    "\" under \"old\" (a block site holds a permission in the state it is read in, decision 0054 item 2)");
             return nullptr;
         }
         an_expr_node_ptr a {peel_place(ops[1U])};
-        if (a == nullptr || a->kind != enk_param_ref)
+        if (a == nullptr)
         {
-            reject(Diag::unsupported_annotation, e->position,
-                   "\"" + name +
-                       "\" of something other than a pointer parameter or, in an `ensures`, the result: a place "
-                       "reached through a load, a member or a global is M4.5d2b2 (decision 0047 item 4)");
+            reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" of something this version cannot read");
             return nullptr;
         }
         const Expr* p {expr(a)};
@@ -10624,11 +11056,30 @@ private:
         {
             return nullptr;
         }
-        if ((p->kind != Expr::Kind::Formal && p->kind != Expr::Kind::Result) || !p->type.is_ptr())
+        if (!p->type.is_ptr() || p->type.pointee == nullptr)
+        {
+            reject(Diag::unsupported_annotation, e->position,
+                   "\"" + name + "\" of something that is not a pointer (decision 0047 item 4)");
+            return nullptr;
+        }
+        // Decision 0054 item 2: the pointer is read from a parameter, a global or the result through loads, members and by-value fields.
+        const Expr* root {vir::place_root(p)};
+        if (root->kind == Expr::Kind::Old)
+        {
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "\"" + name +
+                    "\" under \"old\" (a block site holds a permission in the state it is read in, decision 0054 item 2)");
+            return nullptr;
+        }
+        if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
+            root->kind != Expr::Kind::Result)
         {
             reject(Diag::unsupported_annotation, e->position,
                    "\"" + name +
-                       "\" of something that is not a pointer parameter or the result (decision 0047 item 4)");
+                       "\" of something that is not a pointer parameter, a global or, in an `ensures`, the result, "
+                       "reached through loads and members (`p`, `*pp`, `p->q`, `g`, `*gp`; a local or an element: "
+                       "M4.5e1, decision 0054 item 2)");
             return nullptr;
         }
         if (pointee_qualified(a->type))
@@ -10640,6 +11091,83 @@ private:
             return nullptr;
         }
         const Expr* atom {b_.atom(vir::AtomKind::OwnsBlock, p, -1, loc_of(e->position))};
+        atom_pos_[atom] = e->position;
+        if (vlibc)
+        {
+            const_cast<Expr*>(atom)->vlibc_block = true; // decision 0052 item 7
+        }
+        return atom;
+    }
+
+    // `cerastes_owns_block(E)` / `cerastes::owns_block(E)` / `cerastes_owns_vlibc_block(E)` in the `invariant` of a loop (decision 0054 item 4): an Atom
+    // OwnsBlock whose `a` is the pointer VALUE `E` as the invariant reads it, with `atom_place` as for a contract (vir.cpp): a pointer variable of the
+    // function (a local, an owning one included, or a parameter's copy; a Local, a cell read by name too: keyless, compared by variable), a place reached
+    // from one through loads (`*pp`, `s->q`, `*s.q`: a Deref of the pointer variable's value or of a member address; root a Local or an AddrOf, key
+    // `kLocalSiteBase + var->id`) or a global's value (`g`, `*gp`: a Deref over a GlobalAddr, key `kGlobalSiteBase + id`, steps starting with a load).
+    // Guards are as for any written atom (`p == NULL || owns_block(p)`: vir::loop_atoms collects them).  Its reads are ordinary reads of the invariant.
+    const Expr* invariant_block_atom(an_expr_node_ptr e, const std::string& name,
+                                     const std::vector<an_expr_node_ptr>& ops, bool vlibc)
+    {
+        if (vlibc && il_header.source_language != sl_C)
+        {
+            reject(Diag::unsupported_annotation, e->position,
+                   "\"" + name +
+                       "\" in C++: vlibc's allocations are rejected in C++ until M7 (decisions 0050 item 7 and 0052 "
+                       "item 7)");
+            return nullptr;
+        }
+        if (ops.size() != 2U)
+        {
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "\"" + name +
+                    "\" with a size or other than one argument (the two-argument form is vlibc's own, decision 0047 item 4)");
+            return nullptr;
+        }
+        if (cx_.old_depth > 0)
+        {
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "\"" + name +
+                    "\" under \"old\" (a block site holds a permission in the state it is read in, decision 0054 item 2)");
+            return nullptr;
+        }
+        an_expr_node_ptr a {peel_place(ops[1U])};
+        const Expr* x {a != nullptr ? expr(a) : nullptr};
+        if (x == nullptr)
+        {
+            return nullptr;
+        }
+        if (!x->type.is_ptr() || x->type.pointee == nullptr)
+        {
+            reject(Diag::unsupported_annotation, e->position,
+                   "\"" + name + "\" of something that is not a pointer (decision 0047 item 4)");
+            return nullptr;
+        }
+        std::vector<int> steps;
+        const Expr* root {vir::place_root(x, &steps)};
+        const bool ok {(root->kind == Expr::Kind::Local && root->type.is_ptr()) ||
+                       (root->kind == Expr::Kind::Local && !steps.empty()) ||
+                       ((root->kind == Expr::Kind::AddrOf || root->kind == Expr::Kind::GlobalAddr) &&
+                        vir::steps_have_load(steps))};
+        if (!ok)
+        {
+            reject(Diag::unsupported_annotation, e->position,
+                   "\"" + name +
+                       "\" in a loop invariant of something other than a pointer variable, a place reached from one "
+                       "through loads (`*pp`, `s->q`) or a global's pointer value (`g`; a local or an element: M4.5e1, "
+                       "record 0054 item 4)");
+            return nullptr;
+        }
+        if (pointee_qualified(a->type))
+        {
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "\"" + name +
+                    "\" of a pointer to a `const` object (a function that only reads it takes `reads`, decision 0040 item 2)");
+            return nullptr;
+        }
+        const Expr* atom {b_.atom(vir::AtomKind::OwnsBlock, x, -1, loc_of(e->position))};
         atom_pos_[atom] = e->position;
         if (vlibc)
         {
@@ -10957,7 +11485,7 @@ private:
             // Decision 0041 item 12 (P63 A6): a `static` local of an accepted type is a block of the program; its declaration emits nothing.
             if (v->storage_class == sc_static && !v->is_thread_local && v->source_corresp.enclosing_routine != nullptr)
             {
-                if (reject_variable_markers(v, "a `static` local variable"))
+                if (reject_variable_markers(v, MarkSite::static_local))
                 {
                     cx_.rejected_vars.insert(v);
                     continue;
@@ -12086,9 +12614,10 @@ private:
             check_self_assignment(e, ops);
             const bool target_ok {assign_target(ops[0U], p)};
             allow_enum_conversion(ops[1U]); // decision 0018 item 6 (iii)
-            if (target_ok && p->v != nullptr && cx_.ref_marked.count(p->v) != 0U)
+            if (target_ok &&
+                ((p->v != nullptr && cx_.ref_marked.count(p->v) != 0U) || marked_global_target(p->addr) != nullptr))
             {
-                allow_strict_result(ops[1U]); // decision 0052 item 4
+                allow_strict_result(ops[1U]); // decision 0052 item 4, 0054 item 5
             }
             p->x = expr(ops[1U]);
             if (!target_ok || p->x == nullptr)
@@ -12098,6 +12627,10 @@ private:
             if (p->v != nullptr)
             {
                 check_marked_source(p->v, p->x, e->position);
+            }
+            else
+            {
+                check_marked_global_source(marked_global_target(p->addr), p->x, e->position);
             }
             if ((p->addr != nullptr || p->target.is_ptr()) && p->x->type != p->target)
             {

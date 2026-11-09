@@ -328,6 +328,10 @@ void method(Printer& p, const low::LMethod& m)
         head += ")";
     }
     p.line(0, head);
+    for (const std::string& t : m.tags)
+    {
+        p.line(1, "// " + t);
+    }
     for (const low::LClause& c : m.requires_)
     {
         p.line(1, "requires " + expr(c.expr, true), c.checks);

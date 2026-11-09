@@ -473,6 +473,10 @@ private:
         {
             err(g.loc, "a global without a name");
         }
+        if (g.owning && !(g.type.is_ptr() && g.type.pointee != nullptr && !g.type.pointee->is_void()))
+        {
+            err(g.loc, name + " is `owning` but is not a pointer to an object (decision 0054 item 5)");
+        }
         if (!g.loc.known())
         {
             err(g.loc, name + " has no source position");
@@ -691,12 +695,13 @@ private:
             {
                 // decision 0052 item 3: an owning local is an automatic pointer to an object that is not a cell, a
                 // parameter's copy or a compound literal
-                if (!v->type.is_ptr() || v->type.pointee == nullptr || v->type.pointee->is_void() || v->address_taken ||
-                    v->is_param_copy || v->compound_literal)
+                // (decision 0054 item 6: an address-taken one is accepted, its owner kept in its cell)
+                if (!v->type.is_ptr() || v->type.pointee == nullptr || v->type.pointee->is_void() || v->is_param_copy ||
+                    v->compound_literal)
                 {
                     err(v->loc,
                         "'" + v->name +
-                            "' is marked owning but is not an automatic pointer variable to an object (decision 0052 item 3)");
+                            "' is marked owning but is not an automatic pointer variable to an object (decisions 0052 item 3, 0054 item 6)");
                 }
             }
         }
@@ -1175,39 +1180,42 @@ private:
     // `requires` (an `Expr::Kind::Result` is not allowed there).  `result_init` and `deallocates` need the atoms they stand for.
     void block_atoms(const Function& f, const std::vector<AtomSite>& sites, const std::vector<AtomSite>& block_sites)
     {
-        auto operand_key = [](const AtomSite& s)
+        // A block site's place is that of the pointer it names (decision 0054 item 2: `owns_block(*pp)` is (pp, [load], []), the place of `owns(**pp)`):
+        // duplicates, "beside" and partners compare the whole place, not the root.  A place expr() refuses is keyless here.
+        auto operand_place = [](const AtomSite& s)
         {
-            return atom_place(*s.atom).root;
+            return atom_place(*s.atom);
         };
         for (size_t i {0U}; i < block_sites.size(); ++i)
         {
             const AtomSite& a {block_sites[i]};
-            const int key {operand_key(a)};
-            if (key == kNoPlaceKey)
+            const PlaceKey key {operand_place(a)};
+            if (!key.valid())
             {
                 continue; // refused in expr()
             }
             for (size_t j {0U}; j < i; ++j)
             {
-                if (block_sites[j].in_ensures == a.in_ensures && operand_key(block_sites[j]) == key)
+                if (block_sites[j].in_ensures == a.in_ensures && operand_place(block_sites[j]) == key)
                 {
                     err(a.atom->loc, "the same `owns_block` atom twice in one contract list (decision 0047 item 4)");
                 }
             }
             for (const AtomSite& o : sites)
             {
-                if (atom_place(*o.atom).root == key && atom_place(*o.atom).via.empty())
+                const PlaceKey ok {atom_place(*o.atom)};
+                if (ok.root == key.root && ok.via == key.via)
                 {
                     err(a.atom->loc,
                         "an `owns_block` atom beside `owns`, `reads` or `live` of the same pointer (decision 0047 item 4)");
                 }
             }
-            if (a.in_ensures && key >= 0)
+            if (a.in_ensures && key.root != kResultSiteKey)
             {
                 bool taken {false};
                 for (const AtomSite& r : block_sites)
                 {
-                    if (!r.in_ensures && operand_key(r) == key)
+                    if (!r.in_ensures && operand_place(r) == key)
                     {
                         taken = true;
                     }
@@ -1226,7 +1234,7 @@ private:
             bool on_result {false};
             for (const AtomSite& s : block_sites)
             {
-                if (s.in_ensures && operand_key(s) == kResultSiteKey)
+                if (s.in_ensures && operand_place(s) == PlaceKey {kResultSiteKey, {}, {}})
                 {
                     on_result = true;
                 }
@@ -1254,7 +1262,7 @@ private:
             bool returned {false};
             for (const AtomSite& s : block_sites)
             {
-                if (operand_key(s) != 0)
+                if (operand_place(s) != PlaceKey {0, {}, {}})
                 {
                     continue;
                 }
@@ -1280,7 +1288,7 @@ private:
             bool on_result {false};
             for (const AtomSite& s : block_sites)
             {
-                if (s.in_ensures && operand_key(s) == kResultSiteKey)
+                if (s.in_ensures && operand_place(s) == PlaceKey {kResultSiteKey, {}, {}})
                 {
                     on_result = true;
                 }
@@ -1372,7 +1380,7 @@ private:
             // Decision 0047 item 4: `owns_block(p)` is the whole block, with the flags unless the parameter is marked: it takes the place of `owns(*p)`.
             for (const AtomSite& s : block_sites)
             {
-                if (s.atom->a != nullptr && s.atom->a->kind == Expr::Kind::Formal && s.atom->a->index == k)
+                if (atom_place(*s.atom) == PlaceKey {k, {}, {}})
                 {
                     (s.in_ensures ? owns_out : owns_in) = true;
                 }
@@ -1433,11 +1441,17 @@ private:
         {
             collect_atoms(c.expr, all);
         }
-        const std::vector<AtomSite> sites {loop_atoms(s)};
+        const std::vector<AtomSite> all_sites {loop_atoms(s)};
+        std::vector<AtomSite> sites;
+        const std::vector<AtomSite> bsites {loop_block_atoms(s)};
         std::set<const Expr*> placed;
-        for (const AtomSite& st : sites)
+        for (const AtomSite& st : all_sites)
         {
             placed.insert(st.atom);
+            if (st.atom->atom != AtomKind::OwnsBlock)
+            {
+                sites.push_back(st);
+            }
         }
         if (s.form == LoopForm::DoOnce)
         {
@@ -1445,16 +1459,45 @@ private:
         }
         for (const Expr* a : all)
         {
-            // an `owns_block` of an invariant is refused in expr() (decision 0047 item 4)
-            if (placed.count(a) == 0U && a->atom != AtomKind::OwnsBlock)
+            if (placed.count(a) == 0U)
             {
                 err(a->loc,
                     "a permission atom in a position decision 0037 item 5 does not allow (a top-level conjunct, the right of `||` or an arm of `?:` whose condition holds no atom, call or side effect)");
             }
         }
-        if (placed.size() != sites.size())
+        if (placed.size() != all_sites.size())
         {
             err(s.loc, "a permission atom of an invariant reachable twice");
+        }
+        // Decision 0054 item 4: an `owns_block` site names a pointer variable once, and no other atom of the invariant names the same variable or the cells of its
+        // block (the block carrier holds them whole; the written atom would hold them twice).
+        for (size_t k {0U}; k < bsites.size(); ++k)
+        {
+            const Expr& b {*bsites[k].atom};
+            if (b.a == nullptr)
+            {
+                continue;
+            }
+            for (size_t j {0U}; j < k; ++j)
+            {
+                const Expr& o {*bsites[j].atom};
+                if (o.a != nullptr && o.a->kind == Expr::Kind::Local && b.a->kind == Expr::Kind::Local &&
+                    o.a->var == b.a->var)
+                {
+                    err(b.loc, "the same `owns_block` site twice in the invariant of a loop (decision 0054 item 4)");
+                }
+            }
+            if (b.a->kind == Expr::Kind::Local)
+            {
+                for (const AtomSite& st : sites)
+                {
+                    if (st.atom->a != nullptr && st.atom->a->kind == Expr::Kind::Local && st.atom->a->var == b.a->var)
+                    {
+                        err(b.loc,
+                            "an `owns_block` site and another permission atom on the same pointer variable in the invariant of a loop (decision 0054 item 4: the block site holds its cells whole)");
+                    }
+                }
+            }
         }
         for (size_t k {0U}; k < sites.size(); ++k)
         {
@@ -2392,8 +2435,9 @@ private:
                             "or a place reached from one of them through loads (decisions 0037 item 5, 0040 items 4 and 6, 0041 item 7, 0043 item 9, 0045 item 2)");
                     }
                     else if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind == Expr::Kind::GlobalAddr &&
-                             root->global != nullptr && root->global->owner != nullptr)
+                             root->global != nullptr && root->global->owner != nullptr && !root->global->owning)
                     {
+                        // an owning `static` local is read only by the deep atom the encoder adds (decision 0054 item 5)
                         err(e.loc, "a read of the `static` local '" + root->global->c_name +
                                        "' in a contract (its name is not in scope there, decision 0041 item 12)");
                     }
@@ -2426,13 +2470,9 @@ private:
                 }
                 if (e.atom == AtomKind::OwnsBlock)
                 {
-                    // Decision 0047 item 4: `owns_block(p)` of a pointer parameter or, in an `ensures`, the result: the whole heap block, with no ghost amount.
-                    // In an invariant (d2b), on a global, a member, a load or a pointer variable it is refused.
-                    if (in_invariant_)
-                    {
-                        err(e.loc, "an `owns_block` atom in a loop invariant (decision 0047 item 4: M4.5d2b)");
-                        break;
-                    }
+                    // Decision 0047 item 4 and decision 0054 item 2: `owns_block(E)` of a pointer VALUE `E`: a pointer parameter or, in an `ensures`, the result, or
+                    // a pointer reached from a parameter, a global or the result through loads, members and pointer leaves (`*pp`, `p->q`, `g`, `*gp`, `r->q`, `s.q`):
+                    // the whole heap block, with no ghost amount.  In an invariant (d2b) or under `old` it is refused.
                     if (e.implicit_atom || e.amount != -1)
                     {
                         err(e.loc,
@@ -2442,12 +2482,26 @@ private:
                     {
                         break;
                     }
-                    const bool formal {e.a->kind == Expr::Kind::Formal};
-                    const bool result {e.a->kind == Expr::Kind::Result && ctx == Ctx::Ensures};
-                    if (!formal && !result)
+                    // The pointer is a value: the parameter or the result itself, or a load or a pointer leaf (`Deref`, `Field`); the address of a member or of a
+                    // global is no block's start.
+                    const Expr* broot {place_root(e.a)};
+                    // In a loop invariant (decision 0054 item 4) the pointer is a pointer variable (a plain local; a cell by name is an owner in memory, M4.5d2b2a Part C)
+                    // or a place reached from one, or from a global, through loads and members; a parameter is its local copy there.
+                    const bool value_form {e.a->kind == Expr::Kind::Formal || e.a->kind == Expr::Kind::Result ||
+                                           e.a->kind == Expr::Kind::Deref || e.a->kind == Expr::Kind::Field ||
+                                           (in_invariant_ && e.a->kind == Expr::Kind::Local)};
+                    const bool rooted {
+                        broot != nullptr &&
+                        (in_invariant_
+                             ? ((broot->kind == Expr::Kind::Local && broot->var != nullptr &&
+                                 !broot->var->address_taken) ||
+                                (broot->kind == Expr::Kind::GlobalAddr && e.a->kind != Expr::Kind::GlobalAddr))
+                             : (broot->kind == Expr::Kind::Formal || broot->kind == Expr::Kind::GlobalAddr ||
+                                (broot->kind == Expr::Kind::Result && ctx == Ctx::Ensures)))};
+                    if (!value_form || !rooted)
                     {
                         err(e.loc,
-                            "an `owns_block` atom of something other than a pointer parameter or, in an `ensures`, the result (decision 0047 item 4: a place reached through a load, a global, `old`: M4.5d2b)");
+                            "an `owns_block` atom of something other than a pointer parameter, a pointer reached from a parameter or a global through loads and members or, in an `ensures`, the result (decisions 0047 item 4, 0054 item 2)");
                     }
                     else if (!accepted_pointer(e.a->type))
                     {

@@ -1482,6 +1482,7 @@ void define_struct_globals();
 void define_heap_read_places();
 void define_heap();
 void define_heap_rejections();
+void define_heap_memory();
 void define_partnerless_atoms();
 void define_owning_locals();
 void define_owning_loops();
@@ -1765,6 +1766,7 @@ int main(int argc, char** argv)
     define_heap_read_places();
     define_heap();
     define_heap_rejections();
+    define_heap_memory();
     define_partnerless_atoms();
     define_owning_locals();
     define_owning_loops();

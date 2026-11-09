@@ -103,9 +103,10 @@ CERASTES_DIAG(unsupported_type, error,
 CERASTES_DIAG(unsupported_annotation, error,
               "%s is not supported by \"cerastes verify\" (decision 0037)")
 // A parameter's `[[cerastes::owning]]` (or `ref_to_uninit`, `must_init`) that one declaration of a function has and another does not (decisions 0040
-// item 3, 0042 item 4); the arguments are the function, the attribute (`cerastes::owning`), the parameter and where the other declaration is.
+// item 3, 0042 item 4), or the same of a global (decision 0054 item 5); the arguments are the function or variable, the attribute
+// (`cerastes::owning`), what carries it (`parameter p`, `the variable`) and where the other declaration is.
 CERASTES_DIAG(annotation_mismatch, error,
-              "the declarations of \"%s\" disagree about \"%s\" on parameter %s: %s")
+              "the declarations of \"%s\" disagree about \"%s\" on %s: %s")
 // The initialization markers (decision 0042).  `uninit` on a local that has an initializer; `--strict-init`: a local without an initializer
 // and without `uninit`, and an argument of a `ref_to_uninit`/`must_init` parameter that is not `&x` of an `uninit` local or the caller's own
 // marked parameter passed unchanged.

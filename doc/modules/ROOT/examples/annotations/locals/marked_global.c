@@ -1,14 +1,23 @@
-// expect: rejected cerastes-unsupported_annotation @ L8
+// expect: verified
+// expect: native-ok
 // mode: c23, c++20
-// Rejected: a marked global (planned for the next version).
+// A global marked ref_to_uninit (trailing position): the marker says the pointee may hold no value yet, and the function writes before it reads.
 // tag::source[]
 #include <cerastes.h>
 #include <stdlib.h>
 
-int *g CERASTES_REF_TO_UNINIT;
+static int *g CERASTES_REF_TO_UNINIT = NULL;
 
-int f(void)
+int main(void)
 {
-  return g == NULL;
+  g = (int *)malloc(sizeof(int));
+  if (g == NULL) {
+    return 1;
+  }
+  *g = 3;
+  CERASTES_CHECK(*g == 3);
+  free(g);
+  g = NULL;
+  return 0;
 }
 // end::source[]

@@ -485,6 +485,17 @@ right is missing:
   no block ("owning `v` holds no block at the loop's entry but is not null: set it
   to `NULL` after freeing it or handing it on")
   (xref:memory.adoc#owning-locals[Owning locals]);
+* at a `return` of a function that holds an owning global through its contract, when
+  the global is not null but the function does not hold its block ("returns while
+  owning global `g` does not hold its block: set it to `NULL` after freeing it"), and
+  at a call whose callee needs an owning global's block when the caller cannot show
+  that the global holds one or is null ("calls `f`, which needs owning global `g` to
+  hold its block or be null"); an owning global whose value `main` cannot know must be
+  assigned first (xref:memory.adoc#owning-globals[Owning globals and `static` locals]);
+* at a loop whose invariant names two allocations that may be one
+  (`p == NULL || cerastes_owns_block(p)` and the same for `q`): "the invariant of this
+  loop owns `p` and `q`, which may be one allocation"
+  (xref:memory.adoc#heap[Allocated memory]);
 * at a contract clause that reads `*p` (or `*r`, the object a pointer result
   points to) where no `owns` or `reads` of that object comes before it, at a contract that both owns and reads `*p` on one path, at
   an `ensures` that gives back `*p` on a path where the `requires` did not take
@@ -495,7 +506,11 @@ right is missing:
   at a contract without a body whose `ensures` names, through a pointer, an
   object it does not tie to one its `requires` took ("the contract of `f` returns
   `+**pp+` without saying it is the object its `requires` took")
-  (xref:memory.adoc#pointers-to-pointers[Pointers to pointers]);
+  (xref:memory.adoc#pointers-to-pointers[Pointers to pointers]); the same holds for
+  an allocation such a contract hands back through a pointer or a global ("the
+  contract of `f` returns the block of `+*pp+` without saying it is the one its
+  `requires` took (write `+*pp == old(*pp)+`)", or "… on a path where its `requires`
+  did not take it") (xref:memory.adoc#blocks-through-memory[Allocated memory]);
 * at the closing brace of a loop's body, when an iteration ends without an
   object the loop started with (a function called in the loop kept it), and at
   a loop invariant or measure that reads an object the loop does not hold
@@ -789,4 +804,9 @@ include::example$memory/owning_local_overwrite.c[tag=source]
 ----
 owning_local_overwrite.c:16: error: leak: assigning to owning `p` still holds its block
 ----
+
+*An owning global.* A global or a `static` local marked `cerastes::owning` reports an
+assignment that drops its block the same way ("assigning to owning `g` still holds its
+block"). It is not reported when `main` returns while it holds its block
+(xref:memory.adoc#owning-globals[Owning globals and `static` locals]).
 

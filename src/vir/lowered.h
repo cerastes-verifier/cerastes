@@ -227,6 +227,8 @@ struct LMethod
 {
     std::string name;
     std::string comment; // a `//` line above the method (the C/C++ function it stands for)
+    // `//` lines above the trusted-contract line, each a lint tag (decision 0054 item 8: `cerastes:owning-global GB_<name>` on `program_start`)
+    std::vector<std::string> tags;
     std::vector<LVar> formals;
     std::vector<LVar> results; // zero or one; one per leaf for a struct result (decision 0044 item 4)
     std::vector<LClause> requires_;

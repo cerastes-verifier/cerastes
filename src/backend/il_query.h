@@ -98,6 +98,9 @@ struct IlEntities
     // Decision 0041 item 2: the other declarations of a file-scope variable (a_src_seq_secondary_decl entries whose entity is the variable): one in a
     // system file makes the variable shared with the runtime (`environ`), which is rejected.
     std::map<a_variable_ptr, std::vector<a_source_position>> variable_secondary_decls;
+    // Decision 0054 item 5 (P75 (a)): the attribute list of each such secondary declaration (`attributes`, il_def.h:2164), in the order of
+    // `variable_secondary_decls`: a variable's own `source_corresp.attributes` is the union over every declaration, and EDG raises no mismatch.
+    std::map<a_variable_ptr, std::vector<an_attribute_ptr>> variable_secondary_attrs;
     // Decision 0041 item 5 (P63 H6): the initializer of a `static` local whose `init_kind` is `initk_function_local` is the
     // local-static-variable-init entry of its scope, not the variable's own; the entries by variable.
     std::map<a_variable_ptr, a_local_static_variable_init_ptr> static_local_inits;

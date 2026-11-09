@@ -623,6 +623,14 @@ struct Global
     // A STRUCT global (decision 0044 item 8): one entry per leaf of the struct in struct_leaves order (depth first), each with its own initial value; the
     // scalar fields above (`init_kind`, `init`, `value`, `target`) are then unused (check_program: `init` and `target` null).  Empty for every other global.
     std::vector<GlobalLeaf> leaves;
+    // `[[cerastes::owning]]` and `[[cerastes::ref_to_uninit]]` on this pointer global or `static` local (decision 0054 item 5; the encoder sets them, on a
+    // mutable pointer-to-object variable that is not `void *`, a pointer to a function or to a `const`/`volatile` type, whose every declaration carries
+    // the attribute and whose initializer is absent or null).  `owning`: the variable owns the heap block it points to, so every `owns(g)` of it in a
+    // contract is followed by the block site `g == NULL || owns_block(g)` (the deep atom, which the encoder adds), `main` holds it from `program_start`
+    // with no block, and `main`'s leak row exempts it.  `ref_to_uninit`: the plain mode of the deep atom becomes the marked mode (flags unknown); under
+    // `--strict-init` the encoder checks its stores.
+    bool owning {false};
+    bool ref_to_uninit {false};
 
     bool is_static_local() const
     {
@@ -936,13 +944,18 @@ std::vector<AtomSite> contract_atoms(const Function& f);
 // The `OwnsBlock` atoms of `f`'s contract (decision 0047 item 4), the `requires` first and then the `ensures`, in evaluation order, with the same guards
 // and positions as contract_atoms (an OwnsBlock in a position the record forbids is not listed: check_program reports it).  contract_atoms never lists
 // them, so every loop over its sites, the numbering of the ghost amounts and every `nreq` stay as they were.  `AtomSite::clause`/`in_ensures` say where
-// the atom is written, `atom->a` is the pointer it names (a `Formal` or the `Result`), `path`/`via` are empty, `base` is `atom->a`.
+// the atom is written, `atom->a` is the pointer it names (a `Formal` or the `Result` today), `base` is `atom->a`, `path` is empty and `via` the steps of `atom->a` from its root
+// (decision 0054 item 2; empty today, since only a `Formal` or the `Result` is accepted): so `atom_place(*atom)` of a block site is the place of the pointer it names.
 std::vector<AtomSite> contract_block_atoms(const Function& f);
 // The atoms of the `invariant` clauses of loop `s` (a `While` statement) in the positions of decision 0037 item 5 (decision 0040 item 5): in
 // clause order, each clause in evaluation order, with the same guards (their `cond`s hold no atom, call or side effect, and may read memory
 // like a contract's, decision 0045 item 9).  `AtomSite::clause` is the index in `s.invariants`, `in_ensures` is false, `atom->amount` is -1.  An atom of an invariant elsewhere
-// (under `!`, as an argument, ...) is not listed: check_program reports it.  Empty for a loop of form DoOnce (check_program refuses its atoms).
+// (under `!`, as an argument, ...) is not listed: check_program reports it.  Empty for a loop of form DoOnce (check_program refuses its atoms).  From decision 0054 item 4
+// the `OwnsBlock` atoms of the invariant are listed too (a consumer of the permission atoms skips them: loop_block_atoms is the list of those alone).
 std::vector<AtomSite> loop_atoms(const Stmt& s);
+// The `OwnsBlock` atoms of the `invariant` clauses of loop `s` (decision 0054 item 4), in the same positions and with the same guards as loop_atoms' sites; `atom->a` is the
+// pointer the invariant reads (a `Local` pointer variable, or a place reached from one or from a global through loads and members), `atom->amount` is -1.
+std::vector<AtomSite> loop_block_atoms(const Stmt& s);
 // The shape of a site's guards for pointer parameter `param`: none (the atom is a top-level conjunct, or an arm of `&&`), exactly `param == NULL` being false
 // (`param == NULL || atom`, with C's `bool_to_int`/`to_bool` wrapping of the comparison accepted), or anything else.  restrict_backed and the encoder's
 // merge of `[[cerastes::owning]]` with an explicit atom (decision 0040 item 3) read it.

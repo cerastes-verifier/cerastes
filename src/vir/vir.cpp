@@ -1138,7 +1138,7 @@ public:
                 const PlaceKey pk {atom_place(*e)};
                 s.path = pk.path;
                 s.via = pk.via;
-                s.base = e->a != nullptr ? member_root(e->a) : nullptr;
+                s.base = e->a != nullptr ? (e->atom == AtomKind::OwnsBlock ? e->a : member_root(e->a)) : nullptr;
                 out_.push_back(std::move(s));
                 break;
             }
@@ -1272,20 +1272,9 @@ PlaceKey atom_place(const Expr& atom)
     {
         return k;
     }
-    if (atom.atom == AtomKind::OwnsBlock)
-    {
-        // Decision 0047 item 4: the pointer itself, a Formal or the Result, with no steps and no member path (anything else is a check_program error).
-        if (atom.a->kind == Expr::Kind::Formal)
-        {
-            k.root = atom.a->index;
-        }
-        else if (atom.a->kind == Expr::Kind::Result)
-        {
-            k.root = kResultSiteKey;
-        }
-        return k;
-    }
-    const Expr* base {member_root(atom.a, &k.path)};
+    // Decision 0054 item 2: an `owns_block` atom names a pointer VALUE, `atom.a` itself, and its place is that pointer's: the root and the steps of `atom.a`
+    // (`p`: the Formal, no steps; `*pp`: root `pp`, one load; `g`: `Deref(GlobalAddr g)`), with no member tail (the pointer is the base).
+    const Expr* base {atom.atom == AtomKind::OwnsBlock ? atom.a : member_root(atom.a, &k.path)};
     std::vector<int> steps;
     const Expr* root {place_root(base, &steps)};
     if (root == nullptr)
@@ -1384,7 +1373,6 @@ std::vector<AtomSite> contract_block_atoms(const Function& f)
 
 std::vector<AtomSite> loop_atoms(const Stmt& s)
 {
-    std::vector<AtomSite> all;
     std::vector<AtomSite> out;
     if (s.kind != Stmt::Kind::While || s.form == LoopForm::DoOnce)
     {
@@ -1392,12 +1380,17 @@ std::vector<AtomSite> loop_atoms(const Stmt& s)
     }
     for (size_t k {0U}; k < s.invariants.size(); ++k)
     {
-        AtomCollector(all, false, static_cast<int>(k)).walk(s.invariants[k].expr);
+        AtomCollector(out, false, static_cast<int>(k)).walk(s.invariants[k].expr);
     }
-    // An OwnsBlock atom of an invariant (decision 0052 item 6 (a): M4.5d2b2) is never listed; check_program refuses it.
-    for (AtomSite& a : all)
+    return out;
+}
+
+std::vector<AtomSite> loop_block_atoms(const Stmt& s)
+{
+    std::vector<AtomSite> out;
+    for (AtomSite& a : loop_atoms(s))
     {
-        if (a.atom->atom != AtomKind::OwnsBlock)
+        if (a.atom->atom == AtomKind::OwnsBlock)
         {
             out.push_back(std::move(a));
         }
@@ -1565,17 +1558,31 @@ std::string restrict_hazard(const Function& f, int param)
                    mine.str() + "` that is not based on `" + name(param) + "`";
         }
     }
-    // Decision 0052 item 6 (d): the block of a result's `owns_block` holds every leaf of its type, so it can hold a `T
-    // *` that is not based on `param` too (a block site on a Formal is judged by the parameter's type in the loop
-    // above).
+    // Decision 0052 item 6 (d) and decision 0054 item 2: the block of a block site holds every leaf of its type, and its place is judged like an atom's by the root of its
+    // pointer: a result's block (the result itself or a place reached from it), a global's (`owns_block(g)`, `*gp`) by their types, so a `T *` held there is not
+    // based on `param` either.  A block site on a Formal, or reached from one, is judged by the parameter's type in the loop above.
     for (const AtomSite& s : contract_block_atoms(f))
     {
-        if (s.atom->a != nullptr && s.atom->a->kind == Expr::Kind::Result && !f.ret.is_void())
+        const Expr* root {s.atom->a != nullptr ? place_root(s.atom->a) : nullptr};
+        if (root == nullptr)
+        {
+            continue;
+        }
+        if (root->kind == Expr::Kind::Result && !f.ret.is_void())
         {
             std::set<const StructType*> seen;
             if (may_hold_pointer_to(f.ret, *mine.pointee, seen))
             {
                 return "the result of `" + f.c_name + "` named by the contract can hold a `" + mine.str() +
+                       "`, and a pointer loaded from it is not based on `" + name(param) + "`";
+            }
+        }
+        else if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr)
+        {
+            std::set<const StructType*> seen;
+            if (may_hold_pointer_to(root->global->type, *mine.pointee, seen))
+            {
+                return "the global `" + root->global->c_name + "` named by the contract can hold a `" + mine.str() +
                        "`, and a pointer loaded from it is not based on `" + name(param) + "`";
             }
         }
@@ -1606,8 +1613,7 @@ bool restrict_backed(const Function& f, int param, int* offender)
     {
         for (const AtomSite& b : blocks)
         {
-            if (b.in_ensures == in_ensures && b.atom->a != nullptr && b.atom->a->kind == Expr::Kind::Formal &&
-                b.atom->a->index == q && null_guard(b, q))
+            if (b.in_ensures == in_ensures && null_guard(b, q) && atom_place(*b.atom) == PlaceKey {q, {}, {}})
             {
                 return true;
             }

@@ -481,6 +481,10 @@ parameter. Anything else may point to an object that has a value, and is
 include::example$verifying/strict_init_marked_source.c[tag=source]
 ----
 
+A global or a `static` local marked `ref_to_uninit` follows the same rule at every
+assignment by name, so it may receive the result of `malloc`. An assignment through a
+pointer to it is not checked.
+
 A function marked `ref_to_uninit` returns a marked local, a null pointer or a
 call of another function marked `ref_to_uninit`. A null pointer is allowed
 although P4416 counts it as initialized: there is no object behind it, nothing can

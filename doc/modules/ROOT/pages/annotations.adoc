@@ -338,12 +338,12 @@ local as described next).
 [#marked-locals]
 === Owning and marked locals
 
-`cerastes::owning` and `cerastes::ref_to_uninit` also apply to a pointer local, in
-either position: before the declaration (`CERASTES_OWNING int *p = ...;`), where
-the attribute covers every declarator of the declaration, or after the
-declarator's name (`int *p CERASTES_OWNING = ...;`), where it covers that one
-(`int *a CERASTES_OWNING, *b;` marks `a` only). Both are for variables of
-automatic storage that are not parameters.
+`cerastes::owning` and `cerastes::ref_to_uninit` also apply to a pointer variable
+that is not a parameter: a local, a local whose address is taken, a `static` local
+or a global. Either position works: before the declaration
+(`CERASTES_OWNING int *p = ...;`), where the attribute covers every declarator of
+the declaration, or after the declarator's name (`int *p CERASTES_OWNING = ...;`),
+where it covers that one (`int *a CERASTES_OWNING, *b;` marks `a` only).
 
 [source,c]
 ----
@@ -364,6 +364,36 @@ value]).
 include::example$annotations/locals/marked_local.c[tag=source]
 ----
 
+An owning global or `static` local keeps its block across calls, so its ownership
+travels in contracts: a function that names `cerastes_owns(g)` of an owning global
+also receives and returns the block `g` points to, when `g` is not null. `main` may
+end while an owning global or `static` local still holds its block, since an owner
+with static storage may keep its object for the whole program, as P4417R0 allows
+(xref:memory.adoc#owning-globals[Owning globals and `static` locals]).
+
+[source,c]
+----
+include::example$annotations/locals/owning_global.c[tag=source]
+----
+
+An owning local whose address is taken is an owner like any other: a write through
+a pointer to it is a write to the owner, and a function that receives its address
+decides by its contract what happens to the block.
+
+[source,c]
+----
+include::example$annotations/locals/owning_address_taken.c[tag=source]
+----
+
+`cerastes::ref_to_uninit` on a global or a `static` local says that the object it
+points to may have no value yet; as on a local, it documents that unless
+`--strict-init` is given.
+
+[source,c]
+----
+include::example$annotations/locals/marked_global.c[tag=source]
+----
+
 Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
 
 * either attribute on a variable that is not a pointer, on a `void *` and on a
@@ -373,25 +403,13 @@ Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
   through an owner);
 * `owning(n)`, an owned range, which comes with arrays;
 * either attribute twice on one variable;
-* `owning` on a global, on a `static` local or on a local whose address is taken,
-  and `ref_to_uninit` on a global or a `static` local: planned for a later
-  version, since they need the contracts of every function to say who owns the
-  variable's object.
+* either attribute on a global or a `static` local whose initializer is not a null
+  pointer (an owner owns only what it is given).
 
-[source,c]
-----
-include::example$annotations/locals/owning_global.c[tag=source]
-----
-
-[source,c]
-----
-include::example$annotations/locals/owning_address_taken.c[tag=source]
-----
-
-[source,c]
-----
-include::example$annotations/locals/marked_global.c[tag=source]
-----
+A global declared more than once carries the same attributes on every declaration;
+otherwise the error is `cerastes-annotation_mismatch`, naming both declarations.
+`owning` on a structure's member is the front end's own error until a later
+version.
 
 `cerastes::must_init` stays a parameter attribute: P4222 defines it for parameters
 only, and the front end reports that it does not apply to a local.

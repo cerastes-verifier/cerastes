@@ -1637,8 +1637,8 @@ class FlagTests(unittest.TestCase):
     def test_owner_ghosts_may_stand_between_a_write_and_its_flag(self):
         """Decision 0052 item 3: an owning local's `held_<v> := ...` and `tv_<v> := ...` follow its write and precede its flag."""
         x = self.X
-        body = [f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", "  held_v := y != 0",
-                "  tv_v := (y != 0) ? tv_v : tv_v", f"  d_{x} := true"]
+        body = [f"  d_{x} := false", f"  {x} := 0", f"  {x} := y", "  held_v := y != null",
+                "  held_v := false", f"  d_{x} := true"]
         self.assertEqual(self.probs(*body), [])
 
     def test_another_assignment_between_a_write_and_its_flag_is_still_a_problem(self):
@@ -1650,7 +1650,7 @@ class FlagTests(unittest.TestCase):
 
     def test_owner_ghosts_without_the_write_do_not_make_a_flag_legal(self):
         x = self.X
-        probs = self.probs("  held_v := y != 0", "  tv_v := tv_v", f"  d_{x} := true")
+        probs = self.probs("  held_v := y != null", "  held_v := false", f"  d_{x} := true")
         self.assertTrue(any("does not directly follow a write" in p for p in probs), probs)
 
 
@@ -4382,7 +4382,7 @@ class OwnerLoopTests(unittest.TestCase):
             with self.subTest(cls=cls):
                 inv = ["    invariant held_v == (p != null)", f"    invariant (p != null) ==> (acc({slot}) && {cls})"]
                 entry = [*self.row("(p != null) ==> held_v"), *self.row(f"(p != null) ==> (!((perm({slot}) != write) || !({cls})))")]
-                self.assertEqual(self.strict(self.fixture(tve="  held_v := held_v", invariants=inv, entry=entry)), [])
+                self.assertEqual(self.strict(self.fixture(tve="  held_v := false", invariants=inv, entry=entry)), [])
 
     def test_a_class_row_or_conjunct_at_another_slot_is_a_problem(self):
         inv = ["    invariant held_v == (p != null)", "    invariant (p != null) ==> (acc(loc(block_of(p), 0).tok) && !loc(block_of(p), 0).tok)"]
@@ -4724,6 +4724,459 @@ class SelfTestHygieneTests(unittest.TestCase):
         src = "class C:\n    def test_a(self): pass\n    def test_a(self): pass\n    def test_b(self): pass\n"
         self.assertEqual(self.defined_twice(src), ["C.test_a"])
         self.assertEqual(self.defined_twice(src.replace("def test_a(self): pass\n    def test_b", "def test_c(self): pass\n    def test_b")), [])
+
+
+class LoopCarrierGhostTests(unittest.TestCase):
+    """Decision 0054 items 3 and 4 (as built): the loop-entry ghosts of the loop carriers and the clauses and rows that name them.
+    `ev_<v>__<L>` (`Ref`) is `<v>` at entry and the value set `v == ev || v == null || v == x...` is the one invariant that names it;
+    `hs_<v>__<L>` (`Bool`) is `held_<v>` at entry, named by `invariant held_<v> == hs` and the row `if (!(hs ==> held_<v>)) {`;
+    `dup_...`/`ad_...` is whether two carriers shared a block at entry, named positively only by the exclusivity clause
+    `invariant S || (!(<its pair formula>))` and its row.  Each is assigned once before the `while` of its own loop, from exactly its
+    right-hand side.  A token clause of a loop carrier is an implication whose antecedent names its pointer, and the exemption of a
+    `forperm` leak row only names a token by its block's location.  Each rule has a twin that breaks exactly it."""
+
+    PAIR = "((v != null) && (w != null)) && (block_of(v) == block_of(w))"
+    LOCALS = ["  var v: Ref", "  var w: Ref", "  var held_v: Bool", "  var ev_v__0: Ref", "  var hs_v__0: Bool",
+              "  var dup_v_w__0: Bool", "  var i: Int"]
+    ENTRY = ["  ev_v__0 := v", "  hs_v__0 := held_v",
+             f"  dup_v_w__0 := {PAIR}"]
+    VALUE_SET = "    invariant (v == ev_v__0) || (v == null)"
+    HELD = "    invariant held_v == hs_v__0"
+    EXCL = f"    invariant dup_v_w__0 || (!({PAIR}))"
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, locals_=None, entry=None, invariants=None, body=None, loops=1):
+        invs = invariants if invariants is not None else [self.VALUE_SET, self.HELD, self.EXCL]
+        rows = [
+            f"    if (!(hs_v__0 ==> held_v)) {{", Check("      assert false", A, "permission"), "    }",
+            f"    if (!(dup_v_w__0 || (!({self.PAIR})))) {{", Check("      assert false", A, "permission"), "    }",
+        ]
+        return [
+            "field v_int: Int",
+            "method f__1(p: Ref, n: Int)",
+            Check("  requires n >= 0", WF, "internal"),
+            "  decreases",
+            "{",
+            *(locals_ if locals_ is not None else self.LOCALS),
+            "  held_v := false",
+            *(entry if entry is not None else self.ENTRY),
+            "  i := 0",
+            "  while (i < n)",
+            *[Check(i, INV, "internal") for i in invs],
+            Check("    decreases n - i", "termination.failed", "termination"),
+            "  {",
+            *(body if body is not None else ["    i := i + 1", *rows]),
+            "  }",
+            "}",
+        ]
+
+    def probs(self, **kw):
+        return self.strict(self.fixture(**kw))
+
+    def test_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.probs(), [])
+
+    def test_ad_snapshots_and_the_other_pair_are_clean_too(self):
+        pair = "((x != null) && (y != null)) && (block_of(x) == block_of(y))"
+        locals_ = [*self.LOCALS[:5], "  var ad_h0_x_y__0: Bool", "  var x: Ref", "  var y: Ref", "  var i: Int"]
+        entry = [*self.ENTRY[:2], f"  ad_h0_x_y__0 := {pair}"]
+        invs = [self.VALUE_SET, self.HELD, f"    invariant ad_h0_x_y__0 || (!({pair}))",
+                "    invariant ((x != null) && (!ad_h0_x_y__0)) ==> (x.v_int == 0)"]
+        body = ["    i := i + 1", f"    if (!(hs_v__0 ==> held_v)) {{", Check("      assert false", A, "permission"), "    }",
+                f"    if (!(ad_h0_x_y__0 || (!({pair})))) {{", Check("      assert false", A, "permission"), "    }"]
+        self.assertEqual(self.probs(locals_=locals_, entry=entry, invariants=invs, body=body), [])
+
+    # ev_ ---------------------------------------------------------------------------------------------------------------------------
+    def test_an_entry_value_of_anything_but_its_own_owner_is_a_problem(self):
+        for rhs in ("w", "null", "v.v_ptr_int", "(held_v ? v : null)"):
+            with self.subTest(rhs=rhs):
+                probs = self.probs(entry=[f"  ev_v__0 := {rhs}", *self.ENTRY[1:]])
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("loop-entry ghost `ev_v__0` is assigned", probs[0])
+                self.assertIn("`v`, the owner's own value", probs[0])
+
+    def test_an_entry_value_assigned_in_the_loop_twice_or_never_is_a_problem(self):
+        probs = self.probs(body=["    ev_v__0 := v", "    i := i + 1"])
+        self.assertTrue(any("`ev_v__0` is assigned at or after the `while` of its own loop" in p for p in probs), probs)
+        probs = self.probs(entry=[*self.ENTRY, "  ev_v__0 := v"])
+        self.assertTrue(any("`ev_v__0` is assigned 2 times" in p for p in probs), probs)
+        probs = self.probs(entry=self.ENTRY[1:])
+        self.assertTrue(any("`ev_v__0` is assigned 0 times" in p for p in probs), probs)
+
+    def test_an_entry_value_of_another_type_or_of_a_loop_that_does_not_exist_is_a_problem(self):
+        locals_ = ["  var ev_v__0: Bool", *[l for l in self.LOCALS if "ev_v__0" not in l]]
+        probs = self.probs(locals_=locals_)
+        self.assertTrue(any("`ev_v__0` is a `Bool` local" in p for p in probs), probs)
+        locals_ = [*self.LOCALS, "  var ev_v__3: Ref"]
+        probs = self.probs(locals_=locals_, entry=[*self.ENTRY, "  ev_v__3 := v"])
+        self.assertTrue(any("`ev_v__3` names loop 3, which the method does not have" in p for p in probs), probs)
+
+    def test_the_value_set_is_the_only_invariant_that_names_the_entry_value(self):
+        for inv in ("    invariant (v == null) || (v == ev_v__0)", "    invariant (v == ev_v__0) || (v != null)",
+                    "    invariant (v == ev_v__0) || (w == null)", "    invariant ev_v__0 != null", "    invariant true || (v == ev_v__0)",
+                    "    invariant (v == ev_v__0) || (v == w.v_ptr_int)"):
+            with self.subTest(inv=inv):
+                probs = self.probs(invariants=[inv, self.HELD, self.EXCL])
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`ev_v__0` appears outside the value set", probs[0])
+
+    def test_a_value_set_with_more_locals_is_clean(self):
+        inv = "    invariant (((v == ev_v__0) || (v == null)) || (v == w))"
+        self.assertEqual(self.probs(invariants=[inv, self.HELD, self.EXCL]), [])
+
+    def test_the_entry_value_in_an_assert_or_a_precondition_is_a_problem(self):
+        probs = self.probs(body=["    i := i + 1", "    assert v == ev_v__0"])
+        self.assertTrue(any("`ev_v__0` appears outside the value set" in p for p in probs), probs)
+
+    # hs_ ---------------------------------------------------------------------------------------------------------------------------
+    def test_an_entry_flag_of_anything_but_its_own_flag_is_a_problem(self):
+        for rhs in ("true", "false", "v != null", "held_w"):
+            with self.subTest(rhs=rhs):
+                probs = self.probs(entry=[self.ENTRY[0], f"  hs_v__0 := {rhs}", self.ENTRY[2]])
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("loop-entry ghost `hs_v__0` is assigned", probs[0])
+                self.assertIn("`held_v`", probs[0])
+
+    def test_an_entry_flag_assigned_in_the_loop_or_of_another_type_is_a_problem(self):
+        probs = self.probs(body=["    hs_v__0 := held_v", "    i := i + 1"])
+        self.assertTrue(any("`hs_v__0` is assigned at or after the `while` of its own loop" in p for p in probs), probs)
+        locals_ = ["  var hs_v__0: Ref", *[l for l in self.LOCALS if "hs_v__0" not in l]]
+        probs = self.probs(locals_=locals_)
+        self.assertTrue(any("`hs_v__0` is a `Ref` local" in p for p in probs), probs)
+
+    def test_the_entry_flag_is_named_by_one_invariant_and_one_row_only(self):
+        for inv in ("    invariant held_v ==> hs_v__0", "    invariant hs_v__0", "    invariant held_v == (hs_v__0 || true)",
+                    "    invariant held_w == hs_v__0"):
+            with self.subTest(inv=inv):
+                probs = self.probs(invariants=[self.VALUE_SET, inv, self.EXCL])
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("`hs_v__0` appears outside `invariant held_v == hs_v__0`", probs[0])
+
+    def test_the_entry_flag_row_is_exactly_its_implication(self):
+        for row in ("    if (!(held_v ==> hs_v__0)) {", "    if (!(hs_v__0)) {", "    if (!(hs_v__0 ==> held_v) || true) {"):
+            with self.subTest(row=row):
+                body = ["    i := i + 1", row, Check("      assert false", A, "permission"), "    }"]
+                probs = self.probs(body=body)
+                self.assertTrue(any("`hs_v__0` appears outside" in p for p in probs), probs)
+        body = ["    i := i + 1", "    if (hs_v__0 ==> held_v) {", "      i := i + 2", "    }"]
+        self.assertTrue(any("`hs_v__0` appears outside" in p for p in self.probs(body=body)))
+
+    # dup_/ad_ ----------------------------------------------------------------------------------------------------------------------
+    def test_a_pair_snapshot_is_exactly_the_pair_formula(self):
+        for rhs in ("(v != null) && (w != null)", "((v != null) && (w != null)) && (block_of(v) != block_of(w))",
+                    "((v != null) && (w != null)) && (block_of(v) == block_of(v))", "false", "held_v",
+                    "((v != null) || (w != null)) && (block_of(v) == block_of(w))"):
+            with self.subTest(rhs=rhs):
+                probs = self.probs(entry=[*self.ENTRY[:2], f"  dup_v_w__0 := {rhs}"])
+                self.assertTrue(any("loop-entry ghost `dup_v_w__0` is assigned" in p for p in probs), probs)
+
+    def test_the_exclusivity_clause_must_use_the_snapshots_own_formula(self):
+        other = "((v != null) && (w != null)) && (block_of(v) == block_of(p))"
+        for inv in (f"    invariant dup_v_w__0 || (!({other}))", f"    invariant dup_v_w__0 || ({self.PAIR})",
+                    "    invariant dup_v_w__0 || true", "    invariant dup_v_w__0"):
+            with self.subTest(inv=inv):
+                probs = self.probs(invariants=[self.VALUE_SET, self.HELD, inv])
+                self.assertTrue(any("`dup_v_w__0` is used positively outside the exclusivity clause" in p for p in probs) or
+                                any("`dup_v_w__0`" in p for p in probs), probs)
+
+    def test_a_snapshot_is_never_an_assumption_in_a_body_row(self):
+        body = ["    i := i + 1", f"    if (!(dup_v_w__0 || ({self.PAIR}))) {{", Check("      assert false", A, "permission"), "    }"]
+        self.assertTrue(any("`dup_v_w__0` is used positively" in p for p in self.probs(body=body)))
+        body = ["    i := i + 1", "    assert dup_v_w__0"]
+        self.assertTrue(any("`dup_v_w__0` is used positively" in p for p in self.probs(body=body)))
+
+    def test_a_negated_snapshot_is_a_guard_and_is_clean(self):
+        inv = "    invariant (held_v && (!dup_v_w__0)) ==> (v.v_int == 0)"
+        self.assertEqual(self.probs(invariants=[self.VALUE_SET, self.HELD, self.EXCL, inv]), [])
+
+    def test_a_snapshot_assigned_in_the_loop_or_twice_is_a_problem(self):
+        body = ["    i := i + 1", f"    dup_v_w__0 := {self.PAIR}"]
+        self.assertTrue(any("`dup_v_w__0` is assigned at or after the `while`" in p for p in self.probs(body=body)))
+        probs = self.probs(entry=[*self.ENTRY, f"  dup_v_w__0 := {self.PAIR}"])
+        self.assertTrue(any("`dup_v_w__0` is assigned 2 times" in p for p in probs), probs)
+
+    def test_an_inner_loops_ghost_may_stand_in_the_outer_loops_body(self):
+        lines = [
+            "field v_int: Int",
+            "method f__1(n: Int)",
+            Check("  requires n >= 0", WF, "internal"),
+            "  decreases",
+            "{",
+            "  var held_v: Bool",
+            "  var hs_v__1: Bool",
+            "  var i: Int",
+            "  while (i < n)",
+            Check("    invariant n >= 0", INV, "internal"),
+            Check("    decreases n - i", "termination.failed", "termination"),
+            "  {",
+            "    hs_v__1 := held_v",
+            "    while (i < n)",
+            Check("      invariant held_v == hs_v__1", INV, "internal"),
+            Check("      decreases n - i", "termination.failed", "termination"),
+            "    {",
+            "      i := i + 1",
+            "    }",
+            "  }",
+            "}",
+        ]
+        self.assertEqual(self.strict(lines), [])
+        lines[lines.index("    hs_v__1 := held_v")] = "    i := i + 0"
+        lines[lines.index("      i := i + 1")] = "      hs_v__1 := held_v"
+        probs = self.strict(lines)
+        self.assertTrue(any("`hs_v__1` is assigned at or after the `while` of its own loop" in p for p in probs), probs)
+
+    def test_other_locals_with_similar_names_are_not_ghosts(self):
+        locals_ = [*self.LOCALS, "  var ev: Ref", "  var hs: Bool", "  var dup: Bool", "  var advance: Bool"]
+        body = ["    ev := v", "    hs := true", "    dup := hs", "    advance := dup", "    i := i + 1"]
+        self.assertEqual(self.probs(locals_=locals_, body=body), [])
+
+    # the token clause of a carrier ----------------------------------------------------------------------------------------------------
+    SLOT = "loc(block_of(v), (-1)).tok"
+
+    def carrier(self, inv):
+        lines = self.fixture(invariants=[self.VALUE_SET, self.HELD, self.EXCL, inv])
+        lines.insert(0, "field tok: Bool")
+        return lines
+
+    def test_a_guarded_token_clause_is_clean(self):
+        for inv in (f"    invariant (v != null) ==> (acc({self.SLOT}) && {self.SLOT})",
+                    f"    invariant (held_v && (!(((v != null) && (w != null)) && (block_of(v) == block_of(w))))) ==> (acc({self.SLOT}) && {self.SLOT})",
+                    f"    invariant (((v != null) && (!dup_v_w__0)) && (i >= 0)) ==> acc({self.SLOT}, none)"):
+            with self.subTest(inv=inv):
+                self.assertEqual(self.strict(self.carrier(inv)), [])
+
+    def test_a_token_clause_without_a_guard_that_names_its_pointer_is_a_problem(self):
+        for inv in (f"    invariant acc({self.SLOT})", f"    invariant acc({self.SLOT}) && {self.SLOT}",
+                    f"    invariant (w != null) ==> acc({self.SLOT})", f"    invariant acc({self.SLOT}) ==> (v != null)",
+                    f"    invariant (i >= 0) || acc({self.SLOT})"):
+            with self.subTest(inv=inv):
+                probs = self.strict(self.carrier(inv))
+                self.assertEqual(len(probs), 1, probs)
+                self.assertIn("an `invariant` holds the token of `block_of(v)` outside an implication whose antecedent names `v`", probs[0])
+
+    # forperm exemptions --------------------------------------------------------------------------------------------------------------
+    def leak(self, exemption):
+        row = f"  assert forperm t: Ref [t.tok] :: {exemption}"
+        lines = HeapTokenTests("test_the_emitters_shape_is_clean").fixture(body=[Check(row, A, "leak")])
+        return self.strict(lines)
+
+    def test_exemption_terms_that_name_a_carried_block_are_clean(self):
+        for e in ("false", "t == loc(block_of(res), (-1))", "(v != null) && (t == loc(block_of(v), (-1)))",
+                  "(held_v && (t == loc(block_of(v), (-1)))) || ((w != null) && (t == loc(block_of(w), (-1))))",
+                  "((((loc(member(s, 0), 0) == q) && (k > none)) ? q.v_ptr_int : null) != null) && (t == loc(block_of(q.v_ptr_int), (-1)))",
+                  "(held_v && (t == loc(block_of(v), -1)))"):
+            with self.subTest(e=e):
+                self.assertEqual(self.leak(e), [])
+
+    def test_nested_disjunctions_of_exemption_terms_are_flattened(self):
+        a, b, c = ("(held_%s && (t == loc(block_of(%s), (-1))))" % (n, n) for n in ("u", "v", "w"))
+        d = "(w != null) && (t == loc(block_of(w), (-1)))"
+        for e in (f"(({a} || {b}) || {c})", f"({a} || ({b} || {c}))", f"((({a} || {b}) || {c}) || ({d}))", f"{a} || {b} || {c}"):
+            with self.subTest(e=e):
+                self.assertEqual(self.leak(e), [])
+
+    def test_a_nested_disjunct_without_a_token_term_is_still_a_problem(self):
+        a, b = ("(held_%s && (t == loc(block_of(%s), (-1))))" % (n, n) for n in ("u", "v"))
+        for e in (f"(({a} || {b}) || true)", f"(({a} || (v != null)) || {b})", f"(({a} || {b}) || (t == t))",
+                  f"(({a} || {b}) || (t != loc(block_of(v), (-1))))", f"(({a} || {b}) || !(t == loc(block_of(v), (-1))))"):
+            with self.subTest(e=e):
+                probs = self.leak(e)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertTrue("a `forperm` leak row is" in probs[0] or "in a `forperm` exemption" in probs[0], probs)
+
+    def test_an_exemption_that_could_exempt_more_than_a_carried_block_is_a_problem(self):
+        for e in ("true", "v != null", "t == loc(block_of(v), (-1)) || true", "(v != null) || (t == loc(block_of(v), (-1)))",
+                  "!(t == loc(block_of(v), (-1)))", "t != loc(block_of(v), (-1))", "t == v", "t == loc(block_of(v), 0)",
+                  "t == loc(block_of(v), (-2))", "(t == loc(block_of(v), (-1))) && (t == loc(block_of(w), (-1)))",
+                  "(t == t) && (t == loc(block_of(v), (-1)))", "(t == null) && (t == loc(block_of(v), (-1)))"):
+            with self.subTest(e=e):
+                probs = self.leak(e)
+                self.assertEqual(len(probs), 1, probs)
+                self.assertTrue("a `forperm` leak row is" in probs[0] or "in a `forperm` exemption" in probs[0], probs)
+
+    # ab_q ----------------------------------------------------------------------------------------------------------------------------
+    def test_a_written_sites_iteration_pointer_is_a_ghost_like_aw_q(self):
+        fx = GhostRefTests("test_the_emitters_shape_is_clean")
+        ab = ["  var eb_1: Ref", "  var lb_2__0: Ref", "  var ab_q0__0: Ref", "  var i: Int"]
+        read = "    ab_q0__0 := ((loc(member(x, 0), 0) == y) && (k > none)) ? loc(member(x, 0), 0).v_ptr_int : null"
+        self.assertEqual(fx.strict(fx.fixture(locals_=ab, body=[read, "    i := i + 1"])), [])
+        probs = fx.strict(fx.fixture(locals_=ab, body=["    i := i + 1", read]))
+        self.assertTrue(any("`ab_q0__0` is assigned after other statements of the loop body" in p for p in probs), probs)
+        probs = fx.strict(fx.fixture(locals_=ab, body=["    ab_q0__0 := x", "    i := i + 1"]))
+        self.assertTrue(any("`ab_q0__0` is assigned `x`" in p for p in probs), probs)
+        probs = fx.strict(fx.fixture(locals_=ab, body=[read, read, "    i := i + 1"]))
+        self.assertTrue(any("`ab_q0__0` is assigned 2 times" in p for p in probs), probs)
+        probs = fx.strict(fx.fixture(locals_=ab, before=[*fx.LB, read], body=["    i := i + 1"]))
+        self.assertTrue(any("`ab_q0__0` is assigned outside a loop body" in p for p in probs), probs)
+
+
+class OwningGlobalTagTests(unittest.TestCase):
+    """Decision 0054 items 5, 6 and 8 (Part C, as built): the ownership ghosts of an owning global, `static` local or address-taken
+    owner and `main`'s exemption of an owning global's block.  `program_start` tags each owning global `// cerastes:owning-global
+    GB_x` (right after its head, before its first clause, once, for a declared block); `held_GB_x` exists only for a tagged
+    block; an owner's `held_` is assigned only `false`, `x != null`, the two updates that read the token's permission, or the
+    address-taken owner's `held || ...`; `tv_` only `true` or the conditional read of the token; an exemption term with a `held_GB_x`
+    guard names exactly `t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`; `held_GB_x == ...` only compares with the cell's
+    nullness.  Each rule has a twin that breaks exactly it (only the messages of these rules are read)."""
+
+    CELL = "loc(GB_g__0(), 0).v_ptr_int"
+    TERM = f"held_GB_g__0 && (t == loc(block_of({CELL}), (-1)))"
+    UPD_LOCAL = "  held_v := held_v && ((v != null) && (perm(loc(block_of(v), (-1)).tok) > none))"
+    UPD_GLOBAL = (f"  held_GB_g__0 := (held_GB_g__0 && (perm({CELL}) > none)) && (({CELL} != null) && "
+                  f"(perm(loc(block_of({CELL}), (-1)).tok) > none))")
+    UPD_CELL = ("  held_v := (held_v && (perm(v.v_ptr_int) > none)) && ((v.v_ptr_int != null) && "
+                "(perm(loc(block_of(v.v_ptr_int), (-1)).tok) > none))")
+    RECEIVE = "  held_v := held_v || (((t != null) && (offset_of(t) == 0)) && (perm(loc(block_of(t), (-1)).tok) == write))"
+    TV = "  tv_v := (t != null) ? loc(block_of(t), (-1)).tok : tv_v"
+    LEGAL = ["  held_GB_g__0 := false", "  held_GB_g__0 := t != null", TV, UPD_LOCAL, UPD_GLOBAL, UPD_CELL,
+             RECEIVE, "  held_v := false", "  held_v := t != null"]
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, tag="  // cerastes:owning-global GB_g__0", body=None, term=None, extra_gb=False):
+        return [
+            "field v_ptr_int: Ref",
+            "field tok: Bool",
+            "unique function GB_g__0(): Block",
+            *(["unique function GB_h__0(): Block"] if extra_gb else []),
+            "method program_start()",
+            *([tag] if tag else []),
+            "  ensures len(GB_g__0()) == 1",
+            "  decreases _",
+            "method f__1(p: Ref)",
+            Check("  requires true", WF, "internal"),
+            "  decreases",
+            "{",
+            "  var held_GB_g__0: Bool",
+            "  var tv_v: Bool",
+            "  var held_v: Bool",
+            "  var t: Ref",
+            "  var v: Ref",
+            *(body if body is not None else self.LEGAL),
+            Check(f"  assert forperm t: Ref [t.tok] :: {term or self.TERM}", A, "leak"),
+            "}",
+        ]
+
+    def probs(self, **kw):
+        return [p for p in self.strict(self.fixture(**kw)) if "decision 0054" in p]
+
+    def test_the_emitters_shapes_are_clean(self):
+        self.assertEqual(self.probs(), [])
+
+    def test_a_loop_invariant_and_row_on_the_cells_nullness_are_clean(self):
+        body = [*self.LEGAL, "  var i: Int := 0", "  while (i < 3)",
+                Check(f"    invariant held_GB_g__0 == ({self.CELL} != null)", INV, "internal"),
+                Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1",
+                f"    if (!(held_GB_g__0 == ({self.CELL} != null))) {{", Check("      assert false", A, "permission"), "    }", "  }"]
+        self.assertEqual(self.probs(body=body), [])
+
+    # tags --------------------------------------------------------------------------------------------------------------------------
+    def test_a_ghost_of_an_untagged_block_is_a_problem(self):
+        probs = self.probs(tag=None)
+        self.assertTrue(any("does not tag `// cerastes:owning-global GB_g__0`" in p and "ownership ghost" in p for p in probs), probs)
+
+    def test_a_tag_outside_program_start_or_for_an_undeclared_block_is_a_problem(self):
+        lines = self.fixture(tag=None)
+        lines.insert(lines.index("method f__1(p: Ref)"), "// cerastes:owning-global GB_g__0")
+        self.assertTrue(any("stands only inside `method program_start`" in p for p in self.strict(lines)))
+        probs = self.probs(tag="  // cerastes:owning-global GB_h__0")
+        self.assertTrue(any("names no single `unique function GB_...`" in p for p in probs), probs)
+        probs = self.probs(tag="  // cerastes:owning-global")
+        self.assertTrue(any("names no single `unique function GB_...`" in p for p in probs), probs)
+
+    def test_a_tag_twice_or_after_the_first_clause_is_a_problem(self):
+        lines = self.fixture()
+        lines.insert(lines.index("  // cerastes:owning-global GB_g__0") + 1, "  // cerastes:owning-global GB_g__0")
+        self.assertTrue(any("is tagged `// cerastes:owning-global` twice" in p for p in self.strict(lines)))
+        lines = self.fixture()
+        lines.insert(lines.index("  decreases _"), "  // cerastes:owning-global GB_h__0")
+        lines.insert(lines.index("method program_start()") - 1, "unique function GB_h__0(): Block")
+        probs = self.strict(lines)
+        self.assertTrue(any("right after the head of `method program_start`, before its first clause" in p for p in probs), probs)
+
+    def test_a_block_declared_twice_cannot_be_tagged(self):
+        lines = self.fixture()
+        lines.insert(3, "unique function GB_g__0(): Block")
+        self.assertTrue(any("names no single `unique function GB_...`" in p for p in self.strict(lines)))
+
+    # held_ / tv_ assignments ---------------------------------------------------------------------------------------------------------
+    def test_an_owners_flag_never_becomes_true_without_a_read_of_the_token(self):
+        for rhs in ("true", "held_v || true", "t != null || held_v", "held_v && (v != null)", "held_v || (t != null)",
+                    "held_v || (((t != null) && (offset_of(t) == 1)) && (perm(loc(block_of(t), (-1)).tok) == write))",
+                    "held_v || (((t != null) && (offset_of(t) == 0)) && (perm(loc(block_of(t), (-1)).tok) > none))",
+                    "held_v || (((t != null) && (offset_of(v) == 0)) && (perm(loc(block_of(t), (-1)).tok) == write))",
+                    "held_GB_g__0 && ((v != null) && (perm(loc(block_of(v), (-1)).tok) > none))",
+                    "held_v && ((v != null) && (perm(loc(block_of(t), (-1)).tok) > none))",
+                    "held_v && ((v != null) && (perm(loc(block_of(v), (-1)).tok) >= none))"):
+            with self.subTest(rhs=rhs):
+                probs = self.probs(body=[f"  held_v := {rhs}"])
+                self.assertEqual(len([p for p in probs if "`held_v` is assigned" in p]), 1, probs)
+
+    def test_the_update_of_a_cell_owner_names_its_own_cell_three_times(self):
+        other = self.UPD_GLOBAL.replace("loc(block_of(loc(GB_g__0(), 0).v_ptr_int), (-1)).tok", "loc(block_of(loc(GB_h__0(), 0).v_ptr_int), (-1)).tok")
+        self.assertTrue(any("`held_GB_g__0` is assigned" in p for p in self.probs(body=[other])))
+        wrong_owner = self.UPD_CELL.replace("held_v :=", "held_w :=").replace("(held_v &&", "(held_w &&")
+        self.assertTrue(any("`held_w` is assigned" in p for p in self.probs(body=[wrong_owner])))
+        other_global = self.UPD_GLOBAL.replace("held_GB_g__0 :=", "held_GB_h__0 :=").replace("(held_GB_g__0 &&", "(held_GB_h__0 &&")
+        self.assertTrue(any("`held_GB_h__0` is assigned" in p for p in self.probs(body=[other_global], extra_gb=True)))
+
+    def test_a_flag_assigned_inside_a_one_line_statement_is_read_too(self):
+        probs = self.probs(body=["  if (t != null) { held_v := true }"])
+        self.assertTrue(any("`held_v` is assigned `true`" in p for p in probs), probs)
+
+    def test_an_owning_locals_token_value_is_the_conditional_read_of_its_own_block(self):
+        for rhs in ("true", "false", "t != null", "(t != null) ? loc(block_of(v), (-1)).tok : tv_v",
+                    "(t != null) ? loc(block_of(t), (-1)).tok : true", "(t != null) ? loc(block_of(t), (-1)).tok : tv_w",
+                    "(t != null) ? !loc(block_of(t), (-1)).tok : tv_v"):
+            with self.subTest(rhs=rhs):
+                probs = self.probs(body=[f"  tv_v := {rhs}"])
+                self.assertTrue(any("`tv_v` is assigned" in p for p in probs), probs)
+
+    def test_the_ghosts_of_a_global_are_the_flag_only(self):
+        probs = self.probs(body=["  tv_GB_g__0 := true"])
+        self.assertTrue(any("`tv_GB_g__0` is assigned" in p for p in probs), probs)
+
+    # exemption terms ------------------------------------------------------------------------------------------------------------------
+    def test_an_exemption_term_of_a_held_owning_global_names_its_own_block(self):
+        other = "held_GB_g__0 && (t == loc(block_of(loc(GB_h__0(), 0).v_ptr_int), (-1)))"
+        probs = self.probs(term=other, extra_gb=True)
+        self.assertTrue(any("guarded by `held_GB_g__0`" in p for p in probs), probs)
+        probs = self.probs(term="held_GB_g__0 && (t == loc(block_of(v), (-1)))")
+        self.assertTrue(any("guarded by `held_GB_g__0`" in p for p in probs), probs)
+        probs = self.probs(term="held_GB_g__0 && (t == loc(block_of(loc(GB_g__0(), 0).v_int), (-1)))")
+        self.assertTrue(any("guarded by `held_GB_g__0`" in p for p in probs), probs)
+
+    def test_the_terms_of_a_nested_disjunction_are_each_read(self):
+        def term(n):
+            return f"(held_GB_{n}__0 && (t == loc(block_of(loc(GB_{n}__0(), 0).v_ptr_int), (-1))))"
+        lines = self.fixture(extra_gb=True, term=f"(({term('g')} || {term('h')}) || {term('g')})")
+        probs = [p for p in self.strict(lines) if "decision 0054" in p]
+        self.assertTrue(any("`GB_h__0`, which `program_start` does not tag" in p for p in probs), probs)
+        lines = self.fixture(extra_gb=True, term=f"(({term('g')} || {term('g')}) || {term('g')})")
+        self.assertEqual([p for p in self.strict(lines) if "decision 0054" in p], [])
+
+    def test_an_untagged_block_in_a_held_exemption_term_is_a_problem(self):
+        probs = self.probs(tag=None)
+        self.assertTrue(any("exemption term" in p and "does not tag" in p for p in probs), probs)
+
+    def test_a_term_without_a_held_guard_is_an_ordinary_block_exemption(self):
+        probs = self.probs(tag=None, term=f"(t == loc(block_of({self.CELL}), (-1)))", body=["  held_v := false"])
+        self.assertEqual([p for p in probs if "exemption term" in p], [])
+
+    def test_the_flag_of_a_global_is_compared_only_with_its_cells_nullness(self):
+        for inv in (f"    invariant held_GB_g__0 == ({self.CELL} == null)", "    invariant held_GB_g__0 == true",
+                    f"    invariant held_GB_g__0 == ({self.CELL} != null) || true",
+                    "    invariant held_GB_g__0 == (loc(GB_h__0(), 0).v_ptr_int != null)"):
+            with self.subTest(inv=inv):
+                body = [*self.LEGAL, "  var i: Int := 0", "  while (i < 3)", Check(inv, INV, "internal"),
+                        Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1", "  }"]
+                probs = self.probs(body=body, extra_gb=True)
+                self.assertTrue(any("`held_GB_g__0` is compared with something but" in p for p in probs), probs)
 
 
 if __name__ == "__main__":

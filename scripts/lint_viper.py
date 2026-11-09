@@ -1427,7 +1427,7 @@ def while_loops(src: Source, d: Decl):
 GHOST_REF_LOCAL_RE = re.compile(r"(?<![\w$'.])var\s+(?P<names>[A-Za-z_$][\w$']*(?:\s*,\s*[A-Za-z_$][\w$']*)*)\s*:\s*Ref\b")
 EB_NAME_RE = re.compile(r"eb_\d+")
 LB_NAME_RE = re.compile(r"lb_\d+__\d+")
-AW_NAME_RE = re.compile(r"aw_q\d+__\d+")
+AW_NAME_RE = re.compile(r"a[wb]_q\d+__\d+")
 REF_FIELD_END_RE = re.compile(r"\.v_ptr_[\w$']+$")
 LEAF_CELL_RE = re.compile(r"^loc\(member\((?P<base>.*), -?\d+\), 0\)$", re.S)
 
@@ -1477,7 +1477,8 @@ def lint_ghost_refs(src: Source, decls: list[Decl], add: Callable[[int, str], No
     pointer cell (or a conditional of those: the chain-guarded read); `lb_<N>__<L>` (the loop-entry snapshot) only from `null`
     or a plain read of a pointer cell, outside every loop body (the loop never assigns it, so the loop's automatic place keeps
     one object); `aw_q<j>__<L>` (a written atom's object at the top of an iteration) is assigned once, from such a read or a
-    conditional of them, and only in the leading statements of a loop body, before anything else of the iteration."""
+    conditional of them, and only in the leading statements of a loop body, before anything else of the iteration.
+    `ab_q<j>__<L>` (decision 0054 item 4: a written `owns_block` site's pointer at the top of an iteration) is the same ghost."""
     for d in decls:
         if d.kind != "method" or not d.has_body:
             continue
@@ -1641,6 +1642,279 @@ def lint_owner_loop_ghosts(src: Source, decls: list[Decl], add: Callable[[int, s
                 if t in used and k + 1 < len(body) and body[k + 1][0] == ":=" and (k == 0 or body[k - 1][0] != "."):
                     add(ln, f"`{t}` is assigned inside the loop of line {line}, whose invariant mentions it: the loop head havocs what "
                             "the body assigns (decision 0052 item 3)")
+
+
+# The loop-entry ghosts of the loop carriers (decision 0054 items 3 and 4), each a local that the lowering assigns once before its loop
+# and the loop never assigns, so the invariant that names it states a fact about the loop's entry and not an assumption:
+#   `ev_<v>__<L>` (`Ref`): the owner `v`'s value at entry, `ev_<v>__<L> := <v>`; the value set `v == ev || v == null || v == x...` names it;
+#   `hs_<v>__<L>` (`Bool`): `held_<v>` at entry, `hs_<v>__<L> := held_<v>`; the invariant is `held_<v> == hs_<v>__<L>`, its back-edge row
+#       `if (!(hs_<v>__<L> ==> held_<v>)) {`, `assert false`, `}`;
+#   `dup_...__<L>` and `ad_...__<L>` (`Bool`): whether two carriers shared a block at entry, `S := ((a != null) && (b != null)) &&
+#       (block_of(a) == block_of(b))`; it is used negated (`!S`) as a carrier guard and, positively, only in the exclusivity clause
+#       `invariant S || (!(<the same pair formula>))` and its back-edge row `if (!(S || (!(<formula>)))) {`.
+# Each is assigned exactly once, before the `while` of its own loop (the number after the last `__`, in the order of the loops'
+# `while`s; an inner loop's ghost may stand in the outer loop's body), from exactly that right-hand side.
+LOOP_GHOST_LOCAL_RE = re.compile(r"(?<![\w$'.])var\s+(?P<names>[A-Za-z_$][\w$']*(?:\s*,\s*[A-Za-z_$][\w$']*)*)\s*:\s*(?P<type>[A-Za-z]+)\b")
+EV_NAME_RE = re.compile(r"^ev_(?P<v>[A-Za-z_$][\w$']*)__(?P<l>\d+)$")
+HS_NAME_RE = re.compile(r"^hs_(?P<v>[A-Za-z_$][\w$']*)__(?P<l>\d+)$")
+SNAP_NAME_RE = re.compile(r"^(?:dup|ad)_[\w$']*__\d+$")
+PAIR_FORMULA_RE = re.compile(r"^\(\((?P<a>[A-Za-z_$][\w$']*)!=null\)&&\((?P<b>[A-Za-z_$][\w$']*)!=null\)\)&&"
+                             r"\(block_of\((?P=a)\)==block_of\((?P=b)\)\)$")
+INV_LINE_RE = re.compile(r"^\s*invariant\b(?P<rest>.*)$")
+
+
+def _nospace(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
+def lint_loop_entry_ghosts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        types: dict[str, str] = {}
+        for n in range(d.body_line, d.end_line + 1):
+            if m := LOOP_GHOST_LOCAL_RE.search(src.code[n - 1]):
+                for x in (x.strip() for x in m.group("names").split(",")):
+                    types[x] = m.group("type")
+        ghosts: dict[str, str] = {}
+        for x, t in types.items():
+            kind = "ev" if EV_NAME_RE.match(x) else "hs" if HS_NAME_RE.match(x) else "snap" if SNAP_NAME_RE.match(x) else None
+            if kind is None:
+                continue
+            ghosts[x] = kind
+            if t != ("Ref" if kind == "ev" else "Bool"):
+                add(d.line, f"loop-entry ghost `{x}` is a `{t}` local: `ev_...` is a `Ref`, `hs_...`, `dup_...` and `ad_...` are `Bool` "
+                            "(decision 0054 item 3)")
+        if not ghosts:
+            continue
+        loops = while_loops(src, d)   # numbered in the order of their `while`, as the lowering numbers them
+        assigns: dict[str, list[tuple[int, str]]] = {g: [] for g in ghosts}
+        for n in range(d.body_line, d.end_line + 1):
+            code = src.code[n - 1]
+            for g in ghosts:
+                for a in re.finditer(r"(?<![\w$'.])" + re.escape(g) + r"\s*:=", code):
+                    assigns[g].append((n, _statement_rhs(code, a.end())))
+        rhs_of: dict[str, str] = {}
+        for g, kind in sorted(ghosts.items()):
+            lst = assigns[g]
+            loop_no = int(re.search(r"__(\d+)$", g).group(1))
+            if len(lst) != 1:
+                add(d.line, f"loop-entry ghost `{g}` is assigned {len(lst)} times: it is assigned once, right before its loop "
+                            "(decision 0054 item 3)")
+            if loop_no >= len(loops):
+                add(d.line, f"loop-entry ghost `{g}` names loop {loop_no}, which the method does not have (decision 0054 item 3)")
+            for n, rhs in lst:
+                if loop_no < len(loops) and n >= loops[loop_no][0]:
+                    add(n, f"loop-entry ghost `{g}` is assigned at or after the `while` of its own loop: the loop head would havoc it and "
+                           "the invariant that names it would no longer say anything about the entry (decision 0054 item 3)")
+                if kind == "ev":
+                    want = EV_NAME_RE.match(g).group("v")
+                    ok = _nospace(rhs) == want
+                    what = f"`{want}`, the owner's own value"
+                elif kind == "hs":
+                    want = "held_" + HS_NAME_RE.match(g).group("v")
+                    ok = _nospace(rhs) == want
+                    what = f"`{want}`"
+                else:
+                    ok = PAIR_FORMULA_RE.match(_nospace(rhs)) is not None
+                    what = "`((a != null) && (b != null)) && (block_of(a) == block_of(b))`"
+                    rhs_of[g] = _nospace(rhs)
+                if not ok:
+                    add(n, f"loop-entry ghost `{g}` is assigned `{rhs}`: its right-hand side is exactly {what} (decision 0054 item 3)")
+        alt = "|".join(re.escape(g) for g in sorted(ghosts, key=len, reverse=True))
+        word_re = re.compile(r"(?<![\w$'.])(" + alt + r")(?![\w$'])")
+        for n in range(d.body_line, d.end_line + 1):
+            code = src.code[n - 1]
+            if not word_re.search(code):
+                continue
+            if re.match(r"^\s*(?:var\s+(?:" + alt + r")\s*:|(?:" + alt + r")\s*:=)", code):
+                continue
+            norm = _nospace(code)
+            for g in sorted({m.group(1) for m in word_re.finditer(code)}):
+                kind = ghosts[g]
+                if kind == "hs":
+                    v = HS_NAME_RE.match(g).group("v")
+                    if norm == f"invariantheld_{v}=={g}":
+                        continue
+                    if is_ending_row(src, n) and norm == f"if(!({g}==>held_{v})){{":
+                        continue
+                    add(n, f"`{g}` appears outside `invariant held_{v} == {g}` and its back-edge row `if (!({g} ==> held_{v})) {{`: it is "
+                           "the loop-entry value of the owner's flag and nothing else (decision 0054 item 3)")
+                elif kind == "ev":
+                    v = EV_NAME_RE.match(g).group("v")
+                    m = INV_LINE_RE.match(code)
+                    terms = _nospace(m.group("rest")).replace("(", "").replace(")", "").split("||") if m else []
+                    if terms and terms[0] == f"{v}=={g}" and all(re.fullmatch(re.escape(v) + r"==[A-Za-z_$][\w$']*", t) for t in terms[1:]):
+                        continue
+                    add(n, f"`{g}` appears outside the value set `invariant {v} == {g} || {v} == null || {v} == x...`: it is the "
+                           "owner's entry value and only the value set names it (decision 0054 item 3)")
+                else:
+                    f = rhs_of.get(g)
+                    if f is not None and PAIR_FORMULA_RE.match(f):
+                        if norm == f"invariant{g}||(!({f}))":
+                            continue
+                        if is_ending_row(src, n) and norm == f"if(!({g}||(!({f})))){{":
+                            continue
+                    bare = [m for m in word_re.finditer(code) if m.group(1) == g and not code[:m.start()].rstrip().endswith("!")]
+                    if bare:
+                        add(n, f"`{g}` is used positively outside the exclusivity clause `invariant {g} || (!(<its pair formula>))` and its "
+                               f"back-edge row: a carrier guard is `!{g}` (decision 0054 item 3)")
+
+
+# The token clause of a loop carrier (decision 0054 items 3 and 4): an `invariant` that holds `acc(loc(block_of(P), -1).tok ...)` is an
+# implication whose antecedent names `P`, so a carrier never holds a token for a pointer its guard does not mention (a written site's
+# `P != null ==> ...`, an owner's `held_o && ... ==> ...`, a place's `... && P != null ==> ...`).
+TOK_ACC = "acc(loc(block_of("
+
+
+def lint_carrier_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        for n in range(d.body_line, d.end_line + 1):
+            m = INV_LINE_RE.match(src.code[n - 1])
+            if m is None:
+                continue
+            text = _nospace(m.group("rest"))
+            i = text.find(TOK_ACC)
+            while i >= 0:
+                start = i + len("acc(loc(")
+                end = _group_end(text, start + len("block_of"))
+                arg = text[start + len("block_of("):end] if end >= 0 else ""
+                tail = text[end + 1:] if end >= 0 else ""
+                if end >= 0 and re.match(r",\(?-1\)?\)\.tok", tail):
+                    depth, arrow = 0, -1
+                    for k in range(len(text)):
+                        c = text[k]
+                        depth += c == "("
+                        depth -= c == ")"
+                        if depth == 0 and text.startswith("==>", k):
+                            arrow = k
+                            break
+                    if arrow < 0 or arrow > i or arg not in text[:arrow]:
+                        add(n, f"an `invariant` holds the token of `block_of({arg})` outside an implication whose antecedent names "
+                               f"`{arg}`: a loop carrier is guarded by its pointer (decision 0054 items 3 and 4)")
+                        break
+                i = text.find(TOK_ACC, i + 1)
+
+
+# Owning globals, `static` locals and address-taken owners (decision 0054 items 5, 6 and 8).  The lowering gives each such owner the
+# method-level ghost `held_<o>` (for a global or `static` local `<o>` is its block's name, `GB_<name>`; an owning local also has `tv_<o>`), and `main`'s leak
+# row exempts the block of an owning global by a term `held_GB_x && t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`.  The lint reads only
+# the Viper, so:
+#   * `program_start` carries one tag line `// cerastes:owning-global GB_<name>` per owning global (right after its head, before its
+#     first clause), each naming a declared `unique function GB_<name>()` once; `held_GB_x` exists only for a tagged block;
+#   * a `held_<o>` is assigned only: `false`; `<x> != null` (the owner received a value; its value row precedes); `held_<o> && ((<x> != null)
+#     && (perm(tok(<x>)) > none))` (after a call or a free, local); `(held_<o> && (perm(<C>) > none)) && ((<C> != null) && (perm(tok(<C>))
+#     > none))` (after a call or a free, global or address-taken owner, `<C>` the owner's own cell `loc(GB_x(), 0).v_ptr_T` or
+#     `<o>.v_ptr_T`); `held_<o> || (((<x> != null) && (offset_of(<x>) == 0)) && (perm(tok(<x>)) == write))` (an address-taken owner that
+#     received a block): it never becomes `true` without a read of the token's permission;
+#   * a `tv_<o>` (an owning local's allocator ghost) is assigned only `(<x> != null) ? tok(<x>) : tv_<o>`;
+#   * an exemption term of a `forperm` row with a `held_GB_x` guard names exactly `t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`;
+#   * a comparison of `held_GB_x` with a value is `held_GB_x == (loc(GB_x(), 0).v_ptr_T != null)`, as the loop invariant and its rows say.
+OWNING_GLOBAL_TAG_RE = re.compile(r"//\s*cerastes:owning-global\b[ \t]*(?P<name>\S+)?")
+GB_CALL_RE = re.compile(r"(?<![\w$'])(?P<name>GB_[A-Za-z0-9_$']+)\s*\(\s*\)")
+GB_GHOST_RE = re.compile(r"(?<![\w$'.])held_(?P<name>GB_[A-Za-z0-9_$']+)(?![\w$'])")
+OWNER_ASSIGN_RE = re.compile(r"(?<![\w$'.])(?P<g>(?:held|tv)_[\w$']+)\s*:=")
+_ID = r"[A-Za-z_$][\w$']*"
+_SLOT = r"loc\(block_of\((?P<{n}>.+?)\),\(?-1\)?\)\.tok"
+
+
+def owner_assignment_ok(g: str, rhs: str) -> bool:
+    r = _nospace(rhs)
+    e = re.escape(g)
+    if g.startswith("tv_"):
+        return re.fullmatch(rf"\((?P<x>{_ID})!=null\)\?loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok:{e}", r) is not None
+    if r == "false" or re.fullmatch(rf"{_ID}!=null", r):
+        return True
+    if re.fullmatch(rf"{e}&&\(\((?P<x>{_ID})!=null\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)>none\)\)", r):
+        return True
+    if re.fullmatch(rf"{e}\|\|\(\(\((?P<x>{_ID})!=null\)&&\(offset_of\((?P=x)\)==0\)\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)==write\)\)", r):
+        return True
+    m = re.fullmatch(rf"\({e}&&\(perm\((?P<c>.+?)\)>none\)\)&&\(\((?P=c)!=null\)&&\(perm\(loc\(block_of\((?P=c)\),\(?-1\)?\)\.tok\)>none\)\)", r)
+    if m:
+        c = m.group("c")
+        if gm := re.fullmatch(r"loc\((?P<gb>GB_[\w$']+)\(\),0\)\.v_ptr_[\w$']+", c):
+            return g == "held_" + gm.group("gb")
+        return re.fullmatch(rf"{_ID}\.v_ptr_[\w$']+", c) is not None and c.split(".")[0] == g[len("held_"):]
+    return False
+
+
+def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    declared: dict[str, int] = {}
+    for code in src.code:
+        if m := GB_DECL_RE.match(code):
+            declared[m.group("name")] = declared.get(m.group("name"), 0) + 1
+    start = next((d for d in decls if d.kind == "method" and d.name == PROGRAM_START), None)
+    first_clause = last_clause = None   # `program_start` is a bodyless trusted method: its head, then its clauses
+    if start is not None:
+        clauses = [n for n in range(start.line + 1, start.end_line + 1) if re.match(r"^\s*(requires|ensures|decreases)\b", src.code[n - 1])]
+        first_clause, last_clause = (clauses[0], clauses[-1]) if clauses else (None, start.line)
+    tagged: set[str] = set()
+    for lineno, comment in enumerate(src.comments, start=1):
+        m = OWNING_GLOBAL_TAG_RE.search(comment) if comment else None
+        if m is None:
+            continue
+        name = m.group("name")
+        if start is None or not start.line <= lineno <= last_clause:
+            add(lineno, "`// cerastes:owning-global` stands only inside `method program_start`: it names an owning global whose block "
+                        "`main`'s leak row exempts (decision 0054 item 8)")
+        elif name is None or declared.get(name, 0) != 1:
+            add(lineno, f"`// cerastes:owning-global {name or ''}` names no single `unique function GB_...` declared in this file "
+                        "(decision 0054 item 8)")
+        elif name in tagged:
+            add(lineno, f"`{name}` is tagged `// cerastes:owning-global` twice (decision 0054 item 8)")
+        elif first_clause is not None and lineno > first_clause:
+            add(lineno, "`// cerastes:owning-global` stands right after the head of `method program_start`, before its first clause "
+                        "(decision 0054 item 8)")
+        else:
+            tagged.add(name)
+    for lineno, code in enumerate(src.code, start=1):
+        for gm in sorted({m.group("name") for m in GB_GHOST_RE.finditer(code)}):
+            if gm not in tagged:
+                add(lineno, f"the ownership ghost `held_{gm}` of `{gm}` in a program whose `program_start` does not tag "
+                            f"`// cerastes:owning-global {gm}`: only an owning global has one (decision 0054 item 5)")
+                break
+        for a in OWNER_ASSIGN_RE.finditer(code):
+            rhs = _statement_rhs(code, a.end())
+            if not owner_assignment_ok(a.group("g"), rhs):
+                add(lineno, f"`{a.group('g')}` is assigned `{rhs}`: an owner's ghost is assigned `false`, `<x> != null`, `held && ...` "
+                            "(the update after a call or a free, which reads the token's permission), `held || ...` (a block received "
+                            "through an address) or, for `tv_`, the conditional read of the token (decision 0054 items 5 and 6)")
+        for gm in sorted({m.group("name") for m in re.finditer(r"(?<![\w$'.])held_(?P<name>GB_[\w$']+)\s*==(?!>)", code)}):
+            n = _nospace(code)
+            cell = rf"loc\({re.escape(gm)}\(\),0\)\.v_ptr_[\w$']+"
+            if not (re.fullmatch(rf"invariantheld_{re.escape(gm)}==\({cell}!=null\)", n)
+                    or re.fullmatch(rf"if\(!\(held_{re.escape(gm)}==\({cell}!=null\)\)\)\{{", n)):
+                add(lineno, f"`held_{gm}` is compared with something but `(loc({gm}(), 0).v_ptr_T != null)`, in the loop invariant "
+                            "or its row (decision 0054 item 5)")
+    for lineno, code in enumerate(src.code, start=1):
+        m = FORPERM_LINE_RE.match(code)
+        if m is None:
+            continue
+        body = _strip_wrap(m.group("body").strip())
+        for disjunct in _flatten_or(body):
+            conjuncts = [_strip_wrap(c) for c in _split_top(_strip_wrap(disjunct), "&&")]
+            helds = [c for c in conjuncts if re.fullmatch(r"held_[\w$']*", c)]
+            if not helds:
+                continue
+            for c in conjuncts:
+                t = re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", c, re.S)
+                if t is None:
+                    continue
+                gbs = {g.group("name") for g in GB_CALL_RE.finditer(t.group("loc"))}
+                for g in sorted(gbs - tagged):
+                    add(lineno, f"an exemption term `held_... && t == loc(block_of(...{g}()...), -1)` names the cell of `{g}`, which "
+                                f"`program_start` does not tag `// cerastes:owning-global {g}`: only an owning global's block is exempt "
+                                "at `main`'s end (decision 0054 item 8)")
+                for h in helds:
+                    gm = GB_GHOST_RE.fullmatch(h)
+                    if gm is None:
+                        continue
+                    want = rf"loc\(block_of\(loc\({re.escape(gm.group('name'))}\(\),0\)\.v_ptr_[\w$']+\),\(?-1\)?\)"
+                    if not re.fullmatch(want, _nospace(t.group("loc"))):
+                        add(lineno, f"the exemption term guarded by `{h}` is exactly `t == loc(block_of(loc({gm.group('name')}(), 0).v_ptr_T), "
+                                    "-1)`: a held owning global exempts its own block and no other (decision 0054 item 8)")
 
 
 # The heap's free token (decision 0047 items 6, 7 and 10).  `field tok: Bool` is the ghost token of a heap block at slot -1: held at
@@ -1978,6 +2252,39 @@ def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None], 
             add(d.line, f"`method {d.name}` is not the trusted typed view of decision 0047 items 2 and 4: {why}")
 
 
+def _flatten_or(text: str) -> list[str]:
+    """The disjuncts of a possibly nested `||` chain (`((A || B) || C)`, as the lowering nests it, or `A || (B || C)`), as raw text."""
+    text = _strip_wrap(text.strip())
+    parts = _split_top(text, "||")
+    if len(parts) == 1:
+        return [text]
+    out: list[str] = []
+    for part in parts:
+        out += _flatten_or(part)
+    return out
+
+
+def forperm_exemption_problem(body: str) -> str | None:
+    """Decision 0054 item 8: the exemption of a `forperm` leak row is `false` or a disjunction of terms, each a conjunction of guards
+    with exactly one `t == loc(block_of(<pointer>), -1)`; `t` appears nowhere else, so an exemption only names the token of a block
+    by its location (a carried token), never `true`, `t != ...` or a negated term."""
+    body = _strip_wrap(body.strip())
+    if body == "false":
+        return None
+    for disjunct in _flatten_or(body):
+        conjuncts = [_strip_wrap(c) for c in _split_top(_strip_wrap(disjunct), "&&")]
+        terms = [c for c in conjuncts if (m := re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", c, re.S)) and TOKEN_SLOT_RE.search(m.group("loc"))
+                 and _group_end(m.group("loc"), 3) == len(m.group("loc")) - 1]
+        if len(terms) != 1:
+            return ("an exemption term of a `forperm` leak row is `<guards> && t == loc(block_of(<pointer>), -1)` with exactly one "
+                    "such comparison: it names a carried token by its location (decision 0054 item 8)")
+        for c in conjuncts:
+            if c not in terms and re.search(r"(?<![\w$'.])t(?![\w$'])", c):
+                return ("`t` appears in a `forperm` exemption outside the comparison `t == loc(block_of(<pointer>), -1)`: a guard "
+                        "that tests the token itself would exempt more than a carried block (decision 0054 item 8)")
+    return None
+
+
 def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> set[int]:
     """The rules of the free token (see above).  Returns the lines of the `forperm` assertions, whose map entries the caller
     checks against the category `leak`."""
@@ -2003,6 +2310,8 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
             if TOK_WORD_RE.search(m.group("body")):
                 add(lineno, "the exemption of a `forperm` leak row does not mention `tok`: it names the places the method "
                             "hands back (decision 0047 item 7)")
+            elif (why := forperm_exemption_problem(m.group("body"))) is not None:
+                add(lineno, why)
             forperm_lines.add(lineno)
             continue
         for h in tok_hits:
@@ -2142,6 +2451,9 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_ghost_amounts(src, decls, add)
     lint_perm_locals(src, decls, add)
     lint_owner_loop_ghosts(src, decls, add)
+    lint_loop_entry_ghosts(src, decls, add)
+    lint_carrier_clauses(src, decls, add)
+    lint_owning_global_tags(src, decls, add)
     lint_ghost_refs(src, decls, add)
     forperm_lines = lint_heap_token(src, decls, add)
     lint_views(src, decls, add, has_globals, global_facts)
