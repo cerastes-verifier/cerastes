@@ -1,4 +1,4 @@
-# Handoff at S8's end — CI toolchain profiles (record 0053) (2026-11-06); M4.5d2b2 next
+# Handoff at M4.5d2b2a's planning (2026-11-09); M4.5d2b2a in progress, M4.5d2b2b next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -6,7 +6,8 @@ rediscover, and holds only what is live (owner, 2026-10-26; consolidated again a
 regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
 by S6, a docs session that changed no code: its additions are marked "S6"; at M4.5d2v's start, 2026-11-04; at S7's
 planning, 2026-11-05; at S7's end, the same day: §1, §2, §3's "From S7", §8; at M4.5d2b1's planning, the same
-day: §1, §2, §3, §4.2, §8; and at S8's end, 2026-11-06: §1, §2, §3's "From S8", §8). The text before M4.5d2b1 is `git show a660abc:internal/handoff.md`, before S7
+day: §1, §2, §3, §4.2, §8; at S8's end, 2026-11-06: §1, §2, §3's "From S8", §8; and at M4.5d2b2a's planning, 2026-11-09: §1, §2, §3, §4.2,
+§8). The text before M4.5d2b2a is `git show 15bcdc6:internal/handoff.md`, before M4.5d2b1 `git show a660abc:internal/handoff.md`, before S7
 `git show c2bc48d:internal/handoff.md`, before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
 `git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
@@ -15,12 +16,19 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 
 ## 1. State
 
+- **M4.5d2b2a** (2026-11-09; record 0054 to come; plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`, questions
+  173–179): in progress on branch `m4.5d2b2a-owners-in-memory` (from `origin/main` `15bcdc6`, which holds S8's PR #33)
+  in the worktree `.claude/worktrees/m4.5d2b2a`. M4.5d2b2 is split (question 173): d2b2a block sites through memory,
+  owners in memory (globals, `static` locals, address-taken locals), written `owns_block` invariants and the loop
+  carriers; **d2b2b next**: owning fields and P4418R0, whose spellings were decided at d2b2a's planning (§4.2, §8).
+
 - **S8** (2026-11-06; record 0053; plan `.claude/plans/s8-ci-toolchains.md`, questions 162–168): done on branch
   `s8b-ci-profiles`, which holds S8a's two commits first (`bdefc29`, `d0e318a`); the owner pushed it at `3fcbf92` as PR
-  #33 (its PR tier ran on GitHub: `profiles` and `check (macos-27)` green on the CLT 27.2 image). Result in
+  #33 (its PR tier ran on GitHub: `profiles` and `check (macos-27)` green on the CLT 27.2 image), merged as `15bcdc6`
+  (2026-11-07). Result in
   `internal/status.md`. CI now runs toolchain profiles (`scripts/ci_toolchains.toml`): the references `macos-27` and
   `ubuntu-26.04` on every event, other toolchains nightly or on dispatch. M4.5d2b1 and S7 are merged (PR #32 on
-  `origin/main` `8227bf0`); **M4.5d2b2 is next** (§4.2, §3 "From M4.5d2b1" and "M4.5d2b2").
+  `origin/main` `8227bf0`); M4.5d2b2 came next (now M4.5d2b2a, above).
 
 - **M4.5d2b1** (2026-11-05; record 0052; plan `.claude/plans/m4-5d2b1-results-locals.md`, questions 150–161): done on
   branch `m4.5d2b1-results-locals`, from S7's tip `a660abc` (S7 is not merged yet and the owner was away: "make your next
@@ -79,8 +87,13 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 
 ## 2. Owner steps
 
+At M4.5d2b2a's planning (2026-11-09): PR #33 is merged (`15bcdc6`). The `profiles=all` dispatch has not run, and the
+nightly full check has been cancelled at its 220-minute timeout on every profile, `macos-27` and `ubuntu-26.04`
+included, every night since 2026-10-29 (runs 42378726945 and 42488514070 the latest; the pull request and push tiers
+pass): **the owner handles CI** (question 176), outside d2b2a's plan.
+
 S8's (2026-11-06):
-1. **PR #33** (`s8b-ci-profiles`): push the branch's tip (the commits after `fc499cc`: the self-test fixture fix
+1. **PR #33** (merged 2026-11-07) (`s8b-ci-profiles`): push the branch's tip (the commits after `fc499cc`: the self-test fixture fix
    `32c4ee9`, without which both jobs fail five CI profile self-tests; the exclusions; the promotions; the status) and
    merge it once the PR tier is green; it fixes `main`, red since `c1b691d`. Then dispatch the workflow once with
    `profiles` = `all`: every Linux profile was rehearsed on the box (§3 "From S8"), but `macos-26` has never run
@@ -206,30 +219,14 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
 
 *M4.5d2v's notes moved into its plan's Inputs (`.claude/plans/m4-5d2v-allocator.md`).*
 
-**From M4.5d2b1** (record 0052, audits `build/m4.5d2b/audit{1,2,3,3b}.md` in the worktree)
-- **Cut to d2b2:** written `owns_block` in loop invariants (record 0052 item 6(a), the plan's pre-agreed cut (a); tests kept
-  in `build/m4.5d2b/d2b2-tests/`; pin `reject_owns_block_invariant.c`); audit S10's points apply (NOTAUTO guards, one
-  carrier with an owning loop variable, the written sites in the exemption). [d2b1]
-- **Documented false alarms, pinned, for d2b2:** a covered atom on a leaf of a `static` struct (`return &s.x;`,
-  `static_struct_member_result_false_alarm.c`; covering a leaf broke `f__wf`, audit 2 N1); owning loop variables whose
-  block becomes shared inside the loop (`owning_loop_becomes_shared_false_alarm.c`,
-  `owning_loop_alias_becomes_owned_false_alarm.c`: a `permission` row, then a consequential `leak`) or stops being shared
-  (`owning_loop_stops_shared_false_alarm.c`), because the carriers' guards are loop-entry snapshots (audit 3b). [d2b1]
-- **Limits stated in record 0052:** a given amount is an unknown fraction to the caller (a callee hands back what it took
-  by returning the partner); written atoms never cover (question 159); a bodiless declaration nothing calls is not
-  checked against rule 2a (checking it changed 30 tests' Viper; audit 2 N3); `owns(**pp)` of a block stored in `*pp`
-  needs d2b2's `owns_block(*pp)`; an owner freed inside a loop must be reset to `NULL`. [d2b1]
-- **Notes not taken:** two reports for one fault in a few loop shapes (audit 3 N2: an owner freed through an alias and left
-  non-null; N3: a `NULL`-head loop without `v == NULL` in its invariant; the docs say how to avoid both); an owner
-  entering a loop with the other allocator's block is reported at entry even if the loop frees it first (audit 3 N4,
-  documented). [d2b1]
-- **Process:** the first il-analyst ran out of context after Part A and the owning locals outside loops; a fresh one (same
-  role) did the loops and the audit fixes. Only one agent runs `run_tests.py` (a second run empties `build/vpr`). [d2b1]
+*M4.5d2b1's notes for d2b2 (the cut (a), the four pinned false alarms, record 0052's limits, the notes not taken, the
+process note) and `alloc_<t>`'s `GB_g` note moved into M4.5d2b2a's plan's Inputs (`.claude/plans/m4-5d2b2a-owners-in-memory.md`).*
 
-**M4.5d2b2 owning globals, `static` locals and fields, P4418R0** (from M4.5d2a's planning; sources: P4222R3, P4416R0,
-P4418R0, P4417R0, all 2026-10-22, read again at M4.5d2b1's planning; question 152 gives d2b2's planning the P4418
-spellings, borrow against transfer on parameters and static owners at `main`'s end; d2b1's notes moved into its plan's
-Inputs)
+**M4.5d2b2b owning fields and P4418R0** (from M4.5d2a's planning; sources: P4222R3, P4416R0, P4418R0, P4417R0, all
+2026-10-22, read again at M4.5d2b1's and M4.5d2b2a's planning; d2b2a's planning decided the spellings: questions 174
+(static owners exempt at `main`'s end, P4417 (2.3), built in d2b2a), 175 (`owning` on a parameter stays a borrow), 177
+(`--strict-owner`), 178 (`cerastes::not_invalidating`, checked), 179 (no `no_dangling` in C); d2b1's notes moved into
+d2b2a's plan's Inputs)
 - P4417R0's `[[owner]]` on a parameter is a **transfer** (the callee must delete), where 0029 item 1 made
   `cerastes::owning` on a parameter a **borrow**; P4418 exempts static owners where 0029 item 1 has an owning global freed
   by the end of `main`. `[[not_invalidating]]` (a pointer parameter whose function does not invalidate, checked at the
@@ -237,9 +234,6 @@ Inputs)
   P4417 keeps raw storage (`malloc`) out of the invalidation profile. C applies: raw pointers, structs with pointer
   members as containers, the escape rules, `[[owner]]` on variables, parameters, fields and results, `not_invalidating`
   on pointer parameters; references, iterators, smart pointers and `new`/`delete` are M7's.
-- `alloc_<t>` does not ensure `block_of(r) != GB_g()`, so `&x != &g` is not proved in a function that holds nothing of
-  `g`; d2a's typed views do not state it either (one rule; adding it changes the lint-pinned text and every program with
-  cells and globals) [b2a audit 1 N3; to M4.8 if d2b does not need it].
 - P4417R0's wording, read at d2b1's planning ([profiles.inval.owner]): p3 owner-to-owner transfers and leaves an alias,
   owner-to-non-owner aliases, an owner parameter takes the object, an owner result gives it; p4 an allocation's (there:
   `new`'s) or a call's owning result must initialize or be assigned to an owner, or be deleted, in its full-expression;
@@ -472,7 +466,7 @@ not taken go to §3); single-file runs while working (`build/cerastes verify` di
 builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
-Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's, 0051 is S7's, 0052 is M4.5d2b1's). The
+Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's, 0051 is S7's, 0052 is M4.5d2b1's, 0053 is S8's, 0054 is M4.5d2b2a's). The
 approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session protocol").
 
 Finished sessions: their plans are in `.claude/plans/` (from M4.5b1a on), their results in `internal/status.md` and the
@@ -554,10 +548,16 @@ atoms with no `requires` partner, covered by a returned atom or given with an ou
 reassignment; the loop false alarms lifted for owning variables); `ref_to_uninit` on automatic locals and P4222R3's
 strict rules (questions 154, 155); the d2a/d2v leftovers (written `owns_block` in loop invariants, block-site guards that
 read the heap, `owning` beside `owns_block`, `restrict` beside a block-only parameter, `two((free(p), 0), p)`);
-`cerastes_owns_vlibc_block` (question 153). **M4.5d2b2** (after d2b1): block sites through loads and on globals, owning
-globals, `static` locals and address-taken locals, acyclic owning fields (target `d`), and the rest of P4418R0 (its
-planning decides the `cerastes::` spellings of `not_invalidating` and `no_dangling`, a strict profile mode, borrow
-against transfer on parameters, and static owners at `main`'s end; §3). The ports this paragraph names were all done by
+`cerastes_owns_vlibc_block` (question 153). **M4.5d2b2** (after d2b1) is **split in two** at its
+planning (owner, 2026-11-09, question 173; the surveys measured 3,000–4,600 changed lines). **M4.5d2b2a** (record 0054;
+plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`): block sites through loads and on globals (`owns_block(*pp)`,
+`owns_block(p->q)`, `owns_block(g)`), owning and marked globals, `static` locals and address-taken locals (the block travels
+in `owns(g)`; static owners exempt at `main`'s end, question 174), written `owns_block` in loop invariants, and loop carriers
+keyed by current state (d2b1's four pinned false alarms). **M4.5d2b2b** (after d2b2a): acyclic owning fields (target `d`)
+and the rest of P4418R0 as decided at d2b2a's planning: `owning` on a parameter stays a borrow, with a docs table mapping
+each P4417R0 `[[owner]]` position (question 175); `--strict-owner`, P4417R0's p4 and p6 as an opt-in (177);
+`cerastes::not_invalidating` on a pointer parameter, checked at the definition, with implicit `ensures` keeping the owning
+pointers reachable through it (178); no `no_dangling` in C (179); §3. The ports this paragraph names were all done by
 d2a. The original d2 paragraph and its dependency map follow.
 
 **M4.5d2 `malloc` and `free`.** vlibc's contracts (`malloc` `ref_to_uninit`, `calloc` initialized, `realloc`, `free`),
@@ -1048,6 +1048,15 @@ recommendation, a later session). Each but 168 the recommendation.
 - **172** `macos-26`: (a, recommended) after your `profiles=all` dispatch, the next session promotes it to `nightly` if
   its job is green, or records what differs; (b) leave it at `dispatch`.
 
-**Open, for the next session:** M4.5d2b2's planning decides its own questions (P4418R0's spellings, a strict profile
-mode, borrow against transfer on parameters, static owners at `main`'s end; §3).
+At M4.5d2b2a's planning (2026-11-09, each the recommendation; recorded in its plan): 173 (M4.5d2b2 is two sessions:
+d2b2a block sites through memory, owners in memory, written `owns_block` invariants and the carrier redesign lifting the
+four pinned false alarms; d2b2b acyclic owning fields and P4418R0's rest), 174 (static owners exempt at `main`'s end, as
+P4417R0 (2.3) and [profiles.inval.owner] p5 Note 3: `main`'s leak row exempts the blocks of owning globals and owning
+`static` locals; a block held only through a non-owning global stays a leak, question 123), 175 (`owning` on a parameter
+stays a borrow; P4417's transfer is `requires(p == NULL || owns_block(p))` without a partner, and d2b2b's docs map each
+`[[owner]]` position), 176 (the nightly full check's 220-minute timeout and the `profiles=all` dispatch: the owner handles
+CI, outside d2b2a), 177 (`--strict-owner`, P4417's p4 and p6 as an opt-in like `--strict-init`, d2b2b), 178
+(`cerastes::not_invalidating` on a pointer parameter: the contract gives back every place it takes through `p` and
+consumes no block through `p`, and implicit `ensures` keep every owning pointer reachable through `p`; d2b2b), 179
+(`no_dangling` not provided in C; M7 reads `std::no_dangling` as a checked identity). Questions 169–172 (S8) stay open.
 

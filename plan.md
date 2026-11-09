@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start (the last: M4.5d2b1, 2026-11-05): the plans of the finished milestones, the superseded text and the
+each session's start (the last: M4.5d2b2a, 2026-11-09): the plans of the finished milestones, the superseded text and the
 appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
@@ -172,16 +172,19 @@ M4.5b1c planning: `owns_block` needs the heap token and a whole-block permission
 and owning fields move to M4.5d2 with the rest of P4418R0's invalidation profile (question 91); M4.5c2 is two sessions again
 (question 95: about 3,500 changed lines), struct values and storage first. M4.5d2 is three sessions (owner, 2026-11-03,
 questions 120–122): d2a the heap, d2v vlibc's allocator, d2b results, owning locals, globals and fields and P4418R0;
-d2b is two sessions (owner, 2026-11-05, question 152: 4,500–7,000 changed lines), results and owning locals first.
+d2b is two sessions (owner, 2026-11-05, question 152: 4,500–7,000 changed lines), results and owning locals first;
+d2b2 is two sessions again (owner, 2026-11-09, question 173: 3,000–4,600 changed lines), owners in memory first, owning
+fields and P4418R0 second (its spellings decided at d2b2a's planning, questions 175, 177–179).
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5d2b2 Owning globals and fields, P4418R0** | written `owns_block` in loop invariants (cut from d2b1); block sites through loads and on globals; owning globals, `static` locals and address-taken locals; non-recursive owning fields (target `d`, from M4.5c, question 91); the rest of P4418R0's invalidation profile (owner, 2026-11-02, question 91: its guarantees, `[[owner]]`'s rules, `[[not_invalidating]]`, `no_dangling()`; spellings, a strict profile mode, P4417R0's transfer-on-parameter against 0029's borrow and static owners at `main`'s end decided at its planning, question 152; C++'s parts are M7's) | M4.5d2b1 |
+| **M4.5d2b2a Owners in memory** | block sites through loads and on globals (`owns_block(*pp)`, `owns_block(p->q)`, `owns_block(g)`); owning and marked globals, `static` locals and address-taken locals (the block travels in `owns(g)`; static owners exempt at `main`'s end, question 174); written `owns_block` in loop invariants (cut from d2b1); loop carriers keyed by current state, lifting d2b1's four pinned false alarms (plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`, questions 173–179) | M4.5d2b1 |
+| **M4.5d2b2b Owning fields, P4418R0** | acyclic owning fields (target `d`, from M4.5c, question 91: owning a structure holds `owns_block` of the field's pointee when it is not null; copies, writes, loops on d2b2a's carriers); the rest of P4418R0's invalidation profile (owner, 2026-11-02, question 91) as decided at d2b2a's planning: `owning` on a parameter stays a borrow and the docs map each P4417R0 `[[owner]]` position to cerastes's spelling (question 175), `--strict-owner` with P4417R0's p4 and p6 as an opt-in (177), `cerastes::not_invalidating` on a pointer parameter as a checked attribute (178), no `no_dangling` in C (179: M7 reads `std::no_dangling` as a checked identity); C++'s parts are M7's | M4.5d2b2a |
 | **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants; inner arrays and arrays of structs on M4.5c1's member blocks | M4.5c1 |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))`, `realloc` (from M4.5d2a, question 120); `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2a |
-| **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c2b, M4.5d2b2 |
+| **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c2b, M4.5d2b2b |
 | **M4.5f2 Recursive predicates** | recursive predicates; a linked list (push, pop, length); recursive owning fields | M4.5f1 |
 | **M4.5f3 Lemmas and ghost sequences** | lemma functions and ghost sequences for content specifications (M4.6's string contracts); its record decides whether all of it is in M4 | M4.5f2 |
 
