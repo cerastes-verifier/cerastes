@@ -31,10 +31,10 @@ on:
         required: false
         default: ''
         type: string
-  # 07:00 UTC every night, on main, whether or not main changed: image drift and
+  # 06:00 UTC every night, on main, whether or not main changed: image drift and
   # intermittent results show up without a commit
   schedule:
-    - cron: '0 7 * * *'
+    - cron: '0 6 * * *'
 
 permissions:
   contents: read
@@ -79,7 +79,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.profiles.outputs.macos) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 220
+    timeout-minutes: 360
     env:
       DEVELOPER_DIR: /Library/Developer/CommandLineTools
       CERASTES_CI_PROFILE: ${{ matrix.profile }}
@@ -158,7 +158,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.profiles.outputs.linux) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 220
+    timeout-minutes: 360
     env:
       CERASTES_CI_PROFILE: ${{ matrix.profile }}
       CERASTES_JOBS: ${{ matrix.jobs }}
