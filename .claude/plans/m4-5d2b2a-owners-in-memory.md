@@ -60,6 +60,17 @@ d2b1 landed about 3,900 lines and needed a cut, so the owner split d2b2 in two (
   - implicit `ensures` keep every owning pointer reachable through `p`.
 - **179 (d2b2b):** `no_dangling` is not provided in C. M7 reads `std::no_dangling` as a checked identity.
 
+**During the session** (2026-11-09, after spike S39, each the recommendation):
+- **180:** `owning_loop_alias_becomes_owned_false_alarm.c` cannot verify as written (S39 `d2a`: if the loop ended with
+  `v` null, `w`'s block would leak; ordinary loop incompleteness). The pin is retired for a positive
+  `owning_loop_alias_becomes_owned.c`: the same program with `i < 3 || v != NULL` added to its invariant (S39 `d2b`).
+  Its twin is the program without the conjunct, expecting only `error leak @ L30`, with a comment that the loop needs
+  the invariant. The docs say that an owner assigned on some iterations needs such an invariant.
+- **181:** the flag limit after a handoff (S39 `d2d`: a read of `*w` after `v = w;` in a later iteration is
+  `uninitialized`). Part B tries flag-kept clauses per block under each carrier's guard, spiked first. Pre-agreed cut:
+  if no shape verifies within the part, it is pinned as a documented false alarm
+  (`owning_loop_handoff_read_false_alarm.c`) for M4.8.
+
 **Standing:**
 - 69: the EDG merge waits for the box; no EDG work.
 - 77: one context.
@@ -267,6 +278,16 @@ Stop and ask before any other cut.
   - an owning global in a loop;
   - address-taken owners: `&v` to an allocating callee, and a store through an alias.
 - **Part D:** `return &s.x;` covered, with its twin.
+- **From audit round 1** (each a must-fail twin unless marked):
+  - a bodiless borrowed site with `*pp == q` (the tie fails in `f__wf`), and a bodiless deep atom with `g == p`;
+  - C `int *g` owning without an initializer, then `if (g) free(g);` in `main` (`invalid-free`);
+  - a non-owning alias of an owner's block in a written invariant, and two written sites sharing a block at entry;
+  - a consumer of `reads(g) && owns_block(g)` that returns without setting `g` to `NULL`, and a consumer of `owns(g)`
+    (a `requires` with no partner) followed by `main`'s end;
+  - `&v` passed to a callee that only gives a block, then a loop (a positive);
+  - a leaf of another type in the static struct cover, and a covered atom with a user read after it
+    (`ensures(r, owns(*r) && *r == 1)`, a positive);
+  - `owning_loop_swap.c` and `owning_loop_replace.c` unchanged under item 3's carriers (existing tests).
 - **Byte identity:** vprdiff over the whole suite against the baseline. Only allow-listed tests may change, and the VIR self-test changes only in its new and converted cases.
 
 ## Flips (pre-approved with this plan; any other changed outcome stops the session)
@@ -279,7 +300,8 @@ Stop and ask before any other cut.
   New pins take the still-rejected rows of item 10.
 - **Pinned false alarms retired for positives of the same program**, each with a twin:
   - `owning_loop_becomes_shared_false_alarm.c`;
-  - `owning_loop_alias_becomes_owned_false_alarm.c`;
+  - `owning_loop_alias_becomes_owned_false_alarm.c` (question 180: its positive adds `i < 3 || v != NULL` to the
+    invariant, and its twin, without the conjunct, expects only `error leak @ L30`);
   - `owning_loop_stops_shared_false_alarm.c`;
   - `static_struct_member_result_false_alarm.c`.
 - **Doc examples whose `expect:` changes from `rejected` to `verified`**, with their prose: `examples/annotations/locals/owning_global.c`, `marked_global.c` and `owning_address_taken.c`.

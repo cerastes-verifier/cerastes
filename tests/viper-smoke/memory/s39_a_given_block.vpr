@@ -1,0 +1,111 @@
+// expect: verified
+// S39 (a) record 0054 item 2: a callee allocating into *pp: requires owns(*pp); ensures owns(*pp) && owns_block(*pp),
+// the site partnerless (it gives a whole block, no amount), read in the post-state and framed by the atom before it;
+// the leak exemption at the end label reads *pp; the caller frees *pp. Hand-written from the Viper today's encoder
+// emits for the nearest test (copied prelude, domain and macros); no inhale or assume.
+// S39 hand-written fixture (not emitted by the tool; see README.md). Prelude, domain and helper macros copy what the encoder emits.
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g(): Block
+  unique function GB_h(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// S39 helper macros (hand-written fixtures only; they only name conjuncts the encoder emits today, none is an axiom)
+define WF(p) (((p) == null) || (((p) == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))))
+define RNG(x) (((-2147483648) <= (x)) && ((x) <= 2147483647))
+// the whole allocation of an int (the contract of malloc's typed view / owns_block): facts, token, liveness, cell, flag, range
+define WHOLE(p) (((p) != null) && WF(p) && (offset_of(p) == 0) && acc(loc(block_of(p), (-1)).tok) && loc(block_of(p), (-1)).tok && (lvloc(block_of(p)) == loc(block_of(p), (-2))) && acc(lvloc(block_of(p)).lv) && (len(block_of(p)) == 1) && acc((p).v_int) && acc((p).d_int) && ((p).d_int ==> RNG((p).v_int)))
+// the same read as a check: p holds the whole allocation (a row `if (!(HELD(p))) { assert false }`)
+define HELD(p) (!((perm(loc(block_of(p), (-1)).tok) != write) || (!loc(block_of(p), (-1)).tok)) && (perm(lvloc(block_of(p)).lv) == write) && !((perm((p).v_int) != write) || (perm((p).d_int) != write)))
+define NWHOLE(p) ((p) == null || WHOLE(p))
+define NHELD(p) ((p) == null || HELD(p))
+
+// a pointer-typed cell (an int** place) held whole: the cell, its flag, its value well formed
+define PCELL(pp) ((pp) != null && WF(pp) && (offset_of(pp) < len(block_of(pp))) && acc((pp).v_ptr_int) && acc((pp).d_ptr_int) && (pp).d_ptr_int && WF((pp).v_ptr_int))
+define PCELLHELD(pp) (!((perm((pp).v_ptr_int) != write) || (perm((pp).d_ptr_int) != write)) && (pp).d_ptr_int)
+// the cell of a one-slot global block
+define GC() loc(GB_g(), 0)
+define GFACTS() ((len(GB_g()) == 1) && (lvloc(GB_g()) == loc(GB_g(), (-2))))
+
+// cerastes:trusted-contract vlibc malloc, typed view int (as emitted)
+method malloc_i() returns (res: Ref)
+  ensures WF(res)
+  ensures (res != null) ==> WHOLE(res)
+  decreases _
+
+// cerastes:trusted-contract vlibc free, typed view int (as emitted)
+method free_i(p: Ref)
+  requires WF(p)
+  requires (p != null) ==> WHOLE(p)
+  decreases _
+
+method abort_()
+  ensures false
+  decreases _
+
+// allocation of an address-taken local of type int* (as emitted by alloc_ptr_int)
+method alloc_ptr_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_ptr_int)) && acc(r.d_ptr_int)) && (!r.d_ptr_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// ---- (a) a callee allocating into *pp: requires owns(*pp); ensures owns(*pp) && owns_block(*pp) (partnerless: gives a whole block, no amount)
+method alloc_into(pp: Ref, amt: Perm)
+  requires none < amt && amt < write
+  requires PCELL(pp) && acc(lvloc(block_of(pp)).lv, amt)
+  ensures PCELL(pp) && acc(lvloc(block_of(pp)).lv, amt)
+  ensures (pp.v_ptr_int != null) && WHOLE(pp.v_ptr_int)
+  decreases
+{
+  var t: Ref
+  t := malloc_i()
+  if (t == null) {
+    abort_()
+  }
+  //A_STORE
+  pp.v_ptr_int := t
+  pp.d_ptr_int := true
+  label l_end
+  // the leak exemption reads *pp in the post-state (framed by owns(*pp) which is held here)
+  assert forperm x: Ref [x.tok] :: ((pp.v_ptr_int != null) && (x == loc(block_of(pp.v_ptr_int), (-1))))
+}
+
+method a_caller()
+  decreases
+{
+  var p: Ref
+  var q: Ref
+  p := alloc_ptr_int()
+  p.v_ptr_int := null
+  p.d_ptr_int := true
+  alloc_into(p, perm(lvloc(block_of(p)).lv) / 2)
+  q := p.v_ptr_int
+  //A_FREE
+  free_i(q)
+  exhale acc(p.v_ptr_int) && acc(p.d_ptr_int) && acc(lvloc(block_of(p)).lv)
+  label l_end
+  assert forperm x: Ref [x.tok] :: false
+}

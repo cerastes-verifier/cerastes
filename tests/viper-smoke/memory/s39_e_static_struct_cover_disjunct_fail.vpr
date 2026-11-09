@@ -1,0 +1,131 @@
+// expect: error wellformedness:insufficient.permission @ L97
+// expect: error call:insufficient.permission @ L121
+// S39 (e) the earlier attempt (record 0052 audit 2 N1): the facts `res.d_int && range(res.v_int)` OUTSIDE the guard
+// with a disjunctive per-leaf cover: Silicon cannot pick the chunk for a disjunction, so the contract is not
+// well-formed (and the call fails). Hand-written from the Viper today's encoder emits for the nearest test (copied
+// prelude, domain and macros); no inhale or assume.
+// S39 hand-written fixture (not emitted by the tool; see README.md). Prelude, domain and helper macros copy what the encoder emits.
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g(): Block
+  unique function GB_h(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// S39 helper macros (hand-written fixtures only; they only name conjuncts the encoder emits today, none is an axiom)
+define WF(p) (((p) == null) || (((p) == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))))
+define RNG(x) (((-2147483648) <= (x)) && ((x) <= 2147483647))
+// the whole allocation of an int (the contract of malloc's typed view / owns_block): facts, token, liveness, cell, flag, range
+define WHOLE(p) (((p) != null) && WF(p) && (offset_of(p) == 0) && acc(loc(block_of(p), (-1)).tok) && loc(block_of(p), (-1)).tok && (lvloc(block_of(p)) == loc(block_of(p), (-2))) && acc(lvloc(block_of(p)).lv) && (len(block_of(p)) == 1) && acc((p).v_int) && acc((p).d_int) && ((p).d_int ==> RNG((p).v_int)))
+// the same read as a check: p holds the whole allocation (a row `if (!(HELD(p))) { assert false }`)
+define HELD(p) (!((perm(loc(block_of(p), (-1)).tok) != write) || (!loc(block_of(p), (-1)).tok)) && (perm(lvloc(block_of(p)).lv) == write) && !((perm((p).v_int) != write) || (perm((p).d_int) != write)))
+define NWHOLE(p) ((p) == null || WHOLE(p))
+define NHELD(p) ((p) == null || HELD(p))
+
+// a pointer-typed cell (an int** place) held whole: the cell, its flag, its value well formed
+define PCELL(pp) ((pp) != null && WF(pp) && (offset_of(pp) < len(block_of(pp))) && acc((pp).v_ptr_int) && acc((pp).d_ptr_int) && (pp).d_ptr_int && WF((pp).v_ptr_int))
+define PCELLHELD(pp) (!((perm((pp).v_ptr_int) != write) || (perm((pp).d_ptr_int) != write)) && (pp).d_ptr_int)
+// the cell of a one-slot global block
+define GC() loc(GB_g(), 0)
+define GFACTS() ((len(GB_g()) == 1) && (lvloc(GB_g()) == loc(GB_g(), (-2))))
+
+// cerastes:trusted-contract vlibc malloc, typed view int (as emitted)
+method malloc_i() returns (res: Ref)
+  ensures WF(res)
+  ensures (res != null) ==> WHOLE(res)
+  decreases _
+
+// cerastes:trusted-contract vlibc free, typed view int (as emitted)
+method free_i(p: Ref)
+  requires WF(p)
+  requires (p != null) ==> WHOLE(p)
+  decreases _
+
+method abort_()
+  ensures false
+  decreases _
+
+// allocation of an address-taken local of type int* (as emitted by alloc_ptr_int)
+method alloc_ptr_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_ptr_int)) && acc(r.d_ptr_int)) && (!r.d_ptr_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// ---- (e) the static struct leaf cover: struct S { int x; int y; }; int *where(void) ensures(r, owns(*r)) { static struct S s; s.x = 1; return &s.x; }
+// GB_g plays the static struct s (one block, member blocks 0 and 1)
+define SX() loc(member(loc(GB_g(), 0), 0), 0)
+define SY() loc(member(loc(GB_g(), 0), 1), 0)
+define SFACTS() ((len(GB_g()) == 1) && (lvloc(GB_g()) == loc(GB_g(), (-2))) && (len(member(loc(GB_g(), 0), 0)) == 1) && (len(member(loc(GB_g(), 0), 1)) == 1))
+define SOWNS() (acc(SX().v_int) && acc(SX().d_int) && SX().d_int && RNG(SX().v_int) && acc(SY().v_int) && acc(SY().d_int) && SY().d_int && RNG(SY().v_int))
+// the cover: the result is one of the implicit atom's leaves (per-leaf place equality)
+define COV(r) (((r) == SX()) || ((r) == SY()))
+
+method e_program_start()
+  ensures SFACTS()
+  ensures SOWNS() && acc(lvloc(GB_g()).lv)
+  decreases _
+
+method e_where(amt: Perm) returns (res: Ref, out: Perm)
+  requires SFACTS()
+  requires none < amt && amt < write
+  requires SOWNS() && acc(lvloc(GB_g()).lv, amt)
+  ensures WF(res)
+  ensures none < out && out <= write
+  ensures SOWNS() && acc(lvloc(GB_g()).lv, amt)
+  ensures (res != null) && (offset_of(res) < len(block_of(res))) && ((!COV(res)) ==> (acc(res.v_int) && acc(res.d_int) && acc(lvloc(block_of(res)).lv, out))) && res.d_int && RNG(res.v_int)
+  decreases
+{
+  SX().v_int := 1
+  SX().d_int := true
+  res := SX()
+  out := COV(res) ? write : ((perm(lvloc(block_of(res)).lv) - (none + ((lvloc(block_of(res)) == lvloc(GB_g())) ? amt : none))) / 1)
+  // the row: the result holds the place (covered, or its own output amount)
+  if (!((res != null) && (COV(res) || ((out > none) && (perm(res.v_int) > none))))) {
+    assert false
+  }
+  // the separation rows of the covered pair, guarded by !cov
+  assert (!COV(res)) ==> (SX() != res)
+  assert (!COV(res)) ==> (SY() != res)
+  label l_end
+}
+
+method e_main() returns (res: Int)
+  decreases
+{
+  var p: Ref
+  var t0: Ref
+  var t1: Perm
+  e_program_start()
+  t0, t1 := e_where(perm(lvloc(GB_g()).lv) / 2)
+  // the encoder's case splits on the equalities with the candidate places
+  if (t0 == SX()) { }
+  if (t0 == SY()) { }
+  p := t0
+  assert p != null
+  assert !((perm(p.v_int) != write) || (perm(p.d_int) != write))
+  p.v_int := 2
+  p.d_int := true
+  res := 0
+}
