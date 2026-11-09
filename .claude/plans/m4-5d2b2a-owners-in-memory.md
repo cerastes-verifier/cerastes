@@ -71,6 +71,21 @@ d2b1 landed about 3,900 lines and needed a cut, so the owner split d2b2 in two (
   if no shape verifies within the part, it is pinned as a documented false alarm
   (`owning_loop_handoff_read_false_alarm.c`) for M4.8.
 
+- **182** (the test-mutator's questions on its pre-registered Part A, C and D tests):
+  1. `if (g) free(g);` on an owning global of unknown value at `main`'s start: `lifetime` at the test, then
+     `invalid-free` (record item 5 corrected).
+  2. A dangling `*pp` copy used after a consuming callee: `lifetime` at `(void)p;`.
+  3. The bodiless tie: `permission` at the `ensures` clause, corrected after the first run under question 160.
+  4. An owns-only callee that clears `*pp` on an address-taken owner: `leak` at the closing brace (record item 6's
+     update gains `v != null`).
+  5. `owning` and `ref_to_uninit` mismatched across declarations: one `annotation_mismatch` per variable.
+  6. The other-type cover leaf cannot be written; the mixed-type positive stands in.
+  7. The twin: a `reads(g) && owns_block(g)` consumer called by a function returning `owns(g)`, `permission` at
+     that return.
+  8. A pin for `owns_block` in a measure.
+
+  Also: the three doc examples that flip gain the contracts they need in their bodies.
+
 **Standing:**
 - 69: the EDG merge waits for the box; no EDG work.
 - 77: one context.

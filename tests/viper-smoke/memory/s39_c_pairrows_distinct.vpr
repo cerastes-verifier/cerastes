@@ -1,0 +1,114 @@
+// expect: verified
+// S39 (c, part 2) two written owns_block sites with the pair row at the loop entry and at the back edge. Hand-written
+// from the Viper today's encoder emits for the nearest test (copied prelude, domain and macros); no inhale or assume.
+// S39 hand-written fixture (not emitted by the tool; see README.md). Prelude, domain and helper macros copy what the encoder emits.
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g(): Block
+  unique function GB_h(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// S39 helper macros (hand-written fixtures only; they only name conjuncts the encoder emits today, none is an axiom)
+define WF(p) (((p) == null) || (((p) == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))))
+define RNG(x) (((-2147483648) <= (x)) && ((x) <= 2147483647))
+// the whole allocation of an int (the contract of malloc's typed view / owns_block): facts, token, liveness, cell, flag, range
+define WHOLE(p) (((p) != null) && WF(p) && (offset_of(p) == 0) && acc(loc(block_of(p), (-1)).tok) && loc(block_of(p), (-1)).tok && (lvloc(block_of(p)) == loc(block_of(p), (-2))) && acc(lvloc(block_of(p)).lv) && (len(block_of(p)) == 1) && acc((p).v_int) && acc((p).d_int) && ((p).d_int ==> RNG((p).v_int)))
+// the same read as a check: p holds the whole allocation (a row `if (!(HELD(p))) { assert false }`)
+define HELD(p) (!((perm(loc(block_of(p), (-1)).tok) != write) || (!loc(block_of(p), (-1)).tok)) && (perm(lvloc(block_of(p)).lv) == write) && !((perm((p).v_int) != write) || (perm((p).d_int) != write)))
+define NWHOLE(p) ((p) == null || WHOLE(p))
+define NHELD(p) ((p) == null || HELD(p))
+
+// a pointer-typed cell (an int** place) held whole: the cell, its flag, its value well formed
+define PCELL(pp) ((pp) != null && WF(pp) && (offset_of(pp) < len(block_of(pp))) && acc((pp).v_ptr_int) && acc((pp).d_ptr_int) && (pp).d_ptr_int && WF((pp).v_ptr_int))
+define PCELLHELD(pp) (!((perm((pp).v_ptr_int) != write) || (perm((pp).d_ptr_int) != write)) && (pp).d_ptr_int)
+// the cell of a one-slot global block
+define GC() loc(GB_g(), 0)
+define GFACTS() ((len(GB_g()) == 1) && (lvloc(GB_g()) == loc(GB_g(), (-2))))
+
+// cerastes:trusted-contract vlibc malloc, typed view int (as emitted)
+method malloc_i() returns (res: Ref)
+  ensures WF(res)
+  ensures (res != null) ==> WHOLE(res)
+  decreases _
+
+// cerastes:trusted-contract vlibc free, typed view int (as emitted)
+method free_i(p: Ref)
+  requires WF(p)
+  requires (p != null) ==> WHOLE(p)
+  decreases _
+
+method abort_()
+  ensures false
+  decreases _
+
+// allocation of an address-taken local of type int* (as emitted by alloc_ptr_int)
+method alloc_ptr_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_ptr_int)) && acc(r.d_ptr_int)) && (!r.d_ptr_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+method c3_main()
+  decreases
+{
+  var p: Ref
+  var q: Ref
+  var t: Ref
+  var s: Ref
+  var i: Int
+  t := malloc_i()
+  if (t == null) {
+    abort_()
+  }
+  p := t
+  t := malloc_i()
+  if (t == null) {
+    abort_()
+  }
+  q := t
+  assert block_of(p) != block_of(q)
+  assert (p != null) ==> (q != null)
+  i := 0
+  if (!(HELD(p) && HELD(q) && (block_of(p) != block_of(q)))) {
+    assert false
+  }
+  while (i < 3)
+    invariant (0 <= i) && (i <= 3)
+    invariant WHOLE(p) && WHOLE(q)
+    decreases 3 - i
+  {
+    s := p
+    p := q
+    q := s
+    i := i + 1
+    if (!(HELD(p) && HELD(q) && (block_of(p) != block_of(q)))) {
+      assert false
+    }
+  }
+  free_i(p)
+  free_i(q)
+  label l_end
+  assert forperm x: Ref [x.tok] :: false
+}

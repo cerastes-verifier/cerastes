@@ -1,0 +1,231 @@
+// expect: verified
+// S39 (d, part 2, owner question 181) after v = w a later iteration reads *w: the flag-kept clause is stated per
+// block under the owner's carrier (`v != null && block_of(v) == block_of(w) && flag was set at entry ==> v.d_int`),
+// so the read verifies. Hand-written from the Viper today's encoder emits for the nearest test (copied prelude,
+// domain and macros); no inhale or assume.
+// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// S39 helper macros (hand-written fixtures only; they only name conjuncts the encoder emits today, none is an axiom)
+define WF(p) (((p) == null) || (((p) == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))))
+define RNG(x) (((-2147483648) <= (x)) && ((x) <= 2147483647))
+// the whole allocation of an int (the contract of malloc's typed view / owns_block): facts, token, liveness, cell, flag, range
+define WHOLE(p) (((p) != null) && WF(p) && (offset_of(p) == 0) && acc(loc(block_of(p), (-1)).tok) && loc(block_of(p), (-1)).tok && (lvloc(block_of(p)) == loc(block_of(p), (-2))) && acc(lvloc(block_of(p)).lv) && (len(block_of(p)) == 1) && acc((p).v_int) && acc((p).d_int) && ((p).d_int ==> RNG((p).v_int)))
+// the same read as a check: p holds the whole allocation (a row `if (!(HELD(p))) { assert false }`)
+define HELD(p) (!((perm(loc(block_of(p), (-1)).tok) != write) || (!loc(block_of(p), (-1)).tok)) && (perm(lvloc(block_of(p)).lv) == write) && !((perm((p).v_int) != write) || (perm((p).d_int) != write)))
+define NWHOLE(p) ((p) == null || WHOLE(p))
+define NHELD(p) ((p) == null || HELD(p))
+
+// C/C++ function `main`
+method f_main__0() returns (res: Int)
+  ensures ((-2147483648) <= res) && (res <= 2147483647)
+  decreases
+{
+  var v_w__0: Ref
+  var v_v__1: Ref
+  var v_i__2: Int
+  var held_v_v__1: Bool
+  var tv_v_v__1: Bool
+  var ev_v_v__1: Ref
+  var kl_h0__0: Perm
+  var kt_h0__0: Perm
+  var kv_h0__0: Perm
+  var kd_h0__0: Perm
+  var vs_h0__0: Int
+  var ds_h0__0: Bool
+  var t__0: Ref
+  var t__1: Ref
+  var t__2: Ref
+  var t__8: Int
+  held_v_v__1 := false
+  t__0 := f_malloc__1()
+  held_v_v__1 := held_v_v__1 && ((v_v__1 != null) && (perm(loc(block_of(v_v__1), (-1)).tok) > none))
+  assert (t__0 != null) ==> (perm(lvloc(block_of(t__0)).lv) > none)
+  v_w__0 := t__0
+  assert (v_w__0 != null) ==> (perm(lvloc(block_of(v_w__0)).lv) > none)
+  if (((v_w__0 == null) ? 1 : 0) != 0) {
+    res := 1
+    if (!(!held_v_v__1)) {
+      assert false
+    }
+    goto l_end
+  }
+  assert v_w__0 != null
+  assert !((perm(v_w__0.v_int) != write) || (perm(v_w__0.d_int) != write))
+  v_w__0.v_int := 0
+  v_w__0.d_int := true
+  t__1 := null
+  if (!((t__1 != null) ==> ((offset_of(t__1) == 0) && (perm(loc(block_of(t__1), (-1)).tok) == write)))) {
+    assert false
+  }
+  v_v__1 := t__1
+  held_v_v__1 := t__1 != null
+  tv_v_v__1 := (t__1 != null) ? loc(block_of(t__1), (-1)).tok : tv_v_v__1
+  v_i__2 := 0
+  if (!((v_v__1 != null) ==> held_v_v__1)) {
+    assert false
+  }
+  if (!((v_v__1 != null) ==> (((!((perm(loc(block_of(v_v__1), (-1)).tok) != write) || (!loc(block_of(v_v__1), (-1)).tok))) && (perm(lvloc(block_of(v_v__1)).lv) == write)) && (!((perm(v_v__1.v_int) != write) || (perm(v_v__1.d_int) != write)))))) {
+    assert false
+  }
+  ev_v_v__1 := v_v__1
+  if (lvloc(block_of(v_w__0)) == lvloc(block_of(v_v__1))) { }
+  if (block_of(v_w__0) == block_of(v_v__1)) { }
+  if (v_v__1 == v_w__0) { }
+  kl_h0__0 := perm(lvloc(block_of(v_w__0)).lv)
+  if (kl_h0__0 > none) { }
+  kt_h0__0 := perm(loc(block_of(v_w__0), (-1)).tok)
+  if (kt_h0__0 > none) { }
+  kv_h0__0 := perm(v_w__0.v_int)
+  if (kv_h0__0 > none) { }
+  kd_h0__0 := perm(v_w__0.d_int)
+  if (kd_h0__0 > none) { }
+  ds_h0__0 := false
+  if (kd_h0__0 > none) {
+    ds_h0__0 := v_w__0.d_int
+  }
+  if (kv_h0__0 > none) {
+    vs_h0__0 := v_w__0.v_int
+  }
+  while (((v_i__2 < 3) ? 1 : 0) != 0)
+    invariant ((-2147483648) <= v_i__2) && (v_i__2 <= 2147483647)
+    invariant (v_v__1 == null) || (((v_v__1 == loc(block_of(v_v__1), offset_of(v_v__1))) && (0 <= offset_of(v_v__1))) && (offset_of(v_v__1) <= len(block_of(v_v__1))))
+    invariant (v_v__1 == ev_v_v__1) || (v_v__1 == v_w__0)
+    invariant (v_i__2 < 2) || (v_v__1 != null)
+    invariant held_v_v__1 == (v_v__1 != null)
+    invariant (v_v__1 != null) ==> (acc(loc(block_of(v_v__1), (-1)).tok) && loc(block_of(v_v__1), (-1)).tok)
+    invariant (v_v__1 != null) ==> (acc(v_v__1.v_int) && acc(v_v__1.d_int))
+    invariant (v_v__1 != null) ==> acc(lvloc(block_of(v_v__1)).lv)
+    invariant (v_v__1 != null) ==> (((offset_of(v_v__1) == 0) && (lvloc(block_of(v_v__1)) == loc(block_of(v_v__1), (-2)))) && (len(block_of(v_v__1)) == 1))
+    invariant ((v_v__1 != null) && v_v__1.d_int) ==> (((-2147483648) <= v_v__1.v_int) && (v_v__1.v_int <= 2147483647))
+    invariant (((v_v__1 != null) && (v_w__0 != null) && (block_of(v_v__1) == block_of(v_w__0))) && ((kd_h0__0 > none) && ds_h0__0)) ==> v_v__1.d_int
+    invariant ((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) ==> (acc(v_w__0.v_int, kv_h0__0) && acc(v_w__0.d_int, kd_h0__0))
+    invariant ((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) ==> acc(lvloc(block_of(v_w__0)).lv, kl_h0__0)
+    invariant ((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) ==> acc(loc(block_of(v_w__0), (-1)).tok, kt_h0__0)
+    invariant (((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) && (kt_h0__0 > none)) ==> loc(block_of(v_w__0), (-1)).tok
+    invariant (((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) && ((none < kv_h0__0) && (kv_h0__0 < write))) ==> (v_w__0.v_int == vs_h0__0)
+    invariant (((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) && (((kv_h0__0 > none) && (kd_h0__0 > none)) && v_w__0.d_int)) ==> (((-2147483648) <= v_w__0.v_int) && (v_w__0.v_int <= 2147483647))
+    invariant (((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) && ((kd_h0__0 > none) && ds_h0__0)) ==> v_w__0.d_int
+    invariant (((((0 <= v_i__2) ? 1 : 0) != 0) && (((v_i__2 <= 3) ? 1 : 0) != 0)) ? 1 : 0) != 0
+    invariant ((((((0 <= v_i__2) ? 1 : 0) != 0) && (((v_i__2 <= 3) ? 1 : 0) != 0)) ? 1 : 0) != 0) ==> (!(((3 - v_i__2) < (-2147483648)) || (2147483647 < (3 - v_i__2))))
+    decreases 3 - v_i__2
+  {
+    if (v_v__1 == v_w__0) { }
+    assert (((v_i__2 == 1) ? 1 : 0) != 0) ==> ((v_v__1 != null) ==> (perm(lvloc(block_of(v_v__1)).lv) > none))
+    if ((((((v_i__2 == 1) ? 1 : 0) != 0) && (((v_v__1 == null) ? 1 : 0) != 0)) ? 1 : 0) != 0) {
+      assert (v_w__0 != null) ==> (perm(lvloc(block_of(v_w__0)).lv) > none)
+      t__2 := v_w__0
+      if (!(held_v_v__1 ==> (v_v__1 == t__2))) {
+        assert false
+      }
+      if (!((t__2 != null) ==> ((offset_of(t__2) == 0) && (perm(loc(block_of(t__2), (-1)).tok) == write)))) {
+        assert false
+      }
+      v_v__1 := t__2
+      held_v_v__1 := t__2 != null
+      tv_v_v__1 := (t__2 != null) ? loc(block_of(t__2), (-1)).tok : tv_v_v__1
+    }
+    assert v_w__0 != null
+    assert perm(v_w__0.v_int) > none
+    assert v_w__0.d_int
+    t__8 := v_w__0.v_int
+    assert !(((v_i__2 + 1) < (-2147483648)) || (2147483647 < (v_i__2 + 1)))
+    v_i__2 := v_i__2 + 1
+    if (!((v_v__1 != null) ==> held_v_v__1)) {
+      assert false
+    }
+    if (!((v_v__1 != null) ==> (((!((perm(loc(block_of(v_v__1), (-1)).tok) != write) || (!loc(block_of(v_v__1), (-1)).tok))) && (perm(lvloc(block_of(v_v__1)).lv) == write)) && (!((perm(v_v__1.v_int) != write) || (perm(v_v__1.d_int) != write)))))) {
+      assert false
+    }
+    if (!(((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) ==> (!((perm(v_w__0.v_int) < kv_h0__0) || (perm(v_w__0.d_int) < kd_h0__0))))) {
+      assert false
+    }
+    if (!(((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) ==> (!(perm(lvloc(block_of(v_w__0)).lv) < kl_h0__0)))) {
+      assert false
+    }
+    if (!(((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) ==> (!(perm(loc(block_of(v_w__0), (-1)).tok) < kt_h0__0)))) {
+      assert false
+    }
+    assert (((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) && ((kd_h0__0 > none) && ds_h0__0)) ==> v_w__0.d_int
+    assert (((v_v__1 != null) && (v_w__0 != null) && (block_of(v_v__1) == block_of(v_w__0))) && ((kd_h0__0 > none) && ds_h0__0)) ==> v_v__1.d_int
+    assert (((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) && ((none < kv_h0__0) && (kv_h0__0 < write))) ==> (v_w__0.v_int == vs_h0__0)
+    assert (((v_w__0 != null) && (!((v_v__1 != null) && (block_of(v_v__1) == block_of(v_w__0))))) && (((kv_h0__0 > none) && (kd_h0__0 > none)) && v_w__0.d_int)) ==> (((-2147483648) <= v_w__0.v_int) && (v_w__0.v_int <= 2147483647))
+  }
+  if (v_v__1 == v_w__0) { }
+  assert (!(v_v__1 == null)) ==> ((v_v__1 == null) || (((v_v__1 == loc(block_of(v_v__1), offset_of(v_v__1))) && (0 <= offset_of(v_v__1))) && (offset_of(v_v__1) <= len(block_of(v_v__1)))))
+  assert (!(v_v__1 == null)) ==> (!((perm(loc(block_of(v_v__1), (-1)).tok) != write) || (!loc(block_of(v_v__1), (-1)).tok)))
+  assert (!(v_v__1 == null)) ==> (offset_of(v_v__1) == 0)
+  assert (!(v_v__1 == null)) ==> (lvloc(block_of(v_v__1)) == loc(block_of(v_v__1), (-2)))
+  assert (!(v_v__1 == null)) ==> (perm(lvloc(block_of(v_v__1)).lv) == write)
+  assert (!(v_v__1 == null)) ==> (len(block_of(v_v__1)) == 1)
+  assert (!(v_v__1 == null)) ==> (!((perm(v_v__1.v_int) != write) || (perm(v_v__1.d_int) != write)))
+  assert (!(v_v__1 == null)) ==> (v_v__1.d_int ==> (((-2147483648) <= v_v__1.v_int) && (v_v__1.v_int <= 2147483647)))
+  f_free__2(v_v__1)
+  held_v_v__1 := held_v_v__1 && ((v_v__1 != null) && (perm(loc(block_of(v_v__1), (-1)).tok) > none))
+  res := 0
+  if (!(!held_v_v__1)) {
+    assert false
+  }
+  goto l_end
+  if (!(!held_v_v__1)) {
+    assert false
+  }
+  assert false
+  label l_end
+  assert forperm t: Ref [t.tok] :: false
+}
+
+// C/C++ function `malloc`
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one int (4 bytes), decision 0047
+method f_malloc__1() returns (res: Ref)
+  ensures (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  ensures (!(res == null)) ==> (((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && (len(block_of(res)) == 1)) && acc(res.v_int)) && acc(res.d_int)) && (res.d_int ==> (((-2147483648) <= res.v_int) && (res.v_int <= 2147483647))))
+  decreases _
+
+// C/C++ function `free`
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: one int (4 bytes), decision 0047
+method f_free__2(p_ptr__0: Ref)
+  requires (p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))
+  requires (!(p_ptr__0 == null)) ==> (((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && loc(block_of(p_ptr__0), (-1)).tok) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && (len(block_of(p_ptr__0)) == 1)) && acc(p_ptr__0.v_int)) && acc(p_ptr__0.d_int)) && (p_ptr__0.d_int ==> (((-2147483648) <= p_ptr__0.v_int) && (p_ptr__0.v_int <= 2147483647))))
+  decreases _
+
+// well-formedness of the contract of C/C++ function `malloc`
+method f_malloc__1__wf(res: Ref)
+  requires (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+
+// well-formedness of the contract of C/C++ function `free`
+method f_free__2__wf(p_ptr__0: Ref)
+  requires (p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))
+  decreases
+{
+  // the contract has nothing that can be undefined
+}

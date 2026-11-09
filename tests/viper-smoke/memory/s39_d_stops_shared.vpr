@@ -1,8 +1,9 @@
 // expect: verified
-// S39 (d) record 0054 item 3: owning_loop_stops_shared_false_alarm.c (a and b share a block at entry, a = NULL inside
-// the loop): b is carried although the loop never mentions it, guarded by the current state, and `a == ev_a || a ==
-// null`. Hand-written from the Viper today's encoder emits for the nearest test (copied prelude, domain and macros);
-// no inhale or assume.
+// S39 (d) record 0054 item 3 (hybrid shape, part 2: the exclusivity disjunct `dup || !cur` and its back-edge row are
+// kept for a pair without a sharing assignment): owning_loop_stops_shared_false_alarm.c (a and b share a block at
+// entry, a = NULL inside the loop): b is carried although the loop never mentions it, guarded by the current state,
+// and `a == ev_a || a == null`. Hand-written from the Viper today's encoder emits for the nearest test (copied
+// prelude, domain and macros); no inhale or assume.
 // cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
 
 // the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
@@ -54,6 +55,7 @@ method f_main__0() returns (res: Int)
   var held_v_b__1: Bool
   var tv_v_b__1: Bool
   var ev_v_a__0: Ref
+  var dup_v_b__1_v_a__0__0: Bool
   var t__0: Ref
   var t__1: Ref
   var t__2: Ref
@@ -102,6 +104,7 @@ method f_main__0() returns (res: Int)
     assert false
   }
   ev_v_a__0 := v_a__0
+  dup_v_b__1_v_a__0__0 := ((v_a__0 != null) && (v_b__1 != null) && (block_of(v_a__0) == block_of(v_b__1)))
   if (!((v_b__1 != null) ==> held_v_b__1)) {
     assert false
   }
@@ -113,6 +116,7 @@ method f_main__0() returns (res: Int)
     invariant (v_a__0 == null) || (((v_a__0 == loc(block_of(v_a__0), offset_of(v_a__0))) && (0 <= offset_of(v_a__0))) && (offset_of(v_a__0) <= len(block_of(v_a__0))))
     invariant (v_a__0 == ev_v_a__0) || (v_a__0 == null)
     invariant held_v_b__1 == (v_b__1 != null)
+    invariant dup_v_b__1_v_a__0__0 || (!((v_a__0 != null) && (v_b__1 != null) && (block_of(v_a__0) == block_of(v_b__1))))
     invariant ((v_b__1 != null) && (!((v_a__0 != null) && (block_of(v_a__0) == block_of(v_b__1))))) ==> WHOLE(v_b__1)
     invariant held_v_a__0 == (v_a__0 != null)
     invariant (v_a__0 != null) ==> (acc(loc(block_of(v_a__0), (-1)).tok) && loc(block_of(v_a__0), (-1)).tok)
@@ -139,6 +143,9 @@ method f_main__0() returns (res: Int)
     }
     assert !(((v_i__2 + 1) < (-2147483648)) || (2147483647 < (v_i__2 + 1)))
     v_i__2 := v_i__2 + 1
+    if (!(dup_v_b__1_v_a__0__0 || (!((v_a__0 != null) && (v_b__1 != null) && (block_of(v_a__0) == block_of(v_b__1)))))) {
+      assert false
+    }
     if (!((v_b__1 != null) ==> held_v_b__1)) {
       assert false
     }

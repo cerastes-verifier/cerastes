@@ -2,8 +2,9 @@
 
 - **Status:** draft (2026-11-09, M4.5d2b2a), written before code (invariant 6). Revised after spike S39
   (`build/m4.5d2b2a/s39/README.md`) and audit round 1 (Opus; blocking B1 bodiless sites through memory, B2 the initial
-  value of an owning global, B3 the carrier guards, the last pending S39 part 2; should-fix items 4–14 and notes 16–20
-  taken in items 2–8 and 10). Owner questions during the session: 180 and 181. Owner decisions are from M4.5d2b2a's planning, 2026-11-09; plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`;
+  value of an owning global, B3 the carrier guards, settled by S39 part 2; should-fix items 4–14 and notes 16–20
+  taken in items 2–8 and 10; the re-audit resolved B1–B3 and its S1, S2 and notes are taken in item 3). Owner
+  questions during the session: 180, 181 and 182. Owner decisions are from M4.5d2b2a's planning, 2026-11-09; plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`;
   handoff questions 173–179, each the recommendation:
   - **173:** M4.5d2b2 is two sessions. This record is d2b2a's; d2b2b takes owning fields and P4418R0.
   - **174:** static owners are exempt at `main`'s end, as in P4417R0.
@@ -87,8 +88,8 @@ Written block invariants and owners in memory use the same carriers.
        item 2), and the caller receives the block. This is how `owns(**pp)` of a block allocated into `*pp` is handed
        over: `owns(*pp) && owns_block(*pp)` in the `ensures`;
      - **borrowed**, both sites.
-   - **Bodiless contracts** (audit round 1, B1; extends 0045 item 5 and 0052 item 2a to block sites). Nothing proves a
-     bodiless `ensures`. A borrowed site whose place loads, or rests on a global, can name a different block on return
+   - **Bodiless contracts** (audit round 1, B1; extends 0045 item 5 and 0052 item 2a to block sites). Nothing proves the
+     `ensures` of a function without a verified body in the unit, trusted library routines included. A borrowed site whose place loads, or rests on a global, can name a different block on return
      than on entry. `ensures(owns(*pp) && owns_block(*pp) && *pp == q)` with the caller holding `q`'s block would give
      the caller a second token for that block, and everything after the call would verify. So, in a function without a
      body:
@@ -139,49 +140,87 @@ Written block invariants and owners in memory use the same carriers.
      holder would add only redundant `if (…) { }` splits, so it is left unreachable, and no existing Viper changes.
    - **Still rejected:** a block site under `old` or in a measure. Neither holds a permission.
 
-3. **Loop carriers keyed by the current state** (amends 0052 item 3, Loops; S39 (d)). There are three parts, and all
-   three are needed. *(Pending S39 part 2, audit round 1 B3: 0052 item 3 recorded that a current-value guard loses the
-   distinctness of two blocks after the loop. The auditor predicts that (a) as written regresses
-   `owning_loop_swap.c` and `owning_loop_replace.c`, which verify today. The spike re-encodes every existing owner-loop
-   test, and (a) is rewritten from its result. It may keep the entry snapshot as a disjunct, or add an exclusivity
-   clause.)*
-   - **(a) Guards on current values.** The carriers are ordered:
-     - first the full carriers, which are the owners the loop assigns and the owners it does not name (c), in
-       declaration order;
-     - then the keyed owners and the other places (audit item 6).
+3. **Loop carriers keyed by the current state** (amends 0052 item 3, Loops; S39 (d) and part 2; audit round 1 B3, items 4–6).
+   0052 item 3 recorded that a guard on current values alone loses the distinctness of two blocks after the loop. S39
+   part 2 confirmed it: with that guard alone, `owning_loop_swap.c` frees one block twice and `owning_loop_replace.c`
+   meets a spurious shared state at the loop head. The carriers therefore combine today's loop-entry snapshot with the
+   current state. For each pair of carriers `i` (earlier) and `j` (later) of which the loop writes at least one:
+   - **(a) Guard on the current state.**
+     - Today's snapshot `snap_ij` (`dup_`/`ad_`) is kept: at loop entry, `snap_ij := (o_i != null && o_j != null &&
+       block_of(o_i) == block_of(o_j))`.
+     - Carrier `j`'s clauses (token, cells, liveness, `flag ==> range`), its entry and back-edge rows and its term in
+       the back-edge leak exemption stand under `o_j != null && !cur_ij`, with `cur_ij` the same formula on the
+       current values (in place of `!snap_ij`).
+     - So a block that becomes shared inside the loop is carried by the earlier carrier, and one that stops being
+       shared is carried by the one that still holds it. This holds when **both are owners**.
+     - **A non-owning place paired with an owner** (re-audit S2). When the later member is a non-owning place (0047
+       item 10's heap place), it is guarded by `!snap_ij && !cur_ij`: a place shared with an owner at entry stays off,
+       as today, since the owner may free and replace the block, and Silicon cannot tell a new block from the freed
+       one. It still switches off when it becomes shared inside the loop, which `owning_loop_alias_becomes_owned`
+       needs. A must-verify test pins the shape: `int *a = v;` before a loop whose body frees `v` and allocates it
+       again.
+     - **Which pointer `cur_ij` reads.** For an owner, its current value. For a place, the place's base `hb` (the
+       variable, or the `lb` loop-entry ghost when the loop assigns the variable, 0047 item 10).
+   - **(b) Exclusivity.**
+     - The pure invariant `snap_ij || !cur_ij` comes before the carrier clauses, with its back-edge row `if (!(snap_ij
+       || !cur_ij)) { assert false }`. This replaces 0052's pair row, with the same message and position: "owning `v`
+       takes a block this loop already carries through `w`".
+     - A pair distinct at entry stays distinct, which keeps the swap and replace loops verifying. A pair shared at entry
+       is unconstrained.
+   - **(c) Sharing pairs and value sets.**
+     - **Sharing pairs.** A pair has a **sharing write** when a write to one of the two stores a local pointer that
+       the loop never writes and that is declared outside the loop (`b = a;`, `v = w;`). A write is, per audit item 4,
+       an assignment, including one inside an expression; a store through a pointer that may equal its address; or a
+       call that may change it. Such a pair gets no exclusivity clause and no row (S39 `d1c`: the row is exactly the
+       pinned false alarm).
+     - **Value sets** (re-audit S1). **Every** owner the loop writes, in a sharing pair or not, gets the value set when
+       each of its written values is `NULL` or such a local:
+       - a ghost `ev_o := o` at loop entry, never assigned;
+       - the invariant `o == ev_o || o == null || o == x_1 || …`.
 
-     Carrier `i` is guarded by `o_i != null && !(o_j != null && block_of(o_j) == block_of(o_i))` for every earlier
-     carrier `j`. These guards replace 0052's loop-entry snapshots (`ad_`, `dup_`) and its pair rows ("owning `v` takes
-     a block this loop already carries through `w`"). A block that becomes shared moves to the earlier carrier; one that
-     stops being shared moves to the remaining one.
-   - **(b) The value set.** For each owner the loop writes, a ghost `ev_o := o` is taken at loop entry and never
-     assigned, and the invariant gains `o == ev_o || o == x_1 || …`. Each `x_k` is the value of a write to `o` in the
-     loop that is `NULL` or a local pointer the loop never writes and that is declared outside the loop. A write is any
-     write to `o` (audit item 4):
-     - an assignment, including one inside an expression;
-     - a store through a pointer that may equal `&o`;
-     - a call whose contract may change `o`: through `&o` for an address-taken owner, or `owns(g)` for an owning global.
-
-     If any write's value is anything else (a call's result, an owner the loop writes, an expression, a local declared
-     in the body), no value-set clause is emitted for `o`. Without the clause, an owner's value after the loop is
-     unconstrained (S39 `d1`: the loop verifies, but the return row fails).
-   - **(c) Owners the loop does not name.** When the loop writes an owner or contains a call, every owning local in
-     scope is a **full** carrier, even one the loop never names. A keyed place cannot take a block over: its flag-kept
-     clause is not preserved (S39 `d3c`). That carrier is guarded by `held_o` (audit item 5): its entry row is `held_o
-     ==> whole block`, so an owner freed through an alias before the loop and left non-null does not newly fail at the
-     loop's entry.
-   - **Results** (S39 `d1b`, `d3a`; 5–11 s each under load):
-     - `owning_loop_becomes_shared` and `owning_loop_stops_shared` verify as written;
-     - a block dropped at the back edge or by a reassignment stays `leak`;
-     - `owning_loop_alias_becomes_owned` verifies only with a user invariant (`i < 3 || v != NULL`), because if the loop
-       ended with `v` null, `w`'s block would leak (S39 `d2a`, `d2b`). The record states that limit. Its pin is retired
-       for that positive (question 180).
-   - **The cost** is O(n²) guard literals in the number of owners in scope. Programs with three or more owners in one
-     loop are timed in Part B.
-   - **A limit** (S39 `d2d`). After `v = w;` hands a block to the owner, a read of `*w` in a later iteration is
-     `uninitialized`, because the owner's carrier carries the cells' `flag ==> range` but not the flags themselves.
-     Part B tries flag-kept clauses per block under each carrier's guard; if none verifies, it
-     is pinned as a documented false alarm for M4.8 (question 181).
+       An owner with any other written value gets no value set: an allocation, a call's result, an owner the loop
+       writes, an expression, or a local declared in the body. Without the value set, an owner's value after the loop
+       is unconstrained. S39 `d1`: the loop verifies, but the return row fails. The re-audit reproduced the same on
+       `owning_loop_stops_shared` (`a = NULL;` is not a sharing write, and its value set is needed).
+     - **The sharing test is syntactic** (re-audit note 5). `int *t = a; b = t;` is not a sharing write, so it keeps the
+       exclusivity row and today's false alarm.
+     - **A pair the loop writes neither member of** keeps today's guard. There `cur_ij` equals `snap_ij` (re-audit
+       note 3).
+   - **(d) Owners the loop does not name.**
+     - When the loop writes an owner or contains a call, every owning local (and held owning global, item 5) in scope
+       is a **full** carrier, even one the loop never names. A keyed place cannot take a block over, since its
+       flag-kept clause is not preserved (S39 `d3c`).
+     - Such a carrier is guarded by `held_o` (audit item 5; S39 `w2a`, `w2b`): `held_o ==> o != null`, `held_o ==>
+       whole block`, entry row `held_o ==> held`. An owner freed through an alias before the loop and left non-null
+       does not newly fail at the loop's entry.
+     - After an allocation in the loop body, the case splits `o != a` and `block_of(o) != block_of(a)` against such
+       carriers are asserted (proved, never assumed) so that Silicon has the case.
+   - **(e) The flag follows the block** (question 181; S39 `d2f`, `d2g`). For a place carrier `w` (0047 item 10's heap
+     place, with its entry flag snapshot `ds_w` and amount `kd_w`) and a full owner carrier `v`, the owner's carrier
+     gains `(v != null && hb_w != null && block_of(v) == block_of(hb_w) && kd_w > none && ds_w) ==> <v's flag>`, under
+     `v`'s own carrier guard so that it is framed, with the same assert at the back edge. `w` here is the place's base
+     `hb_w`, whose cell the snapshot `ds_w` describes (re-audit). With one cell per block (d2a), `v`'s flag is that cell's
+     flag. M4.5e1's arrays restate the clause on `hb_w`'s cell. A block Silicon cannot tell from a freed entry block
+     can only satisfy the premise falsely, which costs a false alarm, never a wrong verdict. Then a read of `*w` after `v = w;`, in a later iteration, verifies; a flag that was
+     not set at entry keeps the read `uninitialized`. No cut is needed.
+   - **Order** (audit item 6). Full carriers come first (the owners the loop writes, then the owners it does not name,
+     in declaration order), then keyed owners and places.
+   - **Results** (S39 part 2, quiet machine, 2–4 s each).
+     - Every existing owner-loop test keeps its outcome under the new carriers (S39 `own/`): `owning_loop_swap`,
+       `owning_loop_replace`, `owning_loop_alias`, `vlibc_owning_loop_replace` and their negatives, each at its row.
+     - Their Viper changes only for the ten tests with a pair carrier. These are the `ad_`/`dup_` users:
+       `owning_loop_{swap,replace,alias}.c`, `negative/owning_loop_{swap_plain_temp,replace_leak,alias_free}.c`,
+       `vlibc_owning_loop_replace.c`, `negative/vlibc_owning_loop_replace_leak.c` and the three pinned false alarms.
+       They are Part B's vprdiff allow-list.
+     - `owning_loop_becomes_shared` and `owning_loop_stops_shared` verify as written.
+     - `owning_loop_alias_becomes_owned` verifies with the user invariant `i < 3 || v != NULL` (question 180; S39
+       `d2a`, `d2b`).
+     - A block dropped at the back edge, or by a reassignment, stays `leak`.
+   - **Soundness.** Every piece is an invariant clause or a row that Viper checks: a guard, an exclusivity clause, a
+     value set, or a flag clause. The ghosts are entry snapshots of real values and permissions. The exemption covers
+     only carried tokens, after the ending rows have ended every failing path (audit note 15).
+   - **The cost** is O(n²) pair clauses in the number of carriers. A test with three owners in one loop is timed in
+     Part B.
 
 4. **Written `owns_block` in loop invariants** (0052 item 6(a); audit S10).
    - **Form.** `CERASTES_INVARIANT(p == NULL || owns_block(p))` and its forms through loads and globals (`owns_block(s->q)`,
@@ -223,13 +262,22 @@ Written block invariants and owners in memory use the same carriers.
      owning `static` local, whatever the value. Where the value is unknown, `main` must assign the global (`g = NULL;`
      or an allocation) before it hands it to a callee whose contract has the deep atom. Otherwise the call is
      `permission`: "calls `f`, which needs owning global `g` to hold its block or be null". `if (g) free(g);` at
-     `main`'s start is `invalid-free` there, not dead code.
+     `main`'s start is not dead code: the test `if (g)` is `lifetime`, because a pointer of unknown value may dangle (0028
+     item 3a), and the `free` is `invalid-free` (question 182).
    - **The deep atom.** Every `owns(g)` of an owning global carries item 2's site on the global's value:
      `owns(g) && (g == NULL || owns_block(g))`, in both lists, as one atom. This covers:
      - a written atom;
      - the implicit `owns(s)` of a `static` local (question 80).
 
      `program_start` and `main` never carry it (above).
+
+     **Merging and allocators.** The deep atom names the platform's allocator, as `owning` does (0052 item 7, question
+     153). For a written `owns(g)`, the user may write the deep clause with `cerastes_owns_vlibc_block(g)` instead, and
+     the encoder merges it. An owning `static` local, whose atom is implicit, holds only a platform block: a vlibc
+     block stored in it is `permission` at the store (the value rule). The encoder appends the deep clause after each
+     written `owns(g)` before `finish_atoms` reads the list, so its duplicate and "beside" rules see it. The implicit
+     clauses of `static` locals are paired by construction: in both lists, except in a `noreturn` function, which has
+     only the `requires` site.
 
      A function that only reads the global writes `reads(g)`, which gives the value and no part of the block. A read of
      `*g` needs `reads(*g)` or `owns(*g)` after it (0045). `owns(*g)` beside the deep atom names a cell of the block,
@@ -278,7 +326,7 @@ Written block invariants and owners in memory use the same carriers.
    - **Stores.** Rows are written at stores by name, and at stores through any pointer of the owner's type `T**` that
      may equal `&v` (guarded by `q == &v`, path-precise).
    - **`&v` passed to a callee:** the callee's contract decides.
-     - With `owns(*pp)` alone, the callee may change `v`. After the call, `held_v := held_v && perm(token) > none`, and
+     - With `owns(*pp)` alone, the callee may change `v`. After the call, `held_v := held_v && v != null && perm(tok(block_of(v))) > none`, and
        `v`'s ending rows check its new value.
      - With `owns(*pp) && (*pp == NULL || owns_block(*pp))` in both lists, the callee borrows the block (item 2).
      - With an `ensures` site on `*pp` alone, the callee gives a block (item 2), and `v` owns it: after the call,
@@ -300,6 +348,10 @@ Written block invariants and owners in memory use the same carriers.
      guard, and a disjunctive cover cannot frame them: the contract's well-formedness failed, as Silicon's own check.
    - **The working shape.** The facts stand under `!cov`, the separation rows are guarded by `!cov`, and `o := cov ?
      write : …` as in 0052 item 2. The caller then reads and writes through `*r` by its own implicit atom on `s`.
+   - **Reads of a covered place** (S39 `e4`, `e4b`, `e4c`). A contract read of a covered place (`ensures(r, owns(*r) &&
+     *r == 1)`) is routed through the covering leaf, `(cov ? (res == &s.x ? s.x : s.y) : res.v_int)`, since under a
+     disjunctive cover `res.v_int` is unframed (the contract would not be well-formed). With one leaf of the type, the
+     plain read is framed.
 
 8. **The lint** (`lint_viper.py`):
    - token reads in block sites through loads;
