@@ -34,7 +34,8 @@ test cannot simply join the default run.
 
 ## Decision
 
-1. **The tier.** A verify test (`.c`, `.cpp`) that needs more than the driver's 300 s lives under `tests/long/<area>/`,
+1. **The tier.** A verify test (`.c`, `.cpp`) that needs more than the driver's 300 s (or, item 5, that is slow enough
+   on the box to risk it under load) lives under `tests/long/<area>/`,
    where `<area>` is one of the verify areas `annotations`, `scalar`, `memory`, `vlibc` (a file directly in
    `tests/long/` or in another subdirectory is a header error), and starts with a header `// timeout: <seconds>`, a
    whole number from 301 to 3600 (twice the 1800 s a program may take when it is tried, item 8). Every rule the harness
@@ -77,6 +78,13 @@ test cannot simply join the default run.
 
 5. **The limit of a test** is at least twice its measured time on the quiet x86-64 box, rounded up to a whole minute,
    the same for both modes (the header is one value per file).
+   - **Also slow on the box** (owner, 2026-11-10, question 217, "Time all, move to long"): a test that takes about
+     100 s or more alone on the x86-64 box belongs in the tier too, though it finishes inside the driver's 300 s there:
+     `check.sh` runs at `-j32` on the box and CI's Linux jobs on three cores, where such a test reaches 300 s (exit
+     3). It moves with its partner (a positive and its twin), so the twin rule holds in the tier. M4.5d2b2c found the
+     box four to six times slower than the Mac on the owning-field chain and closure shapes (`chain3` 21 s on the Mac,
+     121 s on the box), though not uniformly (`pointer_arg` 35 s and 46 s), so a session times its new tests on the
+     box before its `check.sh`.
 
 6. **Everything else applies.** `expect:` lines, `mode:`, twins (a must-verify long test has a must-fail twin, which may
    be long too, and then has its own `timeout:`), `native-ok`, `verify-options:` (except `--timeout`, which only the
@@ -113,7 +121,8 @@ test cannot simply join the default run.
      `two_fields.c` is byte-identical from the base build and from Part L-2's, so the session did not slow it; the
      program was recreated from the description of S40 (g)'s lost `g3_two.c` (218.5 s on a loaded Mac) and may differ
      from it in detail. **Neither finished, so neither becomes a long test: both go to the handoff for M4.8 with these
-     times, and `tests/long/` starts empty.** None of the outcomes is the stop of this item (no verified failing
+     times.** The tier's first tests are six of the session's own, slow on the box (item 5, question 217). Both tries'
+     Viper is byte-identical from the final build, so they stand. None of the outcomes is the stop of this item (no verified failing
      program, no exit 3 other than the timeout).
 
 9. **Facts:** the driver's `--timeout` (`src/driver/verify_main.cpp`), `verify_command` and `VERIFY_TIMEOUT_S`

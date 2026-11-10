@@ -35,6 +35,7 @@ when an agent's finding or a stop rule required it, all the recommendation excep
 - **213** (S2) add the two struct-global replace routes now;
 - **214** (re-audit, B1) narrow the escape scan's framing now (only structures with an owning leaf, only loops with no
   exit from their scope);
+- **217** (before the box run) the six tests slow on the box move to `tests/long/` (record 0057 item 5);
 - and, while 214 was queued (a standing instruction since; memory `verify-delta-not-full-check`): "For all of these fix
   now items you should discontinue the testing runs since we know that things are going to change."
 
@@ -109,13 +110,22 @@ resumed between tasks; the orchestrator consulted the Fable advisor):
 
 **Not done.**
 - Question 196's two programs: `cover_twice.c` (base encoder) and `two_fields.c` with its twin (Part L-2) each ran past
-  1800 s in both modes on the quiet box (exit 3 at 1801 s); `two_fields.c`'s Viper is the same from the base and from
-  L-2. Neither became a long test; both go to M4.8 (question 199), and `tests/long/` starts empty.
+  1800 s in both modes on the quiet box (exit 3 at 1801 s); all three programs' Viper is byte-identical from the final
+  build, so the tries stand. Neither became a long test; both go to M4.8 (question 199).
+- **The long tier's first tests** are this session's own (question 217): timed on the box before `check.sh` (all 115
+  new or changed programs, both modes, twelve at a time, load 2–10), six took 120–641 s there against 20–84 s on the
+  Mac: the struct-global replace pins (628–641 s, 516–519 s), `owning_field_loop_chain3.c` and its twin `_chain3_drop.c`
+  (177 s, 247 s), `_chain_cell_write_false_alarm.c` (170 s) and `_chain3_free_mid.c` (120 s). They moved to
+  `tests/long/memory/` with limits of 1320, 1080, 360, 540, 360 and 360 s (each `// timeout:` line takes the slot of
+  a joined comment line, so no `@ L` line moved); `tests/long` and the re-pointed twin `_chain3_freed_before.c`: 22
+  passed on the Mac. Every other session test took at most 95 s on the box.
 - The pins above; the call route of item 2 has no pin (only a marked global's deep atom reaches it, and VIR cannot
   express it alone); the whole-structure route is pinned only in the VIR self-test.
 - No cut was taken.
 
 **Surprises.**
+- **The box is slower than the Mac on these shapes**, four to six times on the chain and closure loops, not
+  uniformly (`pointer_arg` 1.3 times): a session times its new tests on the box before `check.sh` (record 0057 item 5).
 - **The spike's description.** The il-analyst reported that S41 (b) left the deeper pre-read beside the others; the
   auditor found the spike had moved it, and that the order turns a base exit 3 into mapped rows (206).
 - **Twins that pin nothing.** L-1's first route twins entered the loop with a block, so `wef` came from the entry flag

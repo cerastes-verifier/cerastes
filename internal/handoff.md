@@ -19,7 +19,8 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
   `m4.5d2b2c-loop-limits` (worktree `.claude/worktrees/m4.5d2b2c`), not merged: `main` is still the planning commit
   `e3f4b9f`. Its result is in `internal/status.md`; its full `check.sh` with `CERASTES_LONG=1` on the x86-64 box
   was started on the final commit, and the commit after it records the result. Six of d2b2b's loop false alarms are lifted, five pins stay under the written-invariant rule (four renamed,
-  one kept), and the long-running tier exists with no test yet (question 196's two programs ran past 1800 s: M4.8).
+  one kept), and the long-running tier holds six of the session's tests that are slow on the box (question 217);
+  question 196's two programs ran past 1800 s (M4.8).
 - **M4.5d2b2d** is next, with its approved plan `.claude/plans/m4-5d2b2d-invalidation-profile.md` (written at
   M4.5d2b2c's planning from the surveys at `262edb3`). Its survey refresh must re-read `lower.cpp`'s line numbers:
   this session added about 800 lines there.
@@ -89,9 +90,14 @@ numbers at `262edb3`. From d2b2b's audits it also takes N1 (a bodiless untied bo
     owner is address-taken (question 215). [d2b2c]
   - Item 2's call route has no pin (only a marked global's deep atom reaches it) and the whole-structure route is pinned
     in the VIR self-test only; both are the conservative direction. [d2b2c]
-  - **Costs to watch:** the two struct-global leaf replace pins take 60–84 s alone on the Mac
-    (`owning_global_leaf_replace_{member,struct}_false_alarm.c`, 15 and 17 errors); everything else of the session is
-    under 35 s (the built `chain3` 21–22 s). [d2b2c]
+  - **Costs to watch:** six tests moved to `tests/long/memory/` (question 217; 120–641 s on the box, 20–84 s on the
+    Mac); the slowest left in the default tier take 60–95 s on the box at twelve parallel runs
+    (`owning_field_loop_global_pointer_written{,_drop}.c`, `_alias_written.c`, `_chain_drop.c`, `_chain.c`, the doc
+    example `memory/owning_field_loop_alias.c`), and CI's PR tier will select them on the push of this branch (three
+    cores; the driver's 300 s). [d2b2c]
+  - Record 0056 item 6's value-rule rows ("… pointing to another object than the one it began with", "… holding
+    something other than what it began with") are backstops: no test produces them (the auditor reached them only by
+    injecting a write into the Viper); the Error messages page lists them. [d2b2c re-audit]
   - A loop that frames a struct local out still loses an `int` member's value when the loop reaches it otherwise (the
     re-audit's r3 and r5 had to return `s.data == NULL ? 1 : 0` instead of `s.n`): the same on the base. [d2b2c]
 
@@ -821,7 +827,18 @@ recorded in `plan.md` (M8's entries, the vlibc session), §4, M4.5d2b2b's plan a
 - **213** "Add the routes now": the struct-global replace routes.
 - **214** "Fix now": the escape scan frames only structures with an owning leaf, in loops without an exit (re-audit B1).
 
-**Open** (each with a recommendation; the next handoff's questions start at 217):
+- **217** "Time all, move to long": the session's tests slow on the box go to `tests/long/` (record 0057 item 5).
+
+**For confirmation** (decided in the session without a question, under the plan's rules as read then; say if any
+should have been asked):
+- Item 12's row reorders changed the Viper of 34 existing programs beyond edg-backend's prediction (the explicit
+  `owns_block(p)` closures and two tutorial examples, whose printed output is unchanged), every outcome unchanged; taken
+  as within question 210.
+- Question 160's two wider corrections: `negative/owning_field_loop_site_call_entry_unwritten.c` L41→L47 (the same
+  category at the return, not the loop's entry row), and four tests re-laid so a loop's attribute lines share its
+  `while` line (C++20 reports a loop's entry row at its first attribute).
+
+**Open** (each with a recommendation; the next handoff's questions start at 218):
 - **215** `owning_field_loop_owner_replaced_alias_false_alarm.c` (question 201's fifth pin): the loop frees and replaces
   an owning local `v` through `pv = &v` and frees `v->data` in its first iteration only; the invariant it needs,
   `v == NULL || i != 0 || v->data == NULL || owns_block(v->data)`, is rejected for an address-taken owner

@@ -17,8 +17,8 @@
 // expect: error uninitialized @ L63
 // mode: c23, c++20
 // twin: tests/memory/owning_field_loop_chain.c
-// Pins: 0056 item 6 (S2, question 213: the replace test of a struct global's leaf; a false alarm pinned, the program is correct): a loop that frees ga.b->x, frees the owning leaf ga.b of the struct global and replaces it by a structure copy through a struct pointer (`*pga = t;` with `pga = &ga`): a closure of ga.b->x carried across the replacement would be unsound, so none is carried and the free of ga.b->x is reported (invalid-free), as the base does
-// Pre-registered from record 0056 item 6 and audit round 2 S2: the expect lines are the base's outcome (build/m4.5d2b2c/cerastes-base, which has no closure for ga at all), which the build with question 213's routes must reproduce; Part L-2 carries the closure across the replacement today and reports fewer errors (the audit's p4)
+// Pins: 0056 item 6 (S2, question 213: the replace test of a struct global's leaf; a false alarm pinned, the program is correct): a loop that frees ga.b->x, frees the owning leaf ga.b of the struct global and replaces it by a structure copy through a struct pointer (`*pga = t;` with `pga = &ga`): a closure of ga.b->x carried across the replacement would be unsound, so none is carried and the free of ga.b->x is reported (invalid-free), as the base does Pre-registered from record 0056 item 6 and audit round 2 S2: the expect lines are the base's outcome (build/m4.5d2b2c/cerastes-base, which has no closure for ga at all), which the build with question 213's routes must reproduce; Part L-2 carries the closure across the replacement today and reports fewer errors (the audit's p4) Moved to tests/long/ in M4.5d2b2c (record 0057 item 5, owner question 217: 660 s or more measured on the x86-64 box)
+// timeout: 1320
 #include <cerastes.h>
 #include <stdlib.h>
 

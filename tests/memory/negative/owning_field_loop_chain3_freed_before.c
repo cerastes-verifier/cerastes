@@ -1,6 +1,6 @@
 // expect: error permission @ L39
 // mode: c23, c++20
-// twin: tests/memory/owning_field_loop_chain3.c
+// twin: tests/long/memory/owning_field_loop_chain3.c
 // Pins: 0056 item 7, audit round 2 B1: a three-level chain loop (a.b->c->x) whose middle block a.b->c was freed before the loop, the pointer left dangling: the loop's entry row reports the invariant that needs to own the whole allocation a.b->c points to (mapped permission at the loop), and the carried sites' entry ghosts and case splits, which read through the freed block, must not run before that row: an unmapped Silicon if.failed (exit 3) is the defect
 // Pre-registered from audit round 2 B1 (probe p1_chain3_mid_freed_before.c): the base's mapped error, permission at the `while` line, in both modes, exit 1; Part L-2 reports an unmapped exit 3 there until question 211's fix; not yet run on the build with it [Corrected after the first run on the build with 208-211, 213 (question 160): in c++20 an error of the loop's entry row is reported at the first attribute line of the loop, in c23 at the `while`, so the attributes and the `while` now stand on one line (every later line moved up by two).]
 #include <cerastes.h>
