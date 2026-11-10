@@ -1,0 +1,379 @@
+// expect: error assert:assertion.false @ L345
+// S41 (a) twin: the same loop without `free(gp->data)`: the old block of `gp->data` is dropped at the end of an iteration, the back-edge row (forperm over the tokens) fails (the `leak` of the loop's closing line).
+// S41 hand-edited fixture (not emitted by the tool; see README.md). base: encoder output of s41_a_global_pointer_ok with the call f_free__2(t__7) of the loop body removed. No inhale or assume.
+// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field v_ptr_struct_0_buf: Ref
+field d_ptr_struct_0_buf: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_gp__0(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  // cerastes:owning-global GB_gp__0
+  ensures (len(GB_gp__0()) == 1) && (lvloc(GB_gp__0()) == loc(GB_gp__0(), (-2)))
+  ensures (((acc(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) && acc(loc(GB_gp__0(), 0).d_ptr_struct_0_buf)) && loc(GB_gp__0(), 0).d_ptr_struct_0_buf) && (loc(GB_gp__0(), 0).v_ptr_struct_0_buf == null)) && acc(lvloc(GB_gp__0()).lv)
+  decreases _
+
+// C/C++ function `main`
+method f_main__0() returns (res: Int)
+  ensures ((-2147483648) <= res) && (res <= 2147483647)
+  decreases
+{
+  var v_i__0: Int
+  var held_GB_gp__0: Bool
+  var kl_GB_gp__0__0: Perm
+  var kv_GB_gp__0__0: Perm
+  var kd_GB_gp__0__0: Perm
+  var vs_GB_gp__0__0: Ref
+  var ds_GB_gp__0__0: Bool
+  var ab_q0__0: Ref
+  var wef_0_0__0: Bool
+  var wef_0_1__0: Bool
+  var exm_0: Bool
+  var t__0: Ref
+  var t__1: Ref
+  var t__2: Ref
+  var t__3: Ref
+  var t__4: Ref
+  var t__5: Bool
+  var t__6: Ref
+  var t__7: Ref
+  var t__8: Ref
+  var t__9: Ref
+  var t__10: Ref
+  var t__11: Ref
+  var t__12: Ref
+  var t__13: Ref
+  var t__14: Ref
+  var t__15: Ref
+  var t__16: Bool
+  var t__17: Ref
+  var t__18: Bool
+  var te0: Ref
+  var te1: Bool
+  var tb0: Ref
+  var tb1: Bool
+  var wef_d: Bool
+  program_start()
+  held_GB_gp__0 := false
+  t__0 := f_calloc__1()
+  held_GB_gp__0 := (held_GB_gp__0 && (perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none)) && ((loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null) && (perm(loc(block_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf), (-1)).tok) > none))
+  assert (t__0 != null) ==> (!((!((perm(lvloc(block_of(t__0)).lv) > none) || (lvloc(block_of(t__0)) == lvloc(GB_gp__0())))) || (!(((t__0 == null) || (((t__0 == loc(block_of(t__0), offset_of(t__0))) && (0 <= offset_of(t__0))) && (offset_of(t__0) <= len(block_of(t__0))))) && (((t__0 != null) && (offset_of(t__0) < len(block_of(t__0)))) ==> ((len(member(t__0, 0)) == 1) && (len(member(t__0, 1)) == 1)))))))
+  t__1 := loc(GB_gp__0(), 0)
+  assert t__1 != null
+  assert !((perm(t__1.v_ptr_struct_0_buf) != write) || (perm(t__1.d_ptr_struct_0_buf) != write))
+  t__2 := t__0
+  if (!(held_GB_gp__0 ==> (loc(GB_gp__0(), 0).v_ptr_struct_0_buf == t__2))) {
+    assert false
+  }
+  if (!((t__2 != null) ==> ((offset_of(t__2) == 0) && (perm(loc(block_of(t__2), (-1)).tok) == write)))) {
+    assert false
+  }
+  t__1.v_ptr_struct_0_buf := t__2
+  t__1.d_ptr_struct_0_buf := true
+  held_GB_gp__0 := t__2 != null
+  assert loc(GB_gp__0(), 0) != null
+  assert perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none
+  assert loc(GB_gp__0(), 0).d_ptr_struct_0_buf
+  t__3 := loc(GB_gp__0(), 0).v_ptr_struct_0_buf
+  assert (t__3 != null) ==> ((perm(lvloc(block_of(t__3)).lv) > none) || (lvloc(block_of(t__3)) == lvloc(GB_gp__0())))
+  if (((t__3 == null) ? 1 : 0) != 0) {
+    res := 1
+    goto l_end
+  }
+  v_i__0 := 0
+  kl_GB_gp__0__0 := perm(lvloc(block_of(loc(GB_gp__0(), 0))).lv)
+  kv_GB_gp__0__0 := perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf)
+  kd_GB_gp__0__0 := perm(loc(GB_gp__0(), 0).d_ptr_struct_0_buf)
+  ds_GB_gp__0__0 := false
+  if (kd_GB_gp__0__0 > none) {
+    ds_GB_gp__0__0 := loc(GB_gp__0(), 0).d_ptr_struct_0_buf
+  }
+  if (kv_GB_gp__0__0 > none) {
+    vs_GB_gp__0__0 := loc(GB_gp__0(), 0).v_ptr_struct_0_buf
+  }
+  if (lvloc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)) == lvloc(block_of(loc(GB_gp__0(), 0)))) { }
+  t__4 := (kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null
+  t__5 := !(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)
+  if (!(t__5 ==> (t__4 != null))) {
+    assert false
+  }
+  if (!(t__5 ==> ((t__4 == null) || (((t__4 == loc(block_of(t__4), offset_of(t__4))) && (0 <= offset_of(t__4))) && (offset_of(t__4) <= len(block_of(t__4))))))) {
+    assert false
+  }
+  if (!(t__5 ==> (!((perm(loc(block_of(t__4), (-1)).tok) != write) || (!loc(block_of(t__4), (-1)).tok))))) {
+    assert false
+  }
+  if (!(t__5 ==> (offset_of(t__4) == 0))) {
+    assert false
+  }
+  if (!(t__5 ==> (lvloc(block_of(t__4)) == loc(block_of(t__4), (-2))))) {
+    assert false
+  }
+  if (!(t__5 ==> (perm(lvloc(block_of(t__4)).lv) == write))) {
+    assert false
+  }
+  if (!(t__5 ==> ((len(block_of(t__4)) == 1) && ((len(member(t__4, 0)) == 1) && (len(member(t__4, 1)) == 1))))) {
+    assert false
+  }
+  if (!(t__5 ==> (!((perm(loc(member(t__4, 0), 0).v_ptr_int) != write) || (perm(loc(member(t__4, 0), 0).d_ptr_int) != write))))) {
+    assert false
+  }
+  if (!(t__5 ==> (loc(member(t__4, 0), 0).d_ptr_int ==> ((loc(member(t__4, 0), 0).v_ptr_int == null) || (((loc(member(t__4, 0), 0).v_ptr_int == loc(block_of(loc(member(t__4, 0), 0).v_ptr_int), offset_of(loc(member(t__4, 0), 0).v_ptr_int))) && (0 <= offset_of(loc(member(t__4, 0), 0).v_ptr_int))) && (offset_of(loc(member(t__4, 0), 0).v_ptr_int) <= len(block_of(loc(member(t__4, 0), 0).v_ptr_int)))))))) {
+    assert false
+  }
+  if (!(t__5 ==> (!((perm(loc(member(t__4, 1), 0).v_int) != write) || (perm(loc(member(t__4, 1), 0).d_int) != write))))) {
+    assert false
+  }
+  if (!(t__5 ==> (loc(member(t__4, 1), 0).d_int ==> (((-2147483648) <= loc(member(t__4, 1), 0).v_int) && (loc(member(t__4, 1), 0).v_int <= 2147483647))))) {
+    assert false
+  }
+  if (!((t__5 && (t__4 != null)) ==> (lvloc(block_of(t__4)) != lvloc(block_of(loc(GB_gp__0(), 0)))))) {
+    assert false
+  }
+  if (!(held_GB_gp__0 == (loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null))) {
+    assert false
+  }
+  te0 := (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) ? loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int : null
+  te1 := ((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (te0 != null)
+  if (!(te1 ==> (te0 != null))) { assert false }
+  if (!(te1 ==> (!((perm(loc(block_of(te0), (-1)).tok) != write) || (!loc(block_of(te0), (-1)).tok))))) { assert false }
+  if (!(te1 ==> (offset_of(te0) == 0))) { assert false }
+  if (!(te1 ==> (lvloc(block_of(te0)) == loc(block_of(te0), (-2))))) { assert false }
+  if (!(te1 ==> (perm(lvloc(block_of(te0)).lv) == write))) { assert false }
+  if (!(te1 ==> (len(block_of(te0)) == 1))) { assert false }
+  if (!(te1 ==> (!((perm(te0.v_int) != write) || (perm(te0.d_int) != write))))) { assert false }
+  if (!(te1 ==> (te0.d_int ==> (((-2147483648) <= te0.v_int) && (te0.v_int <= 2147483647))))) { assert false }
+  if (!((te1 && (te0 != null)) ==> (lvloc(block_of(te0)) != lvloc(block_of(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)))))) { assert false }
+  if (!((te1 && (te0 != null)) ==> (block_of(te0) != block_of(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null))))) { assert false }
+  if (!((te1 && (te0 != null)) ==> (te0 != loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 1), 0)))) { assert false }
+  if (!((te1 && (te0 != null)) ==> (lvloc(block_of(te0)) != lvloc(GB_gp__0())))) { assert false }
+  wef_0_0__0 := false
+  if (((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && (perm(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).d_ptr_int) > none)) {
+    wef_0_0__0 := loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).d_ptr_int
+  }
+  wef_0_1__0 := false
+  if (((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && (perm(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).d_int) > none)) {
+    wef_0_1__0 := loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).d_int
+  }
+  wef_d := true
+  if ((te1 && (te0 != null)) && (perm(te0.d_int) > none)) { wef_d := te0.d_int }
+  while (((v_i__0 < 5) ? 1 : 0) != 0)
+    invariant ((-2147483648) <= v_i__0) && (v_i__0 <= 2147483647)
+    invariant acc(loc(GB_gp__0(), 0).v_ptr_struct_0_buf, kv_GB_gp__0__0) && acc(loc(GB_gp__0(), 0).d_ptr_struct_0_buf, kd_GB_gp__0__0)
+    invariant acc(lvloc(block_of(loc(GB_gp__0(), 0))).lv, kl_GB_gp__0__0)
+    invariant (kv_GB_gp__0__0 > none) ==> (loc(GB_gp__0(), 0).v_ptr_struct_0_buf == vs_GB_gp__0__0)
+    invariant (((kv_GB_gp__0__0 > none) && (kd_GB_gp__0__0 > none)) && loc(GB_gp__0(), 0).d_ptr_struct_0_buf) ==> (((loc(GB_gp__0(), 0).v_ptr_struct_0_buf == null) || (((loc(GB_gp__0(), 0).v_ptr_struct_0_buf == loc(block_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf), offset_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf))) && (0 <= offset_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf))) && (offset_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) <= len(block_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf))))) && (((loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null) && (offset_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) < len(block_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf)))) ==> ((len(member(loc(GB_gp__0(), 0).v_ptr_struct_0_buf, 0)) == 1) && (len(member(loc(GB_gp__0(), 0).v_ptr_struct_0_buf, 1)) == 1))))
+    invariant ((kd_GB_gp__0__0 > none) && ds_GB_gp__0__0) ==> loc(GB_gp__0(), 0).d_ptr_struct_0_buf
+    invariant (!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) ==> (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)
+    invariant ((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) ==> (acc(loc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), (-1)).tok) && loc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), (-1)).tok)
+    invariant ((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) ==> (acc(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int) && acc(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).d_ptr_int))
+    invariant ((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) ==> (acc(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).v_int) && acc(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).d_int))
+    invariant ((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) ==> acc(lvloc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)).lv)
+    invariant ((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) ==> (((offset_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == 0) && (lvloc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)) == loc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), (-2)))) && ((len(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)) == 1) && ((len(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0)) == 1) && (len(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1)) == 1))))
+    invariant (((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).d_ptr_int) ==> ((loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int == null) || (((loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int == loc(block_of(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int), offset_of(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int))) && (0 <= offset_of(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int))) && (offset_of(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int) <= len(block_of(loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).v_ptr_int)))))
+    invariant (((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).d_int) ==> (((-2147483648) <= loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).v_int) && (loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).v_int <= 2147483647))
+    invariant ((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) ==> (lvloc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)) != lvloc(block_of(loc(GB_gp__0(), 0))))
+    invariant held_GB_gp__0 == (loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null)
+    invariant (((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && wef_0_0__0) ==> loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).d_ptr_int
+    invariant (((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && wef_0_1__0) ==> loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).d_int
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> (acc(loc(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int), (-1)).tok) && loc(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int), (-1)).tok)
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> (acc(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int.v_int) && acc(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int.d_int))
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> acc(lvloc(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int)).lv)
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> (((offset_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int) == 0) && (lvloc(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int)) == loc(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int), (-2)))) && (len(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int)) == 1))
+    invariant ((((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int.d_int) ==> (((-2147483648) <= loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int.v_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int.v_int <= 2147483647))
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> (lvloc(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int)) != lvloc(block_of(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null))))
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> (block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int) != block_of(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)))
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 1), 0))
+    invariant (((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) ==> (lvloc(block_of(loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int)) != lvloc(GB_gp__0()))
+    invariant ((((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) && wef_d) ==> loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int.d_int
+    invariant (((((0 <= v_i__0) ? 1 : 0) != 0) && (((v_i__0 <= 5) ? 1 : 0) != 0)) ? 1 : 0) != 0
+    invariant ((((((0 <= v_i__0) ? 1 : 0) != 0) && (((v_i__0 <= 5) ? 1 : 0) != 0)) ? 1 : 0) != 0) ==> (!(((5 - v_i__0) < (-2147483648)) || (2147483647 < (5 - v_i__0))))
+    decreases 5 - v_i__0
+  {
+    ab_q0__0 := (kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null
+    if (lvloc(block_of(ab_q0__0)) == lvloc(block_of(loc(GB_gp__0(), 0)))) { }
+    assert loc(GB_gp__0(), 0) != null
+    assert perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none
+    assert loc(GB_gp__0(), 0).d_ptr_struct_0_buf
+    t__6 := loc(GB_gp__0(), 0).v_ptr_struct_0_buf
+    assert t__6 != null
+    assert perm(loc(member(t__6, 0), 0).v_ptr_int) > none
+    assert loc(member(t__6, 0), 0).d_ptr_int
+    t__7 := loc(member(t__6, 0), 0).v_ptr_int
+    assert (!(t__7 == null)) ==> ((t__7 == null) || (((t__7 == loc(block_of(t__7), offset_of(t__7))) && (0 <= offset_of(t__7))) && (offset_of(t__7) <= len(block_of(t__7)))))
+    assert (!(t__7 == null)) ==> (!((perm(loc(block_of(t__7), (-1)).tok) != write) || (!loc(block_of(t__7), (-1)).tok)))
+    assert (!(t__7 == null)) ==> (offset_of(t__7) == 0)
+    assert (!(t__7 == null)) ==> (lvloc(block_of(t__7)) == loc(block_of(t__7), (-2)))
+    assert (!(t__7 == null)) ==> (perm(lvloc(block_of(t__7)).lv) == write)
+    assert (!(t__7 == null)) ==> (len(block_of(t__7)) == 1)
+    assert (!(t__7 == null)) ==> (!((perm(t__7.v_int) != write) || (perm(t__7.d_int) != write)))
+    assert (!(t__7 == null)) ==> (t__7.d_int ==> (((-2147483648) <= t__7.v_int) && (t__7.v_int <= 2147483647)))
+    held_GB_gp__0 := (held_GB_gp__0 && (perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none)) && ((loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null) && (perm(loc(block_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf), (-1)).tok) > none))
+    assert loc(GB_gp__0(), 0) != null
+    assert perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none
+    assert loc(GB_gp__0(), 0).d_ptr_struct_0_buf
+    t__8 := loc(GB_gp__0(), 0).v_ptr_struct_0_buf
+    assert t__8 != null
+    t__9 := f_malloc__3()
+    held_GB_gp__0 := (held_GB_gp__0 && (perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none)) && ((loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null) && (perm(loc(block_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf), (-1)).tok) > none))
+    assert (t__9 != null) ==> (!((!((perm(lvloc(block_of(t__9)).lv) > none) || (lvloc(block_of(t__9)) == lvloc(GB_gp__0())))) || (!((t__9 == null) || (((t__9 == loc(block_of(t__9), offset_of(t__9))) && (0 <= offset_of(t__9))) && (offset_of(t__9) <= len(block_of(t__9))))))))
+    t__10 := loc(member(t__8, 0), 0)
+    assert !((perm(t__10.v_ptr_int) != write) || (perm(t__10.d_ptr_int) != write))
+    if (!((t__9 != null) ==> ((offset_of(t__9) == 0) && (perm(loc(block_of(t__9), (-1)).tok) == write)))) {
+      assert false
+    }
+    t__10.v_ptr_int := t__9
+    t__10.d_ptr_int := true
+    assert loc(GB_gp__0(), 0) != null
+    assert perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none
+    assert loc(GB_gp__0(), 0).d_ptr_struct_0_buf
+    t__11 := loc(GB_gp__0(), 0).v_ptr_struct_0_buf
+    assert t__11 != null
+    assert perm(loc(member(t__11, 0), 0).v_ptr_int) > none
+    assert loc(member(t__11, 0), 0).d_ptr_int
+    t__12 := loc(member(t__11, 0), 0).v_ptr_int
+    assert (t__12 != null) ==> ((perm(lvloc(block_of(t__12)).lv) > none) || (lvloc(block_of(t__12)) == lvloc(GB_gp__0())))
+    if (((t__12 != null) ? 1 : 0) != 0) {
+      assert loc(GB_gp__0(), 0) != null
+      assert perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) > none
+      assert loc(GB_gp__0(), 0).d_ptr_struct_0_buf
+      t__13 := loc(GB_gp__0(), 0).v_ptr_struct_0_buf
+      assert t__13 != null
+      assert perm(loc(member(t__13, 0), 0).v_ptr_int) > none
+      assert loc(member(t__13, 0), 0).d_ptr_int
+      t__14 := loc(member(t__13, 0), 0).v_ptr_int
+      assert t__14 != null
+      assert !((perm(t__14.v_int) != write) || (perm(t__14.d_int) != write))
+      t__14.v_int := v_i__0
+      t__14.d_int := true
+    }
+    assert !(((v_i__0 + 1) < (-2147483648)) || (2147483647 < (v_i__0 + 1)))
+    v_i__0 := v_i__0 + 1
+    assert !(((perm(loc(GB_gp__0(), 0).v_ptr_struct_0_buf) < kv_GB_gp__0__0) || (perm(loc(GB_gp__0(), 0).d_ptr_struct_0_buf) < kd_GB_gp__0__0)) || (perm(lvloc(block_of(loc(GB_gp__0(), 0))).lv) < kl_GB_gp__0__0))
+    t__15 := (kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null
+    t__16 := !(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)
+    if (!(t__16 ==> (t__15 != null))) {
+      assert false
+    }
+    if (!(t__16 ==> ((t__15 == null) || (((t__15 == loc(block_of(t__15), offset_of(t__15))) && (0 <= offset_of(t__15))) && (offset_of(t__15) <= len(block_of(t__15))))))) {
+      assert false
+    }
+    if (!(t__16 ==> (!((perm(loc(block_of(t__15), (-1)).tok) != write) || (!loc(block_of(t__15), (-1)).tok))))) {
+      assert false
+    }
+    if (!(t__16 ==> (offset_of(t__15) == 0))) {
+      assert false
+    }
+    if (!(t__16 ==> (lvloc(block_of(t__15)) == loc(block_of(t__15), (-2))))) {
+      assert false
+    }
+    if (!(t__16 ==> (perm(lvloc(block_of(t__15)).lv) == write))) {
+      assert false
+    }
+    if (!(t__16 ==> ((len(block_of(t__15)) == 1) && ((len(member(t__15, 0)) == 1) && (len(member(t__15, 1)) == 1))))) {
+      assert false
+    }
+    if (!(t__16 ==> (!((perm(loc(member(t__15, 0), 0).v_ptr_int) != write) || (perm(loc(member(t__15, 0), 0).d_ptr_int) != write))))) {
+      assert false
+    }
+    if (!(t__16 ==> (loc(member(t__15, 0), 0).d_ptr_int ==> ((loc(member(t__15, 0), 0).v_ptr_int == null) || (((loc(member(t__15, 0), 0).v_ptr_int == loc(block_of(loc(member(t__15, 0), 0).v_ptr_int), offset_of(loc(member(t__15, 0), 0).v_ptr_int))) && (0 <= offset_of(loc(member(t__15, 0), 0).v_ptr_int))) && (offset_of(loc(member(t__15, 0), 0).v_ptr_int) <= len(block_of(loc(member(t__15, 0), 0).v_ptr_int)))))))) {
+      assert false
+    }
+    if (!(t__16 ==> (!((perm(loc(member(t__15, 1), 0).v_int) != write) || (perm(loc(member(t__15, 1), 0).d_int) != write))))) {
+      assert false
+    }
+    if (!(t__16 ==> (loc(member(t__15, 1), 0).d_int ==> (((-2147483648) <= loc(member(t__15, 1), 0).v_int) && (loc(member(t__15, 1), 0).v_int <= 2147483647))))) {
+      assert false
+    }
+    if (!((t__16 && (t__15 != null)) ==> (lvloc(block_of(t__15)) != lvloc(block_of(loc(GB_gp__0(), 0)))))) {
+      assert false
+    }
+    if (!(held_GB_gp__0 == (loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null))) {
+      assert false
+    }
+    if (!((((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && wef_0_0__0) ==> loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 0), 0).d_ptr_int)) {
+      assert false
+    }
+    if (!((((!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)) && wef_0_1__0) ==> loc(member((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null, 1), 0).d_int)) {
+      assert false
+    }
+    tb0 := (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) ? loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int : null
+    tb1 := ((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (tb0 != null)
+    if (!(tb1 ==> (tb0 != null))) { assert false }
+    if (!(tb1 ==> (!((perm(loc(block_of(tb0), (-1)).tok) != write) || (!loc(block_of(tb0), (-1)).tok))))) { assert false }
+    if (!(tb1 ==> (offset_of(tb0) == 0))) { assert false }
+    if (!(tb1 ==> (lvloc(block_of(tb0)) == loc(block_of(tb0), (-2))))) { assert false }
+    if (!(tb1 ==> (perm(lvloc(block_of(tb0)).lv) == write))) { assert false }
+    if (!(tb1 ==> (len(block_of(tb0)) == 1))) { assert false }
+    if (!(tb1 ==> (!((perm(tb0.v_int) != write) || (perm(tb0.d_int) != write))))) { assert false }
+    if (!(tb1 ==> (tb0.d_int ==> (((-2147483648) <= tb0.v_int) && (tb0.v_int <= 2147483647))))) { assert false }
+    if (!((tb1 && (tb0 != null)) ==> (lvloc(block_of(tb0)) != lvloc(block_of(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)))))) { assert false }
+    if (!((tb1 && (tb0 != null)) ==> (block_of(tb0) != block_of(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null))))) { assert false }
+    if (!((tb1 && (tb0 != null)) ==> (tb0 != loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 1), 0)))) { assert false }
+    if (!((tb1 && (tb0 != null)) ==> (lvloc(block_of(tb0)) != lvloc(GB_gp__0())))) { assert false }
+    if (!(((((((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null) && loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).d_ptr_int) && (loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int != null)) && wef_d) ==> loc(member(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null), 0), 0).v_ptr_int.d_int)) { assert false }
+    t__17 := (kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null
+    t__18 := (!(((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) == null)) && (((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null) != null)
+    assert forperm t: Ref [t.tok] :: (t__18 && (t == loc(block_of(t__17), (-1)))) || (tb1 && (t == loc(block_of(tb0), (-1))))
+  }
+  if (lvloc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)) == lvloc(block_of(loc(GB_gp__0(), 0)))) { }
+  if (lvloc(block_of((kv_GB_gp__0__0 > none) ? loc(GB_gp__0(), 0).v_ptr_struct_0_buf : null)) == lvloc(block_of(loc(GB_gp__0(), 0)))) { }
+  res := 0
+  goto l_end
+  assert false
+  label l_end
+  exm_0 := (held_GB_gp__0 && (loc(GB_gp__0(), 0).v_ptr_struct_0_buf != null)) && (perm(loc(member(loc(GB_gp__0(), 0).v_ptr_struct_0_buf, 0), 0).v_ptr_int) > none)
+  assert forperm t: Ref [t.tok] :: (held_GB_gp__0 && (t == loc(block_of(loc(GB_gp__0(), 0).v_ptr_struct_0_buf), (-1)))) || (exm_0 && (t == loc(block_of(loc(member(loc(GB_gp__0(), 0).v_ptr_struct_0_buf, 0), 0).v_ptr_int), (-1))))
+}
+
+// C/C++ function `calloc`
+// cerastes:trusted-contract vlibc: calloc returns NULL or the start of a new allocation of nmemb * size bytes, all zero (C23 7.24.3.2); typed view: one struct buf (16 bytes), decision 0047
+method f_calloc__1() returns (res: Ref)
+  requires (len(GB_gp__0()) == 1) && (lvloc(GB_gp__0()) == loc(GB_gp__0(), (-2)))
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 1)))
+  ensures (!(res == null)) ==> ((((((((((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 1)))) && acc(loc(member(res, 0), 0).v_ptr_int)) && acc(loc(member(res, 0), 0).d_ptr_int)) && (loc(member(res, 0), 0).d_ptr_int ==> ((loc(member(res, 0), 0).v_ptr_int == null) || (((loc(member(res, 0), 0).v_ptr_int == loc(block_of(loc(member(res, 0), 0).v_ptr_int), offset_of(loc(member(res, 0), 0).v_ptr_int))) && (0 <= offset_of(loc(member(res, 0), 0).v_ptr_int))) && (offset_of(loc(member(res, 0), 0).v_ptr_int) <= len(block_of(loc(member(res, 0), 0).v_ptr_int))))))) && acc(loc(member(res, 1), 0).v_int)) && acc(loc(member(res, 1), 0).d_int)) && (loc(member(res, 1), 0).d_int ==> (((-2147483648) <= loc(member(res, 1), 0).v_int) && (loc(member(res, 1), 0).v_int <= 2147483647)))) && loc(member(res, 0), 0).d_ptr_int) && loc(member(res, 1), 0).d_int) && (loc(member(res, 0), 0).v_ptr_int == null)) && (loc(member(res, 1), 0).v_int == 0))
+  decreases _
+
+// C/C++ function `free`
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: one int (4 bytes), decision 0047
+method f_free__2(p_ptr__0: Ref)
+  requires (len(GB_gp__0()) == 1) && (lvloc(GB_gp__0()) == loc(GB_gp__0(), (-2)))
+  requires (p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))
+  requires (!(p_ptr__0 == null)) ==> (((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && loc(block_of(p_ptr__0), (-1)).tok) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && (len(block_of(p_ptr__0)) == 1)) && acc(p_ptr__0.v_int)) && acc(p_ptr__0.d_int)) && (p_ptr__0.d_int ==> (((-2147483648) <= p_ptr__0.v_int) && (p_ptr__0.v_int <= 2147483647))))
+  decreases _
+
+// C/C++ function `malloc`
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one int (4 bytes), decision 0047
+method f_malloc__3() returns (res: Ref)
+  requires (len(GB_gp__0()) == 1) && (lvloc(GB_gp__0()) == loc(GB_gp__0(), (-2)))
+  ensures (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  ensures (!(res == null)) ==> (((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && (len(block_of(res)) == 1)) && acc(res.v_int)) && acc(res.d_int)) && (res.d_int ==> (((-2147483648) <= res.v_int) && (res.v_int <= 2147483647))))
+  decreases _

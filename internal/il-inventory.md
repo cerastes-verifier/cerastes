@@ -8013,3 +8013,82 @@ Evidence in `build/m4.5d2b2b/s40/` (not committed): C programs per shape (`q/`, 
 5. **A loop over a named leaf is rejected or a false alarm today** (`g2_named.c`, `g2_named_auto.c`): item 7's `check.cpp` change and synthetic sites are what lifts both, or cut 1 rejects the loop.
 
 **Proposed kept fixtures** (`keep/`, each with its header and `// expect:` line; checked by `scripts/run_tests.py` on the three I ran, and Silicon's verdict repeated on all eleven; the C programs above become tests in `tests/memory` in Parts A-D, not viper-smoke): `s40_c_struct_local_ok`, `s40_c_struct_local_leak_fail`, `s40_c_struct_local_reassign_fail`, `s40_d_row_transfer_false_alarm`, `s40_d_row_realloc_false_alarm`, `s40_d_row_local_take_false_alarm`, `s40_d_row_true_drop`, `s40_d_free_row_ok`, `s40_d_free_row_take_false_alarm`, `s40_h_main_exempt_ok`, `s40_h_main_other_fail`. The (d) fixtures document why the row is not built (their `error` expectations are facts about the design, not a pin of a defect). `scripts/check.sh` lints `build/vpr` and the VIR self-test's output, not `tests/viper-smoke` (the `s39_*` fixtures also give `no position map` under `lint_viper.py`), so the fixtures need no lint exemption. `lint_viper.py` over `keep/` does show what item 9 must extend: it flags every `held_sq := <leaf> != null` ("an owner's ghost is assigned `false`, `<x> != null`, `held && ...`": the rule is written for `GB_` ghosts) and the two (h) fixtures' exemption term (`program_start` does not tag the struct global).
+## M4.5d2b2c: loop limits of owning fields, long-running tests (records 0056, 0057)
+
+### S41 (0): seven runs of the base build on the pins with one change each (record 0056; macOS, both modes) **every run agrees with the planning survey's row; no stop condition**
+
+Evidence in `build/m4.5d2b2c/s41/0/` (not committed): the programs `run<k>_*.c`, each one of record 0055 item 7's
+pins (`tests/memory/negative/owning_field_loop_<pin>_false_alarm.c`) with one change made by the generator `gen0.py`,
+and `RESULTS.md` with every run's command, exit status, verbatim output and wall time. The build is the session's base
+(`build/m4.5d2b2c/cerastes-base`, a copy of bootstrap's `build/cerastes` at `e3f4b9f`, before any change to `src/`);
+`build/m4.5d2b2c/cerastes-base verify <file>` and the same with `--std=c++20`, one Silicon at a time on a loaded Mac
+(load about 5). Both modes gave the same output in every run.
+
+| Run | Pin and change | Outcome (both modes) | Reading |
+|---|---|---|---|
+| 1a | `alias`, `CERASTES_INVARIANT(cerastes_owns(*p))` added | verified (10 s) | the written-invariant rule holds (0056 item 8); the takeover needs no change |
+| 1b | `alias`, `CERASTES_INVARIANT(cerastes_owns(*v))` instead | `permission` at the loop (L27): "the invariant of this loop owns `v->data`, which may be `*p->data`" | the invariant must name the borrowed parameter |
+| 1c | `alias` without the alias (`v` is `p`) and without an invariant | the pin's seven errors at the same lines: `invalid-free` twice at the `free`, `leak` and `permission` at the loop's end, `leak` and two `permission` at the return | the alias is not the cause: the missing written `owns(*p)` is (limit 1) |
+| 2 | `alias_call`, `refill(&s)` for `refill(ps)` | `uninitialized` at the call (L34): "calls `refill`, which needs `*p->data` to have a value" | with `&s` the pin's `permission` at the loop's end goes (cause (i), the syntactic match); the flag loss stays (cause (ii): `wef` false for a leaf site) |
+| 3 | `global_pointer`, `CERASTES_INVARIANT(gp == NULL \|\| cerastes_owns_block(gp))` | `permission` at the invariant (L29): "this loop invariant reads `gp->data`, which this loop does not hold" | a written invariant fails as the pin does: the block's cells are not places (limit 3) |
+| 4 | `main_holds`, `CERASTES_INVARIANT(g.data == NULL \|\| cerastes_owns_block(g.data))` | verified (6–7 s) | a written site on the global's leaf carries it in `main`; item 5 builds the same site under `hs` |
+| 5a | `pointer_arg`, `CERASTES_INVARIANT(s.data == NULL \|\| cerastes_owns_block(s.data))` | verified (34–35 s) | a user can already write item 2's flag keeping as a plain site |
+| 5b | `owning_local_maybe_null`, `CERASTES_INVARIANT(v == NULL \|\| v->data == NULL \|\| cerastes_owns_block(v->data))` | verified (4 s) | likewise for item 3 |
+| 6 | `owner_replaced`, `CERASTES_INVARIANT(v == NULL \|\| i != 0 \|\| v->data == NULL \|\| cerastes_owns_block(v->data))` | verified (7 s) | a fact of the first iteration, written, makes the replaced-owner loop verify (limit 7) |
+| 7 | `owner_renewed`'s `f` with `renew(pv); renew(pv);` and no loop | `permission` at the second call (L34): "calls `renew`, which needs to own `**pp`, without owning it", then `lifetime`, `permission` and `leak` downstream | `renew`'s contract consumes the structure's cells: the pin is an ordinary must-fail (limit 7, `owner_renewed`) |
+
+So the three inferred rows of the planning survey hold (limit 1 by run 1c, limit 2's cause (ii) by run 2, limit 7 by
+runs 6 and 7), and runs 2 and 5 show the facts items 2–4 build. None of the seven contradicts an item, so record 0056
+items 2–8 stand and Flips C proceed (`owner_renewed` becomes `_consumed`).
+
+### S41 (a)–(c): hand-edited Viper for limits 3, 6 and 4 (record 0056 items 5–7; macOS, both modes) **all three verify with a failing twin; limit 6 is under the 60 s rule; two findings for item 6 and one for item 7**
+
+Evidence in `build/m4.5d2b2c/s41/{a,b,c}/` (not committed): each pin's Viper from the base build
+(`build/m4.5d2b2c/cerastes-base verify <pin> --keep-vpr=…`, both modes), the generators `gen_a.py`, `gen_b.py`,
+`gen_c.py` that edit that Viper (so every edit is reproducible), and the il-analyst's report
+`build/m4.5d2b2c/il-analyst-report-1.md`. Silicon was run on the edited files as `scripts/run_tests.py` runs a `.vpr`
+test. Each edit is a reading of what the encoder should emit, not its output. The unedited pins give the errors their
+`expect:` lines name ((a) six, (b) five, (c) one), and an `assert false` at the start of the loop body and after the
+loop is reported in all three (not vacuous). C23 and C++20 gave the same verdicts.
+
+| Spike | Edit | Positive | Twin |
+|---|---|---|---|
+| (a) limit 3, `owning_field_loop_global_pointer_false_alarm.c` | the cells of `gp`'s block (`data`, `n`) as places of the loop under `gp != null` (read as `perm(gp's cell) > none ? gp : null`), and the closure site `gp->data == NULL \|\| owns_block(gp->data)` with 0054 item 4's entry and back-edge rows | verified, 4.0–4.7 s | without `free(gp->data)`: one error, the back-edge `forperm` (`leak`) |
+| (b) limit 6, `owning_field_loop_chain3_false_alarm.c` | the third level carried: the intermediate cells `a.b->c` and `a.b->c->x` as places, each intermediate flag in the deeper site's guard, a value snapshot of `a.b->c` with `on ==> cell == snapshot` (the loop stores no `struct leaf *`) | verified, 12.1–16.6 s over six timed runs | without `free(a.b->c->x)`: one error, the back-edge `forperm` (`leak`), 20.1–23.7 s |
+| (c) limit 4, `owning_field_loop_main_holds_false_alarm.c` | `hs := held_g_data && perm(g.data's cell) > none` at the loop entry before the entry rows, the site `g.data == NULL \|\| owns_block(g.data)` under `hs`, the invariants `hs ==> (held == (g.data != NULL))` and `!hs ==> !held`, and a back-edge `forperm` | verified, 3.5 s; a `main` loop beside a struct global it never names verified, 2.7 s | another block leaked after the loop: `main`'s exit row; the same in the unnamed variant; a block leaked in the body: the back-edge row |
+
+Timings are Silicon's alone, with no other Silicon, compiler or build running at the start of a run (load 5–10 from the
+session's other agents).
+
+**Findings.**
+1. **(b) needs the value rule on a site's block cells.** Without the snapshot of `a.b->c`, Silicon reports two
+   `null-dereference`s of `(a.b)->c` (in the body and after the loop); without the third site instead, three errors.
+   So item 6's cells are places with the loop's value rule, not framing permissions alone.
+2. **(b) needs no reordering.** The third site's pointer pre-read sits beside the others and verifies; the planning's
+   "pre-read after the earlier sites' rows" is not made (item 7).
+3. **(a) needs no new flag ghost** (the site's `wef_0_0` covers `gp->data`'s flag) and no `held` in the guard
+   (`held == (gp != NULL)` is already invariant).
+4. **(c):** the loop had no back-edge leak row before (no site was carried); the synthetic site needs one. `hs` is
+   neither provable nor refutable in the pin (`fill()`'s `malloc` may fail). A `main` reaching the global only through
+   a callee that requires `g.data == NULL` cannot be written (`permission` at the call). The unnamed-global loop
+   already verifies on the base build: a positive test, not a flip.
+
+**Kept fixtures** (`tests/viper-smoke/memory/`, C23, each run through Silicon): `s41_a_global_pointer_ok`,
+`s41_a_global_pointer_leak_fail`, `s41_b_chain3_ok` (188 KB: the chain's code before and after the loop cannot be
+cut), `s41_b_chain3_leak_fail`, `s41_c_main_holds_ok`, `s41_c_main_holds_unnamed_ok`,
+`s41_c_main_holds_other_leak_fail`, `s41_c_main_holds_unnamed_leak_fail`, `s41_c_main_holds_loop_leak_fail`.
+
+### S41 (d): the existing programs whose Viper items 5–7 change (read from the base Viper and `lower.cpp` at `e3f4b9f`)
+
+Searched: the 593 base C23 `.vpr` files with a loop (62 carry a synthetic site: `ab_q`, `wfc_`, `wef_`, `hp_held`), the
+sources of the 58 tests with an owning member and a loop, and the code. **Item 6:** the struct-local special case it
+replaces is in `owning_field_loop_chain.c` and `negative/owning_field_loop_chain_drop.c` (their later site's guard text
+changes, same outcome expected); the closure of an owning `struct S *` global is in `owning_field_loop_global_pointer_n.c`
+and `negative/…_n_leak.c` (no other test has such a global); a closure for struct-global leaves changes nothing if built
+only where the leaf already has a site (else `owning_field_exemption_loop.c` and its `negative/…_leak.c` change); the
+one-site loops read no cell of a site's block and are unchanged if the new permissions go to the invariant and not to the
+keyed places; the twelve owning-local closure programs (`owning_field_loop_owning_local{,_both,_n,_read,_free,_free_empty}.c`
+and their five negatives) are unchanged only if a site merged with an owner adds no places. **Item 7:** `closure_deep`
+matters only to the `chain3` pin; the intermediate flags change nothing for two-level sites; moving every pre-read would
+reorder `chain.c`, `chain_drop`, `chain3`, the `pointer_arg` pin and the twelve owning-local programs (not made).
+**Item 5:** only the `main_holds` pin (the other struct-global leaf loops are not in `main`).
