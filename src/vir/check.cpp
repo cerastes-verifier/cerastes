@@ -1213,6 +1213,7 @@ private:
             }
         }
         init_markers(f, sites, block_sites);
+        not_invalidating_markers(f, sites, block_sites);
     }
 
     // Decision 0047 items 2, 4 and 5: the rules of the `owns_block` atoms (the encoder reports each first with its own message; this is the backstop).
@@ -1468,6 +1469,58 @@ private:
                     err(r.first->loc,
                         who +
                             " is marked `ref_to_uninit` or `must_init` and an `ensures` reads `*p` where its flag is not promised (decision 0042 item 6)");
+                }
+            }
+        }
+    }
+
+    // `cerastes::not_invalidating` (decision 0058 item 2), repeated as a backstop of the encoder: a pointer parameter, not beside an initialization
+    // marker, whose contract returns every `requires` atom and block site rooted at it (an `ensures` site on the same place) and gives nothing it did not
+    // take, on a function that returns.  The lowering's new `f__wf` row and the tie the encoder splices in rest on it.
+    void not_invalidating_markers(const Function& f, const std::vector<AtomSite>& sites,
+                                  const std::vector<AtomSite>& block_sites)
+    {
+        for (size_t i {0U}; i < f.params.size(); ++i)
+        {
+            const Param& pr {f.params[i]};
+            if (!pr.not_invalidating)
+            {
+                continue;
+            }
+            const int k {static_cast<int>(i)};
+            const std::string who {"parameter " + std::to_string(i + 1U) + " of '" + f.c_name + "'"};
+            if (!pr.type.is_ptr())
+            {
+                err(pr.loc, who + " is marked `not_invalidating` but is not a pointer");
+                continue;
+            }
+            if (pr.init != InitMarker::None)
+            {
+                err(pr.loc,
+                    who + " is marked `not_invalidating` beside an initialization marker (decision 0058 item 2)");
+                continue;
+            }
+            for (const std::vector<AtomSite>* list : {&sites, &block_sites})
+            {
+                for (const AtomSite& s : *list)
+                {
+                    if (atom_place(*s.atom).root != k)
+                    {
+                        continue;
+                    }
+                    bool partner {false};
+                    for (const AtomSite& o : *list)
+                    {
+                        partner =
+                            partner || (o.in_ensures != s.in_ensures && atom_place(*o.atom) == atom_place(*s.atom));
+                    }
+                    if (!partner)
+                    {
+                        err(s.atom->loc.known() ? s.atom->loc : pr.loc,
+                            who + " is marked `not_invalidating` but its contract " +
+                                (s.in_ensures ? "gives" : "takes") + " an object through it without " +
+                                (s.in_ensures ? "taking" : "returning") + " it (decision 0058 item 2)");
+                    }
                 }
             }
         }

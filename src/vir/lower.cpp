@@ -11856,7 +11856,22 @@ private:
             {
                 continue; // nothing but atoms: asserted above
             }
-            low::Meta m {meta("postcondition", at, "the postcondition of `" + f.c_name + "` may not hold")};
+            std::string what {"the postcondition of `" + f.c_name + "` may not hold"};
+            if (!c.added.empty())
+            {
+                // decision 0058 item 2: the equalities the encoder spliced into the clause for a `cerastes::not_invalidating` parameter; the one the
+                // text starts with names the parameter (else the first marked one)
+                std::string owner;
+                for (const Param& pr : f.params)
+                {
+                    if (pr.not_invalidating && !pr.name.empty() && (owner.empty() || c.added.rfind(pr.name, 0U) == 0U))
+                    {
+                        owner = pr.name;
+                    }
+                }
+                what += " (with `" + c.added + "`, which `cerastes::not_invalidating` on `" + owner + "` adds)";
+            }
+            low::Meta m {meta("postcondition", at, what)};
             m.has_note = true;
             m.note_loc = c.loc;
             m.note_text = "this is the postcondition";
@@ -18111,6 +18126,56 @@ private:
                                      quoted(site.atom->a != nullptr ? site.atom->a->c_text : std::string(), "a block") +
                                      " as owned blocks, but they may be the same block"));
                     }
+                }
+            }
+            if (ens)
+            {
+                // Decision 0058 item 2: a parameter that is `cerastes::not_invalidating` gets back everything the contract takes through it, on every path:
+                // the converse of the partner rows above, `facts ==> (g_req ==> g_ens)` (`g_req` over the entry ghosts, `g_ens` over the return ghosts), asserted
+                // under the whole clause so that the equalities the encoder spliced in (`E == old(E)`, the clause of the framing atom or an earlier one) are in
+                // the antecedent, which a guard that reads a loaded pointer needs.  A pair with no guard on either side, or whose guards are one expression,
+                // asks nothing.  With a body too: a body may drop a cell or a block the contract names without returning it, which no return row sees.
+                CtxSave ni_ctx(*this);
+                cmode_ = CMode::Wf;
+                const E ni_facts {low::and_(prior, v.e)};
+                auto ni_row = [&](const AtomSite& site, const AtomSite& partner, const std::string& txt)
+                {
+                    const int root {atom_place(*site.atom).root};
+                    if (root < 0 || static_cast<size_t>(root) >= f.params.size() ||
+                        !f.params[static_cast<size_t>(root)].not_invalidating)
+                    {
+                        return;
+                    }
+                    const E ge {site_guard(site, env)};
+                    const E gp {site_guard(partner, env)};
+                    if (!ge || (gp && same_expr(ge, gp)))
+                    {
+                        return;
+                    }
+                    emit_assert(m.body, low::implies(ni_facts, gp ? low::implies(gp, ge) : ge),
+                                meta("permission", site.atom->loc.known() ? site.atom->loc : c.loc,
+                                     "the contract of `" + f.c_name + "` takes " + quoted(txt, "an object") +
+                                         " on a path where it does not return it, but `" +
+                                         f.params[static_cast<size_t>(root)].name +
+                                         "` is `cerastes::not_invalidating`"));
+                };
+                for (const AtomSite& site : fa.sites)
+                {
+                    if (!site.in_ensures || site.clause != idx || site.atom->amount < 0 || site.atom->amount >= fa.nreq)
+                    {
+                        continue;
+                    }
+                    ni_row(site, fa.sites[static_cast<size_t>(site.atom->amount)],
+                           site.atom->a != nullptr ? site_text(site) : std::string());
+                }
+                for (const AtomSite& site : blocks_of(f).sites)
+                {
+                    const AtomSite* partner {block_partner(f, site)};
+                    if (!site.in_ensures || site.clause != idx || partner == nullptr)
+                    {
+                        continue;
+                    }
+                    ni_row(site, *partner, site.atom->a != nullptr ? site.atom->a->c_text : std::string());
                 }
             }
             prior = low::and_(prior, v.e);

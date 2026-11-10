@@ -43,7 +43,8 @@ enum class Annot
     owning,
     uninit,
     ref_to_uninit,
-    must_init
+    must_init,
+    not_invalidating
 };
 
 inline bool is_registered_cerastes(an_attribute_ptr a)
@@ -62,11 +63,13 @@ inline Annot classify(an_attribute_ptr a)
         const char* name;
         Annot kind;
     } kNames[] {
-        {"requires", Annot::requires_},  {"ensures", Annot::ensures}, {"invariant", Annot::invariant},
-        {"check", Annot::check},         {"fold", Annot::fold},       {"unfold", Annot::unfold},
-        {"predicate", Annot::predicate}, {"pure", Annot::pure},       {"decreases", Annot::decreases},
-        {"owning", Annot::owning},       {"uninit", Annot::uninit},   {"ref_to_uninit", Annot::ref_to_uninit},
-        {"must_init", Annot::must_init},
+        {"requires", Annot::requires_},  {"ensures", Annot::ensures},
+        {"invariant", Annot::invariant}, {"check", Annot::check},
+        {"fold", Annot::fold},           {"unfold", Annot::unfold},
+        {"predicate", Annot::predicate}, {"pure", Annot::pure},
+        {"decreases", Annot::decreases}, {"owning", Annot::owning},
+        {"uninit", Annot::uninit},       {"ref_to_uninit", Annot::ref_to_uninit},
+        {"must_init", Annot::must_init}, {"not_invalidating", Annot::not_invalidating},
     };
     for (const auto& n : kNames)
     {

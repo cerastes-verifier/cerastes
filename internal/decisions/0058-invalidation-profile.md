@@ -155,10 +155,18 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
    - **Two encoder-side facts are new:** "this function gives its result's block" (the `result_sites` test as a
      function) and "this parameter's contract consumes its block" (the encoder's twin of lowering's `block_consumes`).
      Heap routines leave `call()` early, so the rules are also applied in `heap_call` and `allocation_view`.
-   - **What the static rule cannot see** (as 0042 item 8 lists its own): **accepted although wrong** — an owner by name
-     that is already empty or dangling (the default mode's `invalid-free` still reports it); **rejected although
-     harmless** — `t = v; free(t);`, `free(c ? a : b)`, `free(*pp)` with `pp == &v`, an allocation stored in a
-     non-owning local and freed in the same function. Both lists are on the Verifying page, one test per entry.
+   - **How it is read.** The receiving context marks the value's node before it is encoded (casts peeled); a call
+     whose contract gives its result's block is accepted only at a marked node. An `owning` (borrow) parameter is not
+     an owner for p6, an address-taken owning local is. Messages end "(--strict-owner, decision 0058 item 3)", as
+     `--strict-init`'s name their record.
+   - **What the static rule cannot see** (as 0042 item 8 lists its own). **Accepted although wrong**, each still
+     reported by the default mode's path-precise rows: an owner by name that is already empty or dangling
+     (`invalid-free`); a release on some paths only (`if (c) free(v);`, `leak`); an assignment to an owner that still
+     holds a block (`leak`); a member released through two aliases of its structure (`invalid-free`). **Rejected although
+     harmless:** `t = v; free(t);`; `free(c ? a : b)`; `free(*pp)`, `pp == &v` included; a result stored in a non-owning
+     local and released in the same function; a call under `?:` or a comma as the receiver's value (only casts are
+     peeled); the leaves of a by-value struct parameter or result; `(void)make();`. Both lists are on the Verifying
+     page, one test per entry.
    - Without the option every program means the same; the option only rejects more. Both strict options may be given
      together (`// verify-options: --strict-init --strict-owner`), and the harness allow-list holds both.
 

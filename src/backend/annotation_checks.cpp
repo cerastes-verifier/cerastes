@@ -1144,7 +1144,7 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
         return;
     }
     // The initialization markers (decision 0042): no argument list; the encoder reads them on the parameter or the local.
-    if (k == Annot::uninit || k == Annot::ref_to_uninit || k == Annot::must_init)
+    if (k == Annot::uninit || k == Annot::ref_to_uninit || k == Annot::must_init || k == Annot::not_invalidating)
     {
         return;
     }
@@ -1650,6 +1650,7 @@ bool is_protected_macro_name(const std::string& n, const std::set<std::string>& 
                                       "uninit",
                                       "ref_to_uninit",
                                       "must_init",
+                                      "not_invalidating",
                                       "cerastes_owns",
                                       "cerastes_reads",
                                       "cerastes_live",

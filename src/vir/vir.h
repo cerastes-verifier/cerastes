@@ -440,6 +440,9 @@ struct Clause
 {
     const Expr* expr {nullptr};
     SrcLoc loc;
+    // The equalities the encoder spliced into this clause (decision 0058 item 2, `cerastes::not_invalidating`), as written (`p->q == old(p->q)`), joined
+    // by " and "; empty for a clause that is as written.  A postcondition failure of the clause says it holds them.
+    std::string added {};
 };
 
 // The shape of a loop statement (decision 0014 items 4 and 5).
@@ -679,6 +682,9 @@ struct Param
     // `[[cerastes::ref_to_uninit]]` / `[[cerastes::must_init]]` on a pointer parameter (decision 0042 item 4).  Set by the encoder before the
     // contract is read, so a written read of the pointee is rejected there.
     InitMarker init {InitMarker::None};
+    // `[[cerastes::not_invalidating]]` on a pointer parameter (decision 0058 item 2): the contract returns everything it takes through the parameter and
+    // keeps every pointer on the way to it.  Not an initialization marker, so separate from `init`.  Set by the encoder before the contract is read.
+    bool not_invalidating {false};
 };
 
 struct Function

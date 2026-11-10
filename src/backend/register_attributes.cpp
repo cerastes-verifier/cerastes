@@ -85,6 +85,9 @@ const an_attr_registration kAttributes[] {
     {"uninit", "", "v:+a!", RAF_NO_FLAGS},
     {"ref_to_uninit", "", "r|v|p", RAF_ENTITY_ATTACHED},
     {"must_init", "", "p", RAF_NO_FLAGS},
+    // not_invalidating (decision 0058 item 2; P4418R0, P77): a marker on a pointer parameter, target `p` as `must_init` is (it is no initialization
+    // marker and has no argument list); EDG refuses it on a function and after the `*` (#1835).  The encoder reads it like the other parameter markers.
+    {"not_invalidating", "", "p", RAF_NO_FLAGS},
     {"predicate", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {"pure", "", "r", RAF_ENTITY_ATTACHED | RAF_NO_CONSTANT_EVALUATION},
     {nullptr, nullptr, nullptr, RAF_NO_FLAGS},

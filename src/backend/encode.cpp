@@ -1242,7 +1242,16 @@ private:
             {
                 ok = false;
             }
+            // Decision 0058 item 2: `not_invalidating`, read the same way, into a map of its own.
+            if (!read_marker(r, x, Annot::not_invalidating, &owning_reported))
+            {
+                ok = false;
+            }
             if (!check_marker_pairs(r, x))
+            {
+                ok = false;
+            }
+            if (!check_not_invalidating_pairs(r, x))
             {
                 ok = false;
             }
@@ -1302,6 +1311,14 @@ private:
         vir::InitMarker kind {vir::InitMarker::None};
     };
     std::map<a_routine_ptr, std::vector<MarkerParam>> markers_;
+    // `[[cerastes::not_invalidating]]` on the parameters of the routines whose signatures were read (decision 0058 item 2), in index order.  It is no
+    // initialization marker, so it is not in `markers_`: `function_of` sets `vir::Param::not_invalidating` from it before the contract is read.
+    struct NotInvalidatingParam
+    {
+        int index {0};
+        a_source_position pos; // the attribute (its first node, in source order)
+    };
+    std::map<a_routine_ptr, std::vector<NotInvalidatingParam>> not_invalidating_;
     // Each marker kind names itself; a kind that is not a parameter marker is a tool failure (exit status 3), never filed under another marker.
     static const char* marker_name(Annot k)
     {
@@ -1316,6 +1333,10 @@ private:
         if (k == Annot::must_init)
         {
             return "must_init";
+        }
+        if (k == Annot::not_invalidating)
+        {
+            return "not_invalidating";
         }
         internal_error("marker_name: an annotation kind that is not a parameter marker");
         return "";
@@ -1559,7 +1580,9 @@ private:
                 {
                     a_type_ptr pe {pt->variant.pointer.type != nullptr ? skip_typerefs(pt->variant.pointer.type)
                                                                        : nullptr};
-                    if (pt->variant.pointer.type != nullptr &&
+                    // decision 0058 item 2 (question 203): `not_invalidating` on a pointer to a `const` object is accepted; the rule below is an owner's and an
+                    // initializer's
+                    if (kind != Annot::not_invalidating && pt->variant.pointer.type != nullptr &&
                         (f_get_type_qualifiers(pt->variant.pointer.type, TRUE) & TQ_CONST) != 0U)
                     {
                         if (kind == Annot::owning)
@@ -1706,6 +1729,10 @@ private:
                     MarkerParam {static_cast<int>(k), ns[0U]->position,
                                  kind == Annot::must_init ? vir::InitMarker::MustInit : vir::InitMarker::RefToUninit});
             }
+            else if (kind == Annot::not_invalidating)
+            {
+                not_invalidating_[r].push_back(NotInvalidatingParam {static_cast<int>(k), ns[0U]->position});
+            }
             else
             {
                 internal_error("read_marker: an annotation kind that is not a parameter marker");
@@ -1753,6 +1780,277 @@ private:
         cx_.contract = saved_contract;
         cx_.annotation = saved_annotation;
         return ok;
+    }
+
+    // Decision 0058 item 2: `not_invalidating` beside `ref_to_uninit` or `must_init` on one parameter (a pointee that may hold no value has no pointers to
+    // keep; the implicit clause is built as VIR after the contract is read, so `reject_marked_read` would never see its `old`).  False when it rejected.
+    bool check_not_invalidating_pairs(a_routine_ptr r, a_routine_type_supplement_ptr x)
+    {
+        const auto ni {not_invalidating_.find(r)};
+        const auto mk {markers_.find(r)};
+        if (ni == not_invalidating_.end() || mk == markers_.end())
+        {
+            return true;
+        }
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
+        cx_.contract = cx_.annotation = false;
+        bool ok {true};
+        for (const NotInvalidatingParam& n : ni->second)
+        {
+            for (const MarkerParam& m : mk->second)
+            {
+                if (m.index != n.index)
+                {
+                    continue;
+                }
+                std::string pname {std::to_string(n.index + 1)};
+                int i {0};
+                for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next, ++i)
+                {
+                    if (i == n.index && p->name != nullptr && *p->name != '\0')
+                    {
+                        pname = std::string("\"") + p->name + "\"";
+                    }
+                }
+                reject(Diag::unsupported_annotation, n.pos,
+                       "\"cerastes::not_invalidating\" and \"cerastes::" + std::string(marker_name(m.kind)) +
+                           "\" both on parameter " + pname +
+                           " (a pointee that may hold no value has no pointers to keep, decision 0058 item 2)");
+                ok = false;
+                break;
+            }
+        }
+        cx_.contract = saved_contract;
+        cx_.annotation = saved_annotation;
+        return ok;
+    }
+
+    // Decision 0058 item 2: the contract of a `not_invalidating` parameter `p` returns what it takes through `p` and gives nothing new through it.  After
+    // `finish_atoms` (closures of owning fields are counted), with or without a body.  `contract_rejected`: the contract already had a rejection (the
+    // partners are not numbered), so only the `noreturn` rule is applied.
+    void check_not_invalidating(a_routine_ptr r, vir::Function* f, bool contract_rejected)
+    {
+        const auto it {not_invalidating_.find(r)};
+        if (it == not_invalidating_.end())
+        {
+            return;
+        }
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
+        cx_.contract = cx_.annotation = false;
+        const std::vector<vir::AtomSite> sites {vir::contract_atoms(*f)};
+        const std::vector<vir::AtomSite> blocks {vir::contract_block_atoms(*f)};
+        for (const NotInvalidatingParam& m : it->second)
+        {
+            const auto k {static_cast<size_t>(m.index)};
+            if (k >= f->params.size() || !f->params[k].type.is_ptr())
+            {
+                continue;
+            }
+            const std::string pname {f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name};
+            const std::string head {"`" + pname + "` is `cerastes::not_invalidating`, but the contract of `" +
+                                    f->c_name + "` "};
+            auto rooted = [&](const vir::AtomSite& st)
+            {
+                return vir::atom_place(*st.atom).root == static_cast<int>(k);
+            };
+            auto text_of = [&](const vir::AtomSite& st, bool block)
+            {
+                return block ? "owns_block(" + val_text(*st.atom->a) + ")" : atom_text(*st.atom);
+            };
+            // a function declared not to return has no `ensures` to return anything (as 0042 item 4 says of `must_init`)
+            if (f->noreturn)
+            {
+                const vir::AtomSite* any {nullptr};
+                bool block {false};
+                for (const vir::AtomSite& st : sites)
+                {
+                    any = any == nullptr && rooted(st) ? &st : any;
+                }
+                for (const vir::AtomSite& st : blocks)
+                {
+                    if (any == nullptr && rooted(st))
+                    {
+                        any = &st;
+                        block = true;
+                    }
+                }
+                if (any != nullptr)
+                {
+                    reject(Diag::unsupported_annotation, m.pos,
+                           head + "is declared not to return and takes `" + text_of(*any, block) +
+                               "`: it has no `ensures` to return it (decision 0058 item 2)");
+                }
+                continue;
+            }
+            if (contract_rejected)
+            {
+                continue;
+            }
+            for (int pass {0}; pass < 2; ++pass)
+            {
+                const bool block {pass == 1};
+                const std::vector<vir::AtomSite>& list {block ? blocks : sites};
+                for (const vir::AtomSite& st : list)
+                {
+                    if (!rooted(st))
+                    {
+                        continue;
+                    }
+                    // an `ensures` permission atom with no partner has an output amount that no `requires` atom carries (decision 0052 item 2)
+                    bool partner {false};
+                    for (const vir::AtomSite& o : list)
+                    {
+                        if (o.in_ensures == st.in_ensures)
+                        {
+                            continue;
+                        }
+                        partner = partner || (block ? vir::atom_place(*o.atom) == vir::atom_place(*st.atom)
+                                                    : (o.atom->atom == st.atom->atom && st.atom->amount >= 0 &&
+                                                       o.atom->amount == st.atom->amount));
+                    }
+                    if (partner)
+                    {
+                        continue;
+                    }
+                    if (st.in_ensures)
+                    {
+                        reject(
+                            Diag::unsupported_annotation, m.pos,
+                            head + "gives `" + text_of(st, block) +
+                                "` in its `ensures` without taking it in its `requires`: the marker returns what it takes and gives nothing "
+                                "new through `" +
+                                pname + "` (decision 0058 item 2)");
+                    }
+                    else
+                    {
+                        reject(Diag::unsupported_annotation, m.pos,
+                               head + "takes `" + text_of(st, block) +
+                                   "` without returning it: a callee that keeps or frees what `" + pname +
+                                   "` reaches invalidates the caller's pointers (decision 0058 item 2)");
+                    }
+                }
+            }
+        }
+        cx_.contract = saved_contract;
+        cx_.annotation = saved_annotation;
+    }
+
+    // Decision 0058 item 2, the implicit `ensures`: for each `ensures` atom or block site rooted at a `not_invalidating` parameter whose place goes through
+    // loads, every loaded pointer `E` on the way (root first) is `E == old(E)`.  Placed as the closure of 0055 item 3 is (`close_source`): spliced right
+    // after the `ensures` permission atom that frames the load of `E` (the atom with the cell's root and steps whose member path is a prefix of the cell's),
+    // so it inherits that atom's guards by position, never the site's own null test, and no guard is copied.  Each clause that receives one records its
+    // text in `Clause::added`, for the postcondition's message.  After check_not_invalidating (the sites it sees are all partnered).
+    void tie_not_invalidating(a_routine_ptr r, vir::Function* f)
+    {
+        const auto it {not_invalidating_.find(r)};
+        if (it == not_invalidating_.end() || f->noreturn)
+        {
+            return;
+        }
+        const std::vector<vir::AtomSite> sites {vir::contract_atoms(*f)};
+        const std::vector<vir::AtomSite> blocks {vir::contract_block_atoms(*f)};
+        std::map<const Expr*, const Expr*> tail; // the framing atom -> the last node spliced after it
+        std::vector<vir::PlaceKey> tied;
+        for (const NotInvalidatingParam& m : it->second)
+        {
+            const auto k {static_cast<size_t>(m.index)};
+            if (k >= f->params.size() || !f->params[k].type.is_ptr())
+            {
+                continue;
+            }
+            for (const std::vector<vir::AtomSite>* list : {&sites, &blocks})
+            {
+                for (const vir::AtomSite& st : *list)
+                {
+                    if (!st.in_ensures || st.via.empty() || vir::atom_place(*st.atom).root != static_cast<int>(k))
+                    {
+                        continue;
+                    }
+                    // the loaded pointers on the way to the site's base pointer, root first
+                    std::vector<const Expr*> loads;
+                    for (const Expr* e {st.base}; e != nullptr; e = e->a)
+                    {
+                        if ((e->kind == Expr::Kind::Deref || e->kind == Expr::Kind::Field) && e->type.is_ptr())
+                        {
+                            loads.push_back(e);
+                        }
+                        else if (e->kind != Expr::Kind::Deref && e->kind != Expr::Kind::Field &&
+                                 e->kind != Expr::Kind::MemberAddr)
+                        {
+                            break;
+                        }
+                    }
+                    std::reverse(loads.begin(), loads.end());
+                    for (const Expr* e : loads)
+                    {
+                        const SrcLoc l {m.pos.seq != 0U ? loc_of(m.pos) : f->loc};
+                        if (e->kind != Expr::Kind::Deref)
+                        {
+                            reject(
+                                Diag::unsupported_annotation, m.pos,
+                                "`" + f->params[k].name + "` is `cerastes::not_invalidating`, but the pointer `" +
+                                    val_text(*e) +
+                                    "` on the way to a place its contract names is read from a member of a struct value (decision 0058 item 2)");
+                            return;
+                        }
+                        const Expr* cell_atom {b_.atom(vir::AtomKind::Owns, clone_place(e->a, *f, l), -1, l)};
+                        const vir::PlaceKey cell {vir::atom_place(*cell_atom)};
+                        if (!cell.valid() || std::find(tied.begin(), tied.end(), cell) != tied.end())
+                        {
+                            continue;
+                        }
+                        // the atom that frames the cell: a permission atom of the `ensures` or a block site (a block holds every cell of its pointee)
+                        const vir::AtomSite* frame {nullptr};
+                        for (const std::vector<vir::AtomSite>* fl : {&sites, &blocks})
+                        {
+                            for (const vir::AtomSite& o : *fl)
+                            {
+                                const vir::PlaceKey op {vir::atom_place(*o.atom)};
+                                if (frame == nullptr && o.in_ensures && o.atom->atom != vir::AtomKind::Live &&
+                                    op.valid() && op.root == cell.root && op.via == cell.via &&
+                                    op.path.size() <= cell.path.size() &&
+                                    std::equal(op.path.begin(), op.path.end(), cell.path.begin()))
+                                {
+                                    frame = &o;
+                                }
+                            }
+                        }
+                        if (frame == nullptr)
+                        {
+                            lib_internal_error(m.pos, "no `ensures` atom frames the load of `" + val_text(*e) +
+                                                          "` for the implicit clause of `cerastes::not_invalidating`");
+                            return;
+                        }
+                        const Expr* now {clone_place(e, *f, l)};
+                        const Expr* was {clone_place(e, *f, l)};
+                        if (now == nullptr || was == nullptr)
+                        {
+                            lib_internal_error(
+                                m.pos,
+                                "the pointer `" + val_text(*e) +
+                                    "` could not be copied for the implicit clause of `cerastes::not_invalidating`");
+                            return;
+                        }
+                        const Expr* eq {b_.binary(vir::BinaryOp::Eq, now, b_.old(was, l), l)};
+                        const Expr* after {tail.count(frame->atom) != 0U ? tail[frame->atom] : frame->atom};
+                        vir::Clause& clause {f->ensures_[static_cast<size_t>(frame->clause)]};
+                        if (!replace_node(clause.expr, after, b_.binary(vir::BinaryOp::LAnd, after, eq, l)))
+                        {
+                            lib_internal_error(
+                                m.pos,
+                                "the implicit clause of `cerastes::not_invalidating` could not be placed after an atom");
+                            return;
+                        }
+                        tail[frame->atom] = eq;
+                        tied.push_back(cell);
+                        const std::string text {val_text(*e) + " == old(" + val_text(*e) + ")"};
+                        clause.added += (clause.added.empty() ? "" : " and ") + text;
+                    }
+                }
+            }
+        }
     }
 
     // Decision 0042 item 4 (owner question 88): a marked parameter's contract holds an `owns(*p)` atom in its `requires` (explicit, guarded or not, or
@@ -3210,6 +3508,18 @@ private:
                 }
             }
         }
+        // Decision 0058 item 2: `not_invalidating`, set the same way.
+        if (auto ni {not_invalidating_.find(r)}; ni != not_invalidating_.end())
+        {
+            for (const NotInvalidatingParam& m : ni->second)
+            {
+                if (static_cast<size_t>(m.index) < f->params.size() &&
+                    f->params[static_cast<size_t>(m.index)].type.is_ptr())
+                {
+                    f->params[static_cast<size_t>(m.index)].not_invalidating = true;
+                }
+            }
+        }
         if (lib != nullptr)
         {
             f->trusted_reason = lib->reason;
@@ -3224,6 +3534,11 @@ private:
         const size_t rejected_before {rejected_.size()};
         encode_contract(r, f);
         check_marker_atoms(r, f, rejected_.size() != rejected_before);
+        check_not_invalidating(r, f, rejected_.size() != rejected_before);
+        if (rejected_.size() == rejected_before)
+        {
+            tie_not_invalidating(r, f);
+        }
         // Decision 0037 item 2: `restrict` on a pointer parameter is accepted only when the contract owns its pointee and returns it.
         for (int k : restricted)
         {
@@ -5600,6 +5915,12 @@ private:
     {
         return k == Annot::owning || k == Annot::ref_to_uninit || k == Annot::must_init;
     }
+    // The parameter attributes the contexts of decision 0042 item 4 ("never ignored") count: the markers, and from decision 0058 `not_invalidating`.  It is
+    // not `is_param_marker`, which also drives vlibc's trust (0047 item 3) and the readers of function-level attributes that `not_invalidating` cannot reach.
+    static bool is_param_attribute(Annot k)
+    {
+        return is_param_marker(k) || k == Annot::not_invalidating;
+    }
     static an_attribute_ptr first_param_marker(a_type_ptr t)
     {
         a_type_ptr rt {t != nullptr ? skip_typerefs(t) : nullptr};
@@ -5611,7 +5932,7 @@ private:
         {
             for (an_attribute_ptr a {p->attributes}; a != nullptr; a = a->next)
             {
-                if (is_registered_cerastes(a) && is_param_marker(classify(a)))
+                if (is_registered_cerastes(a) && is_param_attribute(classify(a)))
                 {
                     return a;
                 }
@@ -5674,7 +5995,7 @@ private:
                 }
                 for (an_attribute_ptr a {v->variant.assoc_param_type->attributes}; a != nullptr; a = a->next)
                 {
-                    if (is_registered_cerastes(a) && is_param_marker(classify(a)))
+                    if (is_registered_cerastes(a) && is_param_attribute(classify(a)))
                     {
                         found.push_back(a);
                     }
@@ -10604,14 +10925,28 @@ private:
         return intact;
     }
 
+    // Decision 0058 item 2: vlibc writes no `not_invalidating`, and one in a library file would be read by nothing (`library_markers` does not count it, so
+    // lib_trust would trust the routine and ignore it): rejected.  Pinned by a `LibraryFixtureTests` case, no file under tests/ reaches it.
+    void reject_library_not_invalidating(a_routine_ptr r)
+    {
+        const std::vector<an_attribute_ptr> found {library_markers(r, Annot::not_invalidating)};
+        if (!found.empty())
+        {
+            reject(Diag::unsupported_annotation, found[0U]->position,
+                   "\"cerastes::not_invalidating\" in a library file (vlibc writes none, decision 0058 item 2)");
+        }
+    }
+
     // The registered markers (`owning`, `ref_to_uninit`, `must_init`) written in a library file on `r` itself (target `r`, the routine's attribute list) or on a
     // parameter of any of its declarations, one node per spelling (decision 0047 item 3).
-    std::vector<an_attribute_ptr> library_markers(a_routine_ptr r)
+    // With `only` set it lists the attributes of that kind alone (any parameter attribute, not only the markers).
+    std::vector<an_attribute_ptr> library_markers(a_routine_ptr r, Annot only = Annot::none)
     {
         std::vector<an_attribute_ptr> out;
         auto add = [&](an_attribute_ptr a)
         {
-            if (!is_registered_cerastes(a) || !is_param_marker(classify(a)) || !in_library_file(a->position))
+            if (!is_registered_cerastes(a) || !in_library_file(a->position) ||
+                (only == Annot::none ? !is_param_marker(classify(a)) : classify(a) != only))
             {
                 return;
             }
@@ -11977,7 +12312,7 @@ private:
         {
             for (an_attribute_ptr a {list}; a != nullptr; a = a->next)
             {
-                if (is_registered_cerastes(a) && is_param_marker(classify(a)))
+                if (is_registered_cerastes(a) && is_param_attribute(classify(a)))
                 {
                     return true;
                 }
@@ -18810,7 +19145,8 @@ void Encoder::run(const IlEntities& ents)
             continue; // rejected for its reserved name: nothing else about it
         }
         check_routine_attributes(r);
-        reject_unread_function_markers(r); // decision 0047 item 5 (audit S5)
+        reject_unread_function_markers(r);  // decision 0047 item 5 (audit S5)
+        reject_library_not_invalidating(r); // decision 0058 item 2
         // Decision 0047 item 2: a routine trusted from vlibc whose signature mentions `void *` (the malloc family) has a shape, read once here, called or not;
         // it is never read by check_signature or function_of (a call is a typed view).  One whose trust failed was reported by lib_trust.
         if (body == nullptr && mentions_void_pointer(r))
@@ -18953,8 +19289,8 @@ void Encoder::run(const IlEntities& ents)
         }
         // Decision 0042 item 4: function_of is lazy, so a declaration with a `ref_to_uninit` or `must_init` parameter that nothing calls would never have its
         // marker rules checked (an `owns(*p)` atom, `must_init`'s partner in the `ensures`, the contract reads).  Force it for exactly those routines.
-        if (body == nullptr && (markers_.count(r) != 0U || has_struct_pointer_param(r) || has_function_marker(r) ||
-                                contract_names_block_atom(r)))
+        if (body == nullptr && (markers_.count(r) != 0U || not_invalidating_.count(r) != 0U ||
+                                has_struct_pointer_param(r) || has_function_marker(r) || contract_names_block_atom(r)))
         {
             function_of(r, false, decl); // decision 0043: also its member atoms (the const struct pointee rule)
         }

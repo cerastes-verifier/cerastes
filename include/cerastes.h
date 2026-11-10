@@ -20,6 +20,8 @@
 // CERASTES_UNINIT marks an automatic local declared without an initializer (documentation, checked by --strict-init);
 // CERASTES_REF_TO_UNINIT and CERASTES_MUST_INIT mark a pointer parameter whose pointee need not have a value on entry, and
 // (must_init) has one on return (P4222's markers, decision 0042).  Each parameter marker needs an owns(*p) in the contract.
+// CERASTES_NOT_INVALIDATING marks a pointer parameter whose function leaves what the pointer reaches in place: whatever the
+// contract takes through it comes back, and every pointer on the way to it is unchanged (P4418R0, decision 0058).
 #ifndef CERASTES_H
 #define CERASTES_H
 
@@ -59,6 +61,7 @@
 #  define CERASTES_UNINIT [[cerastes::uninit]]
 #  define CERASTES_REF_TO_UNINIT [[cerastes::ref_to_uninit]]
 #  define CERASTES_MUST_INIT [[cerastes::must_init]]
+#  define CERASTES_NOT_INVALIDATING [[cerastes::not_invalidating]]
 #else
 #  define CERASTES_REQUIRES(...)
 #  define CERASTES_PRE(...)
@@ -75,6 +78,7 @@
 #  define CERASTES_UNINIT
 #  define CERASTES_REF_TO_UNINIT
 #  define CERASTES_MUST_INIT
+#  define CERASTES_NOT_INVALIDATING
 #endif
 
 // The C spellings of the specification functions (decisions 0029 item 3, 0037 item 5), declared in C and in C++ alike so that a header shared
