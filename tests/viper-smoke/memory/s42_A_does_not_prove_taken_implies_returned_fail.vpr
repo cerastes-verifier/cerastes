@@ -1,0 +1,8 @@
+// expect: error assert:assertion.false @ L7
+// S42 (record 0058 item 2, variant A): the guarded tie `L_post == NULL || L_post == L_pre` does not prove taken-implies-returned: a callee that frees the block and nulls the field satisfies it
+// S42 hand-written fixture, no encoder output: `pre` and `post` as in s42_B_rows_force_nullness_ok.vpr. No inhale or assume.
+method a_does_not_prove_taken_implies_returned(pre: Ref, post: Ref)
+  requires post == null || post == pre
+{
+  assert pre != null ==> post != null
+}

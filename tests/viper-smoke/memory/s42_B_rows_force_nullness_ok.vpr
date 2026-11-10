@@ -1,0 +1,28 @@
+// expect: verified
+// S42 (record 0058 item 2, variants A and B): for a borrowed closure pair (requires guard `L_pre != NULL`, ensures guard `L_post != NULL`) the two guard rows (returned implies taken, taken implies returned) force the same nullness on entry and return; under them the unguarded tie (B) says nothing more than the guarded one (A); and B alone proves both rows (A alone proves only returned-implies-taken)
+// S42 hand-written fixture, no encoder output: `pre` and `post` stand for the pre- and post-state values of the loaded pointer (the f__wf ghosts hv_k_m0_pre and hv_k_m0_post). No inhale or assume.
+
+// rows => same nullness; rows + A => B
+method rows_force_nullness(pre: Ref, post: Ref)
+  requires post != null ==> pre != null
+  requires pre != null ==> post != null
+{
+  assert (pre == null) == (post == null)
+  assert (pre != null ==> post == pre) ==> post == pre
+  assert (post == null || post == pre) ==> post == pre
+}
+
+// B => both rows
+method b_proves_both_rows(pre: Ref, post: Ref)
+  requires post == pre
+{
+  assert post != null ==> pre != null
+  assert pre != null ==> post != null
+}
+
+// A => returned implies taken
+method a_proves_returned_implies_taken(pre: Ref, post: Ref)
+  requires post == null || post == pre
+{
+  assert post != null ==> pre != null
+}
