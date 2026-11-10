@@ -387,6 +387,87 @@ void define_owning_leaves()
        {
            k.fail("leak", main_pointer(k, 1), 1U, "", "may return while it still owns");
        });
+    // decision 0055 item 7: loops over owning leaves.
+    // void f(void) { struct S s; s.q = NULL; s.n = 0; int i = 0; while (i < 3) { [free(s.q);] s.q = malloc(); i++; } free(s.q); }
+    // the loop names the leaf of a struct local and has no written invariant on it: a synthetic site on `s.q` carries it (held_s_q == (s.q != NULL) is invariant), the
+    // reassignment row stays at the store
+    const auto leaf_loop = [=](Kit& k, bool free_first) -> SrcLoc
+    {
+        StructType* S {mk_s(k)};
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Var* s {k.scell(f, "s", S)};
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> body;
+        if (free_first)
+        {
+            body.push_back(k.es(k.call(fr, {k.leaf(k.addr(s), 0)})));
+        }
+        const Stmt* st {k.lstore(k.addr(s), 0, k.call(m, {}))};
+        body.push_back(st);
+        body.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))}, k.blkc(body))};
+        f->body = k.blkc({k.decl(s, nullptr), k.lstore(k.addr(s), 0, k.nul(PI(k))), k.lstore(k.addr(s), 1, N(k, "0")),
+                          k.decl(i, N(k, "0")), lp, k.es(k.call(fr, {k.leaf(k.addr(s), 0)}))});
+        k.done(f);
+        return st->loc;
+    };
+    lc("owning_leaf_loop_replace",
+       "a loop that frees and replaces the owning leaf s.q of a struct local each iteration: carried by a synthetic site",
+       [=](Kit& k)
+       {
+           leaf_loop(k, true);
+       });
+    lc("owning_leaf_loop_drop",
+       "the same without the free: the reassignment row at the store fails (leak: assigning to owning field s.q)",
+       [=](Kit& k)
+       {
+           k.fail_only("leak", leaf_loop(k, false), 1U, 0U, "assigning to owning field");
+       });
+
+    // void g(void) { owning struct S *v = calloc(); if (v == NULL) { return; } int i = 0; while (i < 3) { [free(v->q);] v->q = malloc(); i++; } free(v->q); free(v); }
+    // (audit S5) the owning local carries the closure of its pointee's owning fields: v == NULL || (v->q == NULL || owns_block(v->q)) is a synthetic site
+    const auto ptr_loop = [=](Kit& k, bool free_first) -> SrcLoc
+    {
+        StructType* S {mk_s(k)};
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* ca {heap_alloc_view(k, "calloc", k.st(S), true)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* frs {heap_free_view(k, k.st(S))};
+        Function* f {k.fn("g", k.vd)};
+        Var* v {k.local(f, "v", k.ptr(k.st(S)))};
+        v->owning = true;
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> body;
+        if (free_first)
+        {
+            body.push_back(k.es(k.call(fr, {k.leaf(k.pn(v), 0)})));
+        }
+        body.push_back(k.lstore(k.pn(v), 0, k.call(m, {})));
+        body.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
+        const Stmt* bs {k.blkc(body)};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))}, bs)};
+        f->body =
+            k.blkc({k.decl(v, k.call(ca, {})), k.iff(k.eq(k.pn(v), k.nul(k.ptr(k.st(S)))), k.blk({k.ret(nullptr)})),
+                    k.decl(i, N(k, "0")), lp, k.es(k.call(fr, {k.leaf(k.pn(v), 0)})), k.es(k.call(frs, {k.pn(v)}))});
+        k.done(f);
+        return bs->end_loc;
+    };
+    lc("owning_ptr_loop_replace",
+       "a loop that frees and replaces v->q of an owning local struct pointer each iteration: the closure of its field is carried",
+       [=](Kit& k)
+       {
+           ptr_loop(k, true);
+       });
+    lc("owning_ptr_loop_drop",
+       "the same without the free: the loop's back-edge row reports the block it drops (leak at the end of the body)",
+       [=](Kit& k)
+       {
+           k.fail_only("leak", ptr_loop(k, false), 1U, 0U);
+       });
 }
 
 } // namespace

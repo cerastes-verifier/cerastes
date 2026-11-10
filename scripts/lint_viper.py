@@ -1822,6 +1822,7 @@ def lint_carrier_clauses(src: Source, decls: list[Decl], add: Callable[[int, str
 OWNING_GLOBAL_TAG_RE = re.compile(r"//\s*cerastes:owning-global\b[ \t]*(?P<name>\S+)?")
 GB_CALL_RE = re.compile(r"(?<![\w$'])(?P<name>GB_[A-Za-z0-9_$']+)\s*\(\s*\)")
 GHOST_ANY_RE = re.compile(r"(?<![\w$'.])(?P<ghost>held_GB_[\w$']*)")
+LOCAL_GHOST_COMPARE_RE = re.compile(r"(?<![\w$'.])(?P<ghost>held_(?!GB_)[\w$']+)\s*==(?!>)")
 OWNER_ASSIGN_RE = re.compile(r"(?<![\w$'.])(?P<g>(?:held|tv)_[\w$']+)\s*:=")
 _ID = r"[A-Za-z_$][\w$']*"
 _SLOT = r"loc\(block_of\((?P<{n}>.+?)\),\(?-1\)?\)\.tok"
@@ -1900,6 +1901,108 @@ def exemption_term_problem(ghost: tuple[str, tuple[int, ...] | None], loc_text: 
     return re.fullmatch(want, _nospace(loc_text)) is not None
 
 
+def ghost_cell_text(ghost: tuple[str, tuple[int, ...] | None]) -> str:
+    """The normalized block cell of an owner ghost `(block, member path)`: `loc(GB_x(),0)` or the leaf's slot; `.v_ptr_T` reads it."""
+    gb, path = ghost
+    return f"loc({gb}(),0)" if not path else slot_text(gb, path)
+
+
+def temp_entry_problem(src: Source, lineno: int, t: str, g: str) -> str | None:
+    """`held_<o> := t != null` of an owning leaf (decision 0055 items 5 and 6): when the temp `t` was just assigned a leaf's cell, bare
+    (an unguarded entry) or as `<guard> ? <cell> : null` (an entry under a by-value site's guard, or the gives-back after a callee whose
+    `ensures` covers the leaf, where the guard is exactly `perm(<cell>) > none`), the cell is the cell the ghost's name spells, the
+    else branch is `null`, and a guard that reads a permission reads that cell's.  Any other `t` (a stored value) is not read here."""
+    rhs = None
+    for n in range(lineno - 1, max(0, lineno - 40), -1):
+        code = src.code[n - 1]
+        if re.match(r"^(method|function)\b", code):
+            break
+        m = re.match(rf"^\s*{re.escape(t)}\s*:=", code)
+        if m:
+            rhs = _nospace(_statement_rhs(code, m.end()))
+            break
+    if rhs is None:
+        return None
+    guard, cell, other = None, rhs, "null"
+    top = _split_top(rhs, "?")
+    if len(top) == 2:
+        branches = _split_top(top[1], ":")
+        if len(branches) == 2:
+            guard, cell, other = top[0], branches[0], branches[1]
+    lo = leaf_cell_owner(cell)
+    if lo is None:
+        return None
+    if g != leaf_ghost_name(lo[1], lo[2]):
+        return f"`{g}` is set from the leaf cell `{cell}`, which is another leaf's: a leaf's ghost reads its own cell"
+    if other != "null":
+        return f"`{g}` is set from `{rhs}`, whose else branch is not `null`"
+    if guard is not None and "perm(" in guard and re.fullmatch(rf"\(?perm\({re.escape(cell)}\)>none\)?", guard) is None:
+        return f"`{g}` is set from `{rhs}`, whose guard reads a permission that is not `perm({cell}) > none`"
+    return None
+
+
+EXM_TOKEN_RE = re.compile(r"(?<![\w$'.])exm_(?P<n>[0-9]+)(?![\w$'])")
+EXM_ASSIGN_RE = re.compile(r"(?<![\w$'.])exm_(?P<n>[0-9]+)\s*:=")
+EXM_VAR_RE = re.compile(r"^\s*var\s+exm_[0-9]+\s*:\s*Bool\s*$")
+_EXM_SHAPE_RE = re.compile(r"^\((?P<g>[\w$']+)&&\((?P<x>.+?)!=null\)\)&&\(perm\((?P<n>.+)\)>none\)$")
+
+
+def lint_exemption_ghosts(src: Source, decls: list[Decl], ghosts: dict[str, tuple[str, tuple[int, ...] | None]],
+                          add: Callable[[int, str], None]) -> dict[int, dict[int, tuple[int, str]]]:
+    """`main`'s deeper exemption (decision 0055 S4): the Bool locals `exm_<n>`, each assigned exactly once, in a method, as
+    `(<g> && (<X> != null)) && (perm(<N>) > none)` where `<g>` is the `held_` ghost of a TAGGED owner and `<X>` that owner's own cell, or
+    an earlier `exm_<m>` and `<X>` the cell `<N>` of that one, and `<N>` is `loc(member(<X>, k), 0).v_T`: the cell of a member of the block
+    `<X>` points to.  Returns, per method (the line of its keyword), each `exm_<n>` as (its line, its cell `<N>`) for the `forperm` rows."""
+    info: dict[int, dict[int, tuple[int, str]]] = {}
+    methods = [d for d in decls if d.kind == "method"]
+
+    def method_of(lineno: int) -> Decl | None:
+        return next((d for d in methods if d.line <= lineno <= d.end_line), None)
+
+    for lineno, code in enumerate(src.code, start=1):
+        if not EXM_TOKEN_RE.search(code):
+            continue
+        d = method_of(lineno)
+        a = EXM_ASSIGN_RE.search(code)
+        if d is None:
+            add(lineno, "an `exm_<n>` ghost stands only inside a method: it frames `main`'s exemption of a static owner's deeper blocks (decision 0055 item 9)")
+        elif EXM_VAR_RE.match(code):
+            continue
+        elif a is not None:
+            n = int(a.group("n"))
+            mine = info.setdefault(d.line, {})
+            rhs = _nospace(_statement_rhs(code, a.end()))
+            if n in mine:
+                add(lineno, f"`exm_{n}` is assigned twice: each exemption ghost is assigned exactly once (decision 0055 item 9)")
+                continue
+            m = _EXM_SHAPE_RE.match(rhs)
+            problem = None
+            nxt = ""
+            if m is None:
+                problem = "it is `(<held ghost or earlier exm> && (<cell> != null)) && (perm(<member cell>) > none)`"
+            else:
+                g, x, nxt = m.group("g"), m.group("x"), m.group("n")
+                if g in ghosts:
+                    if re.fullmatch(re.escape(ghost_cell_text(ghosts[g])) + r"\.v_ptr_[\w$']+", x) is None:
+                        problem = f"`{g}` guards the cell of its own owner, `{ghost_cell_text(ghosts[g])}.v_ptr_T`, and no other"
+                elif (gm := re.fullmatch(r"exm_([0-9]+)", g)) is not None:
+                    prev = mine.get(int(gm.group(1)))
+                    if prev is None:
+                        problem = f"`{g}` is not assigned before it (rooting an exemption through an unassigned ghost)"
+                    elif x != prev[1]:
+                        problem = f"`{g}` guards the cell `{prev[1]}` that it read, and no other"
+                else:
+                    problem = f"`{g}` is not the ghost of an owner tagged `// cerastes:owning-global` nor an earlier `exm_` ghost"
+                if problem is None and re.fullmatch(r"loc\(member\(" + re.escape(x) + r",[0-9]+\),0\)\.v_[\w$']+", nxt) is None:
+                    problem = "the cell it reads is `loc(member(<X>, k), 0).v_T`, a member of the block `<X>` points to"
+            if problem:
+                add(lineno, f"`exm_{n}` is assigned `{rhs}`: {problem} (decision 0055 item 9)")
+            mine[n] = (lineno, nxt)
+        elif not FORPERM_LINE_RE.match(code):
+            add(lineno, "an `exm_<n>` ghost is read only in the `forperm` row of the exemption it frames (decision 0055 item 9)")
+    return info
+
+
 def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
     declared: dict[str, int] = {}
     for code in src.code:
@@ -1962,6 +2065,9 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                 break
         for a in OWNER_ASSIGN_RE.finditer(code):
             rhs = _statement_rhs(code, a.end())
+            tm = re.fullmatch(rf"({_ID})!=null", _nospace(rhs)) if a.group("g").startswith("held_") else None
+            if tm and owner_assignment_ok(a.group("g"), rhs) and (why := temp_entry_problem(src, lineno, tm.group(1), a.group("g"))):
+                add(lineno, f"{why} (decision 0055 items 5 and 6, item 9)")
             if not owner_assignment_ok(a.group("g"), rhs):
                 add(lineno, f"`{a.group('g')}` is assigned `{rhs}`: an owner's ghost is assigned `false`, `<x> != null`, `held && ...` "
                             "(the update after a call or a free, which reads the token's permission), `held || ...` (a block received "
@@ -1978,14 +2084,41 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                     or re.fullmatch(rf"if\(!\({re.escape(gm)}==\({cell}!=null\)\)\)\{{", n)):
                 add(lineno, f"`{gm}` is compared with something but `({cell_text.replace(',', ', ')}.v_ptr_T != null)`, in the loop invariant "
                             "or its row (decision 0054 item 5)")
+    ref_vars = {m.group(1) for l in src.code if (m := re.match(r"^\s*var\s+([\w$']+)\s*:\s*Ref\b", l))}
+    exm_info = lint_exemption_ghosts(src, decls, ghosts, add)
+    for lineno, code in enumerate(src.code, start=1):
+        for gm in sorted({m.group("ghost") for m in LOCAL_GHOST_COMPARE_RE.finditer(code)}):
+            n = _nospace(code)
+            leafish = any(re.fullmatch(rf"held_{re.escape(v)}(?:_[0-9]+)+", gm) for v in ref_vars) or any(
+                (lo := leaf_cell_owner(c)) is not None for c in re.findall(r"(loc\(member\(.*?,[0-9]+\),0\)\.v_ptr_[\w$']+)!=null", n))
+            if not leafish:
+                continue
+            ok = False
+            for shape in (rf"invariant{re.escape(gm)}==\((?P<c>.+)!=null\)", rf"if\(!\({re.escape(gm)}==\((?P<c>.+)!=null\)\)\)\{{"):
+                if (m := re.fullmatch(shape, n)) is not None:
+                    c = m.group("c")
+                    lo = leaf_cell_owner(c)
+                    ok = (re.fullmatch(_ID, c) is not None and gm == "held_" + c) or (lo is not None and gm == leaf_ghost_name(lo[1], lo[2]))
+            if not ok:
+                add(lineno, f"`{gm}` is compared with something but `(<its own cell> != null)`, in the loop invariant or its entry and back-edge "
+                            "rows: an owning local's own value, or an owning leaf's own cell, the one its name spells (decision 0055 items 7 and 9)")
     for lineno, code in enumerate(src.code, start=1):
         m = FORPERM_LINE_RE.match(code)
         if m is None:
             continue
         body = _strip_wrap(m.group("body").strip())
+        enclosing = next((d for d in decls if d.kind == "method" and d.line <= lineno <= d.end_line), None)
         for disjunct in _flatten_or(body):
             conjuncts = [_strip_wrap(c) for c in _split_top(_strip_wrap(disjunct), "&&")]
             helds = [c for c in conjuncts if re.fullmatch(r"held_[\w$']*", c)]
+            for e in (c for c in conjuncts if re.fullmatch(r"exm_[0-9]+", c)):
+                got = exm_info.get(enclosing.line if enclosing else -1, {}).get(int(e[len("exm_"):]))
+                tt = next((re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", c, re.S) for c in conjuncts if c.startswith("t")), None)
+                if got is None or got[0] > lineno:
+                    add(lineno, f"`{e}` is read by this exemption row but not assigned before it in this method (decision 0055 item 9)")
+                elif tt is None or re.fullmatch(rf"loc\(block_of\({re.escape(got[1])}\),\(?-1\)?\)", _nospace(tt.group("loc"))) is None:
+                    add(lineno, f"the exemption term guarded by `{e}` is exactly `t == loc(block_of({got[1]}), -1)`: the block of the cell `{e}` "
+                                "read, one member further than its guard (decision 0055 item 9)")
             if not helds:
                 continue
             for c in conjuncts:

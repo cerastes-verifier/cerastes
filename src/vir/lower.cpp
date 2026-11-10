@@ -2036,6 +2036,17 @@ private:
         }
         return owners;
     }
+    static bool has_owning_leaf(const StructType& st)
+    {
+        for (const StructLeaf& l : struct_leaves(st))
+        {
+            if (l.owning)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
     // The owning leaves of the struct locals declared directly in a block (decision 0055 item 5), in declaration order.
     static std::vector<OwnerRef> leaf_owners_of(const Stmt& block)
     {
@@ -2369,6 +2380,13 @@ private:
             r.global = b->global;
             r.path.assign(rev.rbegin(), rev.rend());
         }
+        else if (b != nullptr && b->kind == Expr::Kind::AddrOf && b->var != nullptr && b->var->type.is_struct() &&
+                 !rev.empty())
+        {
+            // decision 0055 item 7: an owning leaf of a struct local (`s.q`: `Deref(MemberAddr(AddrOf s, k))`)
+            r.var = b->var;
+            r.path.assign(rev.rbegin(), rev.rend());
+        }
         return r;
     }
     bool holds_global_at_entry(const Function& f, const OwnerRef& g)
@@ -2517,6 +2535,48 @@ private:
             }
         }
         return r;
+    }
+    // The owning leaves of named structures (struct locals, struct globals, `static` struct locals) whose block a written site of the loop's invariant (the user's or
+    // item 7's synthetic one) carries (decision 0055 item 7).
+    std::vector<OwnerRef> loop_leaf_owners(const std::vector<WBlock>& wbs)
+    {
+        std::vector<OwnerRef> all;
+        for (const OwnerRef& g_ref : fn_.gowners)
+        {
+            if (!g_ref.path.empty())
+            {
+                all.push_back(g_ref);
+            }
+        }
+        for (const OwnerRef& l : leaf_owners_in_scope())
+        {
+            all.push_back(l);
+        }
+        std::vector<OwnerRef> r;
+        for (const OwnerRef& o : all)
+        {
+            for (const WBlock& b : wbs)
+            {
+                if (b.site != nullptr && site_leaf_owner(*b.site) == o)
+                {
+                    r.push_back(o);
+                    break;
+                }
+            }
+        }
+        return r;
+    }
+    // `held_L == (L != NULL)`: a carried leaf's ghost follows its value.
+    E leaf_held_agrees(const OwnerRef& o)
+    {
+        return low::bin(low::BinOp::Eq, low::var(held_name(o)), low::bin(low::BinOp::Ne, owner_value(o), low::null_()));
+    }
+    void leaf_held_row(const OwnerRef& o, const SrcLoc& at, std::vector<low::LStmt>& out)
+    {
+        emit_ending_assert(out, leaf_held_agrees(o),
+                           meta("permission", at,
+                                "the loop needs owning field `" + owner_text(o) +
+                                    "` to point to a block the function holds, or to be null"));
     }
     // `held_g == (g != NULL)`: the carried global's ghost follows its value (the loop head's state: the function holds `g`'s block exactly when `g` points to one).
     E global_held_agrees(const Global& g)
@@ -2701,6 +2761,30 @@ private:
                 r.insert(held_name(*g));
             }
         }
+        // decision 0055 item 7: a leaf ghost the loop neither carries nor can reach keeps its value across it; the others are the loop's
+        const std::vector<OwnerRef> carried_leaves {loop_leaf_owners(wbs)};
+        std::vector<OwnerRef> leaves;
+        for (const OwnerRef& g_ref : fn_.gowners)
+        {
+            if (!g_ref.path.empty())
+            {
+                leaves.push_back(g_ref);
+            }
+        }
+        for (const OwnerRef& l : leaf_owners_in_scope())
+        {
+            leaves.push_back(l);
+        }
+        for (const OwnerRef& l : leaves)
+        {
+            if (std::find(carried_leaves.begin(), carried_leaves.end(), l) == carried_leaves.end() &&
+                (l.var == nullptr || declared.count(l.var->id) == 0U) && !touches_cells_of_type(&loop, owner_type(l)) &&
+                !loop_calls_reach_cells_of(loop, owner_type(l)) &&
+                !(l.global != nullptr && loop_global_uses(loop).count(l.global->id) != 0U))
+            {
+                r.insert(held_name(l));
+            }
+        }
         for (const OwnerRef& o_ref : owners_in_scope())
         {
             const Var* o {o_ref.var};
@@ -2750,7 +2834,14 @@ private:
             {
                 // the value goes through a temp, the one shape of `held := x != null` the lint admits
                 const std::string t {new_temp(low::LType::Ref)};
-                assign(out, t, owner_value(g_ref));
+                // an owning leaf of a struct global (decision 0055 item 5): the `owns(g)` that holds it may be guarded (`c ? owns(g) : true`), so the cell is read only where
+                // the function holds it
+                assign(out, t,
+                       g_ref.path.empty()
+                           ? owner_value(g_ref)
+                           : low::ite(low::bin(low::BinOp::Gt, value_perm(owner_cell(g_ref), owner_type(g_ref)),
+                                               low::no_perm()),
+                                      owner_value(g_ref), low::null_()));
                 assign(out, held_name(g_ref), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
             }
             else
@@ -2975,6 +3066,15 @@ private:
             {
                 outlives(sc.owners[j].var);
             }
+            // the owning leaves of the outer scopes' struct locals outlive this exit (a leaf of this scope ends with it and takes this owner in its own row)
+            for (size_t j {0U}; j < k; ++j)
+            {
+                for (const OwnerRef& l : fn_.scopes[j].leaves)
+                {
+                    others.push_back(
+                        low::and_(low::var(held_name(l)), low::bin(low::BinOp::Eq, owner_value(v), owner_value(l))));
+                }
+            }
             // the entry values of the formals with an `ensures` block site outlive every exit (a borrowed block parked
             // in an owning local, audit S11 and 2 S3); the result only a `return`
             global_outlives(owner_value(v), nullptr, others);
@@ -3061,6 +3161,11 @@ private:
                     others.push_back(
                         low::and_(low::var(held_name(*o)), low::bin(low::BinOp::Eq, self, owner_value(*o))));
                 }
+            }
+            // decision 0055 item 5 (P4417R0 p3: `s.q = v; v = NULL;`): an owning leaf of a struct local is an owner too
+            for (const OwnerRef& l : leaf_owners_in_scope())
+            {
+                others.push_back(low::and_(low::var(held_name(l)), low::bin(low::BinOp::Eq, self, owner_value(l))));
             }
             global_outlives(self, nullptr, others);
             for (const E& e : returned_owners(self, false))
@@ -4345,10 +4450,10 @@ private:
         }
         E conj {block_conj(p, block_ptr_type(site), e.a->c_text, block_mode(*cf_, site), kept,
                            cf_->allocator == Allocator::Vlibc || e.vlibc_block)};
-        if (const E cv = closure_cover(atoms_of(*cf_), site, env))
+        if (closure_cover(atoms_of(*cf_), site, env))
         {
-            // decision 0055 item 3 (audit S6): the closure of a covered output atom is returned by the implicit atom's own closure
-            conj = low::implies(low::not_(cv), conj);
+            // decision 0055 item 3 (audit S6, S3): the closure of an output atom that an implicit atom can cover is the implicit atom's own closure, and is not given again
+            conj = low::bool_lit(true);
         }
         return {conj, {}};
     }
@@ -11192,7 +11297,6 @@ private:
             return nullptr;
         }
         const PlaceKey pb {atom_place(*b.atom)};
-        E r;
         for (const AtomSite& j : fa.sites)
         {
             if (!j.in_ensures || j.atom->atom != AtomKind::Owns || !j.via.empty() || !is_output(fa, j) ||
@@ -11206,12 +11310,14 @@ private:
             {
                 continue;
             }
-            if (const E cv = cov_of(fa, j, env))
+            if (cov_of(fa, j, env))
             {
-                r = r ? low::bin(low::BinOp::Or, r, cv) : cv;
+                // an implicit atom can cover the output atom (r == &s): the clause is never given (decision 0055 item 3, audit S3: the cover's own `!cov ==>` clause made two
+                // calls of such a function time out, and a covered result's block is the implicit atom's closure's)
+                return low::bool_lit(true);
             }
         }
-        return r;
+        return nullptr;
     }
     // The rows of the `ensures` block sites at a return (item 4; 0037 item 10), after atom_returns' rows: the separation of every `ensures` block site from every other
     // `ensures` site (`lvloc` rows, audit S4: `return p` with owns_block(p) and owns_block(r) fails here, never in Silicon's own postcondition check), then each site's rows.
@@ -11236,11 +11342,11 @@ private:
         {
             const AtomSite& s {fb.sites[i]};
             E g {site_guard(s, env)};
-            // decision 0055 item 3 (audit S6): the block of an owning field that an output `owns` atom closes over is returned once, by the implicit `owns(s)` of the
-            // `static` struct that covers the atom, so its clause stands under `!cov` as the atom's own permissions do
-            if (const E cv = closure_cover(fa, s, env))
+            // decision 0055 item 3 (audit S6, S3): the block of an owning field that an output `owns` atom closes over is returned by the implicit `owns(s)` of the `static`
+            // struct that can cover the atom, so the clause has no row of its own
+            if (closure_cover(fa, s, env))
             {
-                g = g ? low::and_(g, low::not_(cv)) : low::not_(cv);
+                g = low::bool_lit(false);
             }
             rs.push_back(R {&s, block_ptr(s, env), g});
         }
@@ -13947,6 +14053,11 @@ private:
                 w.invariants.push_back(auto_invariant(cell_held_agrees(*v), s.loc));
                 cell_held_row(*v, s.loc, entry);
             }
+            for (const OwnerRef& o : loop_leaf_owners(wbs))
+            {
+                w.invariants.push_back(auto_invariant(leaf_held_agrees(o), s.loc));
+                leaf_held_row(o, s.loc, entry);
+            }
             flag_snaps = flags_kept_entry(s, wbs, loop_number, entry, w.invariants, s.loc);
         }
         const FramedScope framed {framed_ghosts_, framed_owner_ghosts(s, declared, wbs)};
@@ -14285,6 +14396,10 @@ private:
         for (const Var* v : loop_cell_owners(wbs))
         {
             cell_held_row(*v, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc, w.then_body);
+        }
+        for (const OwnerRef& o : loop_leaf_owners(wbs))
+        {
+            leaf_held_row(o, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc, w.then_body);
         }
         flags_kept_row(wbs, flag_snaps, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc,
                        w.then_body);
@@ -14684,7 +14799,7 @@ private:
     // that does not touch the owner keeps it out (the block stays in the frame).
     void owner_loop_sites(const Stmt& s, const std::set<int>& declared, std::vector<AtomSite>& sites)
     {
-        if (fn_.gowners.empty() && owners_in_scope().empty())
+        if (fn_.gowners.empty() && owners_in_scope().empty() && leaf_owners_in_scope().empty())
         {
             return;
         }
@@ -14725,6 +14840,139 @@ private:
                 sites.push_back(std::move(a));
             }
         };
+        // decision 0055 item 7: an owning leaf of a named structure the loop uses is carried like a global pointer: its synthetic site stands on the leaf's cell
+        auto named_leaf = [&](const OwnerRef& o)
+        {
+            for (const AtomSite& w : sites)
+            {
+                if (site_leaf_owner(w) == o)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        auto leaf_addr = [&](const OwnerRef& o)
+        {
+            const Expr* a {o.global != nullptr ? b.global_addr(o.global, s.loc) : b.addr_of(o.var, s.loc)};
+            for (const int k : o.path)
+            {
+                a = b.member_addr(a, k, s.loc);
+            }
+            return a;
+        };
+        for (const OwnerRef& g_ref : fn_.gowners)
+        {
+            if (g_ref.path.empty() || gused.count(g_ref.global->id) == 0U || named_leaf(g_ref) ||
+                !(fn_.f == prog_.entry() || holds_global_at_entry(*fn_.f, g_ref)))
+            {
+                continue;
+            }
+            make(leaf_addr(g_ref), owner_type(g_ref), owner_text(g_ref));
+        }
+        for (const OwnerRef& l : leaf_owners_in_scope())
+        {
+            // a leaf the loop reaches (names its structure, stores through a pointer of its type, or calls a function that names cells of its type) is carried; one it cannot
+            // reach keeps its ghost (framed_owner_ghosts), so no ghost is left to the loop head's havoc
+            if (declared.count(l.var->id) != 0U ||
+                !(lused.count(l.var->id) != 0U || touches_cells_of_type(&s, owner_type(l)) ||
+                  loop_calls_reach_cells_of(s, owner_type(l))) ||
+                named_leaf(l))
+            {
+                continue;
+            }
+            make(leaf_addr(l), owner_type(l), owner_text(l));
+        }
+        // decision 0055 item 7 (audit S5): an owner that points to a structure with owning fields (an owning local `struct S *v`, an owning `struct S *` global) carries
+        // the closure of the pointee's owning fields in a loop that uses it: `v == NULL || (v->q == NULL || owns_block(v->q) [&& the closure of v->q's pointee])`
+        auto closure_leaf = [&](auto&& self, const std::function<const Expr*()>& at_ptr, const Type& lt,
+                                const std::string& text) -> const Expr*
+        {
+            const Expr* v1 {at_ptr()};
+            const_cast<Expr*>(v1)->c_text = text;
+            const Expr* eq {b.binary(BinaryOp::Eq, v1, b.null_const(lt, s.loc), s.loc)};
+            const Expr* v2 {at_ptr()};
+            const_cast<Expr*>(v2)->c_text = text;
+            const Expr* atom {b.atom(AtomKind::OwnsBlock, v2, -1, s.loc)};
+            const Expr* inner {nullptr};
+            if (lt.pointee != nullptr && lt.pointee->is_struct() && lt.pointee->struct_type != nullptr)
+            {
+                for (const StructLeaf& l : struct_leaves(*lt.pointee->struct_type, text, true))
+                {
+                    if (!l.owning)
+                    {
+                        continue;
+                    }
+                    const std::vector<int> path {l.path};
+                    const std::function<const Expr*()> sub {[&b, at_ptr, path, loc = s.loc]()
+                                                            {
+                                                                const Expr* a {at_ptr()};
+                                                                for (const int k : path)
+                                                                {
+                                                                    a = b.member_addr(a, k, loc);
+                                                                }
+                                                                return b.deref(a, loc);
+                                                            }};
+                    // `at_ptr` builds the pointer to the structure; the leaf's own value is read from its cell
+                    const Expr* c {self(self, sub, l.type, l.text)};
+                    inner = inner != nullptr ? b.binary(BinaryOp::LAnd, inner, c, s.loc) : c;
+                }
+            }
+            return b.binary(BinaryOp::LOr, eq, inner != nullptr ? b.binary(BinaryOp::LAnd, atom, inner, s.loc) : atom,
+                            s.loc);
+        };
+        auto make_closure = [&](const std::function<const Expr*()>& ptr, const Type& pt, const std::string& text)
+        {
+            const Expr* all {nullptr};
+            for (const StructLeaf& l : struct_leaves(*pt.pointee->struct_type, text, true))
+            {
+                if (!l.owning)
+                {
+                    continue;
+                }
+                const std::vector<int> path {l.path};
+                const std::function<const Expr*()> leaf {[&b, ptr, path, loc = s.loc]()
+                                                         {
+                                                             const Expr* a {ptr()};
+                                                             for (const int k : path)
+                                                             {
+                                                                 a = b.member_addr(a, k, loc);
+                                                             }
+                                                             return b.deref(a, loc);
+                                                         }};
+                const Expr* c {closure_leaf(closure_leaf, leaf, l.type, l.text)};
+                all = all != nullptr ? b.binary(BinaryOp::LAnd, all, c, s.loc) : c;
+            }
+            if (all == nullptr)
+            {
+                return;
+            }
+            const Expr* p1 {ptr()};
+            const_cast<Expr*>(p1)->c_text = text;
+            const Expr* guard {b.binary(BinaryOp::Eq, p1, b.null_const(pt, s.loc), s.loc)};
+            Stmt& fake {synth_stmts_.emplace_back()};
+            fake.kind = Stmt::Kind::While;
+            fake.loc = s.loc;
+            fake.invariants.push_back(Clause {b.binary(BinaryOp::LOr, guard, all, s.loc), s.loc});
+            for (AtomSite& a : loop_block_atoms(fake))
+            {
+                synth_atoms_.insert(a.atom);
+                sites.push_back(std::move(a));
+            }
+        };
+        // a site already names a place through the owner's pointer (a written invariant on `v->q`): the user's takes precedence
+        auto named_through = [&](int root_key)
+        {
+            for (const AtomSite& w : sites)
+            {
+                const PlaceKey pk {atom_place(*w.atom)};
+                if (pk.root == root_key && pk.via.size() >= 2U)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
         for (const OwnerRef& g_ref : fn_.gowners)
         {
             const Global* g {g_ref.global};
@@ -14750,6 +14998,26 @@ private:
             const Expr* addr {b.addr_of(o, s.loc)};
             make(addr, o->type, o->name);
         }
+        // after the owners' own sites: the closure reads the owner's block, which those sites frame
+        for (const OwnerRef& o_ref : owners_in_scope())
+        {
+            const Var* o {o_ref.var};
+            if (!o->type.is_ptr() || o->type.pointee == nullptr || !o->type.pointee->is_struct() ||
+                o->type.pointee->struct_type == nullptr || !has_owning_leaf(*o->type.pointee->struct_type) ||
+                declared.count(o->id) != 0U || fn_.owner_declared.count(o->id) == 0U || lused.count(o->id) == 0U ||
+                named_through(kLocalSiteBase + o->id))
+            {
+                continue;
+            }
+            make_closure(
+                [&b, o, loc = s.loc]()
+                {
+                    return o->address_taken ? b.deref(b.addr_of(o, loc), loc) : b.local(o, loc);
+                },
+                o->type, o->name);
+        }
+        // (an owning `struct S *` global is not carried with the closure of its fields: the loop's places do not include the cells of a global pointer's block, the
+        // written form is refused the same way; a documented limit of this session, pinned)
     }
     std::set<const Expr*> synth_atoms_; // the atoms of those synthetic sites
     std::deque<Stmt>

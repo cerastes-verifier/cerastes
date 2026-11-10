@@ -5388,5 +5388,209 @@ class OwningLeafTests(unittest.TestCase):
                 self.assertTrue(any("`held_GB_g__0_0` is compared with something but" in p for p in probs), probs)
 
 
+
+class OwningLeafEntryAndExemptionTests(OwningLeafTests):
+    """Decision 0055 item 9, the entry and gives-back of a leaf ghost through a temp, and `main`'s deeper exemption (S4).  A leaf
+    ghost set from a temp that was just given a leaf's cell is set from the cell its name spells, under `null` as the else branch and,
+    where the guard reads a permission, exactly `perm(<that cell>) > none`; an `exm_<n>` is assigned once, in the shape of a held
+    ghost (tagged, its own cell) or an earlier `exm_` guarding the cell that one read, and a `forperm` disjunct `exm_<n> && t ==
+    loc(block_of(<cell>), -1)` names exactly that cell.  Each rule has twins that break exactly it (the inherited tests run again
+    over the same fixture, so the older rules keep their meaning)."""
+
+    L0CELL = OwningLeafTests.CELL
+    NEXT0 = f"loc(member({OwningLeafTests.CELL}, 0), 0).v_ptr_int"
+    NEXT1 = f"loc(member({NEXT0}, 1), 0).v_ptr_int"
+    EXM0 = f"  exm_0 := (held_GB_g__0_0 && ({OwningLeafTests.CELL} != null)) && (perm({NEXT0}) > none)"
+    EXM1 = f"  exm_1 := (exm_0 && ({NEXT0} != null)) && (perm({NEXT1}) > none)"
+    EXM_TERM = (f"(held_GB_g__0_0 && (t == loc(block_of({L0CELL}), (-1)))) || (exm_0 && (t == loc(block_of({NEXT0}), (-1)))) || "
+                f"(exm_1 && (t == loc(block_of({NEXT1}), (-1))))")
+    EXM_VARS = ["  var exm_0: Bool", "  var exm_1: Bool"]
+
+    def body(self, *lines):
+        return [*self.EXM_VARS, *lines]
+
+    def exm_probs(self, lines, term=None):
+        return self.probs(body=self.body(*lines), term=term or self.EXM_TERM)
+
+    # the temp ---------------------------------------------------------------------------------------------------------------------
+    def temp_probs(self, rhs, ghost="held_GB_g__0_0"):
+        return [p for p in self.probs(body=[f"  t := {rhs}", f"  {ghost} := t != null"]) if "is set from" in p]
+
+    def test_a_leaf_ghost_set_from_its_own_cell_through_a_temp_is_clean(self):
+        c = self.CELL
+        for rhs in (c, f"(k != 0) ? {c} : null", f"((((k != 0) ? 1 : 0) != 0) && (!(((m == null) ? 1 : 0) != 0))) ? {c} : null",
+                    f"(perm({c}) > none) ? {c} : null", f"perm({c}) > none ? {c} : null", "q", "(k != 0) ? q : null"):
+            with self.subTest(rhs=rhs):
+                self.assertEqual(self.temp_probs(rhs), [])
+        cell = "loc(member(v_s__0, 0), 0).v_ptr_int"
+        self.assertEqual(self.temp_probs(f"(perm({cell}) > none) ? {cell} : null", "held_v_s__0_0"), [])
+
+    def test_a_temp_set_from_another_leafs_cell_is_a_problem(self):
+        other = self.L1 + ".v_ptr_int"
+        for rhs in (other, f"(k != 0) ? {other} : null", f"(perm({other}) > none) ? {other} : null",
+                    "loc(member(loc(GB_h__0(), 0), 0), 0).v_ptr_int", "(k != 0) ? loc(member(v_s__0, 0), 0).v_ptr_int : null"):
+            with self.subTest(rhs=rhs):
+                self.assertTrue(any("another leaf's" in p for p in self.temp_probs(rhs)), self.temp_probs(rhs))
+        cell = self.CELL
+        self.assertTrue(any("another leaf's" in p for p in self.temp_probs(cell, "held_v_s__0_0")))
+
+    def test_the_else_branch_of_a_leaf_temp_is_null(self):
+        c = self.CELL
+        for rhs in (f"(k != 0) ? {c} : t", f"(k != 0) ? {c} : q", f"(k != 0) ? {c} : {c}", f"(perm({c}) > none) ? {c} : q"):
+            with self.subTest(rhs=rhs):
+                self.assertTrue(any("else branch is not `null`" in p for p in self.temp_probs(rhs)), self.temp_probs(rhs))
+
+    def test_a_guard_that_reads_a_permission_reads_the_leafs_own(self):
+        c, other = self.CELL, self.L1 + ".v_ptr_int"
+        for g in (f"(perm({other}) > none)", f"(perm({c}) >= none)", f"(perm({c}) > write)", f"(perm({c}) > none) || true",
+                  f"(perm(loc(GB_h__0(), 0).v_ptr_int) > none)"):
+            with self.subTest(guard=g):
+                self.assertTrue(any("guard reads a permission" in p for p in self.temp_probs(f"{g} ? {c} : null")), g)
+
+    def test_the_temp_rule_reads_only_the_held_ghosts_of_leaves(self):
+        # an unrelated temp, a pointer global's ghost and a local owner's ghost are not constrained by it
+        probs = [p for p in self.probs(body=["  t := (k != 0) ? v : null", "  held_v_s__0_0 := t != null"]) if "is set from" in p]
+        self.assertEqual(probs, [])
+
+    # exemption ghosts -------------------------------------------------------------------------------------------------------------
+    def test_the_deeper_exemption_of_the_emitters_shape_is_clean(self):
+        self.assertEqual(self.exm_probs([self.EXM0, self.EXM1]), [])
+
+    def test_an_exm_is_assigned_exactly_once(self):
+        self.assertTrue(any("is assigned twice" in p for p in self.exm_probs([self.EXM0, self.EXM0, self.EXM1])))
+
+    def test_an_exm_rooted_at_an_untagged_or_unknown_ghost_is_a_problem(self):
+        bad = self.EXM0.replace("held_GB_g__0_0 &&", "held_v_s__0_0 &&")
+        self.assertTrue(any("not the ghost of an owner tagged" in p for p in self.exm_probs([bad, self.EXM1])))
+        bad = self.EXM0.replace("held_GB_g__0_0 &&", "held_GB_g__0_1 &&")
+        self.assertTrue(any("not the ghost of an owner tagged" in p for p in self.exm_probs([bad, self.EXM1])))
+        bad = self.EXM0.replace("held_GB_g__0_0 &&", "true &&")
+        self.assertTrue(any("`exm_0` is assigned" in p for p in self.exm_probs([bad, self.EXM1])))
+
+    def test_an_exm_guards_its_owners_own_cell(self):
+        for cell in (self.L1 + ".v_ptr_int", "loc(GB_g__0(), 0).v_ptr_int", self.NEXT0):
+            with self.subTest(cell=cell):
+                bad = self.EXM0.replace(f"({self.CELL} != null)", f"({cell} != null)")
+                self.assertTrue(any("guards the cell of its own owner" in p for p in self.exm_probs([bad, self.EXM1])))
+
+    def test_the_cell_an_exm_reads_is_a_member_of_the_block_its_guard_points_to(self):
+        for nxt in ("loc(GB_h__0(), 0).v_ptr_int", self.CELL, f"loc(member({self.L1}, 0), 0).v_ptr_int",
+                    f"loc(member({self.CELL}, 0), 1).v_ptr_int", f"loc(block_of({self.NEXT0}), 0).v_ptr_int"):
+            with self.subTest(next=nxt):
+                bad = self.EXM0.replace(f"perm({self.NEXT0})", f"perm({nxt})")
+                self.assertTrue(any("`exm_0` is assigned" in p and "a member of the block" in p for p in self.exm_probs([bad])), nxt)
+
+    def test_an_exm_is_rooted_through_an_earlier_exm_and_the_cell_it_read(self):
+        self.assertTrue(any("is not assigned before it" in p for p in self.exm_probs([self.EXM1, self.EXM0])))
+        self.assertTrue(any("is not assigned before it" in p for p in self.exm_probs([self.EXM0, self.EXM1.replace("exm_0 &&", "exm_7 &&")])))
+        bad = self.EXM1.replace(f"({self.NEXT0} != null)", f"({self.CELL} != null)")
+        self.assertTrue(any("that it read, and no other" in p for p in self.exm_probs([self.EXM0, bad])))
+
+    def test_an_exm_has_the_shape_of_a_guarded_permission_read(self):
+        for rhs in (f"(held_GB_g__0_0 && ({self.CELL} != null))", f"(perm({self.NEXT0}) > none)", "true",
+                    f"(held_GB_g__0_0 && ({self.CELL} != null)) || (perm({self.NEXT0}) > none)",
+                    f"(held_GB_g__0_0 && ({self.CELL} != null)) && (perm({self.NEXT0}) >= none)",
+                    f"(held_GB_g__0_0 && ({self.CELL} == null)) && (perm({self.NEXT0}) > none)"):
+            with self.subTest(rhs=rhs):
+                self.assertTrue(any("`exm_0` is assigned" in p for p in self.exm_probs([f"  exm_0 := {rhs}", self.EXM1])), rhs)
+
+    def test_an_exm_is_read_only_in_the_row_it_frames(self):
+        probs = self.exm_probs([self.EXM0, self.EXM1, "  assert exm_0"])
+        self.assertTrue(any("is read only in the `forperm` row" in p for p in probs), probs)
+
+    def test_a_disjunct_names_the_cell_its_exm_read(self):
+        n0, n1 = self.NEXT0, self.NEXT1
+        for term in (self.EXM_TERM.replace(f"exm_0 && (t == loc(block_of({n0})", f"exm_0 && (t == loc(block_of({n1})"),
+                     self.EXM_TERM.replace(f"exm_1 && (t == loc(block_of({n1})", f"exm_1 && (t == loc(block_of({n0})"),
+                     self.EXM_TERM.replace(f"exm_0 && (t == loc(block_of({n0})", f"exm_0 && (t == loc(block_of({self.L0CELL})"),
+                     self.EXM_TERM.replace(f"exm_0 && (t == loc(block_of({n0}), (-1)))", f"exm_0 && (t == loc(block_of({n0}), 0))")):
+            with self.subTest(term=term):
+                probs = self.exm_probs([self.EXM0, self.EXM1], term=term)
+                self.assertTrue(any("the exemption term guarded by `exm_" in p for p in probs), probs)
+
+    def test_a_disjunct_of_an_exm_never_assigned_is_a_problem(self):
+        probs = self.exm_probs([self.EXM0])
+        self.assertTrue(any("`exm_1` is read by this exemption row but not assigned" in p for p in probs), probs)
+
+    def test_an_exm_assigned_after_its_row_is_a_problem(self):
+        lines = self.fixture(body=self.body(self.EXM0), term=self.EXM_TERM)
+        lines.insert(len(lines) - 1, self.EXM1)
+        probs = [p for p in self.strict(lines) if "decision 0055" in p]
+        self.assertTrue(any("`exm_1` is read by this exemption row but not assigned before it" in p for p in probs), probs)
+        lines = self.fixture(body=self.body(self.EXM0, self.EXM1), term=self.EXM_TERM)
+        self.assertEqual([p for p in self.strict(lines) if "decision 0055" in p], [])
+
+    def test_an_exm_outside_a_method_is_a_problem(self):
+        lines = self.fixture(body=self.body(self.EXM0, self.EXM1), term=self.EXM_TERM)
+        lines.insert(0, "  var exm_9: Bool")
+        probs = [p for p in self.strict(lines) if "decision 0055" in p]
+        self.assertTrue(any("stands only inside a method" in p for p in probs), probs)
+
+    def test_a_pointer_global_roots_an_exemption_at_its_own_cell(self):
+        base = OwningGlobalTagTests()
+        cell = base.CELL
+        nxt = f"loc(member({cell}, 0), 0).v_ptr_int"
+        exm0 = f"  exm_0 := (held_GB_g__0 && ({cell} != null)) && (perm({nxt}) > none)"
+        term = f"(held_GB_g__0 && (t == loc(block_of({cell}), (-1)))) || (exm_0 && (t == loc(block_of({nxt}), (-1))))"
+
+        def probs(line, t=term):
+            lines = base.fixture(body=["  var exm_0: Bool", *base.LEGAL, line], term=t)
+            return [p for p in base.strict(lines) if "decision 0055" in p]
+        self.assertEqual(probs(exm0), [])
+        self.assertTrue(any("guards the cell of its own owner" in p for p in probs(exm0.replace(f"({cell} != null)", "(loc(GB_h__0(), 0).v_ptr_int != null)"))))
+        self.assertTrue(any("not the ghost of an owner tagged" in p for p in probs(exm0.replace("held_GB_g__0 &&", "held_v &&"))))
+        self.assertTrue(any("the exemption term guarded by `exm_0`" in p for p in probs(exm0, term.replace(f"exm_0 && (t == loc(block_of({nxt})", f"exm_0 && (t == loc(block_of({cell})"))))
+
+
+
+class OwningLeafLoopCarryTests(OwningLeafTests):
+    """Decision 0055 item 7 (Part D): the loop carry of an owning struct local's leaf, `invariant held_<var>_<k> == (<leaf cell> != null)`
+    and its entry and back-edge rows `if (!(held_<var>_<k> == (<cell> != null))) { assert false }`: the comparison is with the cell of that very
+    leaf, the one the ghost's name spells (the global leaf's and the pointer global's comparisons are OwningLeafTests' and
+    OwningGlobalTagTests').  A twin changes the cell, the variable, the path, the operator or the right-hand side."""
+
+    SCELL = "loc(member(v_s__0, 0), 0).v_ptr_int"
+
+    def loop(self, inv, row=None, ghost="held_v_s__0_0"):
+        body = ["  var v_s__0: Ref", *self.LEGAL, "  var i: Int := 0", "  while (i < 3)", Check(inv, INV, "internal"),
+                Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1"]
+        if row is not None:
+            body += [f"    if (!({row})) {{", Check("      assert false", A, "permission"), "    }"]
+        body += ["  }"]
+        return self.probs(body=body)
+
+    def test_the_emitters_loop_carry_of_a_local_leaf_is_clean(self):
+        g, c = "held_v_s__0_0", self.SCELL
+        self.assertEqual(self.loop(f"    invariant {g} == ({c} != null)", f"{g} == ({c} != null)"), [])
+
+    def test_a_local_leafs_flag_is_compared_only_with_its_own_cells_nullness(self):
+        g, c = "held_v_s__0_0", self.SCELL
+        other_var = "loc(member(v_t__0, 0), 0).v_ptr_int"
+        other_member = "loc(member(v_s__0, 1), 0).v_ptr_int"
+        deeper = "loc(member(loc(member(v_s__0, 0), 0), 1), 0).v_ptr_int"
+        for rhs in (f"({c} == null)", "true", f"({c} != null) || true", f"({other_var} != null)", f"({other_member} != null)",
+                    f"({deeper} != null)", "(v_s__0 != null)", f"(!({c} != null))"):
+            for shape in ("    invariant {g} == {rhs}", None):
+                with self.subTest(rhs=rhs, shape=shape):
+                    if shape:
+                        probs = self.loop(shape.format(g=g, rhs=rhs))
+                    else:
+                        probs = self.loop(f"    invariant {g} == ({c} != null)", f"{g} == {rhs}")
+                    self.assertTrue(any(f"`{g}` is compared with something but" in p for p in probs), probs)
+
+    def test_the_ghost_of_another_leaf_compares_with_that_leafs_cell(self):
+        probs = self.loop(f"    invariant held_v_s__0_1 == ({self.SCELL} != null)", ghost="held_v_s__0_1")
+        self.assertTrue(any("`held_v_s__0_1` is compared with something but" in p for p in probs), probs)
+        probs = self.loop(f"    invariant held_v_t__0_0 == ({self.SCELL} != null)")
+        self.assertTrue(any("`held_v_t__0_0` is compared with something but" in p for p in probs), probs)
+
+    def test_an_owning_locals_own_comparison_is_not_read_by_the_leaf_rule(self):
+        # the owning local of decision 0052 compares its flag with its own value; the rule reads leaf ghosts only
+        body = ["  var v_p__0: Ref", "  var held_v_p__0: Bool", "  var i: Int := 0", "  while (i < 3)",
+                Check("    invariant held_v_p__0 == (v_p__0 != null)", INV, "internal"),
+                Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1", "  }"]
+        self.assertEqual([p for p in self.probs(body=body) if "is compared with something" in p], [])
+
+
 if __name__ == "__main__":
     unittest.main()
