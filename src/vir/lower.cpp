@@ -808,6 +808,30 @@ struct Env
     std::vector<E> result_leaves;
 };
 
+// Decision 0055 item 5: the identity of an owner in memory, one type for every owner the lowering tracks with a held ghost: an owning local (`var`), an owning
+// global or `static` local (`global`), and, for an owning leaf of a struct local or global, the member path from the root (`path`, empty for the pointer
+// variable or global itself).  Exactly one of `var` and `global` is set.  It converts implicitly from a variable or a global, so the code that names an owner by one
+// of them keeps its spelling; the names and values of an owner come from the lowering's accessors (`held_name`, `tv_name`, `owner_value`), not from the callers.
+struct OwnerRef
+{
+    const Var* var {nullptr};
+    const Global* global {nullptr};
+    std::vector<int> path;
+    OwnerRef() = default;
+    OwnerRef(const Var* v) : var {v} {}
+    OwnerRef(const Var& v) : var {&v} {}
+    OwnerRef(const Global* g) : global {g} {}
+    OwnerRef(const Global& g) : global {&g} {}
+    bool operator==(const OwnerRef& o) const
+    {
+        return var == o.var && global == o.global && path == o.path;
+    }
+    bool operator!=(const OwnerRef& o) const
+    {
+        return !(*this == o);
+    }
+};
+
 class Lowerer
 {
 public:
@@ -1443,12 +1467,12 @@ private:
             std::vector<const Var*> cells; // in declaration order
             SrcLoc end;                    // the closing brace
             // decision 0052 item 3: the `owning` locals declared directly in the block, in declaration order
-            std::vector<const Var*> owners;
+            std::vector<OwnerRef> owners;
         };
         // the owning locals whose ghosts (`held_v`, `tv_v`) the method declares
         std::set<int> owner_ghosts;
         // decision 0054 item 5: the owning globals and `static` locals whose ghosts (`held_g`) every method of the program declares
-        std::vector<const Global*> gowners;
+        std::vector<OwnerRef> gowners;
         // the owning locals whose declaration has been lowered: a loop carries those (a `for` initializer's owner
         // shares the loop's line)
         std::set<int> owner_declared;
@@ -1990,9 +2014,9 @@ private:
     // ---- owning automatic locals (decision 0052 item 3) ----
 
     // The owning locals declared directly in a block, in declaration order.
-    static std::vector<const Var*> owners_of(const Stmt& block)
+    static std::vector<OwnerRef> owners_of(const Stmt& block)
     {
-        std::vector<const Var*> owners;
+        std::vector<OwnerRef> owners;
         for (const Stmt* c : block.stmts)
         {
             if (c != nullptr && c->kind == Stmt::Kind::Decl && c->var != nullptr && c->var->owning)
@@ -2010,8 +2034,9 @@ private:
     Fn::Scope scope_of(const Stmt& block, const std::vector<const Var*>& cells, const SrcLoc& end)
     {
         Fn::Scope sc {cells, end, owners_of(block)};
-        for (const Var* o : sc.owners)
+        for (const OwnerRef& o_ref : sc.owners)
         {
+            const Var* o {o_ref.var};
             if (fn_.owner_ghosts.insert(o->id).second)
             {
                 // `held_v`: the function holds the block `v` points to and `v` owns it; `tv_v`: that block's token
@@ -2026,23 +2051,39 @@ private:
         }
         return sc;
     }
-    std::string held_name(const Var& v)
+    // The names and the value of an owner (decision 0055 item 5: one identity for every owner): the ghost `held_<root>` of the owning local or the owning
+    // global or `static` local, followed by `_<k>` for each member of an owning leaf's path.
+    static std::string owner_suffix(const OwnerRef& o)
     {
-        return "held_" + var_name(v);
+        std::string r;
+        for (const int k : o.path)
+        {
+            r += "_" + std::to_string(k);
+        }
+        return r;
     }
-    // The value of an owning local: the variable, or the value of its cell when it is address-taken (decision 0054 item 6).
-    E owner_value(const Var& v)
+    std::string held_name(const OwnerRef& o)
     {
+        return (o.global != nullptr ? "held_" + o.global->viper_name() : "held_" + var_name(*o.var)) + owner_suffix(o);
+    }
+    // The value of an owner: the owning local's variable, or the value of its cell when it is address-taken (decision 0054 item 6); an owning global's cell value.
+    E owner_value(const OwnerRef& o)
+    {
+        if (o.global != nullptr)
+        {
+            return cell_value(global_ref(o.global->id), o.global->type);
+        }
+        const Var& v {*o.var};
         return v.address_taken ? cell_value(low::var(var_name(v)), v.type) : low::var(var_name(v));
     }
-    std::string tv_name(const Var& v)
+    std::string tv_name(const OwnerRef& o)
     {
-        return "tv_" + var_name(v);
+        return "tv_" + var_name(*o.var) + owner_suffix(o);
     }
     // The owning locals of every open scope, outermost first.
-    std::vector<const Var*> owners_in_scope() const
+    std::vector<OwnerRef> owners_in_scope() const
     {
-        std::vector<const Var*> r;
+        std::vector<OwnerRef> r;
         for (const Fn::Scope& sc : fn_.scopes)
         {
             r.insert(r.end(), sc.owners.begin(), sc.owners.end());
@@ -2061,8 +2102,9 @@ private:
     void held_updates(std::vector<low::LStmt>& out, const Function* callee = nullptr,
                       const std::vector<LV>* args = nullptr)
     {
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             if (framed_ghosts_.count(held_name(*o)) != 0U)
             {
                 continue; // framed out of the enclosing loop
@@ -2100,23 +2142,24 @@ private:
         }
         // decision 0054 item 5 (Updates are framed): the cell is read only where the function still holds it; a callee that consumed `owns(g)` has taken the
         // cell and the block, so `held_g` becomes false without a read.  A callee that gives `owns(g)` back (an `ensures` atom) returns what `g` holds.
-        for (const Global* g : fn_.gowners)
+        for (const OwnerRef& g_ref : fn_.gowners)
         {
-            if (framed_ghosts_.count(gheld_name(*g)) != 0U)
+            const Global* g {g_ref.global};
+            if (framed_ghosts_.count(held_name(*g)) != 0U)
             {
                 continue; // framed out of the enclosing loop
             }
             const E cell {global_ref(g->id)};
-            assign(out, gheld_name(*g),
-                   low::and_(low::and_(low::var(gheld_name(*g)),
+            assign(out, held_name(*g),
+                   low::and_(low::and_(low::var(held_name(*g)),
                                        low::bin(low::BinOp::Gt, value_perm(cell, g->type), low::no_perm())),
-                             holds_token(gvalue(*g))));
+                             holds_token(owner_value(*g))));
             if (callee != nullptr && gives_global(*callee, *g))
             {
                 const std::string t {new_temp(low::LType::Ref)};
-                assign(out, t, gvalue(*g));
+                assign(out, t, owner_value(*g));
                 const E v {low::var(t)};
-                assign(out, gheld_name(*g), low::bin(low::BinOp::Ne, v, low::null_()));
+                assign(out, held_name(*g), low::bin(low::BinOp::Ne, v, low::null_()));
             }
         }
     }
@@ -2142,15 +2185,6 @@ private:
 
     // ---- owning globals and `static` locals (decision 0054 item 5) ----
 
-    std::string gheld_name(const Global& g) const
-    {
-        return "held_" + g.viper_name();
-    }
-    // the value of the global: its cell's value
-    E gvalue(const Global& g)
-    {
-        return cell_value(global_ref(g.id), g.type);
-    }
     // The owning global an `OwnsBlock` site names by its value (`g`: `Deref(GlobalAddr g)`), or null.
     static const Global* site_global(const AtomSite& s)
     {
@@ -2210,8 +2244,9 @@ private:
                                                            const E& value, std::vector<low::LStmt>& out)
     {
         std::vector<std::pair<const Var*, E>> r;
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             if (!o->address_taken || !(o->type == t))
             {
                 continue;
@@ -2241,8 +2276,9 @@ private:
     std::vector<const Global*> loop_global_owners(const std::vector<WBlock>& wbs)
     {
         std::vector<const Global*> r;
-        for (const Global* g : fn_.gowners)
+        for (const OwnerRef& g_ref : fn_.gowners)
         {
+            const Global* g {g_ref.global};
             for (const WBlock& b : wbs)
             {
                 if (b.site != nullptr && site_global(*b.site) == g)
@@ -2257,7 +2293,7 @@ private:
     // `held_g == (g != NULL)`: the carried global's ghost follows its value (the loop head's state: the function holds `g`'s block exactly when `g` points to one).
     E global_held_agrees(const Global& g)
     {
-        return low::bin(low::BinOp::Eq, low::var(gheld_name(g)), low::bin(low::BinOp::Ne, gvalue(g), low::null_()));
+        return low::bin(low::BinOp::Eq, low::var(held_name(g)), low::bin(low::BinOp::Ne, owner_value(g), low::null_()));
     }
     // A synthetic site does not require the cells' flags, but must not lose what the function knew: at the loop entry each cell's flag is read (while the block is
     // the site's and held), and `p != NULL && flag_entry ==> flag` is invariant, with a row at the back edge (category `uninitialized`): a loop that begins with an
@@ -2359,8 +2395,9 @@ private:
     std::vector<const Var*> loop_cell_owners(const std::vector<WBlock>& wbs)
     {
         std::vector<const Var*> r;
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             for (const WBlock& b : wbs)
             {
                 if (o->address_taken && b.site != nullptr && site_cell_var(*b.site) == o)
@@ -2423,16 +2460,18 @@ private:
         std::set<std::string> r;
         const std::vector<const Global*> carried_globals {loop_global_owners(wbs)};
         const std::vector<const Var*> carried_cells {loop_cell_owners(wbs)};
-        for (const Global* g : fn_.gowners)
+        for (const OwnerRef& g_ref : fn_.gowners)
         {
+            const Global* g {g_ref.global};
             if (std::find(carried_globals.begin(), carried_globals.end(), g) == carried_globals.end() &&
                 !loop_calls_reach_cells_of(loop, g->type))
             {
-                r.insert(gheld_name(*g));
+                r.insert(held_name(*g));
             }
         }
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             if (o->address_taken && declared.count(o->id) == 0U && fn_.owner_declared.count(o->id) != 0U &&
                 std::find(carried_cells.begin(), carried_cells.end(), o) == carried_cells.end() &&
                 !loop_calls_reach_cells_of(loop, o->type))
@@ -2473,29 +2512,31 @@ private:
     // the block when its `requires` has the deep atom, and then `g` is NULL or the block of a pointer it holds.
     void global_owner_entry(const Function& f, std::vector<low::LStmt>& out)
     {
-        for (const Global* g : fn_.gowners)
+        for (const OwnerRef& g_ref : fn_.gowners)
         {
+            const Global* g {g_ref.global};
             if (&f != prog_.entry() && holds_global_at_entry(f, *g))
             {
                 // the value goes through a temp, the one shape of `held := x != null` the lint admits
                 const std::string t {new_temp(low::LType::Ref)};
-                assign(out, t, gvalue(*g));
-                assign(out, gheld_name(*g), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
+                assign(out, t, owner_value(*g));
+                assign(out, held_name(*g), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
             }
             else
             {
-                assign(out, gheld_name(*g), low::bool_lit(false));
+                assign(out, held_name(*g), low::bool_lit(false));
             }
         }
     }
     // The owning globals other than `except` that the function holds, as owners that outlive an ending: `held_o && self == o`.
     void global_outlives(const E& self, const Global* except, std::vector<E>& others)
     {
-        for (const Global* o : fn_.gowners)
+        for (const OwnerRef& o_ref : fn_.gowners)
         {
+            const Global* o {o_ref.global};
             if (o != except)
             {
-                others.push_back(low::and_(low::var(gheld_name(*o)), low::bin(low::BinOp::Eq, self, gvalue(*o))));
+                others.push_back(low::and_(low::var(held_name(*o)), low::bin(low::BinOp::Eq, self, owner_value(*o))));
             }
         }
     }
@@ -2506,10 +2547,11 @@ private:
         const std::string t {new_temp(low::LType::Ref)};
         assign(out, t, value);
         const E nv {low::var(t)};
-        const E self {gvalue(g)};
+        const E self {owner_value(g)};
         std::vector<E> others {low::bin(low::BinOp::Eq, self, nv)};
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             others.push_back(low::and_(low::var(held_name(*o)), low::bin(low::BinOp::Eq, self, owner_value(*o))));
         }
         global_outlives(self, &g, others);
@@ -2517,7 +2559,7 @@ private:
         {
             others.push_back(e);
         }
-        ending_row(out, low::var(gheld_name(g)), g.c_name, others, loc, "assigning to owning");
+        ending_row(out, low::var(held_name(g)), g.c_name, others, loc, "assigning to owning");
         emit_ending_assert(
             out,
             low::implies(low::bin(low::BinOp::Ne, nv, low::null_()),
@@ -2529,7 +2571,7 @@ private:
     }
     void global_owner_after(const Global& g, const E& nv, std::vector<low::LStmt>& out)
     {
-        assign(out, gheld_name(g), low::bin(low::BinOp::Ne, nv, low::null_()));
+        assign(out, held_name(g), low::bin(low::BinOp::Ne, nv, low::null_()));
     }
     // The owning global an address names (`&g` as a store's address), or null.
     static const Global* owning_global_of(const Expr* addr)
@@ -2631,7 +2673,7 @@ private:
         const Fn::Scope& sc {fn_.scopes[k]};
         for (size_t i {sc.owners.size()}; i-- > 0U;)
         {
-            const Var& v {*sc.owners[i]};
+            const Var& v {*sc.owners[i].var};
             std::vector<E> others;
             auto outlives = [&](const Var* o)
             {
@@ -2640,14 +2682,15 @@ private:
             };
             for (size_t j {0U}; j < k; ++j)
             {
-                for (const Var* o : fn_.scopes[j].owners)
+                for (const OwnerRef& o_ref : fn_.scopes[j].owners)
                 {
+                    const Var* o {o_ref.var};
                     outlives(o);
                 }
             }
             for (size_t j {0U}; j < i; ++j)
             {
-                outlives(sc.owners[j]);
+                outlives(sc.owners[j].var);
             }
             // the entry values of the formals with an `ensures` block site outlive every exit (a borrowed block parked
             // in an owning local, audit S11 and 2 S3); the result only a `return`
@@ -2690,8 +2733,9 @@ private:
         if (reassignment)
         {
             std::vector<E> others {low::bin(low::BinOp::Eq, self, nv)};
-            for (const Var* o : owners_in_scope())
+            for (const OwnerRef& o_ref : owners_in_scope())
             {
+                const Var* o {o_ref.var};
                 if (o != &v)
                 {
                     others.push_back(
@@ -2786,8 +2830,9 @@ private:
                    bool returning)
     {
         bool cell_owner {false};
-        for (const Var* o : fn_.scopes[k].owners)
+        for (const OwnerRef& o_ref : fn_.scopes[k].owners)
         {
+            const Var* o {o_ref.var};
             cell_owner = cell_owner || o->address_taken;
         }
         if (cell_owner)
@@ -9455,8 +9500,9 @@ private:
                 if (scoped)
                 {
                     fn_.scopes.push_back(scope_of(s, cells, s.end_loc));
-                    for (const Var* o : fn_.scopes.back().owners)
+                    for (const OwnerRef& o_ref : fn_.scopes.back().owners)
                     {
+                        const Var* o {o_ref.var};
                         // an owner holds nothing at its scope's entry (audit S4: a goto past the declaration, a loop
                         // re-entering the block)
                         assign(out, held_name(*o), low::bool_lit(false));
@@ -9746,8 +9792,9 @@ private:
         if (body_scoped)
         {
             fn_.scopes.push_back(scope_of(*s.body, body_cells, s.body->end_loc));
-            for (const Var* o : fn_.scopes.back().owners)
+            for (const OwnerRef& o_ref : fn_.scopes.back().owners)
             {
+                const Var* o {o_ref.var};
                 assign(out, held_name(*o), low::bool_lit(false));
             }
         }
@@ -10666,10 +10713,11 @@ private:
         {
             // decision 0054 item 5 (`main`, question 174): an owning global or `static` local the function still holds keeps its block past `main` (P4417R0 (2.3)); the term is
             // guarded by `held_g`, so the cell is read only where `main` holds it
-            for (const Global* g : fn_.gowners)
+            for (const OwnerRef& g_ref : fn_.gowners)
             {
-                const E term {
-                    low::and_(low::var(gheld_name(*g)), low::bin(low::BinOp::Eq, low::var("t"), tok_slot(gvalue(*g))))};
+                const Global* g {g_ref.global};
+                const E term {low::and_(low::var(held_name(*g)),
+                                        low::bin(low::BinOp::Eq, low::var("t"), tok_slot(owner_value(*g))))};
                 r = r ? low::bin(low::BinOp::Or, r, term) : term;
             }
         }
@@ -11880,8 +11928,8 @@ private:
                 std::vector<Place::OwnerLink> links;
                 for (const LoopOwner& lo : loop_owner_list_)
                 {
-                    const E ov {low::var(var_name(*lo.var))};
-                    const std::string nm {"ad_" + tag + "_" + var_name(*lo.var) + suffix_of_loop};
+                    const E ov {low::var(var_name(*lo.owner.var))};
+                    const std::string nm {"ad_" + tag + "_" + var_name(*lo.owner.var) + suffix_of_loop};
                     fn_.snapshots.push_back(low::LVar {nm, low::LType::Bool});
                     const E cur {low::and_(low::and_(gnull, low::bin(low::BinOp::Ne, ov, low::null_())),
                                            low::bin(low::BinOp::Eq, block_of(hb), block_of(ov)))};
@@ -11889,7 +11937,7 @@ private:
                     const int kind {lo.written ? (lo.share ? 2 : 1) : 0};
                     owner_bg.push_back(kind == 0 ? low::not_(low::var(nm))
                                                  : low::and_(low::not_(low::var(nm)), low::not_(cur)));
-                    links.push_back(Place::OwnerLink {lo.var, nm, kind});
+                    links.push_back(Place::OwnerLink {lo.owner.var, nm, kind});
                 }
                 const size_t first_of_var {places.size()};
                 for (size_t ci {0U}; ci < cells.size(); ++ci)
@@ -11940,7 +11988,8 @@ private:
                         const E same_block {owner_bg[oi]};
                         if (lo.full)
                         {
-                            for (const Cell& oc : block_cells(low::var(var_name(*lo.var)), lo.var->type, lo.var->name))
+                            for (const Cell& oc :
+                                 block_cells(low::var(var_name(*lo.owner.var)), lo.owner.var->type, lo.owner.var->name))
                             {
                                 if (cell_suffix(oc.type) == pl.suffix)
                                 {
@@ -12717,11 +12766,11 @@ private:
             if (own.written)
             {
                 OwnerValues ov;
-                owner_values(s.body, *own.var, assigned, declared, ov);
-                owner_values(s.step, *own.var, assigned, declared, ov);
+                owner_values(s.body, *own.owner.var, assigned, declared, ov);
+                owner_values(s.step, *own.owner.var, assigned, declared, ov);
                 std::set<int> in_cond;
                 scan_assigned_expr(s.expr, in_cond);
-                if (in_cond.count(own.var->id) != 0U)
+                if (in_cond.count(own.owner.var->id) != 0U)
                 {
                     ov.other = true;
                 }
@@ -12731,9 +12780,9 @@ private:
             }
             if (own.unmentioned)
             {
-                own.hs = "hs_" + var_name(*own.var) + "__" + std::to_string(loop_number);
+                own.hs = "hs_" + var_name(*own.owner.var) + "__" + std::to_string(loop_number);
                 fn_.snapshots.push_back(low::LVar {own.hs, low::LType::Bool});
-                assign(out, own.hs, low::var(held_name(*own.var)));
+                assign(out, own.hs, low::var(held_name(*own.owner.var)));
             }
         }
         for (size_t oi {0U}; oi < owners.size(); ++oi)
@@ -12749,9 +12798,9 @@ private:
                 {
                     continue;
                 }
-                const E pv {low::var(var_name(*own.var))};
-                const E po {low::var(var_name(*owners[oj].var))};
-                const std::string nm {"dup_" + var_name(*own.var) + "_" + var_name(*owners[oj].var) + "__" +
+                const E pv {low::var(var_name(*own.owner.var))};
+                const E po {low::var(var_name(*owners[oj].owner.var))};
+                const std::string nm {"dup_" + var_name(*own.owner.var) + "_" + var_name(*owners[oj].owner.var) + "__" +
                                       std::to_string(loop_number)};
                 fn_.snapshots.push_back(low::LVar {nm, low::LType::Bool});
                 assign(out, nm,
@@ -12766,20 +12815,20 @@ private:
         {
             if (lo.full)
             {
-                loop_owner_ids_.insert(lo.var->id);
+                loop_owner_ids_.insert(lo.owner.var->id);
             }
             if (vlibc_heap_ && !lo.keyed)
             {
                 // Every assignment to the owner in the loop comes from one allocator's view: that allocator is the
                 // invariant's, whether the owner is NULL at the entry or not
                 int cls {0};
-                if (assigned.count(lo.var->id) != 0U)
+                if (assigned.count(lo.owner.var->id) != 0U)
                 {
                     std::set<int> in_cond;
                     scan_assigned_expr(s.expr, in_cond);
-                    assigned_class(s.body, *lo.var, cls);
-                    assigned_class(s.step, *lo.var, cls);
-                    cls = in_cond.count(lo.var->id) != 0U ? 3 : cls;
+                    assigned_class(s.body, *lo.owner.var, cls);
+                    assigned_class(s.step, *lo.owner.var, cls);
+                    cls = in_cond.count(lo.owner.var->id) != 0U ? 3 : cls;
                 }
                 if (cls == 1 || cls == 2)
                 {
@@ -12788,11 +12837,11 @@ private:
                 }
                 // otherwise the allocator of the block at entry (a null owner counts as the platform's: the loop cannot
                 // carry a class it does not know)
-                lo.tve = "tve_" + var_name(*lo.var) + "__" + std::to_string(loop_number);
+                lo.tve = "tve_" + var_name(*lo.owner.var) + "__" + std::to_string(loop_number);
                 fn_.snapshots.push_back(low::LVar {lo.tve, low::LType::Bool});
                 assign(out, lo.tve,
-                       low::ite(low::bin(low::BinOp::Ne, low::var(var_name(*lo.var)), low::null_()),
-                                low::var(tv_name(*lo.var)), low::bool_lit(true)));
+                       low::ite(low::bin(low::BinOp::Ne, low::var(var_name(*lo.owner.var)), low::null_()),
+                                low::var(tv_name(*lo.owner.var)), low::bool_lit(true)));
             }
         }
         for (const LoopOwner& lo : owners)
@@ -12816,9 +12865,9 @@ private:
             {
                 if (own.written && own.valset && !own.keyed && others)
                 {
-                    own.ev = "ev_" + var_name(*own.var) + "__" + std::to_string(loop_number);
+                    own.ev = "ev_" + var_name(*own.owner.var) + "__" + std::to_string(loop_number);
                     fn_.snapshots.push_back(low::LVar {own.ev, low::LType::Ref});
-                    assign(out, own.ev, low::var(var_name(*own.var)));
+                    assign(out, own.ev, low::var(var_name(*own.owner.var)));
                 }
             }
         }
@@ -12864,7 +12913,8 @@ private:
             bool on_owner {false};
             for (const LoopOwner& lo : owners)
             {
-                on_owner = on_owner || ((lo.full || lo.keyed) && same_expr(wats[i].q, low::var(var_name(*lo.var))));
+                on_owner =
+                    on_owner || ((lo.full || lo.keyed) && same_expr(wats[i].q, low::var(var_name(*lo.owner.var))));
             }
             if (on_owner)
             {
@@ -13415,8 +13465,8 @@ private:
             {
                 continue;
             }
-            const E ov {low::var(var_name(*lo.var))};
-            for (const Cell& c : block_cells(ov, lo.var->type, lo.var->name))
+            const E ov {low::var(var_name(*lo.owner.var))};
+            for (const Cell& c : block_cells(ov, lo.owner.var->type, lo.owner.var->name))
             {
                 Place op;
                 op.recv = c.recv;
@@ -13935,7 +13985,8 @@ private:
     // havocs at the loop head), and the block stays in the frame.
     struct LoopOwner
     {
-        const Var* var {nullptr};
+        // the owner (decision 0055 item 5: an OwnerRef); today always an owning local
+        OwnerRef owner;
         bool full {false};
         // a vlibc heap program: the loop-entry snapshot of the token's value (the allocator), which the loop must keep
         // (empty: `cls` says)
@@ -14231,8 +14282,9 @@ private:
                 sites.push_back(std::move(a));
             }
         };
-        for (const Global* g : fn_.gowners)
+        for (const OwnerRef& g_ref : fn_.gowners)
         {
+            const Global* g {g_ref.global};
             if (gused.count(g->id) == 0U || named(g, nullptr) ||
                 !(fn_.f == prog_.entry() || holds_global_at_entry(*fn_.f, *g)))
             {
@@ -14240,8 +14292,9 @@ private:
             }
             make(b.global_addr(g, s.loc), g->type, g->c_name);
         }
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             if (!o->address_taken || declared.count(o->id) != 0U || fn_.owner_declared.count(o->id) == 0U ||
                 !(lused.count(o->id) != 0U || touches_cells_of_type(&s, o->type)) || named(nullptr, o))
             {
@@ -14283,7 +14336,7 @@ private:
             {
                 continue; // its token is a heap place's, exempt below
             }
-            const E p {low::var(var_name(*owners[oi].var))};
+            const E p {low::var(var_name(*owners[oi].owner.var))};
             const E term {low::and_(carrier_guard(owners, oi), low::bin(low::BinOp::Eq, low::var("t"), tok_slot(p)))};
             r = r ? low::bin(low::BinOp::Or, r, term) : term;
         }
@@ -14349,7 +14402,7 @@ private:
                 b.var = qa.var;
                 for (const LoopOwner& lo : owners)
                 {
-                    b.merged = b.merged || (lo.merged && lo.var == qa.var);
+                    b.merged = b.merged || (lo.merged && lo.owner.var == qa.var);
                 }
             }
             if (b.loads)
@@ -14614,18 +14667,20 @@ private:
             for (size_t oi {0U}; oi < owners.size(); ++oi)
             {
                 const LoopOwner& lo {owners[oi]};
-                if (lo.var == b.var)
+                if (lo.owner.var == b.var)
                 {
                     continue;
                 }
-                const E ov {low::var(var_name(*lo.var))};
-                const E live {lo.unmentioned ? low::var(held_name(*lo.var)) : low::bin(BinOp::Ne, ov, low::null_())};
+                const E ov {low::var(var_name(*lo.owner.var))};
+                const E live {lo.unmentioned ? low::var(held_name(*lo.owner.var))
+                                             : low::bin(BinOp::Ne, ov, low::null_())};
                 emit_ending_assert(out,
                                    low::implies(low::and_(low::and_(b.g, low::bin(BinOp::Ne, b.p, low::null_())), live),
                                                 low::bin(BinOp::Ne, block_of(b.p), block_of(ov))),
                                    meta("permission", where,
                                         "the invariant of this loop owns " + quoted(b.text, "an allocation") +
-                                            ", which may be the allocation of the owning `" + lo.var->name + "`"));
+                                            ", which may be the allocation of the owning `" + lo.owner.var->name +
+                                            "`"));
             }
         }
     }
@@ -14673,11 +14728,11 @@ private:
             }
             for (const LoopOwner& lo : owners)
             {
-                if (lo.keyed || lo.var == b.var)
+                if (lo.keyed || lo.owner.var == b.var)
                 {
                     continue;
                 }
-                const E ov {low::var(var_name(*lo.var))};
+                const E ov {low::var(var_name(*lo.owner.var))};
                 case_split(out, low::bin(BinOp::Eq, block_of(p), block_of(ov)));
                 case_split(out, low::bin(BinOp::Eq, p, ov));
             }
@@ -14754,13 +14809,15 @@ private:
         std::vector<const Function*> calls;
         calls_in_stmt(&s, calls, false);
         bool writes_owner {false};
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             writes_owner = writes_owner || (!o->address_taken && declared.count(o->id) == 0U &&
                                             fn_.owner_declared.count(o->id) != 0U && assigned.count(o->id) != 0U);
         }
-        for (const Var* o : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_in_scope())
         {
+            const Var* o {o_ref.var};
             if (declared.count(o->id) != 0U || o->address_taken)
             {
                 continue; // (an address-taken owner is carried by a synthetic written site, owner_loop_sites)
@@ -14770,7 +14827,7 @@ private:
                 continue; // declared after the loop, in a block that is already open
             }
             LoopOwner lo;
-            lo.var = o;
+            lo.owner.var = o;
             lo.written = assigned.count(o->id) != 0U;
             lo.keyed = !lo.written && used.count(o->id) != 0U;
             lo.unmentioned = !lo.written && !lo.keyed && (writes_owner || !calls.empty());
@@ -14846,8 +14903,8 @@ private:
     // "These two owners hold one block now": the formula of the entry snapshots `dup_`/`ad_` on the current values.
     E owners_share_now(const LoopOwner& later, const LoopOwner& earlier)
     {
-        const E pv {low::var(var_name(*later.var))};
-        const E po {low::var(var_name(*earlier.var))};
+        const E pv {low::var(var_name(*later.owner.var))};
+        const E po {low::var(var_name(*earlier.owner.var))};
         return low::and_(
             low::and_(low::bin(low::BinOp::Ne, pv, low::null_()), low::bin(low::BinOp::Ne, po, low::null_())),
             low::bin(low::BinOp::Eq, block_of(pv), block_of(po)));
@@ -14862,8 +14919,8 @@ private:
     E carrier_guard(const std::vector<LoopOwner>& owners, size_t i)
     {
         const LoopOwner& lo {owners[i]};
-        const E p {low::var(var_name(*lo.var))};
-        E g {lo.unmentioned ? low::var(held_name(*lo.var)) : low::bin(low::BinOp::Ne, p, low::null_())};
+        const E p {low::var(var_name(*lo.owner.var))};
+        E g {lo.unmentioned ? low::var(held_name(*lo.owner.var)) : low::bin(low::BinOp::Ne, p, low::null_())};
         for (size_t j {0U}; j < owners.size() && j < lo.pairs.size(); ++j)
         {
             const OwnerPair& pr {lo.pairs[j]};
@@ -14894,7 +14951,7 @@ private:
             {
                 continue;
             }
-            const E p {low::var(var_name(*lo.var))};
+            const E p {low::var(var_name(*lo.owner.var))};
             if (!lo.ev.empty())
             {
                 E vs {
@@ -14918,7 +14975,7 @@ private:
             {
                 for (const Place::OwnerLink& ln : pl.olinks)
                 {
-                    if (ln.owner == lo.var && ln.kind == 1)
+                    if (ln.owner == lo.owner.var && ln.kind == 1)
                     {
                         out.push_back(auto_invariant(
                             low::bin(BinOp::Or, low::var(ln.snap), low::not_(owner_place_now(lo, pl))), loc));
@@ -14929,7 +14986,7 @@ private:
         for (size_t oi {0U}; oi < owners.size(); ++oi)
         {
             const LoopOwner& lo {owners[oi]};
-            const Var& v {*lo.var};
+            const Var& v {*lo.owner.var};
             const E p {low::var(var_name(v))};
             const E nn {low::bin(BinOp::Ne, p, low::null_())};
             const E g {carrier_guard(owners, oi)};
@@ -14995,7 +15052,7 @@ private:
     // "The owner and the heap place hold one block now": the snapshot `ad_` on the current values (the place's base).
     E owner_place_now(const LoopOwner& lo, const Place& pl)
     {
-        const E ov {low::var(var_name(*lo.var))};
+        const E ov {low::var(var_name(*lo.owner.var))};
         return low::and_(
             low::and_(low::bin(low::BinOp::Ne, pl.lroot, low::null_()), low::bin(low::BinOp::Ne, ov, low::null_())),
             low::bin(low::BinOp::Eq, block_of(pl.lroot), block_of(ov)));
@@ -15029,7 +15086,7 @@ private:
         std::string snap;
         for (const Place::OwnerLink& ln : tp->olinks)
         {
-            if (ln.owner == lo.var && ln.kind > 0)
+            if (ln.owner == lo.owner.var && ln.kind > 0)
             {
                 snap = ln.snap;
             }
@@ -15042,12 +15099,12 @@ private:
         {
             if (c.path == pl.mpath && cell_suffix(c.type) == pl.suffix && c.type == pl.type)
             {
-                const E premise {low::and_(
-                    low::and_(
-                        low::and_(g, low::not_(low::var(snap))),
-                        low::and_(low::bin(low::BinOp::Ne, pl.lroot, low::null_()),
-                                  low::bin(low::BinOp::Eq, block_of(low::var(var_name(*lo.var))), block_of(pl.lroot)))),
-                    low::and_(low::bin(low::BinOp::Gt, low::var(pl.kd), low::no_perm()), low::var(pl.ds)))};
+                const E premise {
+                    low::and_(low::and_(low::and_(g, low::not_(low::var(snap))),
+                                        low::and_(low::bin(low::BinOp::Ne, pl.lroot, low::null_()),
+                                                  low::bin(low::BinOp::Eq, block_of(low::var(var_name(*lo.owner.var))),
+                                                           block_of(pl.lroot)))),
+                              low::and_(low::bin(low::BinOp::Gt, low::var(pl.kd), low::no_perm()), low::var(pl.ds)))};
                 return low::implies(premise, cell_flag(c.recv, c.type));
             }
         }
@@ -15065,7 +15122,7 @@ private:
         for (size_t oi {0U}; oi < owners.size(); ++oi)
         {
             const LoopOwner& lo {owners[oi]};
-            const Var& v {*lo.var};
+            const Var& v {*lo.owner.var};
             const E p {low::var(var_name(v))};
             const E g {carrier_guard(owners, oi)};
             if (lo.unmentioned)
@@ -15142,7 +15199,7 @@ private:
             {
                 continue;
             }
-            const E pj {low::var(var_name(*owners[j].var))};
+            const E pj {low::var(var_name(*owners[j].owner.var))};
             const E gj {carrier_guard(owners, j)};
             for (size_t i {0U}; i < owners.size(); ++i)
             {
@@ -15150,12 +15207,12 @@ private:
                 {
                     continue;
                 }
-                const E pi {low::var(var_name(*owners[i].var))};
+                const E pi {low::var(var_name(*owners[i].owner.var))};
                 const OwnerPair& pr {owners[j].pairs[i]};
                 const low::Meta m {meta("permission", at,
-                                        "owning `" + owners[j].var->name +
+                                        "owning `" + owners[j].owner.var->name +
                                             "` takes a block this loop already carries through `" +
-                                            owners[i].var->name + "`")};
+                                            owners[i].owner.var->name + "`")};
                 if (pr.kind == 2)
                 {
                     continue;
@@ -15182,7 +15239,7 @@ private:
                 std::string snap;
                 for (const Place::OwnerLink& ln : pl.olinks)
                 {
-                    if (ln.owner == owners[j].var)
+                    if (ln.owner == owners[j].owner.var)
                     {
                         kind = ln.kind;
                         snap = ln.snap;
@@ -15194,7 +15251,7 @@ private:
                 }
                 const std::string name {pl.label.size() > 1U && pl.label[0U] == '*' ? pl.label.substr(1U) : pl.label};
                 const low::Meta m {meta("permission", at,
-                                        "owning `" + owners[j].var->name +
+                                        "owning `" + owners[j].owner.var->name +
                                             "` takes a block this loop already carries through `" + name + "`")};
                 if (kind == 1)
                 {
@@ -15221,9 +15278,9 @@ private:
             {
                 continue;
             }
-            const E p {low::var(var_name(*lo.var))};
+            const E p {low::var(var_name(*lo.owner.var))};
             const E g {carrier_guard(owners, oi)};
-            const std::vector<Cell> cells {block_cells(p, lo.var->type, lo.var->name)};
+            const std::vector<Cell> cells {block_cells(p, lo.owner.var->type, lo.owner.var->name)};
             for (const Place& pl : places)
             {
                 if (const E fl {flag_follows(lo, g, cells, pl, places)})
@@ -15654,7 +15711,7 @@ private:
                 if (g.owning)
                 {
                     fn_.gowners.push_back(&g);
-                    fn_.snapshots.push_back(low::LVar {gheld_name(g), low::LType::Bool});
+                    fn_.snapshots.push_back(low::LVar {held_name(g), low::LType::Bool});
                 }
             }
         }
