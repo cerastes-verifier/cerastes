@@ -15604,8 +15604,9 @@ class LibraryFixtureTests(unittest.TestCase):
     def test_the_fixture_headers_exist_and_each_is_used_by_a_test(self):
         names = sorted(p.name for p in LIBRARY_FIXTURE_DIR.glob("*.h"))
         self.assertEqual(names, ["lib_body.h", "lib_body_bad.h", "lib_line.h", "lib_macro.h", "lib_macro_contract.h",
-                                 "lib_macro_ok.h", "lib_nonreserved.h", "lib_pragma.h", "lib_pragma_bad.h", "lib_spec.h",
-                                 "lib_trusted.h", "lib_untagged.h", "lib_weak.h", "lib_wrongtag.h"])
+                                 "lib_macro_ok.h", "lib_nonreserved.h", "lib_not_invalidating.h", "lib_pragma.h",
+                                 "lib_pragma_bad.h", "lib_spec.h", "lib_trusted.h", "lib_untagged.h", "lib_weak.h",
+                                 "lib_wrongtag.h"])
         source = Path(__file__).read_text()
         for name in names:
             self.assertGreaterEqual(source.count(f'"{name}"'), 2, f"{name} is used by no test")
@@ -15824,6 +15825,27 @@ int f(int x)
                 self.assertIn("error #cerastes-unsupported_declaration: ", run.stderr)
                 self.assertIn("lib_weak_id", run.stderr)
                 self.assertIn("lib_weak.h", run.stderr)
+
+    def test_a_not_invalidating_marker_in_a_library_header_is_rejected(self):
+        # decision 0058 item 2: vlibc writes no cerastes::not_invalidating, and one in a library file would be counted by
+        # library_markers, trusted and read by nothing, so it is rejected (unsupported_annotation, at the parameter).  The
+        # declaration carries no contract on purpose (a contract on a reserved name is reported first).  Twin: the same
+        # header copied next to the program is a user header, where a marker with no atom is accepted (vacuous), so the
+        # rejection is the library file's and not the marker's
+        line = self.header_line("lib_not_invalidating.h", "void lib_touch")
+        for mode in self.modes():
+            with self.subTest(mode):
+                run, _ = self.run_program("lib_not_invalidating.h", pre="x >= 0", mode=mode)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("error #cerastes-unsupported_annotation: ", run.stderr)
+                self.assertIn(f"lib_not_invalidating.h\", line {line}", run.stderr)
+                self.assertEqual(run.stderr.count("error #"), 1, run.stderr)
+        shutil.copy(LIBRARY_FIXTURE_DIR / "lib_not_invalidating.h", self.tmp / "user_not_invalidating.h")
+        for mode in self.modes():
+            with self.subTest("twin " + mode):
+                run, _ = self.run_program('"user_not_invalidating.h"', pre="x >= 0", mode=mode, hook=False,
+                                          name="user_ni.c")
+                self.assertEqual((run.returncode, run.stderr), (0, ""), run.stdout)
 
     def test_only_the_fixture_directory_is_given_library_trust(self):
         # a copy of a fixture header in the program's own directory is a user header, not a library file: its
