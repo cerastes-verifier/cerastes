@@ -134,7 +134,9 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      existing programs; question 218); outcomes change only where both rows fail today: the two flips and
      `owning_global_call_dangling_closure.c` (question 219). Where the tie holds and only the partner-guard row fails
      (`owns_block_load_bodiless_pathpartner.c`, `owns_block_global_bodiless_pathpartner.c`) the error stays, so that row
-     stays pinned. No VIR self-test case holds both rows.
+     stays pinned. One VIR self-test case holds both rows (`owning_global_leaf_guarded_ensures`, verified): its two
+     asserts swap and it still verifies, within question 218's terms (the orchestrator's first count missed it, and
+     question 219 said no case was affected; status corrects that).
 
 3. **`--strict-owner`** (question 177; P4417R0 [profiles.inval.owner] p4 and p6). The pattern is `--strict-init`'s,
    end to end: a driver option through `VerifyConfig`, a rule applied by the encoder to verified bodies, a diagnostic

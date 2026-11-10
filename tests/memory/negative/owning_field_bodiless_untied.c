@@ -1,5 +1,5 @@
 // expect: error permission @ L17
-// expect: error permission @ L17
+// N1 of record 0058 leaves one message here; the line was: expect: error permission @ L17
 // mode: c23, c++20
 // twin: tests/memory/owning_field_bodiless.c
 // Pins: 0055 item 3 ("Bodiless contracts"): without p->data == old(p->data) a bodiless borrow could return a block of the field that the caller already holds a second token for; touch__wf fails at the ensures clause with the closure

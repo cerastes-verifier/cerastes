@@ -1,7 +1,7 @@
 // expect: error permission @ L27
 // expect: error permission @ L27
-// expect: error permission @ L27
-// expect: error permission @ L27
+// N1 of record 0058 leaves one message here; the line was: expect: error permission @ L27
+// N1 of record 0058 leaves one message here; the line was: expect: error permission @ L27
 // expect: error invalid-free @ L40
 // expect: error invalid-free @ L40
 // expect: error invalid-free @ L40

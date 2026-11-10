@@ -18043,23 +18043,6 @@ private:
                         continue;
                     }
                     const E ge {site_guard(site, env)};
-                    // Partners by path for a site through a load or on a global whose guards read the heap (audit round 2, B1): the tie below holds when the partner's
-                    // guard was false (the pre-state pointer is whatever it was), so the site must also be returned only where its partner took the block.
-                    if (const AtomSite* partner = block_partner(f, site);
-                        partner != nullptr && !site.via.empty() && guards_read_heap(site, *partner))
-                    {
-                        const E gp {site_guard(*partner, env)};
-                        if (gp && !same_expr(ge, gp))
-                        {
-                            const std::string base {site.atom->a != nullptr ? site.atom->a->c_text : std::string()};
-                            emit_assert(
-                                m.body, low::implies(facts, ge ? low::implies(ge, gp) : gp),
-                                meta("permission", site.atom->loc.known() ? site.atom->loc : c.loc,
-                                     "the contract of `" + f.c_name + "` returns " +
-                                         (base.empty() ? std::string("a block") : "the block of `" + base + "`") +
-                                         " on a path where its `requires` did not take it"));
-                        }
-                    }
                     if (site_loads(site))
                     {
                         if (const AtomSite* partner = block_partner(f, site))
@@ -18074,6 +18057,24 @@ private:
                                          " without saying it is the one its `requires` took" +
                                          (base.empty() ? std::string()
                                                        : " (write `" + base + " == old(" + base + ")`)")));
+                        }
+                    }
+                    // Partners by path for a site through a load or on a global whose guards read the heap (audit round 2, B1): the tie above holds when the partner's
+                    // guard was false (the pre-state pointer is whatever it was), so the site must also be returned only where its partner took the block.
+                    // After the tie (N1, record 0058 item 2): an untied borrow gets the tie's message, which names the fix, and not this one as well.
+                    if (const AtomSite* partner = block_partner(f, site);
+                        partner != nullptr && !site.via.empty() && guards_read_heap(site, *partner))
+                    {
+                        const E gp {site_guard(*partner, env)};
+                        if (gp && !same_expr(ge, gp))
+                        {
+                            const std::string base {site.atom->a != nullptr ? site.atom->a->c_text : std::string()};
+                            emit_assert(
+                                m.body, low::implies(facts, ge ? low::implies(ge, gp) : gp),
+                                meta("permission", site.atom->loc.known() ? site.atom->loc : c.loc,
+                                     "the contract of `" + f.c_name + "` returns " +
+                                         (base.empty() ? std::string("a block") : "the block of `" + base + "`") +
+                                         " on a path where its `requires` did not take it"));
                         }
                     }
                     for (size_t oi {static_cast<size_t>(fb.nreq)}; oi < bi; ++oi)

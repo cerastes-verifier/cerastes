@@ -1,5 +1,5 @@
 // expect: error permission @ L22
-// expect: error permission @ L22
+// N1 of record 0058 leaves one message here; the line was: expect: error permission @ L22
 // mode: c23, c++20
 // twin: tests/memory/owning_field_bodiless_chain.c
 // Pins: 0055 item 3 (N5): the inner tie is missing: a bodiless borrow could return another block in a->b->x, so touch__wf fails at the ensures clause (as owning_field_bodiless_untied.c does for the outer level)
