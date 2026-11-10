@@ -166,6 +166,29 @@ the IR, compares the IR, and reports that the objects were not compared. S7's re
 `.vpr` and `.map` files, byte for byte (decision {gh}/internal/decisions/0051-code-style.md[0051]). Its self-test,
 `scripts/test_object_identity.py`, runs in the full check.
 
+[#viper-identity]
+=== Did any program's Viper change?
+
+A change to the encoder that should leave every existing program's Viper as it was (a re-keying before a feature, a
+feature that only adds cases) is checked against a baseline of the Viper itself, long before the full check:
+
+[source,sh]
+----
+python3 scripts/regen_vpr.py --out <dir> [-j N] [--cerastes <path>] [--only <paths> ...]
+python3 scripts/vprdiff.py <base_dir> <new_dir> [--allow <file>] [--show <test>] [--strict-new]
+----
+
+`regen_vpr.py` writes every `.vpr` and `.map` that `run_tests.py` would keep (the same tests, modes and
+`// verify-options:`, taken from `run_tests.py`'s own enumeration and command builder) into a directory of its own,
+without running Silicon: it uses the driver's `silicon_timeout` self-test hook, so the driver writes the Viper, starts
+Silicon, stops it at once and exits 3 with a fixed message, which the script requires. The output is byte for byte
+what a `run_tests.py` run keeps; the whole suite takes about a minute on the Mac, where the suite with Silicon takes
+hours. Take the baseline
+with the starting commit's build, before any change. `vprdiff.py` compares two such trees: an entry (`<test>.<mode>`,
+its `.vpr` with its `.map`) that is only in the base or that differs fails the comparison unless the allow-list (test
+paths or globs, one per line) names it. Entries only in the new tree are new tests: they are counted, and compared only
+with `--strict-new`. So a neutral change shows as "0 allowed, 0 unexpected", and an intended one as exactly its tests.
+
 [#ci]
 == Continuous integration
 

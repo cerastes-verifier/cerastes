@@ -599,7 +599,7 @@ the invariant's constant where every assignment to the owner in the loop comes f
 loop-entry snapshot otherwise. A non-owning alias of the owner's block keeps its 0047 item 10 place, with guards that
 exclude the owner's block. A user invariant or measure that reads `*v` of a carried owner is framed by the owner's cells,
 and a written atom on them is a `permission` at the atom ("which the loop already owns through its owning local"). Programs
-with no owner keep their Viper. Owners on globals, `static` locals, address-taken locals and fields: M4.5d2b2.
+with no owner keep their Viper. Owners on globals, `static` locals and address-taken locals: M4.5d2b2a (0054 items 5 and 6); fields: M4.5d2b2b (0055).
 
 *Marked locals (item 4).* `ref_to_uninit` on an automatic pointer local changes no VIR; the encoder records it
 (`Ctx::ref_marked`). Under `--strict-init` a call whose result is `ref_to_uninit` is accepted only where its node is in
@@ -614,7 +614,7 @@ contract, at the call and return rows and in the leak exemption (an `ensures` gu
 `Expr::vlibc_block` (`cerastes_owns_vlibc_block`, C only) states `!tok`, its rows read the token's value (`want ==
 Vlibc`), and a contract that names one makes the program a vlibc heap program. `restrict_backed`/`restrict_hazard` count a
 block site (6 (d)). A pointer argument's liveness use is registered at the argument's own place, so `two((free(p), 0), p)`
-is `unsequenced` (6 (e)). Cut to M4.5d2b2: a written `owns_block` in a loop invariant (6 (a)), rejected by `spec_block_atom`.
+is `unsequenced` (6 (e)). Cut to M4.5d2b2 at the time: a written `owns_block` in a loop invariant (6 (a)), built by M4.5d2b2a (0054 item 4).
 
 **Block sites through memory, owners in memory, block carriers in loops (M4.5d2b2a, decision 0054).** The Viper
 shapes are pinned by `tests/viper-smoke/memory/s39_*` (spike S39) and the VIR self-test cases `hbl_*`, `olp_*`, `owg_*`.
