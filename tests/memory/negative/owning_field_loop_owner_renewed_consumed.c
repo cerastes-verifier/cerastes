@@ -9,8 +9,8 @@
 // expect: error invalid-free @ L43
 // mode: c23, c++20
 // twin: tests/memory/owning_field_loop_owning_local_free.c
-// Pins: 0055 item 7 (a false alarm pinned; the program is correct): an address-taken owning local struct pointer renewed through pv, struct buf **pv = &v, by a callee in a loop: no closure is carried across a replacement of the owner, so the loop's carry of v loses its pointee's owning field and the callee's requires and the frees after the loop are reported. The expectations are the errors the encoder reports today
-// Pre-registered from the final re-audit (r5/renew_pp2.c), observed on the session build after the last fix: the expect lines are the actual outcome, recorded as a pin
+// Pins: 0056 item 8 (question 201; not a false alarm): renew takes owns(**pp) and returns only owns(*pp), so its contract consumes the structure's cells: the call itself fails the first time it is made on a structure whose cells it does not return (S41 (0) run 7: renew(pv); renew(pv); with no loop reports the second call as permission, then lifetime, permission and leak); the callee's requires and the frees after the loop are reported. The expectations are the errors the encoder reports today, kept by the owner's answer 201
+// Pre-registered from the final re-audit (r5/renew_pp2.c), observed on the session build after the last fix: the expect lines are the actual outcome; M4.5d2b2c keeps them (question 201) and states the cause (S41 (0) run 7)
 #include <cerastes.h>
 #include <stdlib.h>
 

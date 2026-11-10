@@ -5,7 +5,7 @@
 // expect: error uninitialized @ L40
 // mode: c23, c++20
 // twin: tests/memory/owning_field_loop_owning_local_free.c
-// Pins: 0055 item 7 (a false alarm pinned; the program is correct): an owning local struct pointer freed and replaced through an alias, *pv = malloc(...) with pv = &v, in the loop: no closure is carried across a replacement of the owner (owning_field_loop_owner_replaced_false_alarm.c is the direct form). The expectations are the errors the encoder reports today
+// Pins: 0055 item 7 (a false alarm pinned; the program is correct): an owning local struct pointer freed and replaced through an alias, *pv = malloc(...) with pv = &v, in the loop: no closure is carried across a replacement of the owner (owning_field_loop_owner_replaced_no_invariant.c is the direct form, which verifies with a written invariant, owning_field_loop_owner_replaced_written.c). Record 0056 item 8: here the invariant cannot be written yet: v is address-taken, so owns_block(v->data) in an invariant is rejected (unsupported_expression) and (*pv)->data is permission (the loop does not hold it), so the pin stays a false alarm (M4.5d2b2c, a question for the owner). The expectations are the errors the encoder reports today
 // Pre-registered from the final re-audit (r5/rep_alias.c), observed on the session build after the last fix: the expect lines are the actual outcome, recorded as a pin
 #include <cerastes.h>
 #include <stdlib.h>
