@@ -5592,5 +5592,148 @@ class OwningLeafLoopCarryTests(OwningLeafTests):
         self.assertEqual([p for p in self.probs(body=body) if "is compared with something" in p], [])
 
 
+
+class OwningLeafAgreesAndOwnBlockTests(OwningLeafEntryAndExemptionTests):
+    """Decision 0055 items 7 and 9, the shapes of the re-audit's fixes.  (1) The loop carry of a leaf ghost, `leaf_held_agrees`: the snapshot
+    `hp_<held>__<n> := perm(<cell>) > none` assigned once before the loop, the invariant `(hp ==> (held == (<cell> != null))) && ((!hp) ==>
+    (!held))` and the rows `if (!(((perm(<cell>) > none) ==> (held == (<cell> != null))) && ((!(perm(<cell>) > none)) ==> (!held)))) {`, all over
+    the leaf's own cell, the one the ghost's name spells; the snapshot is read only there.  (2) `main`'s term for a leaf's own block,
+    `exm_0 := held_<tagged leaf> && (perm(<that leaf's cell>) > none)` with the disjunct `exm_0 && t == loc(block_of(<that cell>), -1)`, deeper
+    `exm_` rooted at it.  Each rule has twins that break exactly it; the older forms keep their rules (the classes this one inherits from)."""
+
+    GCELL = OwningLeafTests.CELL
+    LCELL = "loc(member(v_s__0, 0), 0).v_ptr_int"
+
+    @staticmethod
+    def inv(hp, g, c):
+        return f"    invariant ({hp} ==> ({g} == ({c} != null))) && ((!{hp}) ==> (!{g}))"
+
+    @staticmethod
+    def row(g, c):
+        return f"    if (!(((perm({c}) > none) ==> ({g} == ({c} != null))) && ((!(perm({c}) > none)) ==> (!{g})))) {{"
+
+    def carry(self, g, c, assign=None, inv=None, rows=None, hp=None, before=()):
+        hp = hp or f"hp_{g}__0"
+        body = ["  var v_s__0: Ref", f"  var {hp}: Bool", *self.LEGAL, *before,
+                *([f"  {hp} := perm({c}) > none"] if assign is None else assign),
+                *([self.row(g, c)] if False else []),
+                "  var i: Int := 0", "  while (i < 3)", Check(inv or self.inv(hp, g, c), INV, "internal"),
+                Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1"]
+        for r in (rows if rows is not None else [self.row(g, c)]):
+            body += [r, Check("      assert false", A, "permission"), "    }"]
+        body += ["  }"]
+        return self.probs(body=body)
+
+    def both(self):
+        return (("held_GB_g__0_0", self.GCELL), ("held_v_s__0_0", self.LCELL))
+
+    def test_the_emitters_carry_of_a_global_and_a_local_leaf_is_clean(self):
+        for g, c in self.both():
+            with self.subTest(g=g):
+                self.assertEqual(self.carry(g, c), [])
+
+    def test_the_snapshot_is_the_permission_to_its_own_leafs_cell(self):
+        for g, c in self.both():
+            hp = f"hp_{g}__0"
+            other = (self.L1 + ".v_ptr_int", "loc(member(v_t__0, 0), 0).v_ptr_int", "loc(member(v_s__0, 1), 0).v_ptr_int")
+            for rhs in (*[f"perm({o}) > none" for o in other], f"perm({c}) >= none", f"perm({c}) > write", "true", f"perm({c}) > none || true",
+                        f"({c} != null)", f"perm({c})"):
+                with self.subTest(g=g, rhs=rhs):
+                    probs = self.carry(g, c, assign=[f"  {hp} := {rhs}"])
+                    self.assertTrue(any(f"`{hp}` is assigned" in p for p in probs), probs)
+
+    def test_the_snapshot_name_spells_the_ghost_it_snapshots(self):
+        g, c = self.both()[1]
+        for hp in ("hp_held_v_s__0_1__0", "hp_held_v_t__0_0__0", "hp_x__0", "hp_held_v_s__0_0"):
+            with self.subTest(hp=hp):
+                probs = self.carry(g, c, assign=[f"  {hp} := perm({c}) > none"], hp=hp)
+                self.assertTrue(any(f"`{hp}` is assigned" in p for p in probs), probs)
+
+    def test_a_snapshot_is_assigned_once(self):
+        for g, c in self.both():
+            hp = f"hp_{g}__0"
+            probs = self.carry(g, c, assign=[f"  {hp} := perm({c}) > none", f"  {hp} := perm({c}) > none"])
+            self.assertTrue(any("is assigned twice" in p for p in probs), probs)
+
+    def test_a_global_leafs_snapshot_needs_its_tag(self):
+        g, c = "held_GB_g__1_0", "loc(member(loc(GB_g__1(), 0), 0), 0).v_ptr_int"
+        probs = self.carry(g, c)
+        self.assertTrue(any(f"`hp_{g}__0` is assigned" in p for p in probs), probs)
+
+    def test_the_invariant_and_rows_compare_the_ghost_with_its_own_cell_under_its_own_snapshot(self):
+        for g, c in self.both():
+            hp = f"hp_{g}__0"
+            o = self.L1 + ".v_ptr_int"
+            bad_invs = [self.inv(hp, g, o),                                                    # another cell
+                        self.inv("hp_held_v_t__0_0__0", g, c),                                 # another ghost's snapshot
+                        f"    invariant ({hp} ==> ({g} == ({c} != null)))",                    # no `!hp ==> !held`
+                        f"    invariant ({hp} ==> ({g} == ({c} == null))) && ((!{hp}) ==> (!{g}))",
+                        f"    invariant ({hp} ==> ({g} == ({c} != null))) && ((!{hp}) ==> {g})",
+                        f"    invariant (true ==> ({g} == ({c} != null))) && ((!true) ==> (!{g}))",
+                        f"    invariant ({hp} ==> ({g} == ({c} != null))) && ((!{hp}) ==> (!{g})) || true"]
+            for inv in bad_invs:
+                with self.subTest(g=g, inv=inv):
+                    probs = self.carry(g, c, inv=inv)
+                    self.assertTrue(any("is compared with something" in p or "snapshot is read only" in p for p in probs), probs)
+
+    def test_the_rows_name_one_cell_and_one_ghost(self):
+        for g, c in self.both():
+            o = self.L1 + ".v_ptr_int"
+            good = self.row(g, c)
+            for row in (self.row(g, o), good.replace(f"(!{g})", f"{g}"), good.replace("> none", ">= none", 1),
+                        self.row("held_v_t__0_0", c), good.replace(f"(perm({c}) > none) ==>", f"(perm({o}) > none) ==>", 1)):
+                with self.subTest(g=g, row=row):
+                    probs = self.carry(g, c, rows=[row])
+                    self.assertTrue(any("is compared with something" in p for p in probs), probs)
+
+    def test_a_snapshot_is_read_only_in_its_invariant_and_after_its_assignment(self):
+        g, c = self.both()[1]
+        hp = f"hp_{g}__0"
+        probs = self.carry(g, c, before=[f"  assert {hp}"])
+        self.assertTrue(any("snapshot is read only" in p for p in probs), probs)
+        body = ["  var v_s__0: Ref", f"  var {hp}: Bool", "  var i: Int := 0", "  while (i < 3)", Check(self.inv(hp, g, c), INV, "internal"),
+                Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1", "  }", f"  {hp} := perm({c}) > none"]
+        probs = self.probs(body=body)
+        self.assertTrue(any("snapshot is read only" in p or "is compared with something" in p for p in probs), probs)
+
+    # a leaf's own block in main's exemption ---------------------------------------------------------------------------------------
+    OWN0 = f"  exm_0 := held_GB_g__0_0 && (perm({GCELL}) > none)"
+    OWN_TERM = f"exm_0 && (t == loc(block_of({GCELL}), (-1)))"
+    OWN1 = f"  exm_1 := (exm_0 && ({GCELL} != null)) && (perm(loc(member({GCELL}, 0), 0).v_ptr_int) > none)"
+    OWN1_CELL = f"loc(member({GCELL}, 0), 0).v_ptr_int"
+    OWN_CHAIN_TERM = f"(exm_0 && (t == loc(block_of({GCELL}), (-1)))) || (exm_1 && (t == loc(block_of({OWN1_CELL}), (-1))))"
+
+    def test_a_leafs_own_block_and_a_chain_rooted_at_it_are_clean(self):
+        self.assertEqual(self.exm_probs([self.OWN0], term=self.OWN_TERM), [])
+        self.assertEqual(self.exm_probs([self.OWN0, self.OWN1], term=self.OWN_CHAIN_TERM), [])
+
+    def test_the_leaf_form_needs_a_tagged_leafs_ghost(self):
+        for g in ("held_v_s__0_0", "held_GB_g__0", "held_GB_g__0_1", "held_v"):
+            with self.subTest(g=g):
+                probs = self.exm_probs([self.OWN0.replace("held_GB_g__0_0", g)], term=self.OWN_TERM)
+                self.assertTrue(any("`exm_0` is assigned" in p and "owning leaf tagged" in p for p in probs), probs)
+
+    def test_the_leaf_form_reads_the_permission_to_its_own_cell(self):
+        for cell in (self.L1 + ".v_ptr_int", "loc(GB_g__0(), 0).v_ptr_int", self.OWN1_CELL, "loc(member(loc(GB_h__0(), 0), 0), 0).v_ptr_int"):
+            with self.subTest(cell=cell):
+                probs = self.exm_probs([self.OWN0.replace(f"perm({self.GCELL})", f"perm({cell})")], term=self.OWN_TERM)
+                self.assertTrue(any("reads the permission to its own leaf's cell" in p for p in probs), probs)
+        probs = self.exm_probs([self.OWN0.replace("> none", ">= none")], term=self.OWN_TERM)
+        self.assertTrue(any("`exm_0` is assigned" in p for p in probs), probs)
+
+    def test_the_leaf_forms_disjunct_names_that_very_cell(self):
+        for cell in (self.OWN1_CELL, self.L1 + ".v_ptr_int", "loc(GB_g__0(), 0).v_ptr_int"):
+            with self.subTest(cell=cell):
+                probs = self.exm_probs([self.OWN0], term=f"exm_0 && (t == loc(block_of({cell}), (-1)))")
+                self.assertTrue(any("the exemption term guarded by `exm_0`" in p for p in probs), probs)
+
+    def test_a_chain_rooted_at_a_leafs_own_block_guards_that_cell(self):
+        bad = self.OWN1.replace(f"({self.GCELL} != null)", f"({self.L1}.v_ptr_int != null)")
+        probs = self.exm_probs([self.OWN0, bad], term=self.OWN_CHAIN_TERM)
+        self.assertTrue(any("that it read, and no other" in p for p in probs), probs)
+        probs = self.exm_probs([self.OWN1, self.OWN0], term=self.OWN_CHAIN_TERM)
+        self.assertTrue(any("is not assigned before it" in p for p in probs), probs)
+
+
 if __name__ == "__main__":
     unittest.main()

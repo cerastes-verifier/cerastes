@@ -1941,9 +1941,88 @@ def temp_entry_problem(src: Source, lineno: int, t: str, g: str) -> str | None:
     return None
 
 
+HP_TOKEN_RE = re.compile(r"(?<![\w$'.])hp_[\w$']+")
+HP_ASSIGN_RE = re.compile(r"(?<![\w$'.])(?P<hp>hp_[\w$']+)\s*:=")
+HP_VAR_RE = re.compile(r"^\s*var\s+hp_[\w$']+\s*:\s*Bool\s*$")
+_HP_NAME_RE = re.compile(r"^hp_(?P<held>held_[\w$']+)__(?P<n>[0-9]+)$")
+_CARRY_INV_RE = re.compile(r"^invariant\((?P<hp>hp_[\w$']+)==>\((?P<g>held_[\w$']+)==\((?P<c>.+?)!=null\)\)\)&&\(\(!(?P=hp)\)==>\(!(?P=g)\)\)$")
+_CARRY_ROW_RE = re.compile(r"^if\(!\(\(\(perm\((?P<c>.+?)\)>none\)==>\((?P<g>held_[\w$']+)==\((?P=c)!=null\)\)\)&&"
+                           r"\(\(!\(perm\((?P=c)\)>none\)\)==>\(!(?P=g)\)\)\)\)\{$")
+
+
+def operands_of_nonnull(n: str) -> list[str]:
+    """The left operand of each `!= null` of the normalized text `n`: the term back to the unmatched `(` or the nearest operator."""
+    out = []
+    for m in re.finditer(r"!=null", n):
+        k, depth = m.start() - 1, 0
+        while k >= 0:
+            ch = n[k]
+            if ch == ")":
+                depth += 1
+            elif ch == "(":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif depth == 0 and ch in ",&|=!<>":
+                break
+            k -= 1
+        out.append(n[k + 1:m.start()])
+    return out
+
+
+def lint_leaf_carry(src: Source, decls: list[Decl], ghosts: dict[str, tuple[str, tuple[int, ...] | None]],
+                    add: Callable[[int, str], None]) -> set[int]:
+    """The loop carry of an owning leaf's ghost (decision 0055 item 7, `leaf_held_agrees`): at the loop's entry the snapshot `hp_<held>__<n> :=
+    perm(<cell>) > none`, the invariant `(hp ==> (held == (<cell> != null))) && ((!hp) ==> (!held))` and its entry and back-edge rows
+    `if (!(((perm(<cell>) > none) ==> (held == (<cell> != null))) && ((!(perm(<cell>) > none)) ==> (!held)))) {`.  `<cell>` is the leaf's own
+    cell, the one the ghost's name spells (`leaf_ghost_name`; a global leaf's ghost is a tagged one), in all of them; the snapshot of a loop is
+    assigned once, before the invariant that reads it, and is read nowhere else.  Returns the lines it found well formed, which the older
+    comparison rules (`held == (<cell> != null)`) then leave alone."""
+    carry: set[int] = set()
+    methods = [d for d in decls if d.kind == "method"]
+    snaps: dict[int, dict[str, int]] = {}
+
+    def cell_ok(g: str, c: str) -> bool:
+        lo = leaf_cell_owner(c)
+        return lo is not None and g == leaf_ghost_name(lo[1], lo[2]) and (lo[0] == "local" or g in ghosts)
+
+    for lineno, code in enumerate(src.code, start=1):
+        d = next((m for m in methods if m.line <= lineno <= m.end_line), None)
+        n = _nospace(code)
+        if (a := HP_ASSIGN_RE.search(code)) is not None:
+            hp = a.group("hp")
+            mine = snaps.setdefault(d.line if d else -1, {})
+            rhs = _nospace(_statement_rhs(code, a.end()))
+            nm = _HP_NAME_RE.match(hp)
+            pm = re.fullmatch(r"perm\((?P<c>.+)\)>none", rhs)
+            if hp in mine:
+                add(lineno, f"`{hp}` is assigned twice: a loop's snapshot is assigned once, at its entry (decision 0055 items 7 and 9)")
+            elif nm is None or pm is None or not cell_ok(nm.group("held"), pm.group("c")):
+                add(lineno, f"`{hp}` is assigned `{rhs}`: it is `perm(<cell>) > none` of the very cell its ghost's name spells, the leaf's own "
+                            "(decision 0055 items 7 and 9)")
+            else:
+                mine[hp] = lineno
+            continue
+        if (m := _CARRY_ROW_RE.match(n)) is not None:
+            if cell_ok(m.group("g"), m.group("c")):
+                carry.add(lineno)
+            continue
+        if (m := _CARRY_INV_RE.match(n)) is not None:
+            nm = _HP_NAME_RE.match(m.group("hp"))
+            if (nm is not None and nm.group("held") == m.group("g") and cell_ok(m.group("g"), m.group("c"))
+                    and snaps.get(d.line if d else -1, {}).get(m.group("hp"), lineno) < lineno):
+                carry.add(lineno)
+                continue
+        if HP_TOKEN_RE.search(code) and not HP_VAR_RE.match(code):
+            add(lineno, "an `hp_` snapshot is read only in the loop carry of its own leaf ghost, `(hp ==> (held == (<its cell> != null))) && "
+                        "((!hp) ==> (!held))`, after its assignment (decision 0055 items 7 and 9)")
+    return carry
+
+
 EXM_TOKEN_RE = re.compile(r"(?<![\w$'.])exm_(?P<n>[0-9]+)(?![\w$'])")
 EXM_ASSIGN_RE = re.compile(r"(?<![\w$'.])exm_(?P<n>[0-9]+)\s*:=")
 EXM_VAR_RE = re.compile(r"^\s*var\s+exm_[0-9]+\s*:\s*Bool\s*$")
+_EXM_LEAF_RE = re.compile(r"^(?P<g>held_[\w$']+)&&\(perm\((?P<n>.+)\)>none\)$")
 _EXM_SHAPE_RE = re.compile(r"^\((?P<g>[\w$']+)&&\((?P<x>.+?)!=null\)\)&&\(perm\((?P<n>.+)\)>none\)$")
 
 
@@ -1978,7 +2057,14 @@ def lint_exemption_ghosts(src: Source, decls: list[Decl], ghosts: dict[str, tupl
             m = _EXM_SHAPE_RE.match(rhs)
             problem = None
             nxt = ""
-            if m is None:
+            if (lm := _EXM_LEAF_RE.match(rhs)) is not None:
+                # a leaf's own block: `held_<leaf> && (perm(<that leaf's cell>) > none)`, the cell the next level is rooted at
+                g, nxt = lm.group("g"), lm.group("n")
+                if g not in ghosts or not ghosts[g][1]:
+                    problem = f"`{g}` is not the ghost of an owning leaf tagged `// cerastes:owning-global GB_x/<k>...`"
+                elif re.fullmatch(re.escape(ghost_cell_text(ghosts[g])) + r"\.v_ptr_[\w$']+", nxt) is None:
+                    problem = f"`{g}` reads the permission to its own leaf's cell, `{ghost_cell_text(ghosts[g])}.v_ptr_T`, and no other"
+            elif m is None:
                 problem = "it is `(<held ghost or earlier exm> && (<cell> != null)) && (perm(<member cell>) > none)`"
             else:
                 g, x, nxt = m.group("g"), m.group("x"), m.group("n")
@@ -2052,6 +2138,7 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
     for gb, path in tagged_leaves:
         ghosts.setdefault(leaf_ghost_name(gb, path), (gb, path))
     tagged_blocks = tagged | {gb for gb, _p in tagged_leaves}
+    carry_lines = lint_leaf_carry(src, decls, ghosts, add)
     for lineno, code in enumerate(src.code, start=1):
         for gm in sorted({m.group("ghost") for m in GHOST_ANY_RE.finditer(code)}):
             if gm not in ghosts:
@@ -2073,7 +2160,7 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                             "(the update after a call or a free, which reads the token's permission), `held || ...` (a block received "
                             "through an address) or, for `tv_`, the conditional read of the token (decision 0054 items 5 and 6); an owning "
                             "leaf's ghost names its own leaf's cell (decision 0055 item 9)")
-        for gm in sorted({m.group("ghost") for m in re.finditer(r"(?<![\w$'.])(?P<ghost>held_GB_[\w$']*)\s*==(?!>)", code)}):
+        for gm in sorted({m.group("ghost") for m in re.finditer(r"(?<![\w$'.])(?P<ghost>held_GB_[\w$']*)\s*==(?!>)", code)} if lineno not in carry_lines else set()):
             if gm not in ghosts:
                 continue
             gb, path = ghosts[gm]
@@ -2087,10 +2174,10 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
     ref_vars = {m.group(1) for l in src.code if (m := re.match(r"^\s*var\s+([\w$']+)\s*:\s*Ref\b", l))}
     exm_info = lint_exemption_ghosts(src, decls, ghosts, add)
     for lineno, code in enumerate(src.code, start=1):
-        for gm in sorted({m.group("ghost") for m in LOCAL_GHOST_COMPARE_RE.finditer(code)}):
+        for gm in sorted({m.group("ghost") for m in LOCAL_GHOST_COMPARE_RE.finditer(code)} if lineno not in carry_lines else set()):
             n = _nospace(code)
             leafish = any(re.fullmatch(rf"held_{re.escape(v)}(?:_[0-9]+)+", gm) for v in ref_vars) or any(
-                (lo := leaf_cell_owner(c)) is not None for c in re.findall(r"(loc\(member\(.*?,[0-9]+\),0\)\.v_ptr_[\w$']+)!=null", n))
+                leaf_cell_owner(c) is not None for c in operands_of_nonnull(n))
             if not leafish:
                 continue
             ok = False
