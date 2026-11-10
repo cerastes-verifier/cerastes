@@ -173,6 +173,9 @@ struct StructMember
     std::string name;
     Type type;
     SrcLoc loc;
+    // `[[cerastes::owning]]` on the field (decision 0055 item 2): a pointer to an object type that owns the block it points to.  The encoder sets it after
+    // add_member; no consumer reads it before the closure (item 3).  The owning-field graph is acyclic (check_program).
+    bool owning {false};
 };
 
 // A C structure type (decision 0043 items 2 and 3), interned in the Program by Program::add_struct (one object per C type: two structs are
@@ -201,6 +204,8 @@ struct StructLeaf
     std::vector<int> path;
     Type type;
     std::string text;
+    // the member is `[[cerastes::owning]]` (decision 0055 item 2): a store to this leaf takes item 4's value rule
+    bool owning {false};
 };
 // The leaves of `s` in declaration order, depth first (a nested struct's leaves in place).  `text` is `root_text` followed by `.name` for each
 // member on the way (`->name` for the first when `arrow`): struct_leaves(s, "t", false) gives "t.x", "t.u.y", struct_leaves(s, "p", true) "p->x", "p->u.y".

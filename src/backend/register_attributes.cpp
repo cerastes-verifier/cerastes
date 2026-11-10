@@ -68,8 +68,10 @@ const an_attr_registration kAttributes[] {
     // the encoder rejects each of them.  From M4.5d2b2a (decision 0054 items 5 and 6) the encoder also accepts it on a
     // mutable pointer global, a `static` local and an address-taken local (P75): the variable's list is the union over
     // its declarations and EDG raises no mismatch, so the encoder compares each declaration's own list.  A field (target
-    // `d`) waits for M4.5d2b2b, and EDG refuses it itself until then.
-    {"owning", "?(X)", "r|v|p", RAF_ENTITY_ATTACHED},
+    // `d`, M4.5d2b2b, decision 0055 item 2; P74 (b), P76) lands on the field's own `source_corresp.attributes` in both positions and for each declarator
+    // (C structures, C++ aggregates, a structure named only by a typedef); registration accepts a non-pointer field, `owning(n)`, a duplicate and a
+    // pointer to `const`, and `struct_info` rejects each of them.  `ref_to_uninit` and `must_init` on a field stay EDG's refusal (#1835).
+    {"owning", "?(X)", "r|v|p|d", RAF_ENTITY_ATTACHED},
     // The initialization markers (decision 0042 item 2; P4222's markers in the cerastes spelling; P54, P64).  `uninit` is a declaration
     // attribute on the definition of an automatic local (`v:+a!`, like `invariant`'s `s:+i!`: EDG itself refuses it on a global, a static
     // local (#1862), a parameter, a field and a function (#1835)).  `ref_to_uninit` is a marker on a parameter, a

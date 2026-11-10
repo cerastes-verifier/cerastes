@@ -370,6 +370,30 @@ private:
         }
         return false;
     }
+    // Decision 0055 item 2: the owning-field graph has an edge from a structure to the pointee structure of each of its owning fields and to each by-value
+    // member structure.  Whether `target` is reachable from `from`; `seen` holds the structures already expanded, so the walk ends on any graph.
+    bool owning_reaches(const StructType& from, const StructType* target, std::set<const StructType*>& seen) const
+    {
+        for (const StructMember& m : from.members)
+        {
+            const StructType* next {nullptr};
+            if (m.type.is_struct())
+            {
+                next = m.type.struct_type;
+            }
+            else if (m.owning && m.type.is_ptr() && m.type.pointee != nullptr && m.type.pointee->is_struct())
+            {
+                next = m.type.pointee->struct_type;
+            }
+            if (next != nullptr &&
+                (next == target || (seen.insert(next).second && owning_reaches(*next, target, seen))))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void struct_type(const StructType& st)
     {
         const std::string name {"the struct '" + st.c_name + "'"};
@@ -427,6 +451,23 @@ private:
             {
                 err(m.loc, "the member '" + m.name + "' of " + name +
                                " is not a bool, an integer, a pointer or a struct (decision 0043 item 2)");
+            }
+            if (m.owning)
+            {
+                // decision 0055 item 2: a pointer to an object, and no cycle (recursive ownership is M4.5f2: the closure would not terminate)
+                if (!m.type.is_ptr() || m.type.pointee == nullptr)
+                {
+                    err(m.loc,
+                        "the owning member '" + m.name + "' of " + name + " is not a pointer (decision 0055 item 2)");
+                }
+                else if (std::set<const StructType*> seen; m.type.pointee->is_struct() &&
+                                                           m.type.pointee->struct_type != nullptr &&
+                                                           (m.type.pointee->struct_type == &st ||
+                                                            owning_reaches(*m.type.pointee->struct_type, &st, seen)))
+                {
+                    err(m.loc, "the owning member '" + m.name + "' of " + name +
+                                   " makes the struct own itself (decision 0055 item 2)");
+                }
             }
         }
     }
@@ -2435,9 +2476,11 @@ private:
                             "or a place reached from one of them through loads (decisions 0037 item 5, 0040 items 4 and 6, 0041 item 7, 0043 item 9, 0045 item 2)");
                     }
                     else if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind == Expr::Kind::GlobalAddr &&
-                             root->global != nullptr && root->global->owner != nullptr && !root->global->owning)
+                             root->global != nullptr && root->global->owner != nullptr && !root->global->owning &&
+                             !owning_leaf_place(e.a))
                     {
-                        // an owning `static` local is read only by the deep atom the encoder adds (decision 0054 item 5)
+                        // an owning `static` local is read only by the deep atom the encoder adds (decision 0054 item 5), and an owning leaf of a `static`
+                        // struct local only by the closure clause of its implicit `owns(s)` (decision 0055 item 3)
                         err(e.loc, "a read of the `static` local '" + root->global->c_name +
                                        "' in a contract (its name is not in scope there, decision 0041 item 12)");
                     }
@@ -2834,6 +2877,31 @@ private:
                                         e.args[k]->type.str() + ", not a " + leaves[k].type.str());
             }
         }
+    }
+
+    // Decision 0055 item 3: whether `a`, the address a Deref reads, is the cell of an owning leaf of a global: a MemberAddr whose member is owning, over
+    // by-value members of a global, or over the value an owning leaf holds (`cache.q`, `cache.t.q`, `cache.b->z`); the reads the closure clause of a `static`
+    // struct local's implicit `owns(s)` makes, and no other.
+    bool owning_leaf_place(const Expr* a) const
+    {
+        if (a == nullptr || a->kind != Expr::Kind::MemberAddr || a->a == nullptr || !a->a->type.is_ptr() ||
+            a->a->type.pointee == nullptr || !a->a->type.pointee->is_struct() ||
+            a->a->type.pointee->struct_type == nullptr || a->index < 0 ||
+            static_cast<size_t>(a->index) >= a->a->type.pointee->struct_type->members.size() ||
+            !a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].owning)
+        {
+            return false;
+        }
+        const Expr* b {a->a};
+        while (b != nullptr && b->kind == Expr::Kind::MemberAddr)
+        {
+            b = b->a; // by-value struct members
+        }
+        if (b == nullptr)
+        {
+            return false;
+        }
+        return b->kind == Expr::Kind::GlobalAddr || (b->kind == Expr::Kind::Deref && owning_leaf_place(b->a));
     }
 
     // In a contract: the place expression `a` of a Deref or an Atom, a chain of MemberAddr nodes over a root, is allowed (decision 0043 item 9); a

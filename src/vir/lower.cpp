@@ -2539,6 +2539,51 @@ private:
                    ? addr->global
                    : nullptr;
     }
+    // Decision 0055 item 4: the owning field a store's address names (`p->q`, `s.q`, `s.t.q`: the last MemberAddr's member), or null.
+    static const StructMember* owning_leaf_of(const Expr* addr)
+    {
+        if (addr == nullptr || addr->kind != Expr::Kind::MemberAddr || addr->a == nullptr)
+        {
+            return nullptr;
+        }
+        const Type& pt {addr->a->type};
+        if (!pt.is_ptr() || pt.pointee == nullptr || !pt.pointee->is_struct() || pt.pointee->struct_type == nullptr)
+        {
+            return nullptr;
+        }
+        const StructType& st {*pt.pointee->struct_type};
+        if (addr->index < 0 || static_cast<size_t>(addr->index) >= st.members.size())
+        {
+            return nullptr;
+        }
+        const StructMember& m {st.members[static_cast<size_t>(addr->index)]};
+        return m.owning ? &m : nullptr;
+    }
+    // The value rule of a store into an owning field (decision 0055 item 4): a pointer that is not null is the start of a block the function holds whole,
+    // before the write (`permission`); a null pointer constant needs no row, and the row reads no old value.  Returns the temp that holds the value.
+    E leaf_value_rule(const std::string& place, const SrcLoc& loc, const E& value, std::vector<low::LStmt>& out)
+    {
+        if (value->kind == low::LExpr::Kind::Null)
+        {
+            return value;
+        }
+        E nv {value};
+        if (value->kind != low::LExpr::Kind::Var)
+        {
+            const std::string t {new_temp(low::LType::Ref)};
+            assign(out, t, value);
+            nv = low::var(t);
+        }
+        emit_ending_assert(
+            out,
+            low::implies(low::bin(low::BinOp::Ne, nv, low::null_()),
+                         low::and_(low::bin(low::BinOp::Eq, low::dom("offset_of", {nv}), low::int_lit("0")),
+                                   low::bin(low::BinOp::Eq, low::perm_of(tok_slot(nv), "tok"), low::write_perm()))),
+            meta("permission", loc,
+                 "owning field `" + place +
+                     "` receives a pointer that is not the start of a block the function holds"));
+        return nv;
+    }
     // The owners that remain when the function returns: the entry value of every formal with an `ensures` block site (a
     // borrowed block parked in an owning
     // local, audit S11) and the result when it has one (audit N2).
@@ -3240,6 +3285,11 @@ private:
                                        "` needs `owns(" + named[i].text + ")` in its contract"
                                  : "writes " + quoted(named[i].text, "the object the pointer points to") +
                                        " without owning it: the object it points to may have ended"));
+            if (plain[i].owning)
+            {
+                // decision 0055 item 4: the value rule of an owning field (a copy, an initializer or a call's result stores each owning leaf)
+                values[i] = leaf_value_rule(named[i].text, s.loc, values[i], out);
+            }
             write_fields(out, t, plain[i].type, values[i]);
         }
     }
@@ -3295,18 +3345,24 @@ private:
             global_owner_after(*og, nv, out);
             return;
         }
+        E value {vs[1U].e};
+        if (t.is_ptr() && owning_leaf_of(s.addr) != nullptr)
+        {
+            // decision 0055 item 4: the value rule of an owning field
+            value = leaf_value_rule(place, s.loc, value, out);
+        }
         if (t.is_ptr() && s.addr->kind != Expr::Kind::GlobalAddr)
         {
             // decision 0054 item 6: a store through a pointer that may be an address-taken owner's cell
-            const auto aliases {owner_alias_rows(recv, t, s.loc, vs[1U].e, out)};
+            const auto aliases {owner_alias_rows(recv, t, s.loc, value, out)};
             if (!aliases.empty())
             {
-                write_fields(out, recv->text, t, vs[1U].e);
+                write_fields(out, recv->text, t, value);
                 owner_alias_after(recv, aliases, out);
                 return;
             }
         }
-        write_fields(out, recv->text, t, vs[1U].e);
+        write_fields(out, recv->text, t, value);
     }
 
     // ---- contracts with pointers (decision 0037) ----
@@ -3606,6 +3662,16 @@ private:
     }
     bool is_heap_program()
     {
+        for (const StructType& st : prog_.structs())
+        {
+            for (const StructMember& m : st.members)
+            {
+                if (m.owning)
+                {
+                    return true; // decision 0055 item 4: the value rule of an owning field reads the token of the block it receives, a block site or not
+                }
+            }
+        }
         for (const Global& g : prog_.globals())
         {
             if (g.owning)
@@ -6167,6 +6233,11 @@ private:
                          " without owning it: its object may have ended"));
             const std::string t {new_temp(low::LType::Ref)};
             assign(fx.stmts, t, place);
+            if (plain[i].owning)
+            {
+                // decision 0055 item 4: the value rule of an owning field, in the effect, before the write
+                values[i] = leaf_value_rule(named[i].text, e.loc, values[i], fx.stmts);
+            }
             write_fields(fx.stmts, t, plain[i].type, values[i]);
         }
         fx.deps = wset;
@@ -6317,8 +6388,11 @@ private:
         {
             // decision 0054 item 6: a store through a pointer that may be an address-taken owner's cell
             const E recv {low::var(recv_name)};
-            const auto aliases {owner_alias_rows(recv, t, e.loc, stored.e, fx.stmts)};
-            write_fields(fx.stmts, recv_name, t, stored.e);
+            // decision 0055 item 4: the value rule of an owning field
+            const E value {owning_leaf_of(e.c) != nullptr ? leaf_value_rule(text, e.loc, stored.e, fx.stmts)
+                                                          : stored.e};
+            const auto aliases {owner_alias_rows(recv, t, e.loc, value, fx.stmts)};
+            write_fields(fx.stmts, recv_name, t, value);
             owner_alias_after(recv, aliases, fx.stmts);
         }
         else

@@ -377,6 +377,12 @@ private:
     bool class_features_done_ {false};
     void collect_class_features();
     const StructInfo& struct_info(a_type_ptr t);
+    // Decision 0055 item 2 (acyclicity): the owning-field graph over the front end's types.  `owning_field` is whether the field has a
+    // `cerastes::owning` node and a pointer type (the encoder reads the rest at the field's own structure); `owning_reaches` whether `target` is reachable from
+    // `from` through by-value structure members and through owning fields declared no later than `limit` (the field that closes a cycle is the last-declared
+    // owning one, so its check sees every other edge of the cycle).
+    static bool owning_field(a_field_ptr g);
+    static bool owning_reaches(a_type_ptr from, a_type_ptr target, a_field_ptr limit, std::set<a_type_ptr>& seen);
     static bool is_struct_kind(a_type_ptr t)
     {
         return t != nullptr && (t->kind == tk_struct || t->kind == tk_class);
@@ -2108,7 +2114,31 @@ private:
             atom_pos_[atom] = *where;
             deep_atoms_.insert(atom);
         }
-        return b_.binary(vir::BinaryOp::LOr, eq, atom, l);
+        // decision 0055 item 3: the block of a `struct S *` global closes over the owning fields of `S`
+        const Expr* inner {g->type.is_ptr() && g->type.pointee != nullptr && g->type.pointee->is_struct()
+                               ? close_struct(
+                                     [this, g, l]()
+                                     {
+                                         return b_.deref(b_.global_addr(g, l), l);
+                                     },
+                                     *g->type.pointee->struct_type, where != nullptr ? *where : cx_.stmt_pos, l)
+                               : nullptr};
+        return b_.binary(vir::BinaryOp::LOr, eq,
+                         inner != nullptr ? b_.binary(vir::BinaryOp::LAnd, atom, inner, l) : atom, l);
+    }
+    // The clause that closes the implicit `owns(s)` of a `static` struct local `g` (or any `owns(g)` of a struct global) over its owning leaves; null when it has none.
+    const Expr* global_closure(const vir::Global* g, const SrcLoc& l)
+    {
+        if (!g->type.is_struct())
+        {
+            return nullptr;
+        }
+        return close_struct(
+            [this, g, l]()
+            {
+                return b_.global_addr(g, l);
+            },
+            *g->type.struct_type, cx_.stmt_pos, l);
     }
     vir::Clause deep_clause(const vir::Global* g, const SrcLoc& l)
     {
@@ -2397,6 +2427,522 @@ private:
         f->ensures_.insert(f->ensures_.begin(), add_ensures.begin(), add_ensures.end());
         cx_.contract = saved_contract;
         cx_.annotation = saved_annotation;
+    }
+
+    // ---- the closure of an atom over owning fields (decision 0055 item 3) ---------------------------------------------------------------
+    // An atom that gives `write` to the cell of an owning field `L` (`owns(*p)`, `owns(p->t)`, the leaf `owns(p->q)`, the same through loads and on a struct
+    // global, the implicit `owns(s)` of a `static` struct local, `owning` on a `struct S *` parameter) or that is a plain block site on a pointer to a
+    // structure with owning fields (`owns_block(p)`, an `owning` result, a site through a load) is followed, under its own guards and in its own list, by
+    // `L == NULL || owns_block(L)` for each owning leaf `L` it covers, and a clause on `L` whose pointee structure has owning fields closes in turn (the
+    // owning-field graph is acyclic, item 2).  Only the clause is added, never an atom, so the contract's own atoms keep their numbers; the clause is 0054
+    // item 2's block site through a load.  `reads` and `live` close nothing, and neither does a marked site (`must_init`'s `requires`, `ref_to_uninit`).
+    struct OwnLeaf
+    {
+        std::vector<int> path;
+        vir::Type type;
+    };
+    // The owning leaves of a structure, in struct_leaves order (depth first), nested by-value members included.
+    static std::vector<OwnLeaf> owning_leaves(const vir::StructType& st)
+    {
+        std::vector<OwnLeaf> out;
+        for (const vir::StructLeaf& lf : vir::struct_leaves(st))
+        {
+            if (leaf_is_owning(st, lf.path))
+            {
+                out.push_back(OwnLeaf {lf.path, lf.type});
+            }
+        }
+        return out;
+    }
+
+    // The name of the member at `path` of `st`.
+    static std::string leaf_name(const vir::StructType& st, const std::vector<int>& path)
+    {
+        const vir::StructType* cur {&st};
+        std::string name;
+        for (int k : path)
+        {
+            const vir::StructMember& m {cur->members[static_cast<size_t>(k)]};
+            name = m.name;
+            cur = m.type.is_struct() ? m.type.struct_type : nullptr;
+        }
+        return name;
+    }
+
+    // A fresh copy of the place expression `e` of a contract (a Formal, the Result or a GlobalAddr under Deref, MemberAddr, Field and Old nodes), with its
+    // spelling; null for any other node.
+    const Expr* clone_place(const Expr* e, const vir::Function& f, const SrcLoc& l)
+    {
+        if (e == nullptr)
+        {
+            return nullptr;
+        }
+        const Expr* r {nullptr};
+        switch (e->kind)
+        {
+            case Expr::Kind::Formal:
+                r = b_.formal(f, e->index, l);
+                break;
+            case Expr::Kind::Result:
+                r = b_.result(f, l);
+                break;
+            case Expr::Kind::GlobalAddr:
+                r = e->global != nullptr ? b_.global_addr(e->global, l) : nullptr;
+                break;
+            case Expr::Kind::Deref:
+            case Expr::Kind::MemberAddr:
+            case Expr::Kind::Field:
+            case Expr::Kind::Old:
+            {
+                const Expr* a {clone_place(e->a, f, l)};
+                if (a == nullptr)
+                {
+                    return nullptr;
+                }
+                r = e->kind == Expr::Kind::Deref        ? b_.deref(a, l)
+                    : e->kind == Expr::Kind::MemberAddr ? b_.member_addr(a, e->index, l)
+                    : e->kind == Expr::Kind::Field      ? b_.field(a, e->index, l)
+                                                        : b_.old(a, l);
+                break;
+            }
+            default:
+                return nullptr;
+        }
+        if (r != nullptr)
+        {
+            Expr* m {const_cast<Expr*>(r)};
+            m->c_text = e->c_text;
+            m->user_spelling = e->user_spelling;
+        }
+        return r;
+    }
+
+    // `*(&base->m1...->mn)` over the fresh pointer expression `base`: the leaf at member path `path`.
+    const Expr* leaf_read(const Expr* base, const std::vector<int>& path, const SrcLoc& l)
+    {
+        const Expr* a {base};
+        for (int k : path)
+        {
+            a = spell_loaded_place(b_.member_addr(a, k, l));
+        }
+        return b_.deref(a, l);
+    }
+
+    using Maker = std::function<const Expr*()>; // makes a fresh copy of a place expression
+
+    // `L == NULL || owns_block(L) [&& the closure of L's own owning fields]`, `make` building `L` (a pointer to an object) afresh; `*atom` is the block site.
+    const Expr* close_leaf(const Maker& make, const vir::Type& ptype, const a_source_position& pos, const SrcLoc& l,
+                           const Expr** atom)
+    {
+        const Expr* eq {b_.binary(vir::BinaryOp::Eq, make(), b_.null_const(ptype, l), l)};
+        const Expr* site {b_.atom(vir::AtomKind::OwnsBlock, make(), -1, l)};
+        atom_pos_[site] = pos;
+        if (atom != nullptr)
+        {
+            *atom = site;
+        }
+        const Expr* inner {ptype.pointee != nullptr && ptype.pointee->is_struct()
+                               ? close_struct(make, *ptype.pointee->struct_type, pos, l)
+                               : nullptr};
+        return b_.binary(vir::BinaryOp::LOr, eq,
+                         inner != nullptr ? b_.binary(vir::BinaryOp::LAnd, site, inner, l) : site, l);
+    }
+    // The conjunction of the clauses of the owning leaves of `st`, `base` building the pointer to the structure; null when it has none.
+    const Expr* close_struct(const Maker& base, const vir::StructType& st, const a_source_position& pos,
+                             const SrcLoc& l)
+    {
+        const Expr* r {nullptr};
+        for (const OwnLeaf& lf : owning_leaves(st))
+        {
+            const std::vector<int> path {lf.path};
+            const Maker make {[this, &base, path, l]()
+                              {
+                                  return leaf_read(base(), path, l);
+                              }};
+            const Expr* c {close_leaf(make, lf.type, pos, l, nullptr)};
+            r = r != nullptr ? b_.binary(vir::BinaryOp::LAnd, r, c, l) : c;
+        }
+        return r;
+    }
+
+    // Structural equality of the place and guard expressions the closure compares (a written clause against the one the pass would add).
+    static bool same_tree(const Expr* a, const Expr* b)
+    {
+        if (a == b)
+        {
+            return true;
+        }
+        if (a == nullptr || b == nullptr || a->kind != b->kind || a->type != b->type)
+        {
+            return false;
+        }
+        switch (a->kind)
+        {
+            case Expr::Kind::Const:
+                if (a->value != b->value)
+                {
+                    return false;
+                }
+                break;
+            case Expr::Kind::Local:
+                if (a->var != b->var)
+                {
+                    return false;
+                }
+                break;
+            case Expr::Kind::GlobalAddr:
+                if (a->global != b->global)
+                {
+                    return false;
+                }
+                break;
+            case Expr::Kind::Formal:
+            case Expr::Kind::MemberAddr:
+            case Expr::Kind::Field:
+                if (a->index != b->index)
+                {
+                    return false;
+                }
+                break;
+            case Expr::Kind::Unary:
+                if (a->uop != b->uop)
+                {
+                    return false;
+                }
+                break;
+            case Expr::Kind::Binary:
+                if (a->bop != b->bop)
+                {
+                    return false;
+                }
+                break;
+            case Expr::Kind::Result:
+            case Expr::Kind::Old:
+            case Expr::Kind::Cond:
+            case Expr::Kind::Convert:
+            case Expr::Kind::ToBool:
+            case Expr::Kind::BoolToInt:
+            case Expr::Kind::Null:
+            case Expr::Kind::Deref:
+                break;
+            default:
+                return false;
+        }
+        return same_tree(a->a, b->a) && same_tree(a->b, b->b) && same_tree(a->c, b->c);
+    }
+    // Whether `g` is `leaf == NULL` being false (either order, C's `bool_to_int`/`to_bool` wrapping accepted): the guard of a block site written as the
+    // closure's clause.
+    static bool is_null_guard_of(const vir::AtomGuard& g, const Expr* leaf)
+    {
+        if (g.holds)
+        {
+            return false;
+        }
+        const Expr* c {g.cond};
+        while (c != nullptr && (c->kind == Expr::Kind::ToBool || c->kind == Expr::Kind::BoolToInt))
+        {
+            c = c->a;
+        }
+        if (c == nullptr || c->kind != Expr::Kind::Binary || c->bop != vir::BinaryOp::Eq)
+        {
+            return false;
+        }
+        const Expr* l {c->a};
+        const Expr* r {c->b};
+        if (l != nullptr && l->kind == Expr::Kind::Null)
+        {
+            std::swap(l, r);
+        }
+        return r != nullptr && r->kind == Expr::Kind::Null && same_tree(l, leaf);
+    }
+    // Replaces the node `from` by `to` in the tree `root` (once).
+    static bool replace_node(const Expr*& root, const Expr* from, const Expr* to)
+    {
+        if (root == from)
+        {
+            root = to;
+            return true;
+        }
+        if (root == nullptr)
+        {
+            return false;
+        }
+        Expr* x {const_cast<Expr*>(root)};
+        for (const Expr** child : {&x->a, &x->b, &x->c})
+        {
+            if (*child != nullptr && replace_node(*child, from, to))
+            {
+                return true;
+            }
+        }
+        for (const Expr*& arg : x->args)
+        {
+            if (replace_node(arg, from, to))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Whether the site's own marker keeps it from closing (decision 0055 item 3: a cell without a value owns nothing): `must_init`'s `requires` side, a
+    // `ref_to_uninit` parameter or result.  A marker applies to a site on the parameter itself (no steps, no member path), as site_marker and block_marker read it.
+    bool closure_marked(const vir::Function& f, const vir::AtomSite& st) const
+    {
+        const vir::PlaceKey pk {vir::atom_place(*st.atom)};
+        if (!pk.valid() || !pk.via.empty() || !pk.path.empty())
+        {
+            return false;
+        }
+        if (pk.root == vir::kResultSiteKey)
+        {
+            return f.result_init != vir::InitMarker::None;
+        }
+        if (pk.root >= 0 && static_cast<size_t>(pk.root) < f.params.size())
+        {
+            const vir::InitMarker init {f.params[static_cast<size_t>(pk.root)].init};
+            return init == vir::InitMarker::RefToUninit || (init == vir::InitMarker::MustInit && !st.in_ensures);
+        }
+        return false;
+    }
+
+    // `ref_to_uninit` on a parameter or a result whose pointee structure has an owning field (decision 0055 item 3: pinned; M4.5d2b2c's strict rules decide it).
+    void reject_marked_owning_pointees(a_routine_ptr r, vir::Function* f)
+    {
+        auto pointee_struct = [](const vir::Type& t) -> const vir::StructType*
+        {
+            return t.is_ptr() && t.pointee != nullptr && t.pointee->is_struct() ? t.pointee->struct_type : nullptr;
+        };
+        const auto at {markers_.find(r)};
+        if (at != markers_.end())
+        {
+            for (const MarkerParam& m : at->second)
+            {
+                const auto k {static_cast<size_t>(m.index)};
+                if (m.kind != vir::InitMarker::RefToUninit || k >= f->params.size())
+                {
+                    continue;
+                }
+                const vir::StructType* st {pointee_struct(f->params[k].type)};
+                if (st == nullptr || owning_leaves(*st).empty())
+                {
+                    continue;
+                }
+                reject(
+                    Diag::unsupported_annotation, m.pos,
+                    "\"cerastes::ref_to_uninit\" on `" +
+                        (f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name) +
+                        "`, a pointer to " + st->c_name + ", which has the owning field `" + st->members[0U].name +
+                        "` (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 3)");
+            }
+        }
+        const vir::StructType* rs {pointee_struct(f->ret)};
+        if (rs == nullptr || f->result_init != vir::InitMarker::RefToUninit || owning_leaves(*rs).empty())
+        {
+            return;
+        }
+        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
+        {
+            if (is_registered_cerastes(a) && written_by_program(a->position) && classify(a) == Annot::ref_to_uninit)
+            {
+                reject(
+                    Diag::unsupported_annotation, a->position,
+                    "\"cerastes::ref_to_uninit\" on `" + f->c_name + "`, which returns a pointer to " + rs->c_name +
+                        ", which has an owning field (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 3)");
+                return;
+            }
+        }
+    }
+
+    void apply_owning_closure(a_routine_ptr r, vir::Function* f)
+    {
+        reject_marked_owning_pointees(r, f);
+        const std::vector<vir::AtomSite> perms {vir::contract_atoms(*f)};
+        const std::vector<vir::AtomSite> blocks {vir::contract_block_atoms(*f)};
+        const bool bodiless {verified_body(r) == nullptr};
+        auto pos_of = [&](const Expr* atom)
+        {
+            const auto it {atom_pos_.find(atom)};
+            return it != atom_pos_.end() ? it->second : cx_.stmt_pos;
+        };
+        // the places of the clauses of the `requires` (added or written): an `ensures` clause on one of them has its `requires` partner
+        std::vector<vir::PlaceKey> taken;
+        for (const vir::AtomSite& b : blocks)
+        {
+            if (!b.in_ensures)
+            {
+                taken.push_back(vir::atom_place(*b.atom));
+            }
+        }
+        for (int list {0}; list < 2; ++list)
+        {
+            std::vector<vir::Clause>& cl {list == 0 ? f->requires_ : f->ensures_};
+            std::vector<vir::PlaceKey> added;
+            std::vector<const vir::AtomSite*> sources;
+            for (const vir::AtomSite& st : perms)
+            {
+                if (st.in_ensures == (list == 1) && st.atom->atom == vir::AtomKind::Owns && st.atom->a != nullptr)
+                {
+                    sources.push_back(&st);
+                }
+            }
+            for (const vir::AtomSite& st : blocks)
+            {
+                if (st.in_ensures == (list == 1) && st.atom->a != nullptr)
+                {
+                    sources.push_back(&st);
+                }
+            }
+            for (const vir::AtomSite* src : sources)
+            {
+                const Expr* a {src->atom->a};
+                const bool block {src->atom->atom == vir::AtomKind::OwnsBlock};
+                if (a->type.pointee == nullptr || closure_marked(*f, *src))
+                {
+                    continue;
+                }
+                const SrcLoc l {src->clause >= 0 && static_cast<size_t>(src->clause) < cl.size()
+                                    ? cl[static_cast<size_t>(src->clause)].loc
+                                    : f->loc};
+                const a_source_position pos {pos_of(src->atom)};
+                // what the atom covers: (a maker of the pointer to the leaf's cell's value place, the leaf's pointer type)
+                struct Cover
+                {
+                    Maker make;
+                    vir::Type ptype;
+                    std::string member; // the member's name
+                };
+                std::vector<Cover> covers;
+                const vir::Type& pointee {*a->type.pointee};
+                if (pointee.is_struct())
+                {
+                    for (const OwnLeaf& lf : owning_leaves(*pointee.struct_type))
+                    {
+                        const std::vector<int> path {lf.path};
+                        covers.push_back(Cover {[this, a, f, path, l]()
+                                                {
+                                                    return leaf_read(clone_place(a, *f, l), path, l);
+                                                },
+                                                lf.type, leaf_name(*pointee.struct_type, lf.path)});
+                    }
+                }
+                else if (!block && a->kind == Expr::Kind::MemberAddr && a->a != nullptr && a->a->type.is_ptr() &&
+                         a->a->type.pointee != nullptr && a->a->type.pointee->is_struct() && a->index >= 0 &&
+                         static_cast<size_t>(a->index) < a->a->type.pointee->struct_type->members.size() &&
+                         a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].owning)
+                {
+                    // the leaf's own cell: `owns(p->q)`
+                    covers.push_back(
+                        Cover {[this, a, f, l]()
+                               {
+                                   return b_.deref(clone_place(a, *f, l), l);
+                               },
+                               pointee, a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].name});
+                }
+                std::vector<const Expr*> add;
+                for (const Cover& cv : covers)
+                {
+                    const Expr* site {nullptr};
+                    const Expr* clause {close_leaf(cv.make, cv.ptype, pos, l, &site)};
+                    const vir::PlaceKey pk {vir::atom_place(*site)};
+                    // the leaf's and the atom's spelling for messages; a place without one (the result of an `owning` function) is named by its member
+                    const std::string field {cv.make()->c_text.empty() ? cv.member : cv.make()->c_text};
+                    const std::string at {block ? val_text(*src->atom->a) : atom_text(*src->atom)};
+                    const std::string source {std::string(block ? "owns_block(" : "owns(") +
+                                              (at.empty() ? std::string("the result") : at) + ")"};
+                    if (!pk.valid())
+                    {
+                        continue;
+                    }
+                    // a block site written on the leaf in this list: the clause's own shape takes its place, any other shape is refused
+                    const vir::AtomSite* written {nullptr};
+                    for (const vir::AtomSite& b : blocks)
+                    {
+                        if (b.in_ensures == (list == 1) && b.atom != src->atom && vir::atom_place(*b.atom) == pk)
+                        {
+                            written = &b;
+                        }
+                    }
+                    if (written != nullptr)
+                    {
+                        bool shape {written->guards.size() == src->guards.size() + 1U &&
+                                    is_null_guard_of(written->guards.back(), cv.make())};
+                        for (size_t g {0U}; shape && g < src->guards.size(); ++g)
+                        {
+                            shape = src->guards[g].holds == written->guards[g].holds &&
+                                    same_tree(src->guards[g].cond, written->guards[g].cond);
+                        }
+                        if (!shape)
+                        {
+                            reject(Diag::unsupported_annotation, pos_of(written->atom),
+                                   "a block site on the owning field `" + field + "` beside `" + source +
+                                       "`, which already includes the block of `" + field + "`: write `" + field +
+                                       " == NULL || owns_block(" + field + ")` or nothing (decision 0055 item 3)");
+                        }
+                        continue;
+                    }
+                    // a permission atom on the leaf's block (`reads(*p->q)` beside `owns(*p)`): the structure's `owns` already holds that block whole
+                    const vir::AtomSite* beside {nullptr};
+                    for (const vir::AtomSite& o : perms)
+                    {
+                        if (o.in_ensures == (list == 1) && o.atom != src->atom && vir::atom_place(*o.atom) == pk)
+                        {
+                            beside = &o;
+                        }
+                    }
+                    if (beside != nullptr)
+                    {
+                        reject(
+                            Diag::unsupported_annotation, pos_of(beside->atom),
+                            std::string(beside->atom->atom == vir::AtomKind::Reads  ? "`reads("
+                                        : beside->atom->atom == vir::AtomKind::Live ? "`live("
+                                                                                    : "`owns(") +
+                                atom_text(*beside->atom) + ")` beside `" + source +
+                                "`, which already holds the block of the owning field `" + field +
+                                "` (a borrower that only reads writes `reads` of the structure and of the field's block, not `owns` of the structure; decision 0055 item 3)");
+                        continue;
+                    }
+                    if (std::find(added.begin(), added.end(), pk) != added.end())
+                    {
+                        continue; // two atoms on one place: finish_atoms reports the overlap
+                    }
+                    if (list == 1 && bodiless && std::find(taken.begin(), taken.end(), pk) == taken.end())
+                    {
+                        // a block the contract gives, with nothing proving it distinct from every block the caller holds (0054 item 2, 0052 item 2a)
+                        const bool on_result {vir::atom_place(*src->atom).root == vir::kResultSiteKey};
+                        reject(
+                            Diag::unsupported_annotation, pos,
+                            "`" + source + "` in the `ensures` of `" + f->c_name + "` covers the owning field `" +
+                                field + "`, " +
+                                (on_result ? "a block that the fresh result would hand over"
+                                           : "a block that `" + f->c_name + "` would give") +
+                                " with no `requires` partner, and `" + f->c_name +
+                                "` has no body in this unit: nothing verifies that this block is distinct from every block the caller holds, so a contract nothing verifies may not promise it (the contract manifest, M6; decision 0055 item 3)");
+                        continue;
+                    }
+                    added.push_back(pk);
+                    add.push_back(clause);
+                }
+                if (add.empty())
+                {
+                    continue;
+                }
+                const Expr* joined {src->atom};
+                for (const Expr* c : add)
+                {
+                    joined = b_.binary(vir::BinaryOp::LAnd, joined, c, l);
+                }
+                if (!replace_node(cl[static_cast<size_t>(src->clause)].expr, src->atom, joined))
+                {
+                    lib_internal_error(pos,
+                                       "the closure of an atom over owning fields could not be placed after the atom");
+                }
+            }
+            if (list == 0)
+            {
+                taken.insert(taken.end(), added.begin(), added.end());
+            }
+        }
     }
 
     // The VIR function of a routine, created with its signature and contract the first time it is needed; null
@@ -2697,6 +3243,7 @@ private:
         }
         apply_owning(r, f);
         apply_owning_globals(f);
+        apply_owning_closure(r, f); // decision 0055 item 3
         finish_atoms(f);
         cx_ = std::move(saved);
     }
@@ -4341,6 +4888,26 @@ private:
                                  : g->leaves.front().kind == vir::GlobalInit::Unknown;
     }
 
+    // Whether the leaf at member path `path` of `st` is an owning field (decision 0055 item 2).
+    static bool leaf_is_owning(const vir::StructType& st, const std::vector<int>& path)
+    {
+        const vir::StructType* cur {&st};
+        for (size_t i {0U}; i < path.size(); ++i)
+        {
+            const vir::StructMember& m {cur->members[static_cast<size_t>(path[i])]};
+            if (i + 1U == path.size())
+            {
+                return m.owning;
+            }
+            if (!m.type.is_struct())
+            {
+                return false;
+            }
+            cur = m.type.struct_type;
+        }
+        return false;
+    }
+
     // The initial value of a struct global or `static` struct local, per leaf (decision 0044 item 8): the elements of a braced list of constants (0043 item 6's
     // element rules), zero or null for a leaf it does not name; a pointer leaf is null or `&h`.  Linkage decides, as for a scalar (question 84), whether the
     // values are known.  False after a rejection at its declaration.
@@ -4416,6 +4983,16 @@ private:
             a_constant_ptr ec {el.c};
             if (lt.is_ptr())
             {
+                // decision 0055 item 5: an owning leaf starts null (or absent); it owns only what it is given
+                if (leaf_is_owning(st, el.path) &&
+                    !(ec->kind == ck_integer && is_pointer_type(ec->type) && decimal_value(ec) == "0"))
+                {
+                    reject(
+                        Diag::unsupported_annotation, el.at,
+                        "an initializer of an owning field that is not a null pointer constant (an owning field starts null; it owns only what it is given, decision 0055 item 5)");
+                    rejected_globals_.insert(v);
+                    return false;
+                }
                 if (ec->kind == ck_integer && is_pointer_type(ec->type))
                 { // a null pointer constant in every spelling (P63 H4)
                     if (decimal_value(ec) != "0")
@@ -4768,6 +5345,11 @@ private:
                     // decision 0054 item 5: the deep atom follows the implicit `owns(s)` of an owning `static` local, in both lists
                     f->requires_.push_back(deep_clause(g, l));
                 }
+                if (const Expr* closure = global_closure(g, l))
+                {
+                    // decision 0055 item 3: the owning fields of a `static` struct local, after its implicit atom
+                    f->requires_.push_back(vir::Clause {closure, l});
+                }
                 if (!f->noreturn)
                 {
                     vir::Clause c {b_.global_atom(vir::AtomKind::Owns, b_.global_addr(g, l), n, l, true), l};
@@ -4776,6 +5358,10 @@ private:
                     if (g->owning)
                     {
                         dest.push_back(deep_clause(g, l));
+                    }
+                    if (const Expr* closure = global_closure(g, l))
+                    {
+                        dest.push_back(vir::Clause {closure, l});
                     }
                 }
                 ++n;
@@ -7497,8 +8083,13 @@ private:
     // every declarator of its declaration, a trailing one on its own, P74).
     static std::vector<an_attribute_ptr> variable_markers(a_variable_ptr v, Annot kind)
     {
+        return marker_nodes(v->source_corresp.attributes, kind);
+    }
+    // The same over any attribute list (a field's `source_corresp.attributes`, decision 0055 item 2; P76 finding 2).
+    static std::vector<an_attribute_ptr> marker_nodes(an_attribute_ptr list, Annot kind)
+    {
         std::vector<an_attribute_ptr> r;
-        for (an_attribute_ptr a {v->source_corresp.attributes}; a != nullptr; a = a->next)
+        for (an_attribute_ptr a {list}; a != nullptr; a = a->next)
         {
             if (!is_registered_cerastes(a) || classify(a) != kind)
             {
@@ -17441,6 +18032,46 @@ void Encoder::collect_class_features()
     }
 }
 
+bool Encoder::owning_field(a_field_ptr g)
+{
+    a_type_ptr u {g->type != nullptr ? skip_typerefs(g->type) : nullptr};
+    return u != nullptr && u->kind == tk_pointer && !u->variant.pointer.is_reference &&
+           !marker_nodes(g->source_corresp.attributes, Annot::owning).empty();
+}
+
+bool Encoder::owning_reaches(a_type_ptr from, a_type_ptr target, a_field_ptr limit, std::set<a_type_ptr>& seen)
+{
+    if (!is_struct_kind(from))
+    {
+        return false;
+    }
+    const auto key = [](a_field_ptr g)
+    {
+        return std::make_pair(static_cast<unsigned long long>(g->source_corresp.decl_position.seq),
+                              static_cast<unsigned long long>(g->source_corresp.decl_position.column));
+    };
+    for (a_field_ptr g {from->variant.class_struct_union.field_list}; g != nullptr; g = g->next)
+    {
+        a_type_ptr gu {g->type != nullptr ? skip_typerefs(g->type) : nullptr};
+        a_type_ptr next {nullptr};
+        if (is_struct_kind(gu))
+        {
+            next = gu; // a by-value member: always an edge
+        }
+        else if (g != limit && owning_field(g) && key(g) <= key(limit))
+        {
+            a_type_ptr pe {gu->variant.pointer.type != nullptr ? skip_typerefs(gu->variant.pointer.type) : nullptr};
+            next = is_struct_kind(pe) ? pe : nullptr;
+        }
+        if (next != nullptr &&
+            (next == target || (seen.insert(next).second && owning_reaches(next, target, limit, seen))))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The VIR type of a struct type entry (decision 0043 items 2 and 3), made once; every rejection of a definition in a verified file is reported
 // here, at the definition or at the member, so the uses stay silent.  A struct is registered before its members are read, so a self-referential
 // pointer member (`struct node *next`) finds it.
@@ -17551,8 +18182,20 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
         const std::string who {fname != nullptr ? "the member `" + std::string(fname) + "` of " + spelled
                                                 : "an unnamed member of " + spelled};
         ++members;
+        // decision 0055 item 2: `cerastes::owning` on the field, one node per written spelling (P74 (b): each declarator carries its own)
+        const std::vector<an_attribute_ptr> own {marker_nodes(f->source_corresp.attributes, Annot::owning)};
+        auto refuse_owning = [&](const a_source_position& at, const std::string& why)
+        {
+            reject(Diag::unsupported_annotation, at, "\"cerastes::owning\" on " + who + " (" + why + ")");
+            ok = false;
+        };
         if (f->is_bit_field)
         {
+            if (!own.empty())
+            {
+                refuse_owning(own[0U]->position, "a bit-field is not a pointer; decision 0055 item 2");
+                continue;
+            }
             refuse(fp, "a bit-field (" + who + "; M8, decision 0043 item 2)");
             continue;
         }
@@ -17620,6 +18263,49 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
         {
             refuse(fp, "a member whose type this version cannot read (" + who + ")");
             continue;
+        }
+        bool owning_member {false};
+        if (!own.empty())
+        {
+            a_type_ptr pe {u->kind == tk_pointer && u->variant.pointer.type != nullptr
+                               ? skip_typerefs(u->variant.pointer.type)
+                               : nullptr};
+            if (own.size() > 1U)
+            {
+                refuse_owning(own[1U]->position, "twice on one member; decision 0055 item 2");
+            }
+            else if (!arguments_of(own[0U]).empty())
+            {
+                refuse_owning(own[0U]->position, "`owning(n)`, an owned range: M4.5e1; decision 0055 item 2");
+            }
+            else if (u->kind != tk_pointer || u->variant.pointer.is_reference)
+            {
+                refuse_owning(own[0U]->position,
+                              std::string(u->kind == tk_pointer ? "a reference" : "it is not a pointer") +
+                                  "; decision 0055 item 2");
+            }
+            else if (pe != nullptr && pe->kind == tk_routine)
+            {
+                refuse_owning(own[0U]->position, "a pointer to a function: M4.7; decision 0055 item 2");
+            }
+            else if (pe != nullptr && pe->kind == tk_void)
+            {
+                refuse_owning(own[0U]->position, "a `void *`: a pointer to an untyped object; decision 0055 item 2");
+            }
+            else if (pointee_qualified(f->type))
+            {
+                refuse_owning(
+                    own[0U]->position,
+                    "a pointer to a `const` or `volatile` object: nothing may be written through an owner; decision 0055 item 2");
+            }
+            else
+            {
+                owning_member = true;
+            }
+            if (!owning_member)
+            {
+                continue;
+            }
         }
         VType mt;
         switch (u->kind)
@@ -17696,7 +18382,31 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                 }
                 break;
         }
+        if (owning_member)
+        {
+            // item 2: no cycle of ownership.  `f` closes one when its pointee structure reaches this structure through by-value members and owning fields
+            // declared no later than `f`.
+            a_type_ptr pu {skip_typerefs(skip_typerefs(f->type)->variant.pointer.type)};
+            std::set<a_type_ptr> seen;
+            if (is_struct_kind(pu) && (pu == t || owning_reaches(pu, t, f, seen)))
+            {
+                const std::string fn {fname};
+                reject(Diag::unsupported_annotation,
+                       marker_nodes(f->source_corresp.attributes, Annot::owning)[0U]->position,
+                       pu == t
+                           ? "owning field `" + fn + "` of `" + spelled + "` makes `" + spelled +
+                                 "` own itself; recursive ownership is M4.5f2 (decision 0055 item 2)"
+                           : "owning field `" + fn + "` of `" + spelled + "` closes a cycle of ownership through `" +
+                                 render_type(pu) + "`; recursive ownership is M4.5f2 (decision 0055 item 2)");
+                ok = false;
+                continue;
+            }
+        }
         prog_.add_member(st, fname, mt.t, loc_of(fp));
+        if (owning_member)
+        {
+            st->members.back().owning = true;
+        }
     }
     if (members == 0U && ok)
     {
@@ -17793,7 +18503,26 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
         }
         if (u->kind == tk_union)
         {
-            reject(Diag::unsupported_declaration, p, "a union (effective types: M8)");
+            // decision 0055 item 2: `owning` on a union's field is reported at the field, and the union stays rejected
+            bool owning_reported {false};
+            for (a_field_ptr uf {u->variant.class_struct_union.field_list}; uf != nullptr; uf = uf->next)
+            {
+                const std::vector<an_attribute_ptr> own {marker_nodes(uf->source_corresp.attributes, Annot::owning)};
+                if (!own.empty() && in_verified_file(own[0U]->position))
+                {
+                    reject(Diag::unsupported_annotation, own[0U]->position,
+                           std::string("\"cerastes::owning\" on ") +
+                               (uf->source_corresp.name != nullptr
+                                    ? "the member `" + std::string(uf->source_corresp.name) + "`"
+                                    : std::string("a member")) +
+                               " of a union (a union: effective types, M8; decision 0055 item 2)");
+                    owning_reported = true;
+                }
+            }
+            if (!owning_reported)
+            {
+                reject(Diag::unsupported_declaration, p, "a union (effective types: M8)");
+            }
             continue;
         }
         // C23 lets a tag be defined twice with compatible content; the two entries are two VIR types whose pointers would not compare (N3037: M8).

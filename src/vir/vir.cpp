@@ -46,7 +46,7 @@ void collect_leaves(const StructType& s, std::vector<int>& path, const std::stri
         }
         else
         {
-            out.push_back(StructLeaf {path, m.type, std::move(t)});
+            out.push_back(StructLeaf {path, m.type, std::move(t), m.owning});
         }
         path.pop_back();
     }
