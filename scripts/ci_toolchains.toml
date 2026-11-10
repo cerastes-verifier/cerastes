@@ -130,7 +130,8 @@ reason = "with libc++ 20's <coroutine>, vlibc's <stdlib.h> shim redeclares abort
 
 # The image's default clang 18: cerastes builds with it, but EDG emulating clang 18 is another language for some tests
 # (no standard [[assume]], non-constant enumerator values accepted, linkage conflicts between vlibc's shim and
-# clang 18's headers; S8, internal/handoff.md).  Dispatch only, until the owner decides (handoff question 169).
+# clang 18's headers; S8, record 0053 item 11).  It stays at dispatch as the record of what the clang-18 emulation
+# changes, and is revisited at M8's inventory (owner, 2026-11-09, handoff question 169).
 [[profile]]
 name = "ubuntu-24.04-clang18"
 platform = "linux"
