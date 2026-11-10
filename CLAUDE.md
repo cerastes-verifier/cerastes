@@ -15,7 +15,8 @@ User docs: doc/ (Antora) → https://cerastes.dev/cerastes/doc/ (decision 0004):
   GitHub's xcode-27 with the owner's Command Line Tools (decision 0016); CERASTES_JOBS sets the default -j;
   pull requests and pushes run the PR tier (CERASTES_CHECK_BASE, 0016 item 14), the full check runs
   nightly at 07:00 UTC and on workflow_dispatch
-- Tests only: python3 scripts/run_tests.py [file|dir ...]   (-v shows tool output)
+- Tests only: python3 scripts/run_tests.py [file|dir ...]   (-v shows tool output; --long adds tests/long/,
+  the long-running tier, decision 0057; CERASTES_LONG=1 scripts/check.sh runs it in the full check)
 - Harness self-test: python3 scripts/test_run_tests.py
 - EDG front end (stock): scripts/cpfe.sh --c++20 [cpfe options] <file>   (adds system headers)
 - EDG in the cerastes configuration (decision 0002) + our back end:

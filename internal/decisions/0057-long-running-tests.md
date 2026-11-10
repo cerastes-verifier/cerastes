@@ -1,6 +1,7 @@
 # 0057 — Long-running tests (M4.5d2b2c)
 
-- **Status:** draft (2026-11-10, M4.5d2b2c), written before the harness change (invariant 6); items 1–4 revised after
+- **Status:** accepted (2026-11-10, M4.5d2b2c), written before the harness change (invariant 6); item 4 revised after
+  audit round 1 (question 207), item 8 states the tries; items 1–4 revised after
   Part T was built, with the five points the draft left open (the areas, the header's scope, the PR tier refused
   beside the long tier, the summary clause, the last line's wording). Owner decisions from
   M4.5d2b2c's planning, 2026-11-10 (plan `.claude/plans/m4-5d2b2c-loop-limits.md`), each the recommendation unless
@@ -105,8 +106,18 @@ test cannot simply join the default run.
      its time goes to the handoff for M4.8. **A failing program that verifies, an exit 3 that is not the timeout, or a
      result with none of the designed errors stops the session.**
 
+   - **The tries** (2026-11-10, the x86-64 box `clang4.cpp.al` in S8's `ubuntu-26.04` container, both modes run at
+     once, load 2–16 on 172 cores). `cover_twice.c`, with the base encoder (the box's build at `aae35c2`, whose `src/`
+     is the session's base): exit 3 at 1801 s in both modes ("Silicon did not finish within 1800 seconds"). `two_fields.c`
+     and its twin `two_fields_drop.c`, with Part L-2's build: exit 3 at 1801 s in all four runs. The Viper of
+     `two_fields.c` is byte-identical from the base build and from Part L-2's, so the session did not slow it; the
+     program was recreated from the description of S40 (g)'s lost `g3_two.c` (218.5 s on a loaded Mac) and may differ
+     from it in detail. **Neither finished, so neither becomes a long test: both go to the handoff for M4.8 with these
+     times, and `tests/long/` starts empty.** None of the outcomes is the stop of this item (no verified failing
+     program, no exit 3 other than the timeout).
+
 9. **Facts:** the driver's `--timeout` (`src/driver/verify_main.cpp`), `verify_command` and `VERIFY_TIMEOUT_S`
-   (`scripts/run_tests.py`); the two programs' times (status, M4.5d2b2c).
+   (`scripts/run_tests.py`); the two programs' tries (item 8).
 
 ## Consequences
 

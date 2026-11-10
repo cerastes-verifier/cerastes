@@ -1,8 +1,10 @@
 # 0056 — Loop limits of owning fields (M4.5d2b2c)
 
-- **Status:** draft (2026-11-10, M4.5d2b2c), written before code (invariant 6); S41 (0) taken in (every run agrees
-  with the survey's rows: items 2–4 and 8 stand); to be revised after S41 (a)–(c) (`internal/il-inventory.md`,
-  chapter M4.5d2b2c) and audit round 1. Owner decisions from M4.5d2b2c's planning,
+- **Status:** accepted (2026-11-10, M4.5d2b2c), written before code (invariant 6), revised after S41
+  (`internal/il-inventory.md`, chapter M4.5d2b2c), audit round 1 (no blocking item; S1–S6), audit round 2 on Part L-1
+  (B1 the route twins; S1–S3) and on Part L-2 (B1, B2; S1–S3), the re-audit of the fixes (B1) and a focused review of
+  its fix; each item says what was built. Owner questions in the session, 204–214, are quoted where they decide.
+  Owner decisions from M4.5d2b2c's planning,
   2026-11-10 (plan `.claude/plans/m4-5d2b2c-loop-limits.md`), each the recommendation:
   - **195:** d2b2c takes record 0055 item 7's pinned loop limits first.
   - **198:** M4.5d2b2c is the loop limits and the long-running tests (record 0057); `not_invalidating`,
@@ -76,7 +78,16 @@ verifier; three rows rest on inference, which S41 (0) checks):
      cells have values, so a loop calling such a callee keeps the guarantee; the route counts a callee whose `ensures`
      block site through a load of that type has another mode (`Kept` on a marked formal, `Uninit` on a result, the
      owning `ref_to_uninit` deep atom). The pin `owning_field_loop_site_call_written_false_alarm.c` then verifies and
-     is retired for a positive.
+     is retired for a positive. **As built**, the route is nearly dead: the only C contract with a non-plain `ensures`
+     site through a load is the deep atom of an owning `ref_to_uninit` global (`fill_g` with `owns(g)` in both lists
+     and `g == old(g)`), whose `requires` carries the same site, so item 4(b) already makes `wef` true for leaf, global
+     and cell-variable sites; the route alone matters only for a closure site or a second global, where it changes no
+     outcome. VIR cannot express a callee with the route alone (`check_program` refuses an `ensures` `owns_block` without
+     a `requires` partner), so the route has no pin; it is kept because removing it would change no outcome and it is
+     the conservative direction.
+   - **The whole-structure route** is pinned only in the VIR self-test (`loop_site_struct_store_route`): no C shape
+     reaches a `Store` of a whole structure into a struct local without the structure escaping (EDG folds `*(&s) = t`
+     to an assignment, and a compound literal expands to leaf stores).
    - **Tests** (audit round 1, S4; corrected after audit round 2, B1): each route of the scan has its own must-fail
      twin, a loop over a site that is NULL at the entry, which the loop fills by that route with a block it never
      writes, and a read of the block after the loop (`uninitialized` at the read, `wef` false). A scan that drops the
@@ -152,18 +163,33 @@ verifier; three rows rest on inference, which S41 (0) checks):
      struct globals that already have a site. **The replace test for globals**: no closure is carried (0055 item 7's
      replaced-owner rule) when the loop may store a value to the global itself, by name (inside an expression too) or
      through a pointer of type `struct S **`, or calls a function whose contract covers the global's cell by name
-     (`owns(gp)`) or by type (an atom through a pointer whose pointee is `struct S *`). Each route has a must-fail test
-     or a pin: the closure's `wfc_` clause has no row of its own, and a missed route would carry a closure across a
-     replacement.
+     (`owns(gp)`) or by type (an atom through a pointer whose pointee is `struct S *`); for the leaves of a struct
+     global also a store through a pointer to the global's structure type, of a member (`pga->b = n`) or of the whole
+     structure (`*pga = t`) (audit round 2 on Part L-2, S2; owner, 2026-11-10, question 213, "Add the routes now").
+     Each route has a must-fail test or a pin: the closure's `wfc_` clause has no row of its own, and a missed route
+     would carry a closure across a replacement (only ever a false alarm: the closure's rows are checked).
    - The site's guard is `gp != NULL` read under the entry snapshot of the cell's permission (`kv > none ? gp : NULL`);
      `held` need not join it, since `held == (gp != NULL)` is already the carrier's invariant. The existing `wef`
      snapshot covers the field's flag; no new flag ghost.
    - **As built** (Part L-2): the value rule is stated over the site's entry ghosts, not the live chain of guards and
      pointers: `eob ==> cell == vsb` and `eob ==> on && p == epb`, where `eob` and `epb` are the site's guard and pointer
      at the entry and `vsb` the cell's snapshot, each with its mapped row (stating it over the live chain nested the
-     guards and made the Viper 2.5 times larger). A site's cells are places only where the loop cannot write the site's
-     pointer; no existing program has a site outside that. A closure for a struct-global leaf is built only where the
-     leaf already has a site other than item 5's.
+     guards and made the Viper 2.5 times larger); so the places are guarded by the entry's `eob`, not by the live `on`
+     the first bullet names. A closure for a struct-global leaf is built only where the leaf already has a site other
+     than item 5's.
+   - **The places test is broader than the rule** (audit round 2 on Part L-2, B2; owner, 2026-11-10, question 212,
+     "Keep as built"). A site's cells are places only where the loop writes neither the site's pointer nor, by name, any
+     address-taken local (`site_pointer_written`). No existing test has a site outside that, but two programs the base
+     handled are worse: `owning_field_loop_chain.c`'s loop with an unrelated address-taken `int z` written in the body
+     (verified on the base; ten errors: `owning_field_loop_chain_cell_write_false_alarm.c`) and a chain loop that frees
+     and nulls its middle owner under the written invariant `i == 0 || a.b == NULL` (verified on the base; four
+     `invalid-free`: `owning_field_loop_chain_null_owner_false_alarm.c`; without the invariant the program leaks on the
+     base too, so the auditor's first form is a must-fail, not a false alarm). Both are pinned false alarms, and
+     narrowing the test, with the base's live-guard places where the pointer may be written, is M4.8's.
+   - **The order at the entry** (audit round 2 on Part L-2, B1; owner, 2026-11-10, question 211, "Fix now"): the entry
+     ghosts and case splits of a site read through an earlier site's cells (`epb`, `eob`, `vsb`, `wblock_splits`) are
+     emitted after the entry rows, as item 7 orders the pre-reads; built first before them, a chain whose intermediate
+     block, or an owning global `gp`, was freed before the loop exited 3 where the base reports a mapped `permission`.
    - **Sound:** a place only frames reads, and its value clause is a checked invariant; each new site is 0054 item 4's
      carrier with its entry and back-edge rows.
    - **Evidence** (S41 (a)): the `global_pointer` loop with the block's cells as places verifies (4.0–4.7 s, both
@@ -182,7 +208,8 @@ verifier; three rows rest on inference, which S41 (0) checks):
      `assignment.failed` at site 2's hoisted pre-read, before site 1's row), and with the move only mapped rows remain.
      In a correct program the order cannot matter (the auditor's beside-order variant of S41 (b) verifies too). The
      tests include must-fail programs of that shape at depth 2, at depth 3 and for an owning `struct S *` global, each
-     a mapped error and no exit 3.
+     a mapped error and no exit 3. That covers a block freed inside the loop (the back edge); a block freed before the
+     loop is item 6's order at the entry (question 211).
    - S41 (b) decides the cost: the plan's rule was "over 60 s in either mode, the limit stays pinned". The hand-edited
      loop verifies in 12.1–16.6 s over six timed runs (both modes; Silicon only, load 5–10 with no other Silicon or
      compiler running), and its twin without `free(a.b->c->x)` fails at the back edge (`leak`, 20.1–23.7 s). The item
@@ -244,6 +271,27 @@ verifier; three rows rest on inference, which S41 (0) checks):
     - **Effect.** A leaf of a struct local that does not escape is reached by a loop only when the loop names the
       structure (`lused`); the by-type tests (`touches_cells_of_type`, `loop_calls_reach_cells_of`) skip it, so a loop
       that does not name it frames it out (its cells, block and ghost keep their state across the loop).
+    - **As built** (`struct_local_escapes`, used by `owner_loop_sites` and `framed_owner_ghosts`): skipping the leaf's
+      site was not enough, since the structure's cells were still places of the loop by type and a store through an
+      `int **` havocked `s.data`. So `loop_places` also leaves out the cells of a struct local that does not escape and
+      that the loop does not name. That is the part that lifts the pin, and it rests on the same framing: cells that
+      are not places are not in the invariant, and the body holds no permission to them.
+    - **Only for a structure with an owning leaf, and only in a loop with no exit from its scope** (the re-audit, B1;
+      owner, 2026-11-10, question 214, "Fix now"). Left out of every loop that does not name it, a struct local's cells
+      were missing when a `return` or an outward `goto` inside the loop ran the structure's scope-exit check: a plain C
+      program with no owning field, which verified on the base, failed `lifetime`. The cells are left out only for a
+      struct local with an owning leaf at some depth, and only when the loop's body and step have no `return` (at any
+      depth: a nested block, loop or `switch`) and no `goto` to a label outside the loop (`struct_local_framed_in`,
+      `exits_of`; `break` and `continue` do not leave the structure's scope, a `noreturn` call runs no scope-exit check).
+      Every `goto` out of the loop counts, even one that stays in the structure's scope: the safer reading. The focused
+      review of this fix found the test complete and the three users (`owner_loop_sites`, `framed_owner_ghosts`,
+      `loop_places`) on one predicate.
+    - **The scan's reach** (the re-audit, read): it walks every operand of every expression and every expression of a
+      statement, written invariants and measures included, so call arguments, assignments and initializers, stored
+      values, returns, aggregates, pointer comparisons and compound literals are seen; copies and by-value arguments are
+      leaf loads and stores and correctly do not count. M4.5e1 adds an array member decaying to a pointer. A write the
+      scan missed was injected into a framed-out cell's Viper and Silicon reported insufficient permission (the framing
+      argument, run).
     - **Sound.** A framed owner's cells and block are not in the loop's invariant, so the body holds no permission to
       them: a store or a call that did reach them through a pointer the scan missed would be a `permission` error in
       the body, never a silent change (Viper frames what the invariant does not name). A missed escape costs a false
@@ -264,6 +312,14 @@ verifier; three rows rest on inference, which S41 (0) checks):
       fail.
     - **Bound.** If the change grows beyond a small reordering of one function's rows, the exit 3 is pinned instead and
       filed for M4.8.
+    - **As built** (`block_call_rows`): a separation row that reads a closure site's pointer comes after the block rows
+      of the earlier block site that holds its cells, where that site has the same root and its path is a proper prefix
+      of the closure's. A first rule ("two or more steps") changed `owning_field_copy_both_call.c`'s outcome (after a
+      failed check Silicon goes on under its condition, so the order decides which later rows fail); the prefix rule
+      keeps every outcome. Thirty-four existing programs' Viper changes by row order only (the same lines, the same
+      sequence once the separation rows are set aside), among them the explicit `owns_block(p)` closures and two
+      tutorial examples; each outcome is unchanged. The probe (`owning_global_call_dangling_closure.c`) exits 1 with a
+      mapped `permission` at the call.
     - **Sound.** Only the order of checks changes; no check is added or removed.
 
 ## Consequences

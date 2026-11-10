@@ -97,12 +97,23 @@ python3 scripts/run_tests.py --update-golden path/to/test.cpp
 python3 scripts/run_tests.py                    # tests/ and the documentation examples
 python3 scripts/run_tests.py tests/scalar       # a directory
 python3 scripts/run_tests.py -v path/to/test.c  # full diffs and tool output for failures
+python3 scripts/run_tests.py --long             # also the long-running tests of tests/long/
 python3 scripts/test_run_tests.py               # the harness's own self-test
 ----
 
 With no paths the harness runs `tests/` and `doc/modules/ROOT/examples/`. The exit status is 0 when every selected
 test passes, 1 when one fails and 2 on a usage or environment error. `-j` sets the parallelism (default: `CERASTES_JOBS`,
 else half the CPUs). Solver timeouts, crashes and messages the harness cannot classify always fail a test.
+
+[#long-running]
+=== Long-running tests
+
+A verify test that needs more than the driver's 300 seconds lives under `tests/long/<area>/` and starts with
+`// timeout: <seconds>` (301 to 3600; decision 0057). A default run skips the tier and says how many tests it skipped
+(`N long skipped` in the summary, a `SKIP` line each); `--long`, or naming a path inside `tests/long/`, runs them, each
+with `--timeout=<seconds>` on its `cerastes verify` command. Their headers and twins are checked in every run, and a
+positive outside `tests/long/` needs a must-fail twin outside it. The limit is at least twice the test's time on the
+quiet x86-64 box. `tests/README.md`, "Long-running tests", has every rule.
 
 == Mutation testing
 
@@ -137,7 +148,9 @@ domain and axioms are the tagged ones, every checked line has a position-map ent
 . runs the walker oracle;
 . builds the documentation and checks the rendered pages.
 
-It ends with `check.sh: all green`. The script is the authority; read it for the current list.
+It ends with `check.sh: all green`, then a line that says whether the long-running tests ran: they run only with
+`CERASTES_LONG=1 scripts/check.sh` (the session's check on the x86-64 box sets it; CI does not). The script is the
+authority; read it for the current list.
 
 [#identity]
 == Refactors that change nothing

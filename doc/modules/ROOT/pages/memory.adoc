@@ -1253,6 +1253,34 @@ Each owning member's block in a loop invariant costs time, and two of them in on
 loop take minutes; a loop that replaces two members' blocks verifies, but
 slowly.
 
+*When a loop needs its invariant written.* cerastes carries an owning member's
+block through a loop by itself when the loop works on the structure through what
+holds it: a local or global structure, an owning pointer, or a parameter whose
+structure the invariant owns. Two kinds of loop need a fact that only the program
+knows, and the invariant states it:
+
+* a loop that replaces the member's block through a second, non-owning pointer to
+  a structure the function borrows (`v = p`). The invariant owns the structure
+  through the parameter, `cerastes_owns(*p)`; owning it through the second pointer,
+  `cerastes_owns(*v)`, is reported (`v->data` may be `+p->data+`), and without the
+  invariant the loop's frees are reported:
++
+[source,c]
+----
+include::example$memory/owning_field_loop_alias.c[tag=source]
+----
+* a loop that frees an owning pointer and gives it a new structure on every
+  iteration, but frees the member's block only in its first iteration. That is a
+  fact of one iteration, which only a written invariant can state:
+  `CERASTES_INVARIANT(v == NULL || i != 0 || v->data == NULL ||
+  cerastes_owns_block(v->data))`. Where the owning pointer's address is taken
+  (`pv = &v`), this invariant cannot be written yet, and the loop is reported
+  although it is correct.
+
+A function whose contract consumes the structure's cells (`requires` owns
+`+**pp+`, `ensures` owns only `+*pp+`) leaves the caller without the structure,
+inside a loop or not: a second call, or a free of what `+*pp+` points to, is reported.
+
 *The buffer must hold values.* Where a contract owns the structure, the member's
 block must hold values, as every block a contract owns must: a structure whose
 buffer was allocated but not yet written cannot be passed to `buf_put` (an
@@ -1364,21 +1392,20 @@ These are rejected with a diagnostic, never approximated
   block (<<owning-fields>>);
 * an owning or marked global, `static` local or owning member whose initializer is
   not a null pointer, and `owning(n)`;
-* a loop that frees or replaces the block of an owning member reached through an
-  owning global pointer (`gp->data` of a `struct buf *gp` marked `cerastes::owning`)
-  is reported as `permission` although it is correct (a loop over a local
-  structure, a global structure or an owning local pointer verifies); and a function
-  that returns the address of a `static` local structure on some paths and a new
-  structure whose owning member holds a block on others is reported as a `leak`;
+* a function that returns the address of a `static` local structure on some paths
+  and a new structure whose owning member holds a block on others is reported as a
+  `leak`;
 * some loops over owning members are reported although they are correct: a loop
-  that works on the structure through a second, non-owning pointer to it, or that
-  passes a pointer to a local structure held in another variable to a function; a
-  loop in `main` that reaches a global structure's owning member only through a
-  function's contract; a chain of three owning members; a loop that frees an owning
-  pointer to a structure and gives it a new one, if it also frees the member's block;
-  and a read after a loop
-  that neither stores into the member's block nor hands the structure on, which may
-  be reported as `uninitialized`;
+  that frees and replaces an owning pointer whose address is taken (`pv = &v`), if it
+  also frees the member's block (the invariant it needs cannot be written yet,
+  <<owning-fields>>); a loop in `main` that hands a global structure to a function
+  through a pointer it holds in a variable (`pg = &g`); a loop that may replace an
+  owning global pointer, or store into a global structure through a pointer to it,
+  and frees an owning member's block; and a loop over a chain of owning members that
+  also writes an unrelated variable whose address is taken, or whose middle owner it
+  frees and sets to null (`i == 0 || a.b == NULL` in its invariant does not help
+  yet); and a loop that copies a whole structure holding an owning member beside an
+  integer member, reported as `uninitialized` at the end of an iteration;
 * `cerastes::uninit` on anything but a local, and `cerastes::must_init` on
   anything but a parameter (P4222 defines it for parameters only);
 * the attributes of the P4417R0 and P4418R0 invalidation profile: a pointer

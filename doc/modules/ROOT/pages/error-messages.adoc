@@ -515,6 +515,13 @@ right is missing:
   object the loop started with (a function called in the loop kept it), and at
   a loop invariant or measure that reads an object the loop does not hold
   (xref:memory.adoc#loops[Memory and ownership]);
+* at the closing brace of a loop's body that carries a structure's owning
+  members through the block of an owning pointer, when an iteration may end with
+  that pointer, or a member of the block, changed although the loop does not
+  write it ("an iteration of this loop ends with `gp` pointing to another object
+  than the one it began with", "… ends with `+gp->n+` holding something other than
+  what it began with"): the loop reaches it through a pointer cerastes does not
+  follow (xref:memory.adoc#owning-fields[Owning fields]);
 * at a loop invariant's `owns`, `reads` or `live` when the loop starts without
   what it names, or when two of its `owns` may name one object, and at the
   closing brace of the loop's body when an iteration ends without it.
