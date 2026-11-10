@@ -45,7 +45,9 @@
 
 #ifdef CERASTES_ATTRIBUTES_
 #  define CERASTES_REQUIRES(...) [[cerastes::requires(__VA_ARGS__)]]
+#  define CERASTES_PRE(...) [[cerastes::requires(__VA_ARGS__)]]
 #  define CERASTES_ENSURES(...) [[cerastes::ensures(__VA_ARGS__)]]
+#  define CERASTES_POST(...) [[cerastes::ensures(__VA_ARGS__)]]
 #  define CERASTES_INVARIANT(...) [[cerastes::invariant(__VA_ARGS__)]]
 #  define CERASTES_DECREASES(...) [[cerastes::decreases(__VA_ARGS__)]]
 #  define CERASTES_CHECK(...) [[cerastes::check(__VA_ARGS__)]]
@@ -59,7 +61,9 @@
 #  define CERASTES_MUST_INIT [[cerastes::must_init]]
 #else
 #  define CERASTES_REQUIRES(...)
+#  define CERASTES_PRE(...)
 #  define CERASTES_ENSURES(...)
+#  define CERASTES_POST(...)
 #  define CERASTES_INVARIANT(...)
 #  define CERASTES_DECREASES(...)
 #  define CERASTES_CHECK(...)

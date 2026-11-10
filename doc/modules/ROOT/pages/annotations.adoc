@@ -37,9 +37,17 @@ There are nine annotations. You write them with macros from `<cerastes.h>`:
 | after a function's parameter list
 | precondition: `p` holds when the function is called
 
+| `CERASTES_PRE(p)`
+| after a function's parameter list
+|precondition: `p` holds when the function is called (this is simply an alternative spelling of `CERASTES_REQUIRES(p)`)
+
 | `CERASTES_ENSURES(p)` or `CERASTES_ENSURES(r, p)`
 | after a function's parameter list
 | postcondition: `p` holds when the function returns; `r` names the result
+
+| `CERASTES_POST(p)` or `CERASTES_POST(r, p)`
+| after a function's parameter list
+| postcondition: `p` holds when the function returns; `r` names the result (this is simply an alternative spelling of `CERASTES_ENSURES(...)`)
 
 | `CERASTES_INVARIANT(p)`
 | before a `while`, `do`, `for` or range-based `for` statement

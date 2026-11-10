@@ -7,8 +7,8 @@
 enum color { RED, GREEN, BLUE };
 
 int ordinal(int n)
-    CERASTES_REQUIRES(0 <= n && n <= 3)
-    CERASTES_ENSURES(r, r == 2 * n)
+    CERASTES_PRE(0 <= n && n <= 3)
+    CERASTES_POST(r, r == 2 * n)
 {
   enum color c = RED;
   int v = (int)(c = (enum color)n);
