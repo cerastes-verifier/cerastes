@@ -3,7 +3,8 @@
 **Approved by the owner on 2026-11-09**, at a session that only planned (its commit also consolidated
 `internal/handoff.md` and `plan.md`). Questions 188–193 were answered there, each the recommendation (below).
 
-Branch `m4.5d2b2b-owning-fields`, worktree `.claude/worktrees/m4.5d2b2b`, both from `origin/main`.
+Branch `m4.5d2b2b-owning-fields`, worktree `.claude/worktrees/m4.5d2b2b`, both from the base Step 0 names:
+`origin/main` once it holds the planning commit `49d1775`, else local `main`.
 
 ## Context
 
@@ -96,11 +97,16 @@ d2b2a landed 3,245 lines against an estimate of 1,650–2,400, so plan for 1,700
 
 1. **The box's full check on `b6b3298`:** `cat ~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.exit` (0 is green) and the
    summary of `d2b2a-check.log`. If it is red, fix that first with targeted checks, and say so in status.
-2. `git fetch`. Everything below is committed on the session branch, never on `main`.
+2. **The base.** `git fetch`, then `git merge-base --is-ancestor 49d1775 origin/main`. The planning's two commits
+   (`2430529`, `49d1775`: this plan, the consolidated handoff and `plan.md`) were made on local `main` and wait for
+   the owner's push. If `origin/main` holds them, branch from `origin/main`. If it does not, branch from local
+   `main`, as d2b1 did on top of S7, and say so in status: a worktree cut from the older `origin/main` would have
+   no plan file, and its closing edits would conflict with the consolidated handoff and `plan.md`.
+3. Everything below is committed on the session branch, never on `main`.
 
 ## Step 1 — worktree, CI, tools, baseline (no encoder code)
 
-1. `git worktree add .claude/worktrees/m4.5d2b2b -b m4.5d2b2b-owning-fields origin/main`; submodules with
+1. `git worktree add .claude/worktrees/m4.5d2b2b -b m4.5d2b2b-owning-fields <base>` (Step 0's base); submodules with
    `--reference` (edg, silicon, then silver); `scripts/bootstrap.sh`.
 2. **CI, one small commit on the branch** (questions 169 and 172):
    - `gh run list --workflow ci.yml --event workflow_dispatch`. If the owner's `profiles=all` dispatch ran and

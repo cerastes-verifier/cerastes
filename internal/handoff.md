@@ -19,9 +19,10 @@ the notes a session consumes move into its plan's "Inputs".
   cites). The kept S39 fixtures are `tests/viper-smoke/memory/s39_*`.
 - **Its one full `check.sh` is on the x86-64 box** and had not finished at this planning. It started 2026-11-10 00:13
   UTC in S8's `cerastes-s8-ubuntu-26.04` container, on `b6b3298`, which differs from `origin/main` only in
-  `scripts/test_run_tests.py` and `tests/README.md` (the 360-minute timeout text). At 01:07 UTC its log had 11,779
-  `PASS` lines and no `FAIL` line, and no `.exit` file yet. The result is
-  `~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.{exit,log}` (§2).
+  `scripts/test_run_tests.py` and `tests/README.md` (the 360-minute timeout text). At 01:09 UTC its main suite had
+  finished with 11,779 `PASS` lines and no `FAIL` line, and the Viper lint and the VIR self-test (1669 lowering
+  cases, 270 rejection cases, 0 problems) had passed; the later steps were still running, with no `.exit` file
+  yet. The result is `~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.{exit,log}` (§2).
 - **M4.5d2b2b is planned** (2026-11-09, a session that only planned; plan
   `.claude/plans/m4-5d2b2b-owning-fields.md`; questions 188–193): owning fields, complete, with the `[[owner]]`
   mapping. **Its Step 0 is next.** M4.5d2b2 is three sessions now (question 188): d2b2a is done, d2b2b is owning
@@ -45,8 +46,9 @@ the notes a session consumes move into its plan's "Inputs".
 Only what is pending. The steps of earlier sessions that are done (the d2b2a push, PRs #27–#33, vlibc's, vlibm's and
 the website's pushes) were checked at M4.5d2b2b's planning and dropped.
 
-1. **Push `main`**: this planning's two commits (`2430529`, the owner's answers 169–172 as written, and the planning
-   commit). Markdown only.
+1. **Push `main`**: this planning's two commits (`2430529`, the owner's answers 169–172 as written, and `49d1775`,
+   the planning commit, with its follow-up). Markdown only. M4.5d2b2b branches from `origin/main` once it holds
+   them; until then it branches from local `main` (its plan's Step 0).
 2. **Read the box's full `check.sh` on `b6b3298`**: `cat ~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.exit` (0 is green)
    and the summary lines of `d2b2a-check.log` beside it. If it is red, M4.5d2b2b fixes it first, with targeted checks
    (its Step 0).
