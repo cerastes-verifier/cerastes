@@ -98,6 +98,12 @@ items 2, 7 and 10, 0047 items 4, 7 and 10, 0052 items 2, 3, 4, 6(a) and 8). Read
 **First step for the next session:** M4.5d2b2b's planning (owning fields, P4418R0 per questions 175, 177–179;
 handoff §3 "M4.5d2b2b" and "From M4.5d2b2a").
 
+*Planned on 2026-11-09, in a session that only planned: plan `.claude/plans/m4-5d2b2b-owning-fields.md`, owner
+questions 188–193. M4.5d2b2 is three sessions now: d2b2b is owning fields, d2b2c `not_invalidating` and
+`--strict-owner`. The same session consolidated `internal/handoff.md` and `plan.md` (the earlier text is
+`git show 2430529`): the handoff's §3 "From M4.5d2b2a" is now in the plan's Inputs and under M4.8, Standing and §6.
+**The first step is the plan's Step 0** (read the box's `check.sh` result).*
+
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
