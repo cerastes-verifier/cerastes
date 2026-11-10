@@ -746,9 +746,38 @@ entry), unless a written site names it; `loop_leaf_owners` carries its ghost wit
 `hp_<held>__<loop>` and the invariant `hp ==> (held == (L != null))`, `!hp ==> !held`, with entry and back-edge rows
 (`permission`). Unreached leaves join `framed_owner_ghosts`. Reads of a leaf owner's value that rest on `held` add
 `perm(cell) > none` (`held_equals`). An owning local `struct S *v`'s loop carries `make_closure`'s site over its
-pointee's owning fields (one level for a struct local's leaf, `closure_deep`), standing only where the cell it is read
+pointee's owning fields (for a struct local's leaf one level until M4.5d2b2c, every depth since: decision 0056 item 7), standing only where the cell it is read
 from has a value (`synth_closure_atoms_`, `wfc_<i>__<loop>`), and not built when the loop may replace the owner
 (`may_replace_local`, `call_takes_address_of`).
+
+**Loop limits of owning fields (M4.5d2b2c, decision 0056).** Every change only adds a checked invariant, a mapped row
+or a guarded update; the VIR self-test cases are `define_loop_limits_l1` and `define_loop_limits_l2`
+(`src/viper/selftest_cases25.inc`), the Viper spikes `tests/viper-smoke/memory/s41_*`.
+- **Flags of a site the loop cannot fill (item 2).** `flags_kept_entry`'s `wef_<i>_<j>__<loop>` starts
+  `stores_type || callee_takes_owner || !loop_may_fill(loop, pt)`; `loop_may_fill` (`expr_may_fill`, `stmt_may_fill`)
+  sees a non-null store of the pointer type through memory or a whole-structure store, a write of an address-taken
+  variable of that type, and a callee whose `ensures` has a block site with a load step and that type. Every synthetic
+  site (question 204). `callee_takes_owner` is true for a leaf site when a callee's `requires` has such a block site
+  (item 4(b)).
+- **The value set (item 3).** `others` also counts an owner with a synthetic closure site (`has_closure_site`).
+- **A leaf's ghost through an alias (item 4(a)).** `held_updates` receives the call's arguments; for a plain local
+  pointer argument `a` whose parameter points to the root's struct type and `gives_param_leaf`: `t := (a == <root> &&
+  perm(<cell>) > none) ? <cell> : null; held := (a == <root>) ? (t != null) : held`, after the framed update; `<root>`
+  is the struct local's block or `loc(GB_g(), 0)`.
+- **In `main`, a global leaf reached by type (item 5).** The synthetic site stands under `hsl_<held>__<loop> := held
+  && perm(<cell>) > none` (taken before the entry rows, conjoined to `WBlock::g`); the invariants `hsl ==> (held == (L
+  != null))` and `!hsl ==> !held` with entry and back-edge rows replace the `hp` pair for that leaf; the loop gets its
+  back-edge `forperm` row.
+- **Site cells as places (item 6).** `resolve_blocks` gives each resolved site whose pointer the loop cannot write its
+  block cells as invariant places (not keyed places; none for a site merged with an owner's carrier), with the value
+  rule over entry ghosts `eob ==> cell == vsb`, `eob ==> on && p == epb` and mapped rows. `owner_loop_sites` builds
+  `make_closure` for an owning `struct S *` global and for struct-global leaves that already have a site, with a
+  replace test (a store to the global by name, inside an expression or through a `struct S **`, a callee covering its
+  cell by name or by type).
+- **Chains (item 7).** `closure_deep` is gone; each intermediate flag joins the deeper site's guard; the pre-read of a
+  site read through an earlier site's cells is emitted after that site's rows (struct-leaf and owning-global closures;
+  question 206); `wblock_splits` leaves out the pair splits between such a site and that earlier site (no-op case
+  splits, for Silicon's paths only).
 
 ## 4. Viper shape
 

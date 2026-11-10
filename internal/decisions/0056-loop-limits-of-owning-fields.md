@@ -71,10 +71,19 @@ verifier; three rows rest on inference, which S41 (0) checks):
      back-edge row; a larger `wef` only asks more of the loop. A loop that cannot fill the site cannot give it a block
      without a value, so the row holds for every correct loop. A user can already write the same as a plain site on
      `s.data` (S41 (0) run 5).
-   - **Tests** (audit round 1, S4): each route of the scan has its own must-fail twin, a loop that fills the site with
-     a block it never writes on the path that enters null and reads it after the loop (`uninitialized` at the read,
-     `wef` false). A scan that drops the route makes `wef` true and moves the error to the back-edge row, so each twin
-     pins its route.
+   - **The call route is for non-plain sites only** (audit round 2 on Part L-1, S1; owner, 2026-11-10, question 208,
+     "Restrict to non-plain"). A plain `ensures` block site (0054 item 2, "The mode") hands back only a block whose
+     cells have values, so a loop calling such a callee keeps the guarantee; the route counts a callee whose `ensures`
+     block site through a load of that type has another mode (`Kept` on a marked formal, `Uninit` on a result, the
+     owning `ref_to_uninit` deep atom). The pin `owning_field_loop_site_call_written_false_alarm.c` then verifies and
+     is retired for a positive.
+   - **Tests** (audit round 1, S4; corrected after audit round 2, B1): each route of the scan has its own must-fail
+     twin, a loop over a site that is NULL at the entry, which the loop fills by that route with a block it never
+     writes, and a read of the block after the loop (`uninitialized` at the read, `wef` false). A scan that drops the
+     route makes `wef` true and moves the error to the back-edge row ("an iteration of this loop may end with … having
+     no value"), so each twin pins its route (the auditor's models `model_store.c`, `model_addr.c`). A twin over a site
+     that is not null at the entry takes `wef` from the entry flag and pins nothing, and a struct local written only by
+     name has no synthetic site at all: the first twins of Part L-1 were of both kinds and are replaced.
 
 3. **The value set of a lone written owner with a closure** (limit 5, `owning_local_maybe_null`).
    - `others` also counts an owner that has a synthetic closure site, so 0054 item 3(c)'s value set `v == ev_v || v ==
@@ -113,6 +122,8 @@ verifier; three rows rest on inference, which S41 (0) checks):
      `leaf_held_agrees(o, hp)` and `leaf_held_row`), not beside it: kept beside it, its entry row would read a `g.data`
      of unknown value in a `main` that never assigns it, a false alarm on a planned positive (audit round 1, S2(i)).
    - The loop gets the back-edge `forperm` leak row it lacked (no site was carried before).
+   - **As built** (Part L-2): the ghost is named `hsl_<held>__<loop>` (clear of the lint's `hs_` names for owners a
+     loop does not mention). An `hs` leaf gets no closure of its own (its pointee's owning fields are not carried).
    - **Sound:** where `hs` is false nothing is asked or carried and `held` is false, so `main`'s exemption (question 174)
      covers nothing for that leaf; where it is true every clause has its entry and back-edge rows, and `main`'s
      exemption covers only the carried token. `hs` is a snapshot of facts the function holds at the entry, never an
@@ -147,6 +158,12 @@ verifier; three rows rest on inference, which S41 (0) checks):
    - The site's guard is `gp != NULL` read under the entry snapshot of the cell's permission (`kv > none ? gp : NULL`);
      `held` need not join it, since `held == (gp != NULL)` is already the carrier's invariant. The existing `wef`
      snapshot covers the field's flag; no new flag ghost.
+   - **As built** (Part L-2): the value rule is stated over the site's entry ghosts, not the live chain of guards and
+     pointers: `eob ==> cell == vsb` and `eob ==> on && p == epb`, where `eob` and `epb` are the site's guard and pointer
+     at the entry and `vsb` the cell's snapshot, each with its mapped row (stating it over the live chain nested the
+     guards and made the Viper 2.5 times larger). A site's cells are places only where the loop cannot write the site's
+     pointer; no existing program has a site outside that. A closure for a struct-global leaf is built only where the
+     leaf already has a site other than item 5's.
    - **Sound:** a place only frames reads, and its value clause is a checked invariant; each new site is 0054 item 4's
      carrier with its entry and back-edge rows.
    - **Evidence** (S41 (a)): the `global_pointer` loop with the block's cells as places verifies (4.0–4.7 s, both
@@ -169,7 +186,13 @@ verifier; three rows rest on inference, which S41 (0) checks):
    - S41 (b) decides the cost: the plan's rule was "over 60 s in either mode, the limit stays pinned". The hand-edited
      loop verifies in 12.1–16.6 s over six timed runs (both modes; Silicon only, load 5–10 with no other Silicon or
      compiler running), and its twin without `free(a.b->c->x)` fails at the back edge (`leak`, 20.1–23.7 s). The item
-     stands; the built encoder's time is measured again on its tests.
+     stands.
+   - **As built** (Part L-2): the first complete build verified the pin in 38–72 s. The third site's case splits
+     (`wblock_splits`: no-op `if` statements on pointer and block equalities with the earlier sites, which guide
+     Silicon's paths and carry no obligation; 52 against the hand edit's 28) multiplied the paths. The build leaves out
+     only the pair splits between a closure site read through an earlier site's cells and that earlier site (the two are
+     distinct by the pair rows, which are checked, and by type); every other program's splits are unchanged (`vprdiff`).
+     Built and quiet, the pin verifies in 21–22 s (C23, C++20), beside the hand edit's 12–16 s.
 
 8. **The written-invariant rule** (question 201; restates 0055 item 7's first bullet).
    - A loop that replaces the block of an owning field of a **borrowed** structure writes `owns(*p)` in its invariant
@@ -204,6 +227,44 @@ verifier; three rows rest on inference, which S41 (0) checks):
     **Still pinned after this session:** item 8's pins, four renamed (the plan's Flips, C: three `_no_invariant` with
     verifying `_written` twins, and `owner_renewed_consumed`, an ordinary must-fail) and `owner_replaced_alias` kept as
     a false alarm (item 8); any limit cut; N2 (no pin; M4.8).
+
+11. **A struct local whose address does not escape is not reached by type** (audit round 2 on Part L-1, S2; owner,
+    2026-11-10, question 209, "Build it now").
+    - **The limit.** A loop reaches a struct local's owning leaf "by type" (0055 item 7) when it stores through a
+      pointer of the leaf's type or calls a function whose contract names cells of that type, even when no pointer to
+      the structure or into it exists. Its synthetic site then needs item 2's flag rule, and a loop that may fill such a
+      site loses the flag of the block the leaf holds (`owning_field_loop_site_store_written_false_alarm.c`; the
+      `pointer_arg` limit was the same reach).
+    - **The rule.** A struct local escapes when its address or the address of any of its members, at any depth, is
+      used as a value anywhere in the function: passed to a call, stored, assigned or used to initialize a variable,
+      returned, converted, or compared with a pointer that is not the null constant. Forming such an address only as
+      the base of a member access, a load or a store through it is not an escape. VIR marks every struct local
+      address-taken (it is a block with member cells), so the scan is new: over the function's body (and its loops'
+      written invariants, which may name `&s`), not over VIR's `address_taken`.
+    - **Effect.** A leaf of a struct local that does not escape is reached by a loop only when the loop names the
+      structure (`lused`); the by-type tests (`touches_cells_of_type`, `loop_calls_reach_cells_of`) skip it, so a loop
+      that does not name it frames it out (its cells, block and ghost keep their state across the loop).
+    - **Sound.** A framed owner's cells and block are not in the loop's invariant, so the body holds no permission to
+      them: a store or a call that did reach them through a pointer the scan missed would be a `permission` error in
+      the body, never a silent change (Viper frames what the invariant does not name). A missed escape costs a false
+      alarm, not a wrong verdict.
+    - **Tests.** The store pin verifies and is retired for a positive; must-fail twins: the same loop with the address
+      escaping by each listed route (and a store through it in the loop that leaves the block without a value), each
+      reported; existing programs' Viper changes only where a by-type reach of a non-escaping struct local disappears
+      (an allow-list fixed before the build).
+
+12. **A call's closure rows after the row that the caller holds the structure** (audit round 2 on Part L-1, S3; owner,
+    2026-11-10, question 210, "Fix now, bounded").
+    - **The exit 3.** On the base build too: a call to a function with `requires(owns(gp)) ensures(owns(gp))` for an
+      owning `struct S *` global, after `free(gp)` in a failing program. The call's row for the closure of `owns(gp)`
+      reads `gp->data` before any row checks that the caller still holds `gp`'s block, so Silicon fails on its own
+      (`insufficient.permission`, unmapped) instead of reporting the mapped error.
+    - **The rule.** At a call, the read of a closure site's pointer comes after the rows that check the caller holds
+      the cell it is read from (the structure's `owns` row), as item 7 orders a loop's pre-reads. Then only mapped rows
+      fail.
+    - **Bound.** If the change grows beyond a small reordering of one function's rows, the exit 3 is pinned instead and
+      filed for M4.8.
+    - **Sound.** Only the order of checks changes; no check is added or removed.
 
 ## Consequences
 

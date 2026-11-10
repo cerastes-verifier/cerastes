@@ -5694,6 +5694,145 @@ class OwningLeafLoopCarryTests(OwningLeafTests):
 
 
 
+class OwningLeafEntrySnapshotTests(OwningLeafTests):
+    """Decision 0056 item 5: the entry snapshot `hsl_<held>__<n>` of a leaf that `main` reaches only by type.  A `Bool` local assigned once
+    before the `while` of its own loop as `<held> && (perm(<cell>) > none)`, `held` and the cell the leaf's own (the ghost's name spells
+    it), read only in the pair `(hsl ==> (held == (<cell> != null))) && ((!hsl) ==> (!held))` (as the invariant and as its entry and
+    back-edge rows) and as the first conjunct of a guard.  Each rule has twins that break exactly it; the `hp` pair's rules and the older
+    comparison rules keep their meaning."""
+
+    GCELL = OwningLeafTests.CELL
+    LCELL = "loc(member(v_s__0, 0), 0).v_ptr_int"
+
+    @staticmethod
+    def pair(h, g, c):
+        return f"({h} ==> ({g} == ({c} != null))) && ((!{h}) ==> (!{g}))"
+
+    def both(self):
+        return (("held_GB_g__0_0", self.GCELL), ("held_v_s__0_0", self.LCELL))
+
+    def hsl(self, g, c, assign=None, inv=None, rows=None, name=None, before=(), guard=None, declare=None, loop_assign=False,
+            after_loop=False):
+        h = name or f"hsl_{g}__0"
+        assign_lines = [f"  {h} := {g} && (perm({c}) > none)"] if assign is None else assign
+        body = ["  var v_s__0: Ref", *([f"  var {h}: Bool"] if declare is None else declare), *self.LEGAL, *before,
+                *([] if loop_assign or after_loop else assign_lines),
+                *(rows[0] if rows is not None else [f"  if (!({self.pair(h, g, c)})) {{", Check("    assert false", A, "permission"), "  }"]),
+                "  var i: Int := 0", "  while (i < 3)", Check(inv or f"    invariant {self.pair(h, g, c)}", INV, "internal"),
+                *([Check(f"    invariant {guard}", INV, "internal")] if guard else []),
+                Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1",
+                *(assign_lines if loop_assign else [])]
+        for r in (rows[1] if rows is not None else [f"    if (!({self.pair(h, g, c)})) {{"]):
+            body += [r, Check("      assert false", A, "permission"), "    }"]
+        body += ["  }", *(assign_lines if after_loop else [])]
+        return [p for p in self.strict(self.fixture(body=body)) if "decision 0056" in p or "decision 0055" in p or "decision 0054" in p]
+
+    def test_the_emitters_snapshot_of_a_global_and_a_local_leaf_is_clean(self):
+        for g, c in self.both():
+            with self.subTest(g=g):
+                self.assertEqual(self.hsl(g, c), [])
+
+    def test_the_snapshot_is_held_and_the_permission_to_its_own_leafs_cell(self):
+        for g, c in self.both():
+            h = f"hsl_{g}__0"
+            other = (self.L1 + ".v_ptr_int", "loc(member(v_t__0, 0), 0).v_ptr_int", "loc(member(v_s__0, 1), 0).v_ptr_int")
+            for rhs in (*[f"{g} && (perm({o}) > none)" for o in other], f"perm({c}) > none", f"{g}", "true",
+                        f"{g} && (perm({c}) >= none)", f"{g} || (perm({c}) > none)", f"held_v_t__0_0 && (perm({c}) > none)",
+                        f"{g} && (perm({c}) > none) && true", f"({c} != null)"):
+                with self.subTest(g=g, rhs=rhs):
+                    probs = self.hsl(g, c, assign=[f"  {h} := {rhs}"])
+                    self.assertTrue(any(f"`{h}` is assigned" in p for p in probs), probs)
+
+    def test_the_snapshot_name_spells_the_ghost_it_snapshots(self):
+        g, c = self.both()[1]
+        for h in ("hsl_held_v_s__0_1__0", "hsl_held_v_t__0_0__0", "hsl_x__0", "hsl_held_v_s__0_0", "hsl_held_v_s__0_0__x"):
+            with self.subTest(h=h):
+                probs = self.hsl(g, c, name=h)
+                self.assertTrue(probs, probs)
+
+    def test_a_snapshot_is_assigned_once_before_its_loop(self):
+        for g, c in self.both():
+            h = f"hsl_{g}__0"
+            line = f"  {h} := {g} && (perm({c}) > none)"
+            for what, kw, needle in (("twice", dict(assign=[line, line]), "is assigned twice"),
+                                     ("never", dict(assign=[]), "never assigned"),
+                                     ("in the loop", dict(loop_assign=True), "at or after the `while`"),
+                                     ("after the loop", dict(after_loop=True), "at or after the `while`"),
+                                     ("for a loop the method does not have", dict(name=f"hsl_{g}__1"), "the method does not have")):
+                with self.subTest(g=g, what=what):
+                    probs = self.hsl(g, c, **kw)
+                    self.assertTrue(any(needle in p for p in probs), probs)
+
+    def test_a_snapshot_is_a_bool_local_that_is_declared(self):
+        g, c = self.both()[1]
+        h = f"hsl_{g}__0"
+        probs = self.hsl(g, c, declare=[f"  var {h}: Ref"])
+        self.assertTrue(any("is a `Ref` local" in p for p in probs), probs)
+        probs = self.hsl(g, c, declare=[])
+        self.assertTrue(any("not declared" in p for p in probs), probs)
+
+    def test_a_global_leafs_snapshot_needs_its_tag(self):
+        g, c = "held_GB_g__1_0", "loc(member(loc(GB_g__1(), 0), 0), 0).v_ptr_int"
+        probs = self.hsl(g, c)
+        self.assertTrue(any(f"`hsl_{g}__0` is assigned" in p for p in probs), probs)
+
+    def test_the_pair_names_the_snapshots_own_ghost_and_cell(self):
+        for g, c in self.both():
+            h = f"hsl_{g}__0"
+            o = self.L1 + ".v_ptr_int"
+            pr = self.pair(h, g, c)
+            bad_invs = [f"    invariant {self.pair(h, g, o)}",                                   # another cell
+                        f"    invariant {self.pair(h, 'held_v_t__0_0', c)}",                     # another ghost
+                        f"    invariant {self.pair('hsl_held_v_t__0_0__0', g, c)}",              # another snapshot
+                        f"    invariant ({h} ==> ({g} == ({c} != null)))",                       # no `!hsl ==> !held`
+                        f"    invariant ({h} ==> ({g} == ({c} == null))) && ((!{h}) ==> (!{g}))",
+                        f"    invariant ({h} ==> ({g} == ({c} != null))) && ((!{h}) ==> {g})",
+                        f"    invariant (true ==> ({g} == ({c} != null))) && ((!true) ==> (!{g}))",
+                        f"    invariant ({pr}) || true"]
+            for inv in bad_invs:
+                with self.subTest(g=g, inv=inv):
+                    probs = self.hsl(g, c, inv=inv)
+                    self.assertTrue(probs, probs)
+
+    def test_the_rows_name_one_cell_one_ghost_and_come_after_the_assignment(self):
+        for g, c in self.both():
+            h = f"hsl_{g}__0"
+            o = self.L1 + ".v_ptr_int"
+            good = f"if (!({self.pair(h, g, c)})) {{"
+            for row in (f"if (!({self.pair(h, g, o)})) {{", good.replace(f"(!{h})", h),
+                        f"if (!({self.pair(h, 'held_v_t__0_0', c)})) {{", f"if (!({self.pair(h, g, c)} || true)) {{"):
+                with self.subTest(g=g, row=row):
+                    probs = self.hsl(g, c, rows=([f"  {row}", Check("    assert false", A, "permission"), "  }"], [f"    {row}"]))
+                    self.assertTrue(probs, probs)
+        # an entry row that stands before the assignment reads the snapshot too early
+        g, c = self.both()[1]
+        h = f"hsl_{g}__0"
+        assign = [f"  {h} := {g} && (perm({c}) > none)"]
+        row = [f"  if (!({self.pair(h, g, c)})) {{", Check("    assert false", A, "permission"), "  }"]
+        body = ["  var v_s__0: Ref", f"  var {h}: Bool", *self.LEGAL, *row, *assign, "  var i: Int := 0", "  while (i < 3)",
+                Check(f"    invariant {self.pair(h, g, c)}", INV, "internal"),
+                Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1", "  }"]
+        probs = [p for p in self.strict(self.fixture(body=body)) if "decision 0056" in p]
+        self.assertTrue(any("read before its assignment" in p for p in probs), probs)
+
+    def test_a_snapshot_elsewhere_is_only_the_first_conjunct_of_a_guard(self):
+        g, c = self.both()[1]
+        h = f"hsl_{g}__0"
+        for use in (f"  t := {h} && (v_s__0 != null)", f"  assert ({h} && (v_s__0 != null)) ==> true"):
+            with self.subTest(use=use):
+                self.assertEqual(self.hsl(g, c, before=[use]), [])
+        for use in (f"  assert {h}", f"  assert !{h}", f"  assert (v_s__0 != null) && {h}", f"  assert (v_s__0 != null) || {h}",
+                    f"  assert {h} || true", f"  assert ({h}) ==> true", f"  t := {h}"):
+            with self.subTest(use=use):
+                probs = self.hsl(g, c, before=[use])
+                self.assertTrue(any("appears other than as the first conjunct" in p for p in probs), probs)
+
+    def test_a_snapshot_is_for_a_leaf_ghost_named_hsl_only(self):
+        g, c = self.both()[1]
+        probs = self.hsl(g, c, before=["  assert hsl_x"])
+        self.assertTrue(any("is not named `hsl_<held ghost>__<loop>`" in p for p in probs), probs)
+
+
 class OwningLeafAgreesAndOwnBlockTests(OwningLeafEntryAndExemptionTests):
     """Decision 0055 items 7 and 9, the shapes of the re-audit's fixes.  (1) The loop carry of a leaf ghost, `leaf_held_agrees`: the snapshot
     `hp_<held>__<n> := perm(<cell>) > none` assigned once before the loop, the invariant `(hp ==> (held == (<cell> != null))) && ((!hp) ==>

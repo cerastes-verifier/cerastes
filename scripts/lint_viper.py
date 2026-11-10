@@ -2069,6 +2069,100 @@ def lint_leaf_carry(src: Source, decls: list[Decl], ghosts: dict[str, tuple[str,
     return carry
 
 
+HSL_TOKEN_RE = re.compile(r"(?<![\w$'.])hsl_[\w$']+")
+HSL_ASSIGN_RE = re.compile(r"(?<![\w$'.])(?P<g>hsl_[\w$']+)\s*:=")
+HSL_VAR_RE = re.compile(r"^\s*var\s+(?P<g>hsl_[\w$']+)\s*:\s*(?P<type>\w+)\s*$")
+_HSL_NAME_RE = re.compile(r"^hsl_(?P<held>held_[\w$']+)__(?P<n>[0-9]+)$")
+
+
+def lint_leaf_entry_snapshot(src: Source, decls: list[Decl], ghosts: dict[str, tuple[str, tuple[int, ...] | None]],
+                             add: Callable[[int, str], None]) -> set[int]:
+    """The entry snapshot `hsl_<held>__<n>` of a leaf `main` reaches only by type (decision 0056 item 5): a `Bool` local, assigned once,
+    before the `while` of loop `<n>` of its method, as `<held> && (perm(<cell>) > none)` where `<held>` is the leaf's ghost and `<cell>` the
+    very cell its name spells (the leaf's own, `leaf_ghost_name`; a global leaf's ghost is a tagged one).  It is read only in
+      * the pair `invariant (hsl ==> (held == (<cell> != null))) && ((!hsl) ==> (!held))` and its entry and back-edge rows
+        `if (!((hsl ==> (held == (<cell> != null))) && ((!hsl) ==> (!held)))) {` (`<held>` and `<cell>` the snapshot's own); and
+      * as the first conjunct of a guard (`hsl && ...`, never negated or alone in another formula), the site's guard that `main` carries
+        the leaf under.
+    Returns the lines of the pair, which the older comparison rules (`held == (<cell> != null)`) then leave alone."""
+    pair: set[int] = set()
+    methods = [d for d in decls if d.kind == "method" and d.has_body]
+
+    def cell_ok(g: str, c: str) -> bool:
+        lo = leaf_cell_owner(c)
+        return lo is not None and g == leaf_ghost_name(lo[1], lo[2]) and (lo[0] == "local" or g in ghosts)
+
+    for d in methods:
+        names: dict[str, int] = {}
+        for n in range(d.body_line, d.end_line + 1):
+            if (m := HSL_VAR_RE.match(src.code[n - 1])) is not None:
+                names[m.group("g")] = n
+                if m.group("type") != "Bool":
+                    add(n, f"`{m.group('g')}` is a `{m.group('type')}` local: an entry snapshot is `Bool` (decision 0056 item 5)")
+        if not names and not any(HSL_TOKEN_RE.search(src.code[n - 1]) for n in range(d.body_line, d.end_line + 1)):
+            continue
+        loops = while_loops(src, d)
+        assigned: dict[str, int] = {}
+        seen_assign: set[str] = set()
+        for n in range(d.body_line, d.end_line + 1):
+            code = src.code[n - 1]
+            for a in HSL_ASSIGN_RE.finditer(code):
+                g = a.group("g")
+                seen_assign.add(g)
+                rhs = _nospace(_statement_rhs(code, a.end()))
+                nm = _HSL_NAME_RE.match(g)
+                m = re.fullmatch(r"(?P<h>held_[\w$']+)&&\(perm\((?P<c>.+)\)>none\)", rhs)
+                loop_no = int(nm.group("n")) if nm else -1
+                if g in assigned:
+                    add(n, f"`{g}` is assigned twice: an entry snapshot is assigned once, before its loop (decision 0056 item 5)")
+                elif g not in names:
+                    add(n, f"`{g}` is assigned but not declared as a `Bool` local of this method (decision 0056 item 5)")
+                elif nm is None or m is None or m.group("h") != nm.group("held") or not cell_ok(m.group("h"), m.group("c")):
+                    add(n, f"`{g}` is assigned `{rhs}`: it is `<held> && (perm(<cell>) > none)` of the leaf its name spells, `held` and the "
+                           "cell that leaf's own (decision 0056 item 5)")
+                elif loop_no >= len(loops) or n >= loops[loop_no][0]:
+                    add(n, f"`{g}` is assigned at or after the `while` of its own loop (or names a loop the method does not have): the loop "
+                           "head would havoc it, and it would no longer say anything about the entry (decision 0056 item 5)")
+                else:
+                    assigned[g] = n
+        for g in names:
+            if g not in seen_assign:
+                add(names[g], f"`{g}` is declared but never assigned: an entry snapshot is assigned once, before its loop (decision 0056 item 5)")
+        for n in range(d.body_line, d.end_line + 1):
+            code = src.code[n - 1]
+            toks = list(HSL_TOKEN_RE.finditer(code))
+            if not toks or HSL_VAR_RE.match(code) or (HSL_ASSIGN_RE.match(code.strip()) and len(toks) == 1):
+                continue
+            norm = _nospace(code)
+            for g in sorted({m.group() for m in toks}):
+                nm = _HSL_NAME_RE.match(g)
+                if nm is None:
+                    add(n, f"`{g}` is not named `hsl_<held ghost>__<loop>` (decision 0056 item 5)")
+                    continue
+                held = nm.group("held")
+                body = rf"\({re.escape(g)}==>\({re.escape(held)}==\((?P<c>.+?)!=null\)\)\)&&\(\(!{re.escape(g)}\)==>\(!{re.escape(held)}\)\)"
+                shapes = (rf"invariant{body}", rf"if\(!\({body}\)\)\{{")
+                hit = next((m for s in shapes if (m := re.fullmatch(s, norm)) is not None), None)
+                if hit is not None:
+                    if not cell_ok(held, hit.group("c")):
+                        add(n, f"`{g}` is compared with `{hit.group('c')} != null`, which is not the cell of the leaf `{held}` spells "
+                               "(decision 0056 item 5)")
+                    elif g not in assigned or assigned[g] >= n:
+                        add(n, f"`{g}` is read before its assignment (decision 0056 item 5)")
+                    else:
+                        pair.add(n)
+                    continue
+                # a guard: every occurrence is the first conjunct of a `&&`, after `(`, `:=` or the start of the formula
+                for m in re.finditer(re.escape(g), norm):
+                    before, after = norm[:m.start()], norm[m.end():]
+                    if not (after.startswith("&&") and (before.endswith("(") or before.endswith(":=") or before.endswith("invariant")
+                                                        or before.endswith("assert") or before == "")):
+                        add(n, f"`{g}` appears other than as the first conjunct of a guard `{g} && ...` or in its pair `({g} ==> ({held} == "
+                               f"(<cell> != null))) && ((!{g}) ==> (!{held}))` (decision 0056 item 5)")
+                        break
+    return pair
+
+
 EXM_TOKEN_RE = re.compile(r"(?<![\w$'.])exm_(?P<n>[0-9]+)(?![\w$'])")
 EXM_ASSIGN_RE = re.compile(r"(?<![\w$'.])exm_(?P<n>[0-9]+)\s*:=")
 EXM_VAR_RE = re.compile(r"^\s*var\s+exm_[0-9]+\s*:\s*Bool\s*$")
@@ -2188,7 +2282,7 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
     for gb, path in tagged_leaves:
         ghosts.setdefault(leaf_ghost_name(gb, path), (gb, path))
     tagged_blocks = tagged | {gb for gb, _p in tagged_leaves}
-    carry_lines = lint_leaf_carry(src, decls, ghosts, add)
+    carry_lines = lint_leaf_carry(src, decls, ghosts, add) | lint_leaf_entry_snapshot(src, decls, ghosts, add)
     for lineno, code in enumerate(src.code, start=1):
         for gm in sorted({m.group("ghost") for m in GHOST_ANY_RE.finditer(code)}):
             if gm not in ghosts:

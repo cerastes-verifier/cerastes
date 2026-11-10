@@ -1601,6 +1601,19 @@ private:
         E gb;
         E cell;
         E fl;
+        // decision 0056 item 6: the cells of this site's block that the loop does not write, each with the ghost that holds its value at the entry (`on ==> cell == ghost`)
+        struct CellVs
+        {
+            E recv;
+            Type type;
+            std::string vs;
+            std::string text;
+        };
+        std::vector<CellVs> cellvs;
+        // decision 0056 item 6: the ghosts of a site whose block cells are places (the site's pointer is one the loop does not write): its pointer and its `on` at the loop's
+        // entry, which the places name (`eog ==> on && p == epg` is invariant)
+        std::string epg;
+        std::string eog;
     };
     // A heap read of an invariant or a measure, for the explicit framing assert (decision 0038 item 6).
     struct InvRead
@@ -2623,6 +2636,22 @@ private:
         }
         return r;
     }
+    // The ghost `hs` of an owning leaf `main` carries only by type (decision 0056 item 5), or a null expression.
+    E leaf_hs(const std::vector<WBlock>& wbs, const OwnerRef& o)
+    {
+        for (const WBlock& b : wbs)
+        {
+            if (b.site != nullptr && site_leaf_owner(*b.site) == o)
+            {
+                const auto it {hs_ghost_.find(b.site->atom)};
+                if (it != hs_ghost_.end())
+                {
+                    return low::var(it->second);
+                }
+            }
+        }
+        return nullptr;
+    }
     // `held_L == (L != NULL)` where the function holds L's cell (`known`), and `!held_L` where it does not (final audit B2: a callee may have consumed `owns(g)` before the
     // loop, and then the cell is neither read nor held).  `known` is `perm(cell) > none` in a row, and the entry's snapshot of it in the invariant (which may not contain `perm`).
     E leaf_held_agrees(const OwnerRef& o, const E& known)
@@ -2635,9 +2664,9 @@ private:
     {
         return low::bin(low::BinOp::Gt, value_perm(owner_cell(o), owner_type(o)), low::no_perm());
     }
-    void leaf_held_row(const OwnerRef& o, const SrcLoc& at, std::vector<low::LStmt>& out)
+    void leaf_held_row(const OwnerRef& o, const SrcLoc& at, std::vector<low::LStmt>& out, const E& known = nullptr)
     {
-        emit_ending_assert(out, leaf_held_agrees(o, leaf_cell_held(o)),
+        emit_ending_assert(out, leaf_held_agrees(o, known != nullptr ? known : leaf_cell_held(o)),
                            meta("permission", at,
                                 "the loop needs owning field `" + owner_text(o) +
                                     "` to point to a block the function holds, or to be null"));
@@ -13463,6 +13492,20 @@ private:
         owner_loop_sites(
             s, declared,
             bsites); // decision 0054 items 5 and 6 (Loops): owners in memory the loop uses are carried like a written site
+        // decision 0056 item 5: the ghost `hs` of each leaf `main` reaches only by type, `held` and the cell has a permission, taken before the entry rows
+        hs_ghost_.clear();
+        for (const AtomSite& bs : bsites)
+        {
+            if (hs_atoms_.count(bs.atom) == 0U)
+            {
+                continue;
+            }
+            const OwnerRef o {site_leaf_owner(bs)};
+            const std::string hs {"hsl_" + held_name(o) + "__" + std::to_string(loop_number)};
+            fn_.snapshots.push_back(low::LVar {hs, low::LType::Bool});
+            assign(out, hs, low::and_(low::var(held_name(o)), leaf_cell_held(o)));
+            hs_ghost_[bs.atom] = hs;
+        }
         std::set<int> merge_ids;
         wsite_vars_.clear();
         wsite_keys_.clear();
@@ -14261,46 +14304,10 @@ private:
             }
         }
 
-        // final audit S2: the cells of the block an owning leaf of a struct local points to are places of the invariants (as a full owner's are), so that the closure site
-        // `a.b->x` of the leaf `a.b` reads its pointer from the cell the leaf's carrier holds, under the leaf's own cell held and `a.b != NULL`
-        for (const AtomSite& bw : bsites)
-        {
-            const OwnerRef lo {site_leaf_owner(bw)};
-            if (lo.var == nullptr || lo.path.empty())
-            {
-                continue;
-            }
-            const Type lt {owner_type(lo)};
-            if (!lt.is_ptr() || lt.pointee == nullptr || !lt.pointee->is_struct() ||
-                lt.pointee->struct_type == nullptr || !has_owning_leaf(*lt.pointee->struct_type))
-            {
-                continue;
-            }
-            const E ov {owner_value(lo)};
-            E wg {low::bin(low::BinOp::Ne, ov, low::null_())};
-            for (const Place& pl : places)
-            {
-                if (pl.value && pl.var == lo.var && pl.mpath == lo.path && !pl.kv.empty())
-                {
-                    wg = low::and_(low::bin(low::BinOp::Gt, low::var(pl.kv), low::no_perm()), wg);
-                    break;
-                }
-            }
-            for (const Cell& c : block_cells(ov, lt, owner_text(lo)))
-            {
-                Place op;
-                op.recv = c.recv;
-                op.type = c.type;
-                op.value = true;
-                op.suffix = cell_suffix(c.type);
-                op.label = c.text;
-                op.wg = wg;
-                inv_all.push_back(std::move(op));
-            }
-        }
-
         // Decision 0054 item 4: the written `owns_block` sites: their carriers' clauses and rows, and the case splits
-        std::vector<WBlock> wbs {resolve_blocks(bsites, loop_number, owners, inv_all)};
+        std::vector<Place> block_places;
+        std::vector<WBlock> wbs {resolve_blocks(bsites, loop_number, owners, inv_all, s, writes, block_places)};
+        inv_all.insert(inv_all.end(), block_places.begin(), block_places.end());
         std::vector<FlagSnap> flag_snaps;
         if (!wbs.empty())
         {
@@ -14308,7 +14315,11 @@ private:
             std::vector<low::LStmt> bbs;
             wblock_splits(wbs, places, owners, bws, false);
             wblock_splits(wbs, places, owners, bbs, true);
-            entry.insert(entry.begin() + static_cast<std::ptrdiff_t>(snap_mark), bws.begin(), bws.end());
+            // decision 0056 item 6: the sites' ghosts first (the case splits and rows read the later sites' pointers through them)
+            std::vector<low::LStmt> ghs;
+            wblock_ghosts(wbs, ghs);
+            entry.insert(entry.begin() + static_cast<std::ptrdiff_t>(snap_mark), ghs.begin(), ghs.end());
+            entry.insert(entry.begin() + static_cast<std::ptrdiff_t>(snap_mark + ghs.size()), bws.begin(), bws.end());
             bsplits_post.insert(bsplits_post.end(), bws.begin(), bws.end());
             bsplits.insert(bsplits.end(), bbs.begin(), bbs.end());
             wblock_invariants(wbs, places, s.loc, w.invariants);
@@ -14326,6 +14337,13 @@ private:
             }
             for (const OwnerRef& o : loop_leaf_owners(wbs))
             {
+                if (const E hs = leaf_hs(wbs, o))
+                {
+                    // decision 0056 item 5: `hs ==> held == (L != NULL)` and `!hs ==> !held`
+                    w.invariants.push_back(auto_invariant(leaf_held_agrees(o, hs), s.loc));
+                    leaf_held_row(o, s.loc, entry, hs);
+                    continue;
+                }
                 const std::string hp {"hp_" + held_name(o) + "__" + std::to_string(loop_number)};
                 fn_.snapshots.push_back(low::LVar {hp, low::LType::Bool});
                 assign(entry, hp, leaf_cell_held(o));
@@ -14673,7 +14691,8 @@ private:
         }
         for (const OwnerRef& o : loop_leaf_owners(wbs))
         {
-            leaf_held_row(o, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc, w.then_body);
+            leaf_held_row(o, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc, w.then_body,
+                          leaf_hs(wbs, o));
         }
         flags_kept_row(wbs, flag_snaps, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc,
                        w.then_body);
@@ -15307,16 +15326,33 @@ private:
         {
             // final audit B2: a loop that reaches the leaf's cell by type (a store through a pointer of its type, a callee naming cells of it) carries it as it carries a
             // local struct's leaf, so the cell that the invariant's places hold by type has its block too, in a function whose `requires` holds the leaf (its entry row is then
-            // `g.q == NULL || owns_block(g.q)` by the contract).  `main` is not carried by type: program_start does not fix a global's value, so the row would ask what
+            // `g.q == NULL || owns_block(g.q)` by the contract).  `main` is not carried by type outright (decision 0056 item 5 carries it under `hs`): program_start does not fix a global's value, so the row would ask what
             // nothing says (exm_loop_type.c: a global `main` never names); a loop of `main` that uses the global is carried as before
-            const bool by_type {fn_.f != prog_.entry() && (touches_cells_of_type(&s, owner_type(g_ref)) ||
-                                                           loop_calls_reach_cells_of(s, owner_type(g_ref)))};
-            if (g_ref.path.empty() || named_leaf(g_ref) || !(gused.count(g_ref.global->id) != 0U || by_type) ||
-                !(fn_.f == prog_.entry() || holds_global_at_entry(*fn_.f, g_ref)))
+            // Decision 0056 item 5: a leaf `main` reaches only by type is carried under the ghost `hs` (`held` and the cell has a permission, taken at the loop's entry): where
+            // it is false the site asks and carries nothing
+            if (g_ref.path.empty() || named_leaf(g_ref))
             {
                 continue;
             }
+            const bool in_main {fn_.f == prog_.entry()};
+            const bool touches {touches_cells_of_type(&s, owner_type(g_ref)) ||
+                                loop_calls_reach_cells_of(s, owner_type(g_ref))};
+            const bool used {gused.count(g_ref.global->id) != 0U};
+            const bool by_type {!in_main && touches};
+            const bool main_by_type {in_main && !used && touches};
+            if (!(used || by_type || main_by_type) || !(in_main || holds_global_at_entry(*fn_.f, g_ref)))
+            {
+                continue;
+            }
+            const size_t first_site {sites.size()};
             make(leaf_addr(g_ref), owner_type(g_ref), owner_text(g_ref));
+            if (main_by_type)
+            {
+                for (size_t i {first_site}; i < sites.size(); ++i)
+                {
+                    hs_atoms_.insert(sites[i].atom);
+                }
+            }
         }
         for (const OwnerRef& l : leaf_owners_in_scope())
         {
@@ -15333,8 +15369,6 @@ private:
         }
         // decision 0055 item 7 (audit S5): an owner that points to a structure with owning fields (an owning local `struct S *v`, an owning `struct S *` global) carries
         // the closure of the pointee's owning fields in a loop that uses it: `v == NULL || (v->q == NULL || owns_block(v->q) [&& the closure of v->q's pointee])`
-        bool closure_deep {
-            true}; // false for the closure of an owning leaf of a struct local (final audit S2: one level; the places that read it are one level)
         auto closure_leaf = [&](auto&& self, const std::function<const Expr*()>& at_ptr, const Type& lt,
                                 const std::string& text) -> const Expr*
         {
@@ -15345,7 +15379,7 @@ private:
             const_cast<Expr*>(v2)->c_text = text;
             const Expr* atom {b.atom(AtomKind::OwnsBlock, v2, -1, s.loc)};
             const Expr* inner {nullptr};
-            if (closure_deep && lt.pointee != nullptr && lt.pointee->is_struct() && lt.pointee->struct_type != nullptr)
+            if (lt.pointee != nullptr && lt.pointee->is_struct() && lt.pointee->struct_type != nullptr)
             {
                 for (const StructLeaf& l : struct_leaves(*lt.pointee->struct_type, text, true))
                 {
@@ -15473,19 +15507,29 @@ private:
                 },
                 o->type, o->name);
         }
-        // final audit S2: an owning leaf of a struct local that points to a structure with owning fields (`a.b` of `struct A { struct B *b [[owning]]; }`, `B` with an owning `x`)
-        // carries the closure of the pointee's owning fields as an owning local pointer does, ONE level (a chain `a.b->c->x` stays a false alarm, pinned: the places that read the closure are the leaf's block's cells); the leaf's own site (the user's or the synthetic one) comes first
-        for (const OwnerRef& l : leaf_owners_in_scope())
+        // final audit S2, decision 0056 items 6 and 7: an owning leaf of a struct local or a struct global that points to a structure with owning fields (`a.b` of `struct A {
+        // struct B *b [[owning]]; }`, `B` with an owning `x`) carries the closure of the pointee's owning fields as an owning local pointer does, to every owning depth (each
+        // site's block cells are places of the invariants, resolve_blocks); the leaf's own site (the user's or the synthetic one) comes first
+        std::vector<OwnerRef> closure_leaves {leaf_owners_in_scope()};
+        for (const OwnerRef& g_ref : fn_.gowners)
+        {
+            if (!g_ref.path.empty())
+            {
+                closure_leaves.push_back(g_ref);
+            }
+        }
+        for (const OwnerRef& l : closure_leaves)
         {
             const Type lt {owner_type(l)};
             if (!lt.is_ptr() || lt.pointee == nullptr || !lt.pointee->is_struct() ||
                 lt.pointee->struct_type == nullptr || !has_owning_leaf(*lt.pointee->struct_type) ||
-                declared.count(l.var->id) != 0U)
+                (l.var != nullptr && declared.count(l.var->id) != 0U))
             {
                 continue;
             }
             const std::vector<int>* via {nullptr};
             int key {kNoPlaceKey};
+            bool under_hs {false};
             for (const AtomSite& w : sites)
             {
                 if (site_leaf_owner(w) == l)
@@ -15493,12 +15537,13 @@ private:
                     const PlaceKey pk {atom_place(*w.atom)};
                     via = &w.via;
                     key = pk.root;
+                    under_hs = hs_atoms_.count(w.atom) != 0U;
                     break;
                 }
             }
-            if (via == nullptr || key == kNoPlaceKey)
+            if (via == nullptr || key == kNoPlaceKey || under_hs)
             {
-                continue;
+                continue; // (a leaf carried under `hs` has no closure: its closure would need the guard too)
             }
             // a site of the user's already names a place through the leaf's pointer (`a.b->x`): the user's takes precedence
             bool through {false};
@@ -15516,25 +15561,191 @@ private:
             {
                 continue;
             }
-            if (may_replace_local(&s, l.var->id, l.path, lt, true, false))
+            if (l.var != nullptr
+                    ? may_replace_local(&s, l.var->id, l.path, lt, true, false)
+                    : (may_replace_global(&s, l.global, l.path, lt) || global_callee_may_replace(s, l.global, lt)))
             {
                 continue;
             }
             const OwnerRef lcopy {l};
-            closure_deep = false;
             make_closure(
                 [&b, &leaf_addr, lcopy, loc = s.loc]()
                 {
                     return b.deref(leaf_addr(lcopy), loc);
                 },
                 lt, owner_text(l));
-            closure_deep = true;
         }
-        // (an owning `struct S *` global is not carried with the closure of its fields: the loop's places do not include the cells of a global pointer's block, the
-        // written form is refused the same way; a documented limit of this session, pinned)
+        // decision 0056 item 6: an owning `struct S *` global the loop uses carries the closure of its pointee's owning fields (its block's cells are places of the invariants),
+        // unless the loop may replace the global itself; the global's own site comes first
+        for (const OwnerRef& g_ref : fn_.gowners)
+        {
+            const Global* g {g_ref.global};
+            if (!g_ref.path.empty() || gused.count(g->id) == 0U || !g->type.is_ptr() || g->type.pointee == nullptr ||
+                !g->type.pointee->is_struct() || g->type.pointee->struct_type == nullptr ||
+                !has_owning_leaf(*g->type.pointee->struct_type) || named_through(kGlobalSiteBase + g->id))
+            {
+                continue;
+            }
+            bool own_site {false};
+            for (const AtomSite& w : sites)
+            {
+                own_site = own_site || site_global(w) == g;
+            }
+            if (!own_site || may_replace_global(&s, g, {}, g->type) || global_callee_may_replace(s, g, g->type))
+            {
+                continue;
+            }
+            make_closure(
+                [&b, g, loc = s.loc]()
+                {
+                    return b.deref(b.global_addr(g, loc), loc);
+                },
+                g->type, g->c_name);
+        }
+    }
+    // Whether a statement may replace the pointer of the global `g` (or its member at `path`): a store of a value that is not the null constant by name or through a pointer of the
+    // owner's type, the address of the global passed to a call, or a callee that names the global in its contract or a cell of the owner's type.
+    bool may_replace_global(const Stmt* st, const Global* g, const std::vector<int>& path, const Type& t)
+    {
+        if (st == nullptr)
+        {
+            return false;
+        }
+        auto stores = [&](const Expr* addr, const Expr* value)
+        {
+            if (addr == nullptr || (value != nullptr && value->kind == Expr::Kind::Null))
+            {
+                return false;
+            }
+            std::vector<int> rev;
+            const Expr* base {addr};
+            while (base != nullptr && base->kind == Expr::Kind::MemberAddr)
+            {
+                rev.push_back(base->index);
+                base = base->a;
+            }
+            if (base != nullptr && base->kind == Expr::Kind::GlobalAddr)
+            {
+                if (base->global != g)
+                {
+                    return false;
+                }
+                const std::vector<int> sp(rev.rbegin(), rev.rend());
+                const size_t n {std::min(sp.size(), path.size())};
+                return std::equal(sp.begin(), sp.begin() + static_cast<std::ptrdiff_t>(n), path.begin());
+            }
+            if (base != nullptr && base->kind == Expr::Kind::AddrOf)
+            {
+                return false;
+            }
+            return rev.empty() && value != nullptr && value->type == t;
+        };
+        std::function<bool(const Expr*)> in_expr {[&](const Expr* e)
+                                                  {
+                                                      if (e == nullptr)
+                                                      {
+                                                          return false;
+                                                      }
+                                                      if (e->kind == Expr::Kind::StoreE && stores(e->c, e->a))
+                                                      {
+                                                          return true;
+                                                      }
+                                                      if (e->kind == Expr::Kind::Call)
+                                                      {
+                                                          for (const Expr* x : e->args)
+                                                          {
+                                                              if (expr_hands_global(x, g))
+                                                              {
+                                                                  return true;
+                                                              }
+                                                          }
+                                                      }
+                                                      for (const Expr* x : {e->a, e->b, e->c})
+                                                      {
+                                                          if (in_expr(x))
+                                                          {
+                                                              return true;
+                                                          }
+                                                      }
+                                                      for (const Expr* x : e->args)
+                                                      {
+                                                          if (in_expr(x))
+                                                          {
+                                                              return true;
+                                                          }
+                                                      }
+                                                      return false;
+                                                  }};
+        if ((st->kind == Stmt::Kind::Store && stores(st->addr, st->expr)) || in_expr(st->expr) || in_expr(st->addr))
+        {
+            return true;
+        }
+        for (const Stmt* c : {st->then_body, st->else_body, st->body, st->step})
+        {
+            if (may_replace_global(c, g, path, t))
+            {
+                return true;
+            }
+        }
+        for (const Stmt* c : st->stmts)
+        {
+            if (may_replace_global(c, g, path, t))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The address of the global `g` handed over by an expression: its address, not a value read through it (`Deref` stops the search, as call_takes_address_of's does).
+    static bool expr_hands_global(const Expr* e, const Global* g)
+    {
+        if (e == nullptr || e->kind == Expr::Kind::Deref)
+        {
+            return false;
+        }
+        if (e->kind == Expr::Kind::GlobalAddr && e->global == g)
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (expr_hands_global(x, g))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (expr_hands_global(x, g))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // A callee of the loop that names the global in its contract (an `owns(g)` of its own) or a cell of the owner's type may replace it.
+    bool global_callee_may_replace(const Stmt& loop, const Global* g, const Type& t)
+    {
+        std::vector<const Function*> calls;
+        calls_in_stmt(&loop, calls, false);
+        for (const Function* c : calls)
+        {
+            for (const AtomSite& a : atoms_of(*c).sites)
+            {
+                const PlaceKey pk {atom_place(*a.atom)};
+                if (pk.root == kGlobalSiteBase + g->id)
+                {
+                    return true;
+                }
+            }
+        }
+        return loop_calls_reach_cells_of(loop, t);
     }
     std::set<const Expr*> synth_atoms_;         // the atoms of those synthetic sites
     std::set<const Expr*> synth_closure_atoms_; // those of them that close over an owner's owning fields (make_closure)
+    std::set<const Expr*>
+        hs_atoms_; // those of them of a leaf of a global that `main` reaches only by type: the site's guard stands under the ghost `hs` (decision 0056 item 5)
+    std::map<const Expr*, std::string> hs_ghost_; // the loop being lowered: the `hs` ghost of each such atom
     std::deque<Stmt>
         synth_stmts_; // the loops owner_loop_sites makes its synthetic invariants in (their atoms live in the Program's arena)
     // Whether a loop's body (condition and step included) can call a function that hands out a block (an `ensures` block site).
@@ -15611,11 +15822,14 @@ private:
     // The sites' pointers as the invariant reads them, once the loop's places are known (the chain of a pointer reached through loads is framed by the places
     // and the earlier written atoms like a written atom's, decision 0045 item 12), their guards, and the merge with an owning loop variable.
     std::vector<WBlock> resolve_blocks(const std::vector<AtomSite>& sites, int loop_number,
-                                       const std::vector<LoopOwner>& owners, const std::vector<Place>& all_places)
+                                       const std::vector<LoopOwner>& owners, const std::vector<Place>& all_places,
+                                       const Stmt& loop, const LoopWrites& writes, std::vector<Place>& block_places)
     {
         std::vector<WBlock> out;
         const std::vector<Place>* saved {inv_places_};
-        inv_places_ = &all_places;
+        // decision 0056 item 6: the cells of each resolved site's block are places for the sites after it (and, through `block_places`, for the loop's invariants and measure)
+        std::vector<Place> chain_places {all_places};
+        inv_places_ = &chain_places;
         for (const AtomSite& site : sites)
         {
             const Expr& qa {*site.atom->a};
@@ -15699,13 +15913,40 @@ private:
                     const AtomGuard& x {site.guards[gi]};
                     const LV v {lower(*x.cond, body_env(), nullptr, {}, scratch)};
                     const E ge {x.holds ? v.e : low::not_(v.e)};
-                    (gi + 1U < site.guards.size() ? gpre : glast) =
-                        gi + 1U < site.guards.size() ? low::and_(gpre, ge) : ge;
+                    if (gi + 1U == site.guards.size())
+                    {
+                        glast = ge;
+                        continue;
+                    }
+                    if (gi > 0U)
+                    {
+                        // decision 0056 item 7: an intermediate pointer is read from a cell that has a value where the deeper site stands: its flag joins the guard, before the
+                        // guard that reads the cell
+                        const Expr* cond {x.cond};
+                        while (cond != nullptr &&
+                               (cond->kind == Expr::Kind::ToBool || cond->kind == Expr::Kind::BoolToInt))
+                        {
+                            cond = cond->a;
+                        }
+                        if (cond != nullptr && cond->kind == Expr::Kind::Binary && cond->a != nullptr &&
+                            cond->a->kind == Expr::Kind::Deref && cond->a->a != nullptr)
+                        {
+                            const LV cl {lower(*cond->a->a, body_env(), nullptr, {}, scratch)};
+                            gpre = low::and_(gpre, cell_flag(cl.e, cond->a->type));
+                        }
+                    }
+                    gpre = low::and_(gpre, ge);
                 }
                 inv_reads_.clear();
                 b.gb = gpre;
                 b.fl = cell_flag(b.cell, b.pt);
                 b.g = low::and_(low::and_(gpre, b.fl), glast);
+            }
+            const auto hs_it {hs_ghost_.find(site.atom)};
+            if (hs_it != hs_ghost_.end())
+            {
+                // decision 0056 item 5: the leaf of a global that `main` reaches only by type stands where `main` held it at the loop's entry
+                b.g = low::and_(low::var(hs_it->second), b.g);
             }
             if (b.loads)
             {
@@ -15717,12 +15958,115 @@ private:
             {
                 b.qb = b.p;
             }
+            if (!b.merged && b.pt.pointee != nullptr && b.pt.pointee->is_struct() &&
+                b.pt.pointee->struct_type != nullptr && has_owning_leaf(*b.pt.pointee->struct_type) &&
+                !site_pointer_written(b, writes))
+            {
+                // decision 0056 item 6: the cells of the block are places held whole where the site stood at the loop's entry (a pointer the loop does not write is the
+                // same there: `eog ==> on && p == epg` is invariant); the ones the loop does not write keep their entry value, which a deeper site needs to know its
+                // pointer is the one it began with
+                b.epg = "epb_" + std::to_string(out.size()) + "__" + std::to_string(loop_number);
+                b.eog = "eob_" + std::to_string(out.size()) + "__" + std::to_string(loop_number);
+                fn_.snapshots.push_back(low::LVar {b.epg, low::LType::Ref});
+                fn_.snapshots.push_back(low::LVar {b.eog, low::LType::Bool});
+                size_t ci {0U};
+                for (const Cell& c : block_cells(low::var(b.epg), b.pt, b.text))
+                {
+                    Place op;
+                    op.recv = c.recv;
+                    op.type = c.type;
+                    op.value = true;
+                    op.suffix = cell_suffix(c.type);
+                    op.label = c.text;
+                    op.wg = low::var(b.eog);
+                    chain_places.push_back(op);
+                    block_places.push_back(std::move(op));
+                    // a cell is written by a store by name or through a pointer of its type, or by a callee whose atoms reach cells of that type (the reach rules)
+                    if (writes.fields.count(cell_suffix(c.type)) == 0U && !loop_calls_reach_cells_of(loop, c.type))
+                    {
+                        const std::string nm {"vsb_" + std::to_string(out.size()) + "_" + std::to_string(ci) + "__" +
+                                              std::to_string(loop_number)};
+                        fn_.snapshots.push_back(low::LVar {nm, ltype(c.type)});
+                        b.cellvs.push_back(WBlock::CellVs {c.recv, c.type, nm, c.text});
+                    }
+                    ++ci;
+                }
+            }
             out.push_back(std::move(b));
         }
         inv_places_ = saved;
         return out;
     }
 
+    // Whether site `j` is a closure site whose pointer is read through the block cells of an earlier site that is not merged with an owner (decision 0056 items 6 and 7).
+    bool wblock_dependent(const std::vector<WBlock>& wbs, size_t j)
+    {
+        const WBlock& b {wbs[j]};
+        if (!b.loads || b.merged || b.site == nullptr || synth_closure_atoms_.count(b.site->atom) == 0U)
+        {
+            return false;
+        }
+        for (size_t k {0U}; k < j; ++k)
+        {
+            if (!wbs[k].merged && !wbs[k].epg.empty())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // Whether the loop may write the pointer a site reads its block from (the site's own cell: a store of its pointer type, a cell by name, the global it is read from).
+    bool site_pointer_written(const WBlock& b, const LoopWrites& w)
+    {
+        if (w.fields.count(cell_suffix(b.pt)) != 0U || !w.cells.empty())
+        {
+            return true;
+        }
+        const Expr* root {b.site != nullptr && b.site->atom != nullptr ? place_root(b.site->atom->a, nullptr)
+                                                                       : nullptr};
+        if (root != nullptr && root->kind == Expr::Kind::GlobalAddr && root->global != nullptr)
+        {
+            const int id {root->global->id};
+            if (w.globals.count(id) != 0U)
+            {
+                return true;
+            }
+            for (const auto& gl : w.gleaves)
+            {
+                if (gl.first == id)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    // The ghosts of the sites whose cells are places (item 6), taken at the entry in the sites' order: the pointer and the `on` of each site, then the values of the cells the
+    // loop keeps where the site stands.
+    void wblock_ghosts(const std::vector<WBlock>& wbs, std::vector<low::LStmt>& out)
+    {
+        for (const WBlock& b : wbs)
+        {
+            if (b.epg.empty())
+            {
+                continue;
+            }
+            assign(out, b.epg, b.p);
+            assign(out, b.eog, wblock_on(b, {}));
+            if (b.cellvs.empty())
+            {
+                continue;
+            }
+            low::LStmt ifs;
+            ifs.kind = low::LStmt::Kind::If;
+            ifs.expr = low::var(b.eog);
+            for (const WBlock::CellVs& c : b.cellvs)
+            {
+                assign(ifs.then_body, c.vs, cell_value(c.recv, c.type));
+            }
+            out.push_back(std::move(ifs));
+        }
+    }
     // The guard of a site's carrier clauses: its own guard and `p != null`.  The block is no place's of the loop: rows at the entry and the back edge say so
     // (wblock_place_rows) and the invariant keeps the facts, so Silicon never has to decide a guard (a pointer read through a load is not decidable by it; the
     // written atoms' NOTAUTO guards of decision 0040 item 5 are replaced by checks here, so that a site that shares a cell with a place is reported, not switched off).
@@ -15794,6 +16138,12 @@ private:
             out.push_back(auto_invariant(b.g ? low::implies(b.g, low::bin(BinOp::Ne, b.p, low::null_()))
                                              : low::bin(BinOp::Ne, b.p, low::null_()),
                                          loc));
+            if (!b.epg.empty())
+            {
+                // decision 0056 item 6: where the site stood at the entry it stands, with the pointer it began with (the places of its cells name that pointer)
+                out.push_back(auto_invariant(
+                    low::implies(low::var(b.eog), low::and_(on, low::bin(BinOp::Eq, b.p, low::var(b.epg)))), loc));
+            }
             out.push_back(
                 auto_invariant(low::implies(on, low::and_(low::acc(tok_slot(b.p), "tok"),
                                                           b.vlibc ? low::not_(tok_value(b.p)) : tok_value(b.p))),
@@ -15806,6 +16156,12 @@ private:
                     low::implies(on, low::and_(low::acc(c.recv, "v_" + sfx), low::acc(c.recv, "d_" + sfx))), loc));
             }
             out.push_back(auto_invariant(low::implies(on, low::acc(live_cell(b.p), "lv")), loc));
+            for (const WBlock::CellVs& c : b.cellvs)
+            {
+                out.push_back(auto_invariant(
+                    low::implies(low::var(b.eog), low::bin(BinOp::Eq, cell_value(c.recv, c.type), low::var(c.vs))),
+                    loc));
+            }
             out.push_back(auto_invariant(
                 low::implies(known,
                              low::and_(low::and_(low::bin(BinOp::Eq, low::dom("offset_of", {b.p}), low::int_lit("0")),
@@ -15851,23 +16207,42 @@ private:
         // A site through loads has a pointer and a guard that are chains over the framing disjuncts; each of the rows below would repeat them.  They are read once, here, in
         // the state the rows are asserted in (audit round 2, the two-sites timeout): the rows then name two variables.
         std::vector<WBlock> wbs {wbs0};
-        for (WBlock& b : wbs)
+        auto hoist = [&](WBlock& b)
         {
-            if (b.loads && !b.merged && b.p != nullptr)
+            const std::string tp {new_temp(low::LType::Ref)};
+            assign(out, tp, b.p);
+            b.p = low::var(tp);
+            if (b.g != nullptr)
             {
-                const std::string tp {new_temp(low::LType::Ref)};
-                assign(out, tp, b.p);
-                b.p = low::var(tp);
-                if (b.g != nullptr)
-                {
-                    const std::string tg {new_temp(low::LType::Bool)};
-                    assign(out, tg, b.g);
-                    b.g = low::var(tg);
-                }
+                const std::string tg {new_temp(low::LType::Bool)};
+                assign(out, tg, b.g);
+                b.g = low::var(tg);
             }
-        }
-        for (const WBlock& b : wbs)
+        };
+        // decision 0056 item 7 (audit round 1, S1): the pointer of a closure site read through an earlier site's block cells is read after that site's rows, so that a body that
+        // freed the earlier block ends at its row and not at this read (Silicon's own `assignment.failed`).  A site merged with an owner keeps its order: the owner's rows come first
+        std::vector<bool> deferred(wbs.size(), false);
+        for (size_t j {0U}; j < wbs.size(); ++j)
         {
+            WBlock& b {wbs[j]};
+            if (!b.loads || b.merged || b.p == nullptr)
+            {
+                continue;
+            }
+            if (wblock_dependent(wbs0, j))
+            {
+                deferred[j] = true;
+                continue;
+            }
+            hoist(b);
+        }
+        for (size_t j {0U}; j < wbs.size(); ++j)
+        {
+            if (deferred[j])
+            {
+                hoist(wbs[j]);
+            }
+            const WBlock& b {wbs[j]};
             const SrcLoc where {back ? at : b.loc};
             const std::string pl {b.text.empty() ? std::string("the pointer") : "`" + b.text + "`"};
             auto add = [&](const char* cat, E cond, const std::string& msg)
@@ -15898,6 +16273,27 @@ private:
                        back ? "the invariant of this loop needs, at the end of an iteration,"
                             : "the invariant of this loop needs",
                        false, b.vlibc ? Allocator::Vlibc : Allocator::Platform, std::string());
+            if (back && !b.epg.empty())
+            {
+                // decision 0056 item 6: the site stands where it stood at the entry with the pointer it began with, and the cells the loop does not write hold what they held
+                emit_ending_assert(
+                    out,
+                    low::implies(low::var(b.eog), low::and_(low::and_(b.g, low::bin(BinOp::Ne, b.p, low::null_())),
+                                                            low::bin(BinOp::Eq, b.p, low::var(b.epg)))),
+                    meta("permission", where,
+                         "an iteration of this loop ends with " + pl +
+                             " pointing to another object than the one it began with"));
+                for (const WBlock::CellVs& c : b.cellvs)
+                {
+                    emit_ending_assert(
+                        out,
+                        low::implies(low::var(b.eog), low::bin(BinOp::Eq, cell_value(c.recv, c.type), low::var(c.vs))),
+                        meta("permission", where,
+                             "an iteration of this loop ends with " +
+                                 quoted(c.text.empty() ? b.text : c.text, "an owned object") +
+                                 " holding something other than what it began with"));
+                }
+            }
         }
         for (size_t j {0U}; j < wbs.size(); ++j)
         {
@@ -15979,8 +16375,13 @@ private:
                     case_split(out, low::bin(BinOp::Eq, block_of(p), block_of(pl.lroot)));
                 }
             }
+            const bool dependent {wblock_dependent(wbs, j)};
             for (size_t k {0U}; k < j; ++k)
             {
+                if (dependent && !wbs[k].merged && !wbs[k].epg.empty())
+                {
+                    continue; // (the closure is read through that site's cells, and its block is distinct from it by the pair rows: the splits cost Silicon a path each)
+                }
                 case_split(out, low::bin(BinOp::Eq, block_of(p), block_of(pn(wbs[k]))));
                 case_split(out, low::bin(BinOp::Eq, p, pn(wbs[k])));
             }

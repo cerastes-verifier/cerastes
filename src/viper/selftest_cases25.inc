@@ -223,18 +223,16 @@ void define_loop_limits_l1()
         lbody.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
         const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
                               {k.cl(k.sub(N(k, "3"), k.v(i)))}, k.blkc(lbody))};
-        std::vector<const Stmt*> body {k.decl(s, nullptr),
-                                       k.lstore(k.addr(s), 0, k.nul(PI(k))),
-                                       k.lstore(k.addr(s), 1, N(k, "0")),
-                                       k.decl(z, k.nul(PI(k)))};
+        std::vector<const Stmt*> body {k.decl(s, nullptr), k.lstore(k.addr(s), 0, k.nul(PI(k))),
+                                       k.lstore(k.addr(s), 1, N(k, "0")), k.decl(z, k.nul(PI(k)))};
         if (mode != 2)
         {
             body.push_back(k.lstore(k.addr(s), 0, k.call(m, {})));
         }
         if (mode == 0)
         {
-            body.push_back(k.iff(k.ne(k.leaf(k.addr(s), 0), k.nul(PI(k))),
-                                 k.blk({k.store(k.leaf(k.addr(s), 0), N(k, "1"))})));
+            body.push_back(
+                k.iff(k.ne(k.leaf(k.addr(s), 0), k.nul(PI(k))), k.blk({k.store(k.leaf(k.addr(s), 0), N(k, "1"))})));
         }
         body.push_back(k.decl(i, N(k, "0")));
         body.push_back(lp);
@@ -309,3 +307,258 @@ void define_loop_limits_l1()
            k.fail("leak", maybe_null(k, false), 1U, "", "may return while it still owns");
        });
 }
+
+// Loop limits of owning fields, Part L-2 (decision 0056 items 5, 6 and 7, M4.5d2b2c): the leaf of a global that `main` reaches only by type (under the ghost `hs`), the closure of
+// an owning `struct S *` global (the site's block cells are places), and a chain of three owning levels.
+void define_loop_limits_l2()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto PI = [](Kit& k)
+    {
+        return k.ptr(k.i32);
+    };
+
+    // item 6: struct Leaf { int *x (owning); int k; }  static owning struct Leaf *gp;
+    // int main(void) { gp = calloc(1, sizeof(struct Leaf)); if (gp == NULL) { return 1; } int i = 0;
+    //                  while (i < 3) { [free(gp->x);] gp->x = malloc(sizeof(int)); i++; } return 0; }
+    // the loop carries gp's block and the closure of its owning field gp->x: the block's cells are places for the closure's pointer
+    const auto gp_loop = [=](Kit& k, bool free_first, bool free_mid = false) -> SrcLoc
+    {
+        StructType* Leaf {k.strukt("Leaf", {{"x", PI(k)}, {"k", k.i32}})};
+        Leaf->members[0U].owning = true;
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* ca {heap_alloc_view(k, "calloc", k.st(Leaf), true)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* frl {heap_free_view(k, k.st(Leaf))};
+        Function* f {k.fn("main", k.i32)};
+        k.prog.set_entry(f);
+        Global* gp {k.prog.add_global("gp", k.ptr(k.st(Leaf)), k.at())};
+        gp->init_kind = Global::Init::Null;
+        gp->owning = true;
+        const auto gv = [&]()
+        {
+            return k.deref(k.b.global_addr(gp, k.at()));
+        };
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> body;
+        if (free_mid)
+        {
+            body.push_back(
+                k.iff(k.eq(k.v(i), N(k, "1")), k.blk({k.es(k.call(fr, {k.leaf(gv(), 0)})),
+                                                      k.lstore(gv(), 0, k.nul(PI(k))), k.es(k.call(frl, {gv()}))})));
+        }
+        else
+        {
+            if (free_first)
+            {
+                body.push_back(k.es(k.call(fr, {k.leaf(gv(), 0)})));
+            }
+            body.push_back(k.lstore(gv(), 0, k.call(m, {})));
+        }
+        body.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
+        const Stmt* bs {k.blkc(body)};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))}, bs)};
+        f->body = k.blkc({k.store(k.b.global_addr(gp, k.at()), k.call(ca, {})),
+                          k.iff(k.eq(gv(), k.nul(k.ptr(k.st(Leaf)))), k.blk({k.ret(N(k, "1"))})), k.decl(i, N(k, "0")),
+                          lp, k.ret(N(k, "0"))});
+        k.done(f);
+        return bs->end_loc;
+    };
+    lc("loop_global_pointer_closure",
+       "a loop in main that frees and replaces gp->x of an owning struct pointer global: the closure of gp's owning field is carried beside gp's block",
+       [=](Kit& k)
+       {
+           gp_loop(k, true);
+       });
+    lc("loop_global_pointer_closure_drop",
+       "the same without the free: the loop's back-edge row reports the old block of gp->x (leak at the end of the body)",
+       [=](Kit& k)
+       {
+           k.fail_only("leak", gp_loop(k, false), 1U, 0U);
+       });
+
+    lc("loop_global_pointer_free_block",
+       "a body that frees gp->x and gp in one iteration: the rows of the sites end the path (permission at the end of the body), never Silicon's own failure at a pre-read",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", gp_loop(k, false, true), 11U, 1U, "own the whole allocation");
+       });
+
+    // item 7: struct Leaf { int *x (owning); int k; }  struct Mid { struct Leaf *c (owning); int j; }  struct Top { struct Mid *b (owning); int m; }
+    // int f(void) { struct Top a = { NULL, 0 }; a.b = calloc(); if (a.b == NULL) { return 0; } a.b->c = calloc(); if (a.b->c == NULL) { free(a.b); a.b = NULL; return 0; }
+    //               int i = 0; while (i < 3) { MODE; i++; } free(a.b->c->x); free(a.b->c); free(a.b); a.b = NULL; }
+    // mode 0: free(a.b->x), a.b->c->x = malloc()      mode 1: a.b->c->x = malloc() (the old block is dropped)
+    // mode 2: if (i == 1) { free(a.b->c->x); a.b->c->x = NULL; free(a.b->c); }   (the middle block freed in the body: a mapped row, never Silicon's own failure)
+    const auto chain3 = [=](Kit& k, int mode, SrcLoc* fend = nullptr) -> SrcLoc
+    {
+        StructType* Leaf {k.strukt("Leaf", {{"x", PI(k)}, {"k", k.i32}})};
+        Leaf->members[0U].owning = true;
+        StructType* Mid {k.strukt("Mid", {{"c", k.ptr(k.st(Leaf))}, {"j", k.i32}})};
+        Mid->members[0U].owning = true;
+        StructType* Top {k.strukt("Top", {{"b", k.ptr(k.st(Mid))}, {"m", k.i32}})};
+        Top->members[0U].owning = true;
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* cam {heap_alloc_view(k, "calloc", k.st(Mid), true)};
+        Function* cal {heap_alloc_view(k, "calloc", k.st(Leaf), true)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* frl {heap_free_view(k, k.st(Leaf))};
+        Function* frm {heap_free_view(k, k.st(Mid))};
+        Function* f {k.fn("f", k.i32)};
+        Var* a {k.scell(f, "a", Top)};
+        Var* i {k.local(f, "i", k.i32)};
+        const auto ab = [&]()
+        {
+            return k.leaf(k.addr(a), 0);
+        };
+        const auto abc = [&]()
+        {
+            return k.leaf(ab(), 0);
+        };
+        std::vector<const Stmt*> body;
+        if (mode == 0)
+        {
+            body.push_back(k.es(k.call(fr, {k.leaf(abc(), 0)})));
+            body.push_back(k.lstore(abc(), 0, k.call(m, {})));
+        }
+        else if (mode == 1)
+        {
+            body.push_back(k.lstore(abc(), 0, k.call(m, {})));
+        }
+        else
+        {
+            body.push_back(
+                k.iff(k.eq(k.v(i), N(k, "1")), k.blk({k.es(k.call(fr, {k.leaf(abc(), 0)})),
+                                                      k.lstore(abc(), 0, k.nul(PI(k))), k.es(k.call(frl, {abc()}))})));
+        }
+        body.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
+        const Stmt* bs {k.blkc(body)};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))}, bs)};
+        std::vector<const Stmt*> tail;
+        if (mode != 2)
+        {
+            tail.push_back(k.es(k.call(fr, {k.leaf(abc(), 0)})));
+            tail.push_back(k.es(k.call(frl, {abc()})));
+            tail.push_back(k.es(k.call(frm, {ab()})));
+            tail.push_back(k.lstore(k.addr(a), 0, k.nul(k.ptr(k.st(Mid)))));
+        }
+        std::vector<const Stmt*> top {k.decl(a, nullptr),
+                                      k.lstore(k.addr(a), 0, k.nul(k.ptr(k.st(Mid)))),
+                                      k.lstore(k.addr(a), 1, N(k, "0")),
+                                      k.lstore(k.addr(a), 0, k.call(cam, {})),
+                                      k.iff(k.eq(ab(), k.nul(k.ptr(k.st(Mid)))), k.blk({k.ret(N(k, "0"))})),
+                                      k.lstore(ab(), 0, k.call(cal, {})),
+                                      k.iff(k.eq(abc(), k.nul(k.ptr(k.st(Leaf)))),
+                                            k.blk({k.es(k.call(frm, {ab()})),
+                                                   k.lstore(k.addr(a), 0, k.nul(k.ptr(k.st(Mid)))), k.ret(N(k, "0"))})),
+                                      k.decl(i, N(k, "0")),
+                                      lp};
+        for (const Stmt* t : tail)
+        {
+            top.push_back(t);
+        }
+        const Stmt* rt {k.ret(N(k, "0"))};
+        top.push_back(rt);
+        f->body = k.blkc(top);
+        k.done(f);
+        if (fend != nullptr)
+        {
+            *fend = rt->loc;
+        }
+        return bs->end_loc;
+    };
+    lc("loop_chain3_replace",
+       "a loop that frees and replaces a.b->c->x, three owning levels below a struct local: the closure of the leaf a.b is carried to every depth",
+       [=](Kit& k)
+       {
+           chain3(k, 0);
+       });
+    lc("loop_chain3_drop",
+       "the same without the free: the loop's back-edge row reports the old block of the third level (leak at the end of the body)",
+       [=](Kit& k)
+       {
+           k.fail_only("leak", chain3(k, 1), 1U, 0U);
+       });
+
+    lc("loop_chain3_free_mid",
+       "a body that frees the middle block (a.b->c) in one iteration: the rows of the sites end the path (permission at the end of the body, then the leaf a.b still holding its block), never Silicon's own failure at a pre-read",
+       [=](Kit& k)
+       {
+           SrcLoc fend;
+           const SrcLoc lend {chain3(k, 2, &fend)};
+           k.fail_only("permission", lend, 17U, 7U, "own the whole allocation");
+           k.fail("leak", fend, 1U, "", "still holds its block");
+       });
+
+    // item 5: struct S { int *q (owning); int n; }  struct S g;  void bump(int **pp) requires(owns(*pp)) ensures(owns(*pp) && *pp == old(*pp));
+    // int main(void) { g.q = NULL; g.n = 0; g.q = malloc(); int *z = NULL; int i = 0; while (i < 3) { bump(&z); i++; } [int *lk = malloc();] return 0; }
+    // the loop reaches g.q only by type: main carries it under the ghost `hs` (held and the cell has a permission); main ends holding the block (exempt)
+    const auto main_type = [=](Kit& k, bool leak) -> SrcLoc
+    {
+        StructType* S {k.strukt("S", {{"q", PI(k)}, {"n", k.i32}})};
+        S->members[0U].owning = true;
+        Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+        Function* bump {k.fn("bump", k.vd, {{"pp", k.ptr(PI(k))}})};
+        const auto pp = [&]()
+        {
+            return k.b.text(k.F(bump, 0), "pp");
+        };
+        k.req(bump, k.b.atom(AtomKind::Owns, pp(), 0, k.at()));
+        k.ens(bump, k.land(k.b.atom(AtomKind::Owns, pp(), 0, k.at()), k.eq(k.deref(pp()), k.old(k.deref(pp())))));
+        k.trusted(bump);
+        k.done(bump);
+        Function* f {k.fn("main", k.i32)};
+        k.prog.set_entry(f);
+        Global* g {k.prog.add_global("g", k.st(S), k.at())};
+        {
+            GlobalLeaf l0;
+            l0.kind = Global::Init::Null;
+            l0.loc = k.at();
+            g->leaves.push_back(l0);
+            GlobalLeaf l1;
+            l1.kind = Global::Init::Value;
+            l1.init = N(k, "0");
+            l1.value = "0";
+            l1.loc = k.at();
+            g->leaves.push_back(l1);
+        }
+        Var* z {k.cell(f, "z", PI(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        Var* lk {k.local(f, "lk", PI(k))};
+        const Stmt* bs {k.blkc({k.es(k.call(bump, {k.addr(z)})), k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))}, bs)};
+        std::vector<const Stmt*> body {k.lstore(k.b.global_addr(g, k.at()), 0, k.nul(PI(k))),
+                                       k.lstore(k.b.global_addr(g, k.at()), 1, N(k, "0")),
+                                       k.lstore(k.b.global_addr(g, k.at()), 0, k.call(m, {})),
+                                       k.decl(z, k.nul(PI(k))),
+                                       k.decl(i, N(k, "0")),
+                                       lp};
+        if (leak)
+        {
+            body.push_back(k.decl(lk, k.call(m, {})));
+        }
+        body.push_back(k.ret(N(k, "0")));
+        f->body = k.blkc(body);
+        k.done(f);
+        return f->end_loc;
+    };
+    lc("loop_main_type_hs",
+       "main holds the block of a struct global's owning leaf across a loop that reaches the leaf only by type: carried under hs, and main ends holding it (exempt)",
+       [=](Kit& k)
+       {
+           main_type(k, false);
+       });
+    lc("loop_main_type_hs_leak",
+       "the same with another block leaked after the loop: the exemption names only the leaf's token, so main's exit row fails",
+       [=](Kit& k)
+       {
+           k.fail("leak", main_type(k, true), 1U, "", "may return while it still owns");
+       });
+}
+
+} // namespace

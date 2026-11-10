@@ -1,12 +1,8 @@
-// expect: error invalid-free @ L45
-// expect: error null-dereference @ L45
-// expect: error leak @ L51
-// expect: error invalid-free @ L52
-// expect: error null-dereference @ L52
+// expect: error leak @ L46
 // mode: c23, c++20
-// twin: tests/memory/owning_field_loop_chain.c
-// Pins: 0055 item 7 (a false alarm pinned): a loop that frees and replaces a.b->c->x, three owning levels below a struct local: the loop carries the chain to depth 1 only (owning_field_loop_chain.c verifies), so the deeper level's block is not backed by the loop's places. The expectations are the errors the encoder reports today
-// Pre-registered from the final re-audit (probes r4/ and r5/), observed on the session build after the fixes: chain3.c: the expect lines are the actual outcome, recorded as a pin
+// twin: tests/memory/owning_field_loop_chain3.c
+// Pins: 0056 item 7 (limit 6): the same loop without free(a.b->c->x): the third level's old block is dropped at the end of an iteration, which the loop's back-edge row reports at the loop body's closing brace
+// Pre-registered from record 0056 item 7 and S41 (b) (the twin of the hand-edited fixture, not yet run on the L-2 build): leak at the closing brace of the loop body, in both modes
 #include <cerastes.h>
 #include <stdlib.h>
 
@@ -42,7 +38,6 @@ int f(void)
   CERASTES_INVARIANT(0 <= i && i <= 3)
   CERASTES_DECREASES(3 - i)
   while (i < 3) {
-    free(a.b->c->x);
     a.b->c->x = (int *)malloc(sizeof(int));
     if (a.b->c->x != NULL) {
       *a.b->c->x = i;

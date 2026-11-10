@@ -1491,6 +1491,7 @@ void define_block_guards_and_vlibc_sites();
 void define_owning_fields();
 void define_owning_leaves();
 void define_loop_limits_l1();
+void define_loop_limits_l2();
 } // namespace
 
 #include "selftest_cases2.inc"
@@ -1782,6 +1783,7 @@ int main(int argc, char** argv)
     define_owning_fields();
     define_owning_leaves();
     define_loop_limits_l1();
+    define_loop_limits_l2();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

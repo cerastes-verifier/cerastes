@@ -1,8 +1,8 @@
-// expect: error leak @ L61
+// expect: verified
+// expect: native-ok
 // mode: c23, c++20
-// twin: tests/memory/owning_field_global_main.c
-// Pins: 0055 item 7 (a false alarm pinned, not a defect of the program): main fills a struct global's owning leaf and ends holding it after a loop that passes the address of a plain pointer local to a borrower: the loop does not carry the global's leaf, which it reaches only by type, so main's end row reports the block the static owner holds; without the loop (owning_field_global_main.c) it verifies. The expectations are the errors the encoder reports today
-// Pre-registered from the final re-audit (probes r4/ and r5/), observed on the session build after the fixes: main_hold_type.c: the expect lines are the actual outcome, recorded as a pin
+// Covers: 0056 item 5 (limit 4): a loop in main beside a struct global with an owning field that main never names and never assigns: the leaf's entry snapshot hs is false (main holds nothing), so nothing is carried and nothing is asked of the loop
+// Pre-registered from record 0056 item 5 and S41 (c) v3 (verified on the base; not yet run on the L-2 build): verifies in both modes
 #include <cerastes.h>
 #include <stdlib.h>
 
@@ -46,9 +46,6 @@ void fill(void)
 
 int main(void)
 {
-  g.data = NULL;
-  g.n = 0;
-  fill();
   int *z = NULL;
   int i = 0;
   CERASTES_INVARIANT(0 <= i && i <= 3)
