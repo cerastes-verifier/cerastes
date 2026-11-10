@@ -1302,9 +1302,23 @@ private:
         vir::InitMarker kind {vir::InitMarker::None};
     };
     std::map<a_routine_ptr, std::vector<MarkerParam>> markers_;
+    // Each marker kind names itself; a kind that is not a parameter marker is a tool failure (exit status 3), never filed under another marker.
     static const char* marker_name(Annot k)
     {
-        return k == Annot::ref_to_uninit ? "ref_to_uninit" : k == Annot::must_init ? "must_init" : "owning";
+        if (k == Annot::owning)
+        {
+            return "owning";
+        }
+        if (k == Annot::ref_to_uninit)
+        {
+            return "ref_to_uninit";
+        }
+        if (k == Annot::must_init)
+        {
+            return "must_init";
+        }
+        internal_error("marker_name: an annotation kind that is not a parameter marker");
+        return "";
     }
     static const char* marker_name(vir::InitMarker k)
     {
@@ -1686,11 +1700,15 @@ private:
             {
                 owning_[r].push_back(OwningParam {static_cast<int>(k), ns[0U]->position});
             }
-            else
+            else if (kind == Annot::ref_to_uninit || kind == Annot::must_init)
             {
                 markers_[r].push_back(
                     MarkerParam {static_cast<int>(k), ns[0U]->position,
                                  kind == Annot::must_init ? vir::InitMarker::MustInit : vir::InitMarker::RefToUninit});
+            }
+            else
+            {
+                internal_error("read_marker: an annotation kind that is not a parameter marker");
             }
         }
         return ok;
