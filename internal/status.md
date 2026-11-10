@@ -92,7 +92,8 @@ items 2, 7 and 10, 0047 items 4, 7 and 10, 0052 items 2, 3, 4, 6(a) and 8). Read
 - **A lost hand edit.** A test generator re-run wiped three hand-added expect lines (question 183). The audit caught
   it, and handoff §6's rule was restated to the agent.
 - **Cost.** Two written sites through loads over parameter places cost 33–148 s (question 186).
-- **CI.** The nightly CI has timed out at 220 minutes since 2026-10-29 (question 176).
+- **CI.** The nightly CI has timed out at 220 minutes since 2026-10-29 (question 176). The owner raised the limit
+  to 360 minutes (`99b587e`); the guard's bound and record 0016 item 9 follow it.
 
 **First step for the next session:** M4.5d2b2b's planning (owning fields, P4418R0 per questions 175, 177–179;
 handoff §3 "M4.5d2b2b" and "From M4.5d2b2a").

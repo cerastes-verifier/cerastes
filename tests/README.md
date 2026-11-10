@@ -1045,7 +1045,7 @@ constants assigned once before use, bootstrap run once and the environment ban h
 exactly the jobs `profiles`, `check` and `check-linux`, each with its keys, `needs`, the pinned `if`,
 `fail-fast: false`, the matrix of its own output, `runs-on` from the matrix, its environment and its steps in
 order, every action SHA-pinned with its `with:` values; only the SHAs, the step and job names,
-`timeout-minutes` (at most 220) and the dispatch input's description may change without the self-test, and
+`timeout-minutes` (at most 360) and the dispatch input's description may change without the self-test, and
 the dispatch input may reach a command only through an environment variable. The profile file is checked by
 `ci_profile.py check` (the schema) in the self-test, and `ci_reference_problems` pins the two references'
 declared facts (`CI_REFERENCE_PROFILES`) and that exactly they are `every`: a new toolchain is one profile

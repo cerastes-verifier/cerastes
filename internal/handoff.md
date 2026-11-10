@@ -107,7 +107,10 @@ M4.5d2b2a's (2026-11-09):
 At M4.5d2b2a's planning (2026-11-09): PR #33 is merged (`15bcdc6`). The `profiles=all` dispatch has not run, and the
 nightly full check has been cancelled at its 220-minute timeout on every profile, `macos-27` and `ubuntu-26.04`
 included, every night since 2026-10-29 (runs 42378726945 and 42488514070 the latest; the pull request and push tiers
-pass): **the owner handles CI** (question 176), outside d2b2a's plan.
+pass): **the owner handles CI** (question 176), outside d2b2a's plan. After the session the owner raised both
+full-check jobs to `timeout-minutes: 360` (`99b587e`), GitHub's limit for a job on its hosted runners. The
+self-test's bound (`CI_YML_MAX_TIMEOUT`) and record 0016 item 9 now follow it, so the next nightly run shows whether
+the full check fits in six hours.
 
 S8's (2026-11-06):
 1. **PR #33** (merged 2026-11-07) (`s8b-ci-profiles`): push the branch's tip (the commits after `fc499cc`: the self-test fixture fix

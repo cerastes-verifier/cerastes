@@ -4485,8 +4485,9 @@ CI_YML_JOBS = ("profiles", "check", "check-linux")
 # and the schedule and workflow_dispatch get the empty base, the full check
 CI_YML_CHECK_BASE = ("${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha"
                      " || github.event_name == 'push' && github.event.before || '' }}")
-# decision 0016 item 9: max(150, 1.5 x the 145 min of the last full run on main), rounded up
-CI_YML_MAX_TIMEOUT = 220
+# decision 0016 item 9: 360 min, GitHub's limit for a job on its hosted runners (owner, 2026-11-09: the full
+# check had outgrown S4's 220)
+CI_YML_MAX_TIMEOUT = 360
 CI_YML_CLT = "/Library/Developer/CommandLineTools"
 CI_YML_CONCURRENCY = {
     "group": "${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number)"
@@ -4881,7 +4882,7 @@ class CiGuardTests(unittest.TestCase):
                 ("cancel-in-progress", line_with("  cancel-in-progress:")),
                 ("jobs", "jobs:\n"), ("job name", self.JOB_NAME), ("profiles job name", "    name: profiles\n"),
                 ("runs-on", self.RUNS_ON), ("profiles runs-on", "    runs-on: ubuntu-26.04\n"),
-                ("timeout", "    timeout-minutes: 220\n"), ("profiles timeout", "    timeout-minutes: 10\n"),
+                ("timeout", "    timeout-minutes: 360\n"), ("profiles timeout", "    timeout-minutes: 10\n"),
                 ("outputs", "    outputs:\n"), ("the macos output", line_with("      macos:")),
                 ("the linux output", line_with("      linux:")),
                 ("schedule", "  schedule:\n    - cron: '0 7 * * *'\n"), ("cron", "    - cron: '0 7 * * *'\n"),
@@ -5074,13 +5075,11 @@ class CiGuardTests(unittest.TestCase):
         sub("a repeated description", line_with("        description:"), line_with("        description:") * 2)
         sub("the dispatch input removed", "    inputs:\n", "    x:\n")
         # the timeouts, the environment, the base
-        sub("timeout 221", "timeout-minutes: 220", "timeout-minutes: 221")
-        sub("timeout 240, the S2 value", "timeout-minutes: 220", "timeout-minutes: 240")
-        sub("timeout 361", "timeout-minutes: 220", "timeout-minutes: 361")
-        sub("timeout quoted", "timeout-minutes: 220", "timeout-minutes: '220'")
-        sub("timeout an expression", "timeout-minutes: 220", "timeout-minutes: ${{ vars.T }}")
-        sub("timeout 0", "timeout-minutes: 220", "timeout-minutes: 0")
-        sub("the profiles timeout 221", "timeout-minutes: 10", "timeout-minutes: 221")
+        sub("timeout 361", "timeout-minutes: 360", "timeout-minutes: 361")
+        sub("timeout quoted", "timeout-minutes: 360", "timeout-minutes: '360'")
+        sub("timeout an expression", "timeout-minutes: 360", "timeout-minutes: ${{ vars.T }}")
+        sub("timeout 0", "timeout-minutes: 360", "timeout-minutes: 0")
+        sub("the profiles timeout 361", "timeout-minutes: 10", "timeout-minutes: 361")
         sub("the profiles timeout removed", "    timeout-minutes: 10\n", "")
         sub("an Xcode developer dir", "DEVELOPER_DIR: /Library/Developer/CommandLineTools",
             "DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer")
@@ -5266,7 +5265,7 @@ class CiGuardTests(unittest.TestCase):
                 ("every step renamed", re.sub(r"(?m)^(      - name: ).*$", r"\1Do it", self.YML)),
                 ("a comment added", self.YML.replace("jobs:\n", "jobs:\n  # a comment\n")),
                 ("a comment in a block", self.YML.replace("          silicon_head=", "          # note\n          silicon_head=")),
-                ("a shorter timeout", self.YML.replace("timeout-minutes: 220", "timeout-minutes: 120")),
+                ("a shorter timeout", self.YML.replace("timeout-minutes: 360", "timeout-minutes: 120")),
                 ("a shorter profiles timeout", self.YML.replace("timeout-minutes: 10", "timeout-minutes: 5")),
                 ("the job renamed", self.YML.replace("name: check (${{", "name: build (${{")),
                 ("the profiles job renamed", self.YML.replace("    name: profiles\n", "    name: Select the profiles\n")),
@@ -5670,7 +5669,7 @@ class CiGuardTests(unittest.TestCase):
         sub("the matrix from the macOS output", "fromJSON(needs.profiles.outputs.linux)", "fromJSON(needs.profiles.outputs.macos)")
         sub("fail-fast true", "fail-fast: false", "fail-fast: true")
         sub("continue-on-error on the job", "    steps:\n", "    continue-on-error: true\n    steps:\n")
-        sub("timeout 221", "timeout-minutes: 220", "timeout-minutes: 221")
+        sub("timeout 361", "timeout-minutes: 360", "timeout-minutes: 361")
         sub("DEVELOPER_DIR in the Linux env", "      CERASTES_JOBS: ${{ matrix.jobs }}\n",
             "      DEVELOPER_DIR: /Library/Developer/CommandLineTools\n      CERASTES_JOBS: ${{ matrix.jobs }}\n")
         sub("CERASTES_JOBS 0", "CERASTES_JOBS: ${{ matrix.jobs }}", "CERASTES_JOBS: 0")
