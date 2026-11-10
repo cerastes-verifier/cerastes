@@ -29,11 +29,12 @@ class that runs the real driver is added with the driver (M3-3).
 | `scalar/` | M3: scalar code through `cerastes verify` (`verified` positives, each with a must-fail twin in `scalar/negative/`) | `build/cerastes verify` |
 | `memory/` | M4.5b1 (b1a–b1c3): pointers to address-taken locals (decision 0032), pointer parameters, results and contracts (decision 0037: `owns`, `reads`, `live`, `old`, framing, `restrict`, `&param`), loops and jumps over memory (decision 0038: automatic loop invariants, invariants and measures over memory, scope exits at `break`/`continue`/`goto`/`return`), sequencing over memory (decision 0039) and pointers to pointers, `[[cerastes::owning]]` parameters, `*result` and written atoms in loop invariants (decision 0040), initialization through pointers (decision 0042: `uninit`, `ref_to_uninit`, `must_init`, the call's flag row, `--strict-init` through `// verify-options:`), the heap (decision 0047, M4.5d2a: `malloc`/`calloc`/`free` through vlibc's contracts and the typed view, `owns_block`, owning and `ref_to_uninit` results, `invalid-free` and `leak`, two calls over liveness and token cells, `heap_*`; every heap twin and pin carries a `// Pre-registered from record 0047 ...` line, the expectation written before the encoder existed; `memory/verifast/` holds ports of VeriFast's C examples with their adaptation header and line map): `verified` positives, each with a must-fail twin in `memory/negative/` that fails for one reason at one line (the twin rule as in `scalar/`: an `error` twin in every mode), and the `rejected` pins of what later sessions lift (M4.5b2 on) (each has a `// Pins:` line) | `build/cerastes verify` |
 | `vlibc/` | M4.5d1 (decision 0046): vlibc's trusted contracts as `cerastes verify` reads them: the C library through the driver's shim (`<stdlib.h>`, `<cstdlib>`, `<array>`) and `<vlibc/stdlib.h>`, the trusted functions (`abort`, `exit`, `_Exit`: each positive relies on `ensures(false)`, its twin in `vlibc/negative/` removes the call; `malloc`, `calloc`, `free`, decision 0047: the positives allocate and free through `<cstdlib>` and `<vlibc/stdlib.h>`, each twin violates the trusted contract: a double free of `free`'s `requires`, a missing null test after `malloc`, a wrong value after `calloc`), the reserved names (`rejected annotation_reserved_library`), a user redeclaration of a platform function, and the `platform: linux` items of decision 0031 item 10; `vlibc/trusted_contracts.txt` is the committed list of every trusted declaration in vlibc's shim headers (name, header, declaration, tag), compared by `python3 scripts/vlibc_contracts.py check --include-dir third_party/vlibc/include/vlibc --list tests/vlibc/trusted_contracts.txt` (`check.sh` runs it): a pin move that changes a trusted contract fails until that file changes, and changing it is a golden change (invariant 1, audited per decision 0030 item 5); its `#` lines and blank lines are ignored; the same script refuses a tagged `vlibc_<name>` whose declaration is not `<name>`'s with the name substituted, one outside `extern "C" { }` or without a trusted `<name>` in its header (decision 0048 item 2, M4.5d2v; `scripts/test_vlibc_contracts.py`'s `Pairing`). The area is like `scalar/`: `.c` tests run in both modes, positives carry `native-ok` and an `error` twin in `vlibc/negative/` | `build/cerastes verify` |
+| `long/` | Decision 0057: the long-running tests, the verify tests that need more than the driver's 300 s, in the subdirectory of their area (`long/memory/`, `long/scalar/`, ...) with a `// timeout:` line. A default run skips them and counts them; `--long` (`CERASTES_LONG=1` for `check.sh`) runs them. See [Long-running tests](#long-running-tests). Empty until a test needs it | `build/cerastes verify` |
 | `differential/verifast/` | Nothing yet: unmodified reference copies of VeriFast's template tests, with no `expect:` headers. Skipped (`.harness-skip`) | none |
 | `../doc/modules/ROOT/examples/` | The code examples of the user documentation, which are ordinary tests (not under `tests/`, but run by default with it) | by the example's `expect:` kind |
 
 `annotations/`, `scalar/`, `memory/` and `vlibc/` each have a `negative/` directory of must-fail twins
-(see [Twins](#twins)). Later milestones add `templates/` and `concepts/`,
+(see [Twins](#twins)); so does each area of `long/`. Later milestones add `templates/` and `concepts/`,
 and the differential tests against VeriFast in M5 (see plan.md).
 
 ## Header format
@@ -55,6 +56,7 @@ line of code is an error, so an expectation can never be silently ignored.
 // expect: frontend-refused <substring>
 // cerastes-fe-options: <options>
 // verify-options: <options>                (verified, error and rejected tests only; see Verify options)
+// timeout: <seconds>                       (301 to 3600; verified and error tests, and every test of tests/long/ and no other: see Long-running tests)
 // expect: golden
 // expect: native-ok
 // mode: c++20 | c23
@@ -99,11 +101,16 @@ line of code is an error, so an expectation can never be silently ignored.
 - **`verify-options: <options>`**: options added to the `cerastes verify` command of a
   `verified`, `error` or `rejected` test. A closed list: today only `--strict-init`. See
   [Verify options](#verify-options).
+- **`timeout: <seconds>`**: the limit of the `cerastes verify` run of a long-running test, an integer from
+  301 to 3600. It is the mark of `tests/long/`: required there, an error anywhere else, and valid only with
+  `verified` or `error` in a `.c` or `.cpp` test. See [Long-running tests](#long-running-tests).
 - **`twin: <path>`**: the positive test a must-fail test was derived from.
   See [Twins](#twins).
 - **`mode:`**: the language modes to run a C or C++ test in, comma-separated
   or on several lines. Each mode is a separate test run. The default is
   `c++20` for `.cpp` and `c23` for `.c`. Not allowed in `.vpr` files.
+
+An `expect:`, `mode:`, `twin:` or `timeout:` line after the first line of code is an error.
 
 Line numbers are 1-based lines of the test file itself. Solver timeouts,
 crashes, parse or type errors and messages the harness cannot classify always
@@ -586,11 +593,65 @@ valid for cerastes and must be written without it. A shape the compilers refuse 
 ## Time limits
 
 Each run of the front end (`cerastes-fe`, `cpfe`) has a limit of ten minutes, `FRONTEND_TIMEOUT_S` in
-`scripts/run_tests.py`, and a run of `cerastes verify` or Silicon the same. The largest front-end test,
-`edg-smoke/libcxx_headers_cerastes_fe.cpp` (the libc++ headers in the cerastes configuration), takes about 70
-seconds of CPU, which a loaded machine (a parallel build, other test runs) stretches well past the two minutes
-that the limit used to be. A limit is there to catch a hang, never to measure speed: reaching it always
-fails the test, whatever the expectation.
+`scripts/run_tests.py`, and a run of Silicon through `.vpr` the same (`SILICON_TIMEOUT_S`). The largest front-end
+test, `edg-smoke/libcxx_headers_cerastes_fe.cpp` (the libc++ headers in the cerastes configuration), takes about
+70 seconds of CPU, which a loaded machine (a parallel build, other test runs) stretches well past the two minutes
+that the limit used to be.
+
+A run of `cerastes verify` has two limits, and the driver's is the one a test meets first. The harness passes no
+`--timeout`, so the driver stops Silicon after its own default of 300 seconds (`--timeout=<n>`, 1 to 86400; reaching
+it is exit status 3, a failure of the test whatever it expects), inside the harness's own ten minutes
+(`VERIFY_TIMEOUT_S`) for the whole run. A test that needs more than the driver's 300 seconds is a long-running test
+and has its own limit (see [Long-running tests](#long-running-tests)): `// timeout: <seconds>` becomes
+`--timeout=<seconds>` on its command, and the harness gives that run `<seconds>` plus `LONG_RUN_SLACK_S` (120).
+
+A limit is there to catch a hang, never to measure speed: reaching it always fails the test, whatever the
+expectation.
+
+## Long-running tests
+
+A verify test that needs more than the driver's 300 seconds (decision 0057) lives under `tests/long/`, in the
+subdirectory named after its area (`tests/long/memory/`, `tests/long/scalar/`, `tests/long/vlibc/`,
+`tests/long/annotations/`), and starts with `// timeout: <seconds>`, an integer from 301 to 3600. The rules, each
+pinned by the harness self-test:
+
+- **The header is the tier.** A `timeout:` line outside `tests/long/` is a header error, and so is a test under
+  `tests/long/` without one, directly in `tests/long/` or in a directory that is not an area's. The line is valid
+  only with `verified` or `error` in a `.c` or `.cpp` test, once, in the leading comment block. `--timeout` in
+  `// verify-options:` is a header error: only the header line sets the limit.
+- **The command.** The harness adds `--timeout=<seconds>` to the `cerastes verify` command of each mode of the test
+  and no other test gets it. It gives each run `<seconds> + 120` seconds of its own (`LONG_RUN_SLACK_S`), so that
+  the driver's limit, not the harness's, ends a run that is too slow. Reaching it is exit status 3 and fails the
+  test, like any other.
+- **Opt-in.** `run_tests.py` skips `tests/long/` unless `--long` is given. A path named on the command line inside
+  `tests/long/` (a file, `tests/long/memory`, `tests/long`) is run without it: naming a long test asks for it.
+  `scripts/check.sh` passes `--long` when `CERASTES_LONG=1`; unset or `0` skips the tier, and any other value, the
+  empty string included, stops the check (as `CERASTES_JOBS` does). CI sets neither.
+- **Never silent.** Each skipped long test prints a `SKIP` line, and the summary says how many it skipped
+  (`1 passed, 0 failed, 0 skipped, 2 long skipped`; the clause is there when the number is not zero). A skipped
+  long test is never counted as passed, so `--expect-passed` does not take it into account. `check.sh`'s last line
+  says whether the tier ran: `check.sh: long tier: ran (CERASTES_LONG=1)` or `check.sh: long tier: skipped (set
+  CERASTES_LONG=1 to run tests/long)`.
+- **Checked even when skipped.** The header of every long test is read in every run (`--check-headers` reads
+  `tests/long/` too), and a long test with a bad header fails the run instead of being skipped. The twin rule and the
+  area rules read `tests/long/<area>/` like `tests/<area>/`: a long `.c` test runs in both modes or says
+  `// c-only:`, a long positive carries `native-ok`, a negative test of `tests/long/<area>/negative/` is a must-fail
+  twin, and a positive needs an `error` twin in each of its modes. **A positive outside `tests/long/` needs that
+  twin outside `tests/long/` too** (owner, question 207): CI never runs a long test, the PR tier never selects it and
+  `mutate.py` never mutates it, so the must-fail half of invariant 2 for a test that CI runs cannot rest on one; a
+  long twin may stand beside the ordinary one but never in its place (the header error says that the positive's only
+  twins are long-running). A long positive may count a twin of either tier, and `--count-error-twins` counts only the
+  pairs that count in this sense.
+- **The PR tier never selects a long test**, changed or sampled, and a named long path is skipped under
+  `--pr-base`; `--long` with `--pr-base` is a usage error (exit 2), and so is `CERASTES_LONG=1` with
+  `CERASTES_CHECK_BASE` in `check.sh`. Skipped long tests are counted apart from the Silicon runs the tier leaves
+  to the full check.
+- **Mutation.** `scripts/mutate.py` does not mutate `tests/long/` and says how many tests it left out.
+- **Choosing the limit.** At least twice the test's measured time on the quiet x86-64 box, rounded up to a whole
+  minute, the same for both modes (the header has one value). A limit catches a hang; it is not a measurement.
+
+Run the tier with `python3 scripts/run_tests.py --long` (or name `tests/long`), and in the full check with
+`CERASTES_LONG=1 scripts/check.sh`.
 
 ## Parallelism (`-j`, `CERASTES_JOBS`)
 
@@ -618,11 +679,14 @@ SHA-256 of its repository-relative path, so adding a file moves no other test in
 made as usual: rejections, front-end and golden tests, native-ok compilations, header checks and twins. The
 first line names the merge base and the summary counts the Silicon runs left to the full check; `--expect-passed`
 counts those as passed (the VIR self-test's cases are sampled the same way). An empty `<ref>` is the full run, and
-a ref git cannot resolve is a usage error (exit 2).
+a ref git cannot resolve is a usage error (exit 2). A long-running test (`tests/long/`, decision 0057) is never
+selected by the tier, changed or sampled; the summary counts it as skipped (`N long skipped`), not as a run left to
+the full check.
 
 `scripts/check.sh` reads `CERASTES_CHECK_BASE` once and passes it to both of its test runs: unset or empty
 (the default, and what a session ends with) is the full check, which ends with `check.sh: all green`; set, it is
-the PR tier, which ends with `check.sh: green in the PR tier (not the full check)`. To rehearse CI's pull-request
+the PR tier, which ends with `check.sh: green in the PR tier (not the full check)`. Either way its last line
+says whether the long-running tests ran (see [Long-running tests](#long-running-tests)). To rehearse CI's pull-request
 run locally: `CERASTES_CHECK_BASE=main scripts/check.sh`.
 
 ## Mutation testing (`scripts/mutate.py`)
@@ -646,6 +710,10 @@ killed; one that still verifies survived, which means that the test would not no
 survivor must be killed (by strengthening the test), or listed with one reason in `tests/mutants-equivalent.txt`
 (`id<TAB>reason`, plus a `# reviewed:` line), or be in the safe-direction bucket. The run ends with zero
 unexplained survivors, and a test none of whose mutants was killed fails the run.
+
+The long-running tests of `tests/long/` (decision 0057) are not mutated, even when named on the command line, and a
+run says so: `mutate: skipped N long-running tests under tests/long/ (decision 0057: they are not mutated)` (on
+standard error with `--list`, which prints ids only). A test of the equivalence list that is long is a stale entry.
 
 **Why a safe-direction bucket (owner decision, 2026-10-16).** A sound verifier must accept a program that
 meets a *weaker obligation than the original*. Changing a contract so that it is easier to meet gives such a

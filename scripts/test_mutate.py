@@ -2190,6 +2190,88 @@ class ListedFilesTests(RunCase):
         self.assertEqual(mu.entry_path("x/a.c:1:1:relop:<-><="), "x/a.c")
 
 
+class LongTestsAreNotMutatedTests(RunCase):
+    """Decision 0057 item 6: tests/long/ is skipped by mutate.py, named or not, and the run says how many tests it
+    left out.  The long file is a good verified test in the eyes of the harness (read_header is patched to say so),
+    so a run that stopped skipping would mutate it and these tests would see its calls."""
+
+    LONG = "tests/long/memory/l.c"
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(rt, "ROOT", self.base)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.long = self.base / self.LONG
+        self.long.parent.mkdir(parents=True)
+        self.long.write_text(GOOD)
+        real = rt.read_header
+        good_long = rt.parse_header("// expect: verified\n// timeout: 400\n", ".c")
+        patcher = mock.patch.object(rt, "read_header",
+                                    lambda f: good_long if f.resolve() == self.long.resolve() else real(f))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def say(self, n):
+        return mu.long_skipped_message(n)
+
+    def test_select_leaves_the_long_test_out_and_reports_it(self):
+        a = self.put("a.c")
+        skipped = []
+        chosen = mu.select([str(self.dir), str(self.long)], skipped)
+        self.assertEqual([f for f, _ in chosen], [a])
+        self.assertEqual(skipped, [self.long])
+        # named alone: nothing is selected, one is reported
+        skipped = []
+        self.assertEqual(mu.select([str(self.long)], skipped), [])
+        self.assertEqual(skipped, [self.long])
+        # twin: the same file outside tests/long/ is selected (the patched header reads as verified there too)
+        elsewhere = self.put("b.c")
+        self.assertEqual([f for f, _ in mu.select([str(elsewhere)], [])], [elsewhere])
+
+    def test_a_run_mutates_the_others_and_says_how_many_it_skipped(self):
+        self.set_rules([["x <= 5", 1, None], ["x < 6", 1, None], ["x < 4", 1, None], ["  ;\n", 1, None]])
+        self.put("a.c")
+        status, out, _ = self.run_main(self.dir, self.long, "-j", 1)
+        self.assertEqual(status, 0, out)
+        self.assertIn(self.say(1), out)
+        files = {Path(c[1]).name for c in self.calls()}
+        self.assertEqual(files, {"a.c"})  # never a copy of the long test
+
+    def test_naming_only_a_long_test_runs_nothing_and_says_so(self):
+        status, out, err = self.run_main(self.long)
+        self.assertEqual(status, 2, (out, err))
+        self.assertIn(self.say(1), out)
+        self.assertIn("no verified tests under", err)
+        self.assertEqual(self.calls(), [])
+
+    def test_list_says_it_on_standard_error_and_prints_only_ids(self):
+        t = self.put("a.c")
+        status, out, err = self.run_main(t, self.long, "--list")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn(self.say(1), err)
+        self.assertNotIn("skipped", out)
+        self.assertEqual(len([l for l in out.split("\n") if l.strip()]), len(GOOD_MUTANTS), out)
+        self.assertFalse([l for l in out.split("\n") if "l.c" in l], out)
+
+    def test_validate_says_it_too(self):
+        t = self.put("a.c")
+        status, out, err = self.run_main("--validate", t, self.long)
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn(self.say(1), out)
+        self.assertIn("1 tests, 4 mutants generated", out)
+
+    def test_nothing_is_said_when_nothing_is_skipped(self):
+        t = self.put("a.c")
+        status, out, err = self.run_main("--validate", t)
+        self.assertEqual(status, 0, (out, err))
+        self.assertNotIn("long-running", out + err)
+
+    def test_the_message_names_the_directory_and_the_record(self):
+        self.assertEqual(self.say(3), "mutate: skipped 3 long-running tests under tests/long/ "
+                                      "(decision 0057: they are not mutated)")
+
+
 class JobsTests(RunCase):
     """The default `-j` is CERASTES_JOBS, else half the CPUs; an explicit -j wins (decision 0016)."""
 

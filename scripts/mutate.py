@@ -1738,18 +1738,28 @@ def display_path(path: Path) -> str:
     return rt.rel(path)
 
 
-def select(paths: list[str]) -> list[tuple[Path, list[str]]]:
-    """The verified C and C++ tests under `paths`, with their modes."""
+def select(paths: list[str], long_skipped: list[Path] | None = None) -> list[tuple[Path, list[str]]]:
+    """The verified C and C++ tests under `paths`, with their modes.  A long-running test (under tests/long/,
+    decision 0057) is never selected, named or not; the ones left out are appended to `long_skipped` so that
+    the run can say how many."""
     try:
         sel = rt.discover(paths)
     except rt.UsageError as err:
         raise Problem(str(err)) from None
     out = []
     for f in sel.tests:
+        if rt.is_long(f):
+            if long_skipped is not None:
+                long_skipped.append(f)
+            continue
         exp = rt.read_header(f)
         if isinstance(exp, rt.Expectation) and f.suffix != ".vpr" and exp.kind == "verified":
             out.append((f, exp.modes))
     return out
+
+
+def long_skipped_message(n: int) -> str:
+    return f"mutate: skipped {n} long-running tests under {rt.LONG_DIR}/ (decision 0057: they are not mutated)"
 
 
 def tree_has_verified_tests() -> bool:
@@ -1992,17 +2002,21 @@ def main(argv: list[str] | None = None) -> int:
     paths = args.paths or [str(ROOT / p) for p in DEFAULT_PATHS]
 
     existing = [p for p in paths if Path(p).exists()]
+    long_skipped: list[Path] = []
     if args.validate and not args.paths and not existing:
         chosen: list[tuple[Path, list[str]]] = []
     else:
         try:
-            chosen = select(paths)
+            chosen = select(paths, long_skipped)
         except Problem as err:
             if args.validate and not args.paths and "not a test file or directory" in str(err):
                 chosen = []
             else:
                 print(f"mutate: {err}", file=sys.stderr)
                 return 2
+    if long_skipped:
+        # said whatever comes next, and on stderr for --list, whose stdout is the ids
+        print(long_skipped_message(len(long_skipped)), file=sys.stderr if args.list else sys.stdout)
     if not chosen:
         if args.validate and not tree_has_verified_tests():
             print("mutate: no verified tests to mutate yet")

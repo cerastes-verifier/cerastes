@@ -3136,13 +3136,51 @@ VIR_CASES_FLOOR = 1493
 # these are the only active lines (stripped) that may name either; the final lines print "all
 # green" only when pr_base is empty, so a PR-tier run never reads as the full check.
 CHECK_SH_PR_BASE = 'pr_base="${CERASTES_CHECK_BASE:-}"'
+# Decision 0057: the full test run passes `--long` exactly when `long_flag` holds it (CERASTES_LONG=1); the VIR
+# self-test's run names a path and never gets it.
+CHECK_SH_TESTS_RUN = 'python3 scripts/run_tests.py --pr-base="$pr_base" ${long_flag:+"$long_flag"}'
+CHECK_SH_LONG_PR_CONFLICT = (
+    'if [[ -n "$pr_base" && "$long_tier" == 1 ]]; then',
+    'echo "check.sh: CERASTES_LONG=1 cannot be combined with the PR tier, which never runs tests/long '
+    '(decision 0057)" >&2',
+    "exit 1",
+    "fi",
+)
 CHECK_SH_PR_BASE_USES = (
     CHECK_SH_PR_BASE,
     'if [[ -n "$pr_base" ]]; then',
     "printf 'check.sh: the PR tier, against %s (decision 0016 item 14)\\n' \"$pr_base\"",
-    'python3 scripts/run_tests.py --pr-base="$pr_base"',
+    CHECK_SH_TESTS_RUN,
     'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vir-selftest',
+    CHECK_SH_LONG_PR_CONFLICT[0],
 )
+# Decision 0057 item 3: CERASTES_LONG is read once, validated (unset or 0: skipped, 1: run; anything else,
+# the empty string included, stops the check), refused together with the PR tier, and turned into the flag.
+CHECK_SH_LONG_READ = (
+    'long_tier="${CERASTES_LONG-0}"',
+    'case "$long_tier" in',
+    "0 | 1) ;;",
+    "*)",
+    'echo "check.sh: CERASTES_LONG=$long_tier is not 0 or 1 (unset it, or set 1 to run tests/long: '
+    'decision 0057)" >&2',
+    "exit 1",
+    ";;",
+    "esac",
+    *CHECK_SH_LONG_PR_CONFLICT,
+    'long_flag=""',
+    'if [[ "$long_tier" == 1 ]]; then',
+    'long_flag="--long"',
+    "fi",
+)
+# Decision 0057 item 4: the last lines say whether the long tier ran.
+CHECK_SH_LONG_REPORT = (
+    'if [[ "$long_tier" == 1 ]]; then',
+    "printf 'check.sh: long tier: ran (CERASTES_LONG=1)\\n'",
+    "else",
+    "printf 'check.sh: long tier: skipped (set CERASTES_LONG=1 to run tests/long)\\n'",
+    "fi",
+)
+CHECK_SH_LONG_USES = frozenset((*CHECK_SH_LONG_READ, *CHECK_SH_LONG_REPORT, CHECK_SH_TESTS_RUN))
 CHECK_SH_GREEN = (
     'if [[ -n "$pr_base" ]]; then',
     "printf '\\ncheck.sh: green in the PR tier (not the full check)\\n'",
@@ -3181,7 +3219,7 @@ def check_sh_problems(text):
     # binary under test is verified against the tree after the tests ran
     edg = index(r"^\s*python3 scripts/edg_tree\.py check\s*$", "the EDG tree guard")
     boot = index(r"^\s*scripts/bootstrap\.sh --build-only\s*$", "the build step")
-    tests = index(r'^\s*python3 scripts/run_tests\.py --pr-base="\$pr_base"\s*$', "the test run")
+    tests = index(r'^\s*' + re.escape(CHECK_SH_TESTS_RUN) + r'\s*$', "the test run")
     verify = index(r"^\s*python3 scripts/edg_tree\.py describe --verify-build\s*$",
                    "the build verification")
     green = index(r"all green", "the final green line")
@@ -3216,6 +3254,21 @@ def check_sh_problems(text):
     if sum(1 for l in lines if "all green" in l) != 1:
         problems.append("exactly one active line may print `all green`")
     body = [l.strip() for l in lines if l.strip()]
+    # decision 0057: the long tier is read, validated and refused beside the PR tier by the pinned lines only,
+    # after the reading of the PR tier and before the EDG tree guard; the tests get `--long` only through
+    # `long_flag`; the last lines report whether it ran
+    for l in lines:
+        if re.search(r"CERASTES_LONG|long_tier|long_flag|--long\b", l) and l.strip() not in CHECK_SH_LONG_USES:
+            problems.append(f"the long tier only in the pinned lines: {l.strip()}")
+    reads = [i for i in range(len(body)) if tuple(body[i:i + len(CHECK_SH_LONG_READ)]) == CHECK_SH_LONG_READ]
+    if len(reads) != 1:
+        problems.append("the reading of CERASTES_LONG must be present exactly once, exactly as pinned")
+    elif None not in (pr_base, edg):
+        read_line = next((i for i, l in enumerate(lines) if l.strip() == CHECK_SH_LONG_READ[0]), None)
+        if read_line is None or not pr_base < read_line < edg:
+            problems.append("CERASTES_LONG must be read after CERASTES_CHECK_BASE and before the EDG tree guard")
+    if body[-len(CHECK_SH_LONG_REPORT):] != list(CHECK_SH_LONG_REPORT):
+        problems.append("the last lines must say whether the long tier ran, exactly as pinned")
     ends = [i for i in range(len(body)) if tuple(body[i:i + len(CHECK_SH_GREEN)]) == CHECK_SH_GREEN]
     if len(ends) != 1:
         problems.append("the final lines must print `all green` only when pr_base is empty, "
@@ -3359,6 +3412,22 @@ pr_base="${CERASTES_CHECK_BASE:-}"
 if [[ -n "$pr_base" ]]; then
   printf 'check.sh: the PR tier, against %s (decision 0016 item 14)\\n' "$pr_base"
 fi
+long_tier="${CERASTES_LONG-0}"
+case "$long_tier" in
+  0 | 1) ;;
+  *)
+    echo "check.sh: CERASTES_LONG=$long_tier is not 0 or 1 (unset it, or set 1 to run tests/long: decision 0057)" >&2
+    exit 1
+    ;;
+esac
+if [[ -n "$pr_base" && "$long_tier" == 1 ]]; then
+  echo "check.sh: CERASTES_LONG=1 cannot be combined with the PR tier, which never runs tests/long (decision 0057)" >&2
+  exit 1
+fi
+long_flag=""
+if [[ "$long_tier" == 1 ]]; then
+  long_flag="--long"
+fi
 step "edg tree"
 python3 scripts/edg_tree.py check
 step "vlibc tree"
@@ -3377,7 +3446,7 @@ python3 scripts/test_lint_viper.py
 python3 scripts/test_mutate.py
 python3 scripts/test_vlibc_contracts.py
 step "tests"
-python3 scripts/run_tests.py --pr-base="$pr_base"
+python3 scripts/run_tests.py --pr-base="$pr_base" ${long_flag:+"$long_flag"}
 step "viper lint"
 python3 scripts/lint_viper.py
 step "vir self-test"
@@ -3404,6 +3473,11 @@ if [[ -n "$pr_base" ]]; then
   printf '\\ncheck.sh: green in the PR tier (not the full check)\\n'
 else
   printf '\\ncheck.sh: all green\\n'
+fi
+if [[ "$long_tier" == 1 ]]; then
+  printf 'check.sh: long tier: ran (CERASTES_LONG=1)\\n'
+else
+  printf 'check.sh: long tier: skipped (set CERASTES_LONG=1 to run tests/long)\\n'
 fi
 """
     YML = """\
@@ -3471,7 +3545,7 @@ jobs:
         verify = "python3 scripts/edg_tree.py describe --verify-build\n"
         green = "printf '\\ncheck.sh: all green\\n'\n"
         boot = "scripts/bootstrap.sh --build-only\n"
-        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
+        tests = CHECK_SH_TESTS_RUN + "\n"
         mutations = {
             "guard commented out": self.SH.replace(guard, "# " + guard),
             "guard removed": self.SH.replace(guard, ""),
@@ -3513,7 +3587,7 @@ jobs:
         describe = "python3 scripts/vlibc_tree.py describe\n"
         boot = "scripts/bootstrap.sh --build-only\n"
         edg = "python3 scripts/edg_tree.py check\n"
-        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
+        tests = CHECK_SH_TESTS_RUN + "\n"
         mutations = {}
         for name, line in (("tree guard", tree), ("resolution", resolve), ("contract check", contracts),
                            ("script self-test", test), ("report", describe)):
@@ -3548,7 +3622,7 @@ jobs:
         # only for the full check
         reading = 'pr_base="${CERASTES_CHECK_BASE:-}"\n'
         guard = "python3 scripts/edg_tree.py check\n"
-        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
+        tests = CHECK_SH_TESTS_RUN + "\n"
         vrun = 'python3 scripts/run_tests.py --pr-base="$pr_base" --expect-passed "$vir_cases" build/vir-selftest\n'
         pr_green = "  printf '\\ncheck.sh: green in the PR tier (not the full check)\\n'\n"
         green = "printf '\\ncheck.sh: all green\\n'\n"
@@ -3591,7 +3665,7 @@ jobs:
         oracle_test = "python3 scripts/test_walker_oracle.py\n"
         oracle = "python3 scripts/walker_oracle.py\n"
         export = "export CERASTES_REQUIRE_E2E=1\n"
-        tests = 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'
+        tests = CHECK_SH_TESTS_RUN + "\n"
         verify = "python3 scripts/edg_tree.py describe --verify-build\n"
         out = {}
         lint_test = "python3 scripts/test_lint_viper.py\n"
@@ -3720,7 +3794,7 @@ jobs:
         lines = [l for l in active_lines(self.SH) if l.strip()]
         guard = lines.index("python3 scripts/edg_tree.py check")
         self.assertLess(guard, lines.index("scripts/bootstrap.sh --build-only"))
-        self.assertLess(lines.index('python3 scripts/run_tests.py --pr-base="$pr_base"'),
+        self.assertLess(lines.index(CHECK_SH_TESTS_RUN),
                         lines.index("python3 scripts/edg_tree.py describe --verify-build"))
         self.assertLess(lines.index("python3 scripts/edg_tree.py describe --verify-build"),
                         len(lines) - 1)
@@ -13568,6 +13642,727 @@ class VerifyNativeTests(VerifierMixin, NativeCase):
         self.assertEqual(status, 0, out)
         self.assertEqual(self.calls(), [])
         self.assertEqual(self.verify_calls(), [])
+
+
+# ---------------------------------------------------------------------------
+# Long-running tests (decision 0057): tests/long, `// timeout:`, --long, CERASTES_LONG
+# ---------------------------------------------------------------------------
+
+class LongTimeoutHeaderTests(unittest.TestCase):
+    """`// timeout: <seconds>` (decision 0057 item 2): 301 to 3600, once, in the leading block, on a `verified` or
+    `error` C or C++ test, never in verify-options.  Each refusal has the accepted shape as its twin: a header that
+    stopped refusing it would let a long test run under a limit nobody chose, or none."""
+
+    VERIFIED = "// expect: verified\n"
+    ERROR = "// expect: error check @ L9\n"
+
+    def parse(self, text, suffix=".c"):
+        return rt.parse_header(text, suffix)
+
+    def test_the_limits_are_those_of_the_record(self):
+        self.assertEqual((rt.LONG_TIMEOUT_MIN_S, rt.LONG_TIMEOUT_MAX_S, rt.LONG_RUN_SLACK_S), (301, 3600, 120))
+        self.assertEqual(rt.LONG_DIR, Path("tests/long"))
+        self.assertEqual(rt.LONG_KINDS, ("verified", "error"))
+
+    def test_a_verified_and_an_error_test_take_it_in_c_and_in_cpp(self):
+        for expect in (self.VERIFIED, self.ERROR):
+            for suffix in (".c", ".cpp"):
+                with self.subTest(expect, suffix=suffix):
+                    exp = self.parse(expect + "// timeout: 1800\n", suffix)
+                    self.assertEqual(exp.timeout, 1800)
+                    self.assertEqual(self.parse("// timeout: 1800\n" + expect, suffix).timeout, 1800)
+                    self.assertIsNone(self.parse(expect, suffix).timeout)  # no line, no limit
+
+    def test_the_ends_of_the_range_are_in_and_just_outside_is_out(self):
+        for good in ("301", "3600", "302", "3599"):
+            with self.subTest(good):
+                self.assertEqual(self.parse(self.VERIFIED + f"// timeout: {good}\n").timeout, int(good))
+        for bad in ("300", "3601", "1", "86400", "299"):
+            with self.subTest(bad), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse(self.VERIFIED + f"// timeout: {bad}\n")
+            self.assertIn("outside 301 to 3600", str(ctx.exception))
+
+    def test_a_value_that_is_not_a_plain_whole_number_is_refused(self):
+        for bad in ("", "0", "abc", "-400", "+400", "400.0", "1e3", "0400", "4 00", "400s", "0x190", "four hundred"):
+            with self.subTest(repr(bad)), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse(self.VERIFIED + f"// timeout: {bad}\n")
+            self.assertIn("not a whole number of seconds", str(ctx.exception))
+
+    def test_one_line_at_most(self):
+        with self.assertRaises(rt.HeaderError) as ctx:
+            self.parse(self.VERIFIED + "// timeout: 400\n// timeout: 500\n")
+        self.assertIn("more than one `timeout:` line", str(ctx.exception))
+        with self.assertRaises(rt.HeaderError):  # the same value twice is still twice
+            self.parse(self.VERIFIED + "// timeout: 400\n// timeout: 400\n")
+
+    def test_it_belongs_in_the_leading_comment_block(self):
+        with self.assertRaises(rt.HeaderError) as ctx:
+            self.parse(self.VERIFIED + "int x;\n// timeout: 400\n")
+        self.assertIn("leading comment block", str(ctx.exception))
+        # twin: after the block the same words are an ordinary comment to every other reader of the file
+        self.assertIsNone(self.parse(self.VERIFIED + "int x;\n// timeouts: 400 are fine\n").timeout)
+
+    def test_only_a_verified_or_error_c_or_cpp_test_takes_it(self):
+        bad = {
+            "rejected": "// expect: rejected undefined_identifier @ L9\n",
+            "golden": "// expect: golden\n",
+            "frontend-ok": "// expect: frontend-ok\n",
+            "frontend-error": "// expect: frontend-error undefined_identifier @ L3\n",
+            "frontend-refused": "// expect: frontend-refused x\n// cerastes-fe-options: --c11\n",
+        }
+        for what, expect in bad.items():
+            with self.subTest(what), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse(expect + "// timeout: 400\n")
+            self.assertIn("only valid with `expect: verified`, `expect: error`", str(ctx.exception))
+            self.parse(expect)  # the same header without the line is fine: the line is what is refused
+        for expect in ("// expect: verified\n", "// expect: error assert:assertion.false @ L3\n"):
+            with self.subTest(expect), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse(expect + "// timeout: 400\n", ".vpr")
+            self.assertIn("timeout", str(ctx.exception))
+            self.parse(expect, ".vpr")
+
+    def test_verify_options_never_sets_the_timeout(self):
+        for words in ("--timeout=400", "--timeout", "--strict-init --timeout=400", "--timeout=400 --strict-init",
+                      "--timeout=1800"):
+            with self.subTest(words), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse(self.VERIFIED + f"// verify-options: {words}\n")
+            self.assertIn("`// timeout: <seconds>`", str(ctx.exception))
+        # twin: the one allowed option is still fine, and with a timeout line beside it
+        exp = self.parse(self.VERIFIED + "// verify-options: --strict-init\n// timeout: 400\n")
+        self.assertEqual((exp.verify_options, exp.timeout), (["--strict-init"], 400))
+
+    def test_the_timeout_is_not_a_verify_option(self):
+        # regen_vpr.py and mutate.py forward verify_options: a limit stored there would reach their runs
+        exp = self.parse(self.VERIFIED + "// timeout: 400\n")
+        self.assertEqual(exp.verify_options, [])
+
+    def test_the_readme_documents_it(self):
+        text = (REAL_ROOT / "tests" / "README.md").read_text()
+        for needle in ("// timeout:", "tests/long", "--long", "CERASTES_LONG", "Long-running tests"):
+            with self.subTest(needle):
+                self.assertIn(needle, text)
+
+
+class LongTierPlacementTests(RootedCase):
+    """The header is the tier, and the tier is where the file lives (decision 0057 items 2 and 6): a `timeout:`
+    outside tests/long/ and a test under it without one are header errors, a long test lives in the directory of
+    its area, and the rules keyed on that area (native-ok, both modes, the negative directory, the twin) read
+    tests/long/<area>/ like tests/<area>/."""
+
+    POS = ("// expect: verified\n// expect: native-ok\n// mode: c23, c++20\n// timeout: 400\nint f(void);\n")
+    LONG = "tests/long/memory"
+    NEG = "tests/long/memory/negative"
+
+    def error_twin(self, rel, twin, modes="c23, c++20", timeout=True):
+        return self.put(rel, f"// expect: error permission @ L9\n// mode: {modes}\n"
+                             + ("// timeout: 400\n" if timeout else "") + f"// twin: {twin}\nint g(void);\n")
+
+    def problems(self):
+        return {str(f.relative_to(self.root)): m for f, m in rt.cross_file_problems()}
+
+    def test_a_timeout_outside_the_long_directory_is_a_header_error(self):
+        text = "// expect: verified\n// expect: native-ok\n// mode: c23, c++20\n// timeout: 400\nint f(void);\n"
+        for rel in ("tests/memory/a.c", "tests/memory/negative/a.c", "tests/scalar/a.c", "tests/a.c",
+                    "doc/modules/ROOT/examples/memory/a.c", "tests/longer/a.c", "tests/memory/long/a.c"):
+            with self.subTest(rel):
+                err = self.header(rel, text)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("`timeout:` is only valid in a test under tests/long/", str(err))
+        # twin: the same file in the long directory is accepted
+        exp = self.header(f"{self.LONG}/a.c", text)
+        self.assertIsInstance(exp, rt.Expectation)
+        self.assertEqual(exp.timeout, 400)
+
+    def test_a_test_under_the_long_directory_needs_a_timeout(self):
+        for rel in (f"{self.LONG}/a.c", f"{self.LONG}/sub/a.c", f"{self.NEG}/a.c", "tests/long/scalar/a.cpp"):
+            with self.subTest(rel):
+                err = self.header(rel, self.POS.replace("// timeout: 400\n", ""))
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("needs `// timeout: <seconds>`", str(err))
+
+    def test_a_long_test_lives_in_the_directory_of_its_area(self):
+        for rel in ("tests/long/a.c", "tests/long/other/a.c", "tests/long/headers/a.c", "tests/long/negative/a.c"):
+            with self.subTest(rel):
+                err = self.header(rel, self.POS)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("lives in the directory of its area", str(err))
+        for area in ("annotations", "scalar", "memory", "vlibc"):
+            with self.subTest(area):
+                self.assertIsInstance(self.header(f"tests/long/{area}/a.c", self.POS), rt.Expectation)
+
+    def test_only_a_verified_or_error_test_can_be_long(self):
+        # a golden or .vpr test under tests/long/ cannot have the line, and cannot be without it
+        for rel, text in ((f"{self.LONG}/g.c", "// expect: golden\n// expect: native-ok\n// mode: c23, c++20\n"),
+                          (f"{self.LONG}/s.vpr", "// expect: verified\n"),
+                          (f"{self.LONG}/r.c", "// expect: rejected undefined_identifier @ L9\n// mode: c23, c++20\n")):
+            with self.subTest(rel):
+                err = self.header(rel, text)
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("needs `// timeout: <seconds>`", str(err))
+                err = self.header(rel, text + "// timeout: 400\n")
+                self.assertIsInstance(err, rt.HeaderError)
+                self.assertIn("timeout", str(err))
+
+    def test_a_long_c_test_runs_in_both_modes_and_needs_native_ok(self):
+        err = self.header(f"{self.LONG}/a.c", self.POS.replace("// mode: c23, c++20\n", "// mode: c23\n"))
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("must run in both modes", str(err))
+        err = self.header(f"{self.LONG}/b.c", self.POS.replace("// expect: native-ok\n", ""))
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("native-ok", str(err))
+        self.put(f"{self.LONG}/t.c", self.POS)
+        err = self.header(f"{self.NEG}/c.c", "// expect: error check @ L9\n// timeout: 400\n"
+                                             f"// twin: {self.LONG}/t.c\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("must run in both modes", str(err))
+
+    def test_a_long_positive_needs_an_error_twin(self):
+        self.put(f"{self.LONG}/a.c", self.POS)
+        found = self.problems()
+        self.assertEqual(list(found), [f"{self.LONG}/a.c"])
+        self.assertIn("must be the `twin:` of a test under tests/memory/negative/", found[f"{self.LONG}/a.c"])
+        self.error_twin(f"{self.NEG}/e.c", f"{self.LONG}/a.c")  # a long twin counts
+        self.assertEqual(self.problems(), {})
+
+    def test_a_long_positive_may_have_an_ordinary_twin(self):
+        self.put(f"{self.LONG}/a.c", self.POS)
+        self.error_twin("tests/memory/negative/e.c", f"{self.LONG}/a.c", timeout=False)
+        self.assertEqual(self.problems(), {})
+
+    ORDINARY = "// expect: verified\n// expect: native-ok\n// mode: c23, c++20\nint f(void);\n"
+
+    def test_an_ordinary_positive_needs_an_ordinary_error_twin(self):
+        # question 207: CI never runs a long test, the PR tier never selects it and mutate.py never mutates it, so the
+        # must-fail half of invariant 2 for a test that CI runs cannot rest on one
+        self.put("tests/memory/p.c", self.ORDINARY)
+        self.assertEqual(list(self.problems()), ["tests/memory/p.c"])
+        self.error_twin(f"{self.NEG}/e.c", "tests/memory/p.c")  # a long twin, in both modes
+        found = self.problems()
+        self.assertEqual(list(found), ["tests/memory/p.c"])
+        self.assertIn("its only twins are long-running tests under tests/long/", found["tests/memory/p.c"])
+        # twin: an ordinary error twin of the same positive makes it right, and the long one may stay
+        self.error_twin("tests/memory/negative/o.c", "tests/memory/p.c", timeout=False)
+        self.assertEqual(self.problems(), {})
+
+    def test_the_ordinary_twin_must_run_in_every_mode_whatever_the_long_one_covers(self):
+        self.put("tests/memory/p.c", self.ORDINARY)
+        self.error_twin(f"{self.NEG}/e.c", "tests/memory/p.c")  # long, both modes
+        self.error_twin("tests/memory/negative/o.c", "tests/memory/p.c", modes="c23", timeout=False)
+        self.assertIn("no `error` twin runs in c++20", self.problems()["tests/memory/p.c"])
+        self.error_twin("tests/memory/negative/o2.c", "tests/memory/p.c", modes="c++20", timeout=False)
+        self.assertEqual(self.problems(), {})
+
+    def test_an_ordinary_rejected_twin_is_not_the_ordinary_error_twin_beside_a_long_one(self):
+        self.put("tests/memory/p.c", self.ORDINARY)
+        self.error_twin(f"{self.NEG}/e.c", "tests/memory/p.c")
+        self.put("tests/memory/negative/r.c", "// expect: rejected cerastes-unsupported_type @ L9\n"
+                                              "// mode: c23, c++20\n// twin: tests/memory/p.c\nint g(void);\n")
+        self.assertIn("it has only a `rejected` twin", self.problems()["tests/memory/p.c"])
+
+    def test_a_long_positive_may_count_a_twin_of_either_tier(self):
+        self.put(f"{self.LONG}/a.c", self.POS)
+        self.error_twin("tests/memory/negative/o.c", f"{self.LONG}/a.c", timeout=False)
+        self.assertEqual(self.problems(), {})
+        self.put(f"{self.LONG}/b.c", self.POS)
+        self.error_twin(f"{self.NEG}/e.c", f"{self.LONG}/b.c")
+        self.assertEqual(self.problems(), {})
+
+    def test_count_error_twins_does_not_count_a_long_twin_for_an_ordinary_positive(self):
+        # the acceptance count of pairs is made of pairs CI runs
+        self.put("tests/scalar/p.c", "// expect: verified\n// expect: native-ok\n// mode: c23, c++20\nint f(void);\n")
+        self.put("tests/long/scalar/negative/e.c", "// expect: error permission @ L9\n// mode: c23, c++20\n// timeout: 400\n"
+                                                   "// twin: tests/scalar/p.c\nint g(void);\n")
+        self.assertEqual(rt.count_error_twins(), 0)
+        self.put("tests/scalar/negative/o.c", "// expect: error permission @ L9\n// mode: c23, c++20\n"
+                                              "// twin: tests/scalar/p.c\nint g(void);\n")
+        self.assertEqual(rt.count_error_twins(), 1)
+
+    def test_a_twin_of_another_area_does_not_count(self):
+        self.put(f"{self.LONG}/a.c", self.POS)
+        self.error_twin("tests/long/scalar/negative/e.c", f"{self.LONG}/a.c")
+        self.error_twin("tests/scalar/negative/e.c", f"{self.LONG}/a.c", timeout=False)
+        self.assertEqual(list(self.problems()), [f"{self.LONG}/a.c"])
+
+    def test_a_long_positive_with_only_a_rejected_twin_has_none(self):
+        self.put(f"{self.LONG}/a.c", self.POS)
+        self.put("tests/memory/negative/r.c", "// expect: rejected cerastes-unsupported_type @ L9\n"
+                                              f"// mode: c23, c++20\n// twin: {self.LONG}/a.c\nint g(void);\n")
+        self.assertIn("it has only a `rejected` twin", self.problems()[f"{self.LONG}/a.c"])
+
+    def test_the_error_twin_of_a_long_positive_must_run_in_both_modes(self):
+        self.put(f"{self.LONG}/a.c", self.POS)
+        self.error_twin(f"{self.NEG}/e.c", f"{self.LONG}/a.c", modes="c23")
+        self.assertIn("no `error` twin runs in c++20", self.problems()[f"{self.LONG}/a.c"])
+
+    def test_a_long_negative_test_needs_a_twin_and_an_error(self):
+        err = self.header(f"{self.NEG}/n.c", "// expect: error check @ L9\n// mode: c23, c++20\n// timeout: 400\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("needs `// twin:", str(err))
+        self.put(f"{self.LONG}/a.c", self.POS)
+        err = self.header(f"{self.NEG}/m.c", "// expect: verified\n// expect: native-ok\n// mode: c23, c++20\n"
+                                             f"// timeout: 400\n// twin: {self.LONG}/a.c\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("must expect at least one error", str(err))
+        err = self.header(f"{self.NEG}/o.c", "// expect: error check @ L9\n// mode: c23, c++20\n// timeout: 400\n"
+                                             f"// twin: {self.NEG}/m.c\n")
+        self.assertIsInstance(err, rt.HeaderError)
+
+    def test_a_twin_that_is_a_long_negative_is_refused(self):
+        self.put(f"{self.LONG}/a.c", self.POS)
+        self.error_twin(f"{self.NEG}/e.c", f"{self.LONG}/a.c")
+        err = self.header("tests/memory/other.c", f"// expect: verified\n// mode: c23, c++20\n// twin: {self.NEG}/e.c\n")
+        self.assertIsInstance(err, rt.HeaderError)
+        self.assertIn("is itself under", str(err))
+
+    def test_the_area_rules_apply_to_every_area_of_the_table(self):
+        # a long counterpart for every area that has rules: dropping one from the mapping would free its long tests
+        for area, negative in rt.TWIN_AREAS:
+            with self.subTest(str(area)):
+                self.assertEqual(rt.long_counterpart(area), rt.LONG_DIR / area.name)
+                self.assertEqual(rt.long_counterpart(negative), rt.LONG_DIR / area.name / "negative")
+                self.assertTrue(rt.under_area(self.root / rt.LONG_DIR / area.name / "x.c", area))
+                self.assertTrue(rt.under_area(self.root / area / "x.c", area))
+                self.assertFalse(rt.under_area(self.root / "tests" / "other" / "x.c", area))
+        self.assertIsNone(rt.long_counterpart(Path("doc/modules/ROOT/examples/memory")))
+        self.assertIsNone(rt.long_counterpart(rt.LONG_DIR))
+
+
+class LongTierUnitTests(RootedCase):
+    """The pieces of the tier: the command, the harness's limit, the PR tier's selection, the named paths."""
+
+    def env(self):
+        return {"CERASTES_VERIFY": "/x/cerastes"}
+
+    def test_the_command_carries_the_timeout_only_for_a_long_test(self):
+        path, vpr = self.root / "tests/long/memory/a.c", self.root / "a.vpr"
+        plain = rt.verify_command(self.env(), path, "c23", vpr, ["--strict-init"])
+        self.assertFalse([a for a in plain if a.startswith("--timeout")], plain)
+        self.assertEqual(plain, rt.verify_command(self.env(), path, "c23", vpr, ["--strict-init"], None))
+        long = rt.verify_command(self.env(), path, "c23", vpr, ["--strict-init"], 400)
+        self.assertEqual(long, [*plain, "--timeout=400"])
+        self.assertEqual(long.count("--timeout=400"), 1)
+
+    def test_the_harness_gives_a_long_run_its_timeout_plus_the_slack(self):
+        long = rt.parse_header("// expect: verified\n// timeout: 400\n", ".c")
+        plain = rt.parse_header("// expect: verified\n", ".c")
+        self.assertEqual(rt.verify_run_limit(long), 400 + rt.LONG_RUN_SLACK_S)
+        self.assertEqual(rt.verify_run_limit(plain), rt.VERIFY_TIMEOUT_S)
+        # the driver's limit must come first: the harness's own is strictly larger, whatever the value
+        for n in (rt.LONG_TIMEOUT_MIN_S, 1800, rt.LONG_TIMEOUT_MAX_S):
+            exp = rt.parse_header(f"// expect: verified\n// timeout: {n}\n", ".c")
+            self.assertGreater(rt.verify_run_limit(exp), n)
+
+    def test_the_pr_tier_never_selects_a_long_test(self):
+        long = self.put("tests/long/memory/a.c", "// expect: verified\n")
+        plain = self.put("tests/memory/a.c", "// expect: verified\n")
+        tier = rt.PrTier("0" * 40, {long.resolve(), plain.resolve()})
+        self.assertTrue(tier.selects(plain))  # twin: a changed ordinary test is selected
+        self.assertFalse(tier.selects(long))  # changed
+        with mock.patch.object(rt, "in_pr_sample", return_value=True):
+            self.assertFalse(tier.selects(long))  # sampled
+            self.assertFalse(rt.PrTier("0" * 40, set()).selects(long))
+            self.assertTrue(rt.PrTier("0" * 40, set()).selects(plain))
+        # a helper header of the long test that changed does not select it either
+        helper = self.put("tests/long/memory/headers/h.h", "int h(void);\n")
+        inc = self.put("tests/long/memory/b.c", '// expect: verified\n#include "headers/h.h"\n')
+        self.assertFalse(rt.PrTier("0" * 40, {helper.resolve()}).selects(inc))
+
+    def test_discover_marks_the_long_tests_a_path_named(self):
+        a = self.put("tests/long/memory/a.c", "// expect: verified\n")
+        b = self.put("tests/long/scalar/b.c", "// expect: verified\n")
+        c = self.put("tests/memory/c.c", "// expect: verified\n")
+        sel = rt.discover([str(self.root / "tests")])
+        self.assertEqual({f.resolve() for f in sel.tests}, {a.resolve(), b.resolve(), c.resolve()})
+        self.assertEqual(sel.named_long, set())  # a directory above tests/long names none of them
+        self.assertEqual(rt.discover([str(a)]).named_long, {a.resolve()})
+        self.assertEqual(rt.discover([str(c)]).named_long, set())
+        self.assertEqual(rt.discover([str(self.root / "tests/long")]).named_long, {a.resolve(), b.resolve()})
+        self.assertEqual(rt.discover([str(self.root / "tests/long/memory")]).named_long, {a.resolve()})
+        # a long test named after the whole tree was scanned is still named
+        self.assertEqual(rt.discover([str(self.root / "tests"), str(a)]).named_long, {a.resolve()})
+
+    def test_is_long_is_a_matter_of_where_the_file_lives(self):
+        self.assertTrue(rt.is_long(self.root / "tests/long/memory/a.c"))
+        self.assertTrue(rt.is_long(self.root / "tests/long"))
+        for rel in ("tests/memory/a.c", "tests/longer/a.c", "tests/memory/long/a.c", "doc/long/a.c"):
+            self.assertFalse(rt.is_long(self.root / rel), rel)
+
+
+class LongTierRunTests(VerifierMixin, DiagRunCase):
+    """rt.main() with the fake `cerastes verify` and a temporary repository root that holds a long test: it is
+    skipped and counted unless `--long` or a named path asks for it, its command carries `--timeout`, a bad header
+    still fails, and nothing about it can pass or vanish unnoticed."""
+
+    LONG = "tests/long/memory/negative/e.c"
+    PLAIN = "tests/other/p.c"
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.dir.parent / "repo"
+        self.repo.mkdir()
+        self.dir = self.repo  # where self.write and self.vtest put files
+        patcher = mock.patch.object(rt, "ROOT", self.repo)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        (self.repo / rt.DOC_EXAMPLES).mkdir(parents=True)
+        self.plain = self.vtest(self.PLAIN, ["verified"], self.ok(self.PLAIN))
+        self.long = self.long_test(self.LONG)
+
+    def long_test(self, name, timeout="400", extra=(), expects="error check @ L5"):
+        f = rt.rel(self.dir / name)
+        header = f"// expect: {expects}\n// mode: c23, c++20\n"
+        if timeout is not None:
+            header += f"// timeout: {timeout}\n"
+        header += f"// twin: {self.PLAIN}"
+        return self.write(name, f"// out: {f}:5: error: check: m", "// exit: 1", *extra, header=header)
+
+    def argv_of(self, name):
+        return [c["argv"] for c in self.verify_calls() if c["argv"][1] == name]
+
+    def test_the_command_carries_the_timeout_in_both_modes_and_only_there(self):
+        status, out, err = self.run_harness(self.plain, self.long)
+        self.assertEqual(status, 0, (out, err))
+        long_calls = self.argv_of(self.LONG)
+        self.assertEqual(sorted(c[2] for c in long_calls), ["--std=c++20", "--std=c23"])
+        for argv in long_calls:
+            self.assertEqual(argv[-1], "--timeout=400", argv)
+            self.assertEqual([a for a in argv if a.startswith("--timeout")], ["--timeout=400"])
+        (plain_call,) = self.argv_of(self.PLAIN)
+        self.assertEqual([a for a in plain_call if a.startswith("--timeout")], [])
+
+    def test_each_run_gets_its_timeout_plus_the_slack_from_the_harness(self):
+        limits = {}
+        real = rt.run_tool
+
+        def spy(cmd, env, timeout):
+            limits[cmd[2]] = timeout
+            return real(cmd, env, timeout)
+
+        with mock.patch.object(rt, "run_tool", spy):
+            status, out, err = self.run_harness(self.plain, self.long)
+        self.assertEqual(status, 0, (out, err))
+        self.assertEqual(limits[self.LONG], 400 + rt.LONG_RUN_SLACK_S)
+        self.assertEqual(limits[self.PLAIN], rt.VERIFY_TIMEOUT_S)
+
+    def test_a_default_run_skips_the_long_test_and_counts_it(self):
+        status, out, err = self.run_harness()
+        self.assertEqual(status, 0, (out, err))
+        self.assertEqual(self.argv_of(self.LONG), [])  # never started
+        self.assertIn(f"SKIP  {self.LONG}: long-running test", out)
+        self.assertNotIn(f"PASS  {self.LONG}", out)
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped, 1 long skipped")
+        self.assertEqual([c[1] for c in map(lambda c: c["argv"], self.verify_calls())], [self.PLAIN])
+
+    def test_the_count_is_the_number_of_skipped_long_tests(self):
+        self.long_test("tests/long/memory/negative/e2.c")
+        self.long_test("tests/long/scalar/negative/e3.c")
+        status, out, _ = self.run_harness()
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped, 3 long skipped")
+        self.assertEqual(out.count("SKIP  tests/long/"), 3)
+
+    def test_a_skipped_long_test_never_counts_as_passed(self):
+        # --expect-passed pins the number of passing tests: a skipped long test must not make up the difference
+        status, out, err = self.run_harness("--expect-passed", "1")
+        self.assertEqual(status, 0, (out, err))
+        for wrong in ("2", "3"):
+            status, out, err = self.run_harness("--expect-passed", wrong)
+            self.assertEqual(status, 1, (out, err))
+            self.assertIn(f"expected exactly {wrong} passing tests, got 1", err)
+
+    def test_long_runs_it_and_the_summary_has_no_skipped_long_tests(self):
+        status, out, err = self.run_harness("--long")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn(f"PASS  {self.LONG} [c23]", out)
+        self.assertIn(f"PASS  {self.LONG} [c++20]", out)
+        self.assertEqual(self.summary(out), "3 passed, 0 failed, 0 skipped")
+        self.assertEqual(len(self.argv_of(self.LONG)), 2)
+
+    def test_a_named_path_inside_the_long_directory_runs_without_long(self):
+        for args in ([self.long], [self.repo / "tests/long"], [self.repo / "tests/long/memory"]):
+            with self.subTest(args=[rt.rel(a) for a in args]):
+                status, out, err = self.run_harness(*args)
+                self.assertEqual(status, 0, (out, err))
+                self.assertEqual(self.summary(out), "2 passed, 0 failed, 0 skipped")
+                self.assertNotIn("SKIP", out)
+
+    def test_a_named_directory_above_the_long_directory_does_not_ask_for_it(self):
+        status, out, err = self.run_harness(self.repo / "tests")
+        self.assertEqual(status, 0, (out, err))
+        self.assertEqual(self.summary(out), "1 passed, 0 failed, 0 skipped, 1 long skipped")
+        # a path outside the long directory beside a long file runs only the long one asked for
+        other = self.vtest("tests/other/q.c", ["verified"], self.ok("tests/other/q.c"))
+        status, out, err = self.run_harness(self.repo / "tests/other", self.long)
+        self.assertEqual(status, 0, (out, err))
+        self.assertEqual(self.summary(out), "4 passed, 0 failed, 0 skipped")
+
+    def test_a_long_test_with_a_bad_header_fails_a_default_run_and_is_not_skipped(self):
+        for what, timeout in (("no timeout", None), ("out of range", "300"), ("not a number", "soon")):
+            with self.subTest(what):
+                self.long_test("tests/long/memory/negative/bad.c", timeout=timeout)
+                status, out, err = self.run_harness()
+                self.assertEqual(status, 1, (out, err))
+                self.assertIn("FAIL  tests/long/memory/negative/bad.c", out)
+                self.assertIn("bad header", out)
+                self.assertNotIn("SKIP  tests/long/memory/negative/bad.c", out)
+                # the good long test is skipped and counted, the bad one is counted as a failure
+                self.assertEqual(self.summary(out), "1 passed, 1 failed, 0 skipped, 1 long skipped")
+                self.assertEqual(self.argv_of("tests/long/memory/negative/bad.c"), [])
+                (self.repo / "tests/long/memory/negative/bad.c").unlink()
+
+    def test_a_timeout_outside_the_long_directory_fails_a_default_run(self):
+        self.long_test("tests/other/early.c", timeout="400")
+        status, out, err = self.run_harness()
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("FAIL  tests/other/early.c", out)
+        self.assertIn("`timeout:` is only valid in a test under tests/long/", out)
+
+    def test_check_headers_reads_the_long_tests_without_long(self):
+        status, out, err = self.run_harness("--check-headers")
+        self.assertEqual(status, 0, (out, err))
+        self.assertIn("2 of 2 headers ok", out)  # the plain test and the skipped-by-default long one
+        self.long_test("tests/long/memory/negative/bad.c", timeout=None)
+        status, out, err = self.run_harness("--check-headers")
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("tests/long/memory/negative/bad.c: bad header", out)
+        self.assertIn("2 of 3 headers ok", out)
+        self.assertEqual(self.verify_calls(), [])
+
+    def test_the_twin_rule_reads_the_long_tests_of_a_default_run(self):
+        # a long positive with no twin fails a run that skips it: its header is checked, skipped or not
+        self.write("tests/long/memory/pos.c", header="// expect: verified\n// expect: native-ok\n"
+                                                    "// mode: c23, c++20\n// timeout: 400")
+        for args in (["--check-headers"], []):
+            with self.subTest(args=args):
+                status, out, err = self.run_harness(*args)
+                self.assertEqual(status, 1, (out, err))
+                self.assertIn("tests/long/memory/pos.c", out)
+                self.assertIn("a positive test under tests/memory/ must be the `twin:` of a test under "
+                              "tests/memory/negative/", out)
+        self.assertEqual(self.argv_of("tests/long/memory/pos.c"), [])
+
+    def test_a_skipped_long_test_expects_no_viper(self):
+        status, out, _ = self.run_harness()
+        self.assertEqual(status, 0, out)
+        self.assertRegex(out, r"build/vpr: run \S+, 1 files expected\n")
+        status, out, _ = self.run_harness("--long")
+        self.assertEqual(status, 0, out)
+        self.assertRegex(out, r"build/vpr: run \S+, 3 files expected\n")
+
+    def test_a_long_test_that_reaches_its_limit_fails_like_any_other(self):
+        long = self.long_test("tests/long/memory/negative/slow.c", extra=("// exit: 3",
+                              "// err: Silicon did not finish within 400 seconds"))
+        status, out, err = self.run_harness(long)
+        self.assertEqual(status, 1, (out, err))
+        self.assertIn("FAIL  tests/long/memory/negative/slow.c", out)
+
+    def test_long_and_the_pr_tier_do_not_combine(self):
+        status, out, err = self.run_harness("--long", "--pr-base", "main")
+        self.assertEqual(status, 2, (out, err))
+        self.assertIn("--long cannot be combined with --pr-base", err)
+        self.assertEqual(self.verify_calls(), [])
+
+    def test_the_pr_tier_skips_a_long_test_changed_sampled_or_named(self):
+        tier = rt.PrTier("0" * 40, {self.long.resolve(), self.plain.resolve()})
+        with mock.patch.object(rt, "pr_tier", return_value=tier), \
+                mock.patch.object(rt, "in_pr_sample", return_value=True):
+            for args in ([], [self.long], [self.repo / "tests"]):
+                with self.subTest(args=[rt.rel(a) for a in args]):
+                    self.verify_log.unlink(missing_ok=True)
+                    status, out, err = self.run_harness("--pr-base", "main", *args)
+                    self.assertEqual(status, 0, (out, err))
+                    self.assertEqual(self.argv_of(self.LONG), [])
+                    self.assertIn("1 long skipped", self.summary(out))
+                    self.assertNotIn(f"PASS  {self.LONG}", out)
+        # twin: the same changed test without the long directory is run by the tier
+        with mock.patch.object(rt, "pr_tier", return_value=tier):
+            self.verify_log.unlink(missing_ok=True)
+            status, out, err = self.run_harness("--pr-base", "main", self.plain)
+            self.assertEqual(status, 0, (out, err))
+            self.assertEqual(len(self.argv_of(self.PLAIN)), 1)
+
+    def test_the_pr_tier_does_not_count_a_skipped_long_test_as_left_to_the_full_check(self):
+        # --expect-passed counts the Silicon runs left to the full check as passed: a long test must not be one
+        # of them (it is its own bucket), or a run that skipped it would pass an exact count it never met
+        tier = rt.PrTier("0" * 40, set())
+        with mock.patch.object(rt, "pr_tier", return_value=tier), \
+                mock.patch.object(rt, "in_pr_sample", return_value=False):
+            status, out, err = self.run_harness("--pr-base", "main", "--expect-passed", "1")
+            self.assertEqual(status, 0, (out, err))
+            self.assertIn("1 long skipped", out)
+            self.assertIn("1 Silicon runs left to the full check", out)
+            status, out, err = self.run_harness("--pr-base", "main", "--expect-passed", "3")
+            self.assertEqual(status, 1, (out, err))
+
+
+class LongTierWiringTests(unittest.TestCase):
+    """check.sh and the long tier (decision 0057 item 3): CERASTES_LONG is read once, anything but unset, 0 or 1
+    stops the check, 1 with the PR tier is refused, the full test run gets `--long` exactly then, and the last line
+    says whether the tier ran.  The first tests mutate the fixture of WiringCheckTests; the last ones run the
+    pinned lines of the real check.sh under bash."""
+
+    SH = WiringCheckTests.SH
+    READ = 'long_tier="${CERASTES_LONG-0}"\n'
+    CONFLICT = ('if [[ -n "$pr_base" && "$long_tier" == 1 ]]; then\n'
+                '  echo "check.sh: CERASTES_LONG=1 cannot be combined with the PR tier, which never runs tests/long '
+                '(decision 0057)" >&2\n  exit 1\nfi\n')
+    FLAG = 'long_flag=""\nif [[ "$long_tier" == 1 ]]; then\n  long_flag="--long"\nfi\n'
+    CASE = ('case "$long_tier" in\n  0 | 1) ;;\n  *)\n    echo "check.sh: CERASTES_LONG=$long_tier is not 0 or 1 '
+            '(unset it, or set 1 to run tests/long: decision 0057)" >&2\n    exit 1\n    ;;\nesac\n')
+    TESTS = CHECK_SH_TESTS_RUN + "\n"
+    REPORT = ('if [[ "$long_tier" == 1 ]]; then\n  printf \'check.sh: long tier: ran (CERASTES_LONG=1)\\n\'\nelse\n'
+              '  printf \'check.sh: long tier: skipped (set CERASTES_LONG=1 to run tests/long)\\n\'\nfi\n')
+
+    def test_the_fixture_has_every_pinned_piece(self):
+        self.assertEqual(check_sh_problems(self.SH), [])
+        for piece in (self.READ, self.CONFLICT, self.FLAG, self.CASE, self.TESTS, self.REPORT):
+            self.assertIn(piece, self.SH)
+
+    def test_the_real_check_sh_is_pinned_too(self):
+        real = (REAL_ROOT / "scripts" / "check.sh").read_text()
+        self.assertEqual(check_sh_problems(real), [])
+        for piece in (self.READ, self.CONFLICT, self.FLAG, self.CASE, self.TESTS, self.REPORT):
+            self.assertIn(piece, real)
+
+    def test_mutations_of_the_long_tier_wiring_are_found(self):
+        green = "printf '\\ncheck.sh: all green\\n'\nfi\n"
+        mutations = {
+            "the reading removed": self.SH.replace(self.READ, ""),
+            "the reading commented out": self.SH.replace(self.READ, "# " + self.READ),
+            "an empty value taken as unset": self.SH.replace("${CERASTES_LONG-0}", "${CERASTES_LONG:-0}"),
+            "the default is the long tier": self.SH.replace("${CERASTES_LONG-0}", "${CERASTES_LONG-1}"),
+            "another variable": self.SH.replace("${CERASTES_LONG-0}", "${CERASTES_LONG_TIER-0}"),
+            "the validation removed": self.SH.replace(self.CASE, ""),
+            "the validation accepts everything": self.SH.replace("  0 | 1) ;;\n", "  *) ;;\n"),
+            "the validation accepts 2": self.SH.replace("0 | 1) ;;", "0 | 1 | 2) ;;"),
+            "the validation warns only": self.SH.replace(
+                '    echo "check.sh: CERASTES_LONG=$long_tier is not 0 or 1 (unset it, or set 1 to run tests/long: '
+                'decision 0057)" >&2\n    exit 1\n', '    echo "check.sh: CERASTES_LONG=$long_tier" >&2\n'),
+            "the validation exits 0": self.SH.replace(
+                '(unset it, or set 1 to run tests/long: decision 0057)" >&2\n    exit 1\n    ;;',
+                '(unset it, or set 1 to run tests/long: decision 0057)" >&2\n    exit 0\n    ;;'),
+            "the conflict removed": self.SH.replace(self.CONFLICT, ""),
+            "the conflict only warns": self.SH.replace(self.CONFLICT, self.CONFLICT.replace("  exit 1\n", "")),
+            "the conflict never fires": self.SH.replace('"$long_tier" == 1 ]]; then\n  echo', '"$long_tier" == 7 ]]; then\n  echo'),
+            "the flag removed": self.SH.replace(self.FLAG, ""),
+            "the flag always set": self.SH.replace('long_flag=""\n', 'long_flag="--long"\n'),
+            "the flag set without the condition": self.SH.replace(self.FLAG, 'long_flag="--long"\n'),
+            "the flag set when the tier is skipped": self.SH.replace(
+                'if [[ "$long_tier" == 1 ]]; then\n  long_flag', 'if [[ "$long_tier" == 0 ]]; then\n  long_flag'),
+            "the flag misspelt": self.SH.replace('long_flag="--long"', 'long_flag="--longer"'),
+            "the tests without the flag": self.SH.replace(self.TESTS, 'python3 scripts/run_tests.py --pr-base="$pr_base"\n'),
+            "the tests with the flag fixed": self.SH.replace(self.TESTS, self.TESTS[:-1].replace(
+                '${long_flag:+"$long_flag"}', "--long") + "\n"),
+            "the tests with the flag unquoted": self.SH.replace(self.TESTS, self.TESTS.replace(
+                '${long_flag:+"$long_flag"}', "$long_flag")),
+            "the tests with the flag twice": self.SH.replace(self.TESTS, self.TESTS[:-1] + " --long\n"),
+            "the tests run twice": self.SH.replace(self.TESTS, self.TESTS + 'python3 scripts/run_tests.py --long\n'),
+            "the VIR cases get the flag": self.SH.replace(
+                'build/vir-selftest\npython3 scripts/lint_viper.py',
+                'build/vir-selftest ${long_flag:+"$long_flag"}\npython3 scripts/lint_viper.py'),
+            "the flag exported": self.SH.replace(self.FLAG, self.FLAG + "export long_flag\n"),
+            "the tier assigned again": self.SH.replace('step "tests"\n', 'long_tier=1\nstep "tests"\n'),
+            "the variable set later": self.SH.replace('step "tests"\n', 'export CERASTES_LONG=1\nstep "tests"\n'),
+            "the whole block after the EDG tree guard": self.SH.replace(
+                self.READ + self.CASE + self.CONFLICT + self.FLAG, "").replace(
+                'step "build"\n', self.READ + self.CASE + self.CONFLICT + self.FLAG + 'step "build"\n'),
+            "the block before the PR tier reading": self.SH.replace(
+                self.READ + self.CASE + self.CONFLICT + self.FLAG, "").replace(
+                'pr_base="${CERASTES_CHECK_BASE:-}"\n', self.READ + self.CASE + self.CONFLICT + self.FLAG
+                + 'pr_base="${CERASTES_CHECK_BASE:-}"\n'),
+            "the report removed": self.SH.replace(self.REPORT, ""),
+            "the report always says ran": self.SH.replace(
+                "skipped (set CERASTES_LONG=1 to run tests/long)", "ran (CERASTES_LONG=1)"),
+            "the report always says skipped": self.SH.replace(
+                "ran (CERASTES_LONG=1)", "skipped (set CERASTES_LONG=1 to run tests/long)"),
+            "the report on the wrong branch": self.SH.replace(
+                'if [[ "$long_tier" == 1 ]]; then\n  printf \'check.sh: long tier: ran',
+                'if [[ "$long_tier" == 0 ]]; then\n  printf \'check.sh: long tier: ran'),
+            "the report before the green line": self.SH.replace(self.REPORT, "").replace(
+                'if [[ -n "$pr_base" ]]; then\n  printf \'\\ncheck.sh: green', self.REPORT
+                + 'if [[ -n "$pr_base" ]]; then\n  printf \'\\ncheck.sh: green'),
+            "a line after the report": self.SH + "printf 'done\\n'\n",
+            "the report not last": self.SH.replace(self.REPORT, "") + self.REPORT + "echo done\n",
+        }
+        for what, text in mutations.items():
+            with self.subTest(what):
+                self.assertNotEqual(text, self.SH, "mutation did not apply")
+                self.assertTrue(check_sh_problems(text), what)
+
+    # -- the pinned lines of the real check.sh, run by bash
+
+    def head(self):
+        """The real check.sh from the reading of the PR tier to the EDG tree guard: both readings, the
+        validation, the conflict and the flag, as bash runs them."""
+        real = (REAL_ROOT / "scripts" / "check.sh").read_text()
+        start = real.index('pr_base="${CERASTES_CHECK_BASE:-}"')
+        return real[start:real.index('step "edg tree"')]
+
+    def run_head(self, tail, bash="bash", **env):
+        script = "set -euo pipefail\nstep() { :; }\n" + self.head() + tail
+        clean = {k: v for k, v in os.environ.items() if k not in ("CERASTES_LONG", "CERASTES_CHECK_BASE")}
+        clean.update(env)
+        return subprocess.run([bash, "-c", script], capture_output=True, text=True, env=clean, timeout=60)
+
+    def bashes(self):
+        found = ["bash"]
+        if Path("/bin/bash").exists() and Path("/bin/bash").resolve() != Path(shutil.which("bash")).resolve():
+            found.append("/bin/bash")  # macOS: bash 3.2, where an empty array under `set -u` aborts
+        return found
+
+    def test_the_values_of_the_variable(self):
+        # (value, exit status, `long_tier|long_flag` printed)
+        cases = [(None, 0, "0|"), ("0", 0, "0|"), ("1", 0, "1|--long"), ("", 1, None), ("2", 1, None),
+                 ("yes", 1, None), ("01", 1, None), (" 1", 1, None), ("1 ", 1, None), ("-1", 1, None),
+                 ("true", 1, None)]
+        for bash in self.bashes():
+            for value, status, shown in cases:
+                with self.subTest(bash=bash, value=value):
+                    env = {} if value is None else {"CERASTES_LONG": value}
+                    r = self.run_head('printf "%s|%s\\n" "$long_tier" "$long_flag"\n', bash, **env)
+                    self.assertEqual(r.returncode, status, r.stderr)
+                    if shown is None:
+                        self.assertEqual(r.stdout, "")  # stopped before anything else ran
+                        self.assertIn("CERASTES_LONG=" + value + " is not 0 or 1", r.stderr)
+                    else:
+                        self.assertEqual(r.stdout, shown + "\n", r.stderr)
+
+    def test_the_long_tier_and_the_pr_tier_are_refused_together(self):
+        for bash in self.bashes():
+            with self.subTest(bash=bash):
+                r = self.run_head('echo reached\n', bash, CERASTES_LONG="1", CERASTES_CHECK_BASE="origin/main")
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertNotIn("reached", r.stdout)
+                self.assertIn("cannot be combined with the PR tier", r.stderr)
+                # twin: each alone is fine
+                for env in ({"CERASTES_LONG": "1"}, {"CERASTES_CHECK_BASE": "origin/main"},
+                            {"CERASTES_LONG": "0", "CERASTES_CHECK_BASE": "origin/main"}):
+                    r = self.run_head('echo reached\n', bash, **env)
+                    self.assertEqual(r.returncode, 0, (env, r.stderr))
+                    self.assertIn("reached", r.stdout)
+
+    def test_the_test_run_gets_the_flag_exactly_when_the_tier_is_on(self):
+        real = (REAL_ROOT / "scripts" / "check.sh").read_text()
+        line = next(l for l in real.split("\n") if l.startswith("python3 scripts/run_tests.py --pr-base=\"$pr_base\" ${long"))
+        probe = line.replace("python3 scripts/run_tests.py", "printf '[%s]'") + "\necho\n"
+        for bash in self.bashes():
+            for env, shown in (({}, "[--pr-base=]"), ({"CERASTES_LONG": "0"}, "[--pr-base=]"),
+                               ({"CERASTES_LONG": "1"}, "[--pr-base=][--long]"),
+                               ({"CERASTES_CHECK_BASE": "origin/main"}, "[--pr-base=origin/main]")):
+                with self.subTest(bash=bash, env=env):
+                    r = self.run_head(probe, bash, **env)
+                    self.assertEqual((r.returncode, r.stdout.strip().splitlines()[-1]), (0, shown), r.stderr)
+
+    def test_the_report_says_what_ran(self):
+        real = (REAL_ROOT / "scripts" / "check.sh").read_text()
+        report = real[real.rindex('if [[ "$long_tier" == 1 ]]; then\n  printf'):]
+        self.assertEqual(report, self.REPORT)
+        for bash in self.bashes():
+            for value, text in (("1", "check.sh: long tier: ran (CERASTES_LONG=1)"),
+                                ("0", "check.sh: long tier: skipped (set CERASTES_LONG=1 to run tests/long)")):
+                with self.subTest(bash=bash, value=value):
+                    r = self.run_head(report, bash, CERASTES_LONG=value)
+                    self.assertEqual((r.returncode, r.stdout.strip()), (0, text), r.stderr)
 
 
 class ScalarAreaTests(RootedCase):

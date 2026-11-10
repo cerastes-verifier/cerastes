@@ -18,6 +18,8 @@ expectations (grammar in tests/README.md):
     // cerastes-fe-options: <options>                    (only with frontend-refused)
     // verify-options: <options>                         (only with verified, error or rejected;
     //                                                    today only --strict-init)
+    // timeout: <seconds>                                (301 to 3600; only with verified or error, and
+    //                                                    required exactly under tests/long/: record 0057)
     // expect: golden
     // expect: native-ok                                 (accompanies an outcome)
     // mode: c++20 | c23                                 (C and C++ only)
@@ -98,6 +100,14 @@ not exist is an error (exit 2) that names it, so a vanished examples directory
 cannot silently drop the doc tests.  Paths named on the command line replace
 the defaults.
 
+A test under tests/long/<area>/ is a long-running test (decision 0057): it must start with
+`// timeout: <seconds>` (301 to 3600), and no test elsewhere may have the line.  The harness passes
+`--timeout=<seconds>` to its `cerastes verify` runs and gives each run that many seconds plus
+LONG_RUN_SLACK_S of its own.  A run skips tests/long/ unless `--long` is given (`check.sh` passes it when
+CERASTES_LONG=1) or a path inside tests/long/ is named on the command line; the summary counts the long
+tests it skipped.  Their headers and twins are checked in every run, and the area rules (native-ok, both
+modes, a must-fail twin) read tests/long/<area>/ like tests/<area>/.  The PR tier never selects a long test.
+
 `--pr-base <ref>` runs the PR tier of CI (decision 0016 item 14): a test
 that reaches Silicon (a `.vpr` test, or a `verified` or `error` test) runs
 only when it changed since `git merge-base <ref> HEAD` (the working tree and
@@ -167,6 +177,14 @@ SILICON_TIMEOUT_S = 600
 # loaded machine stretches past 120 s; a hang still fails, after ten minutes.
 FRONTEND_TIMEOUT_S = 600
 VERIFY_TIMEOUT_S = 600
+# Decision 0057: a verify test that needs more than the driver's 300 s is a long test, under LONG_DIR in its
+# area's directory, with `// timeout: <seconds>` (LONG_TIMEOUT_MIN_S to LONG_TIMEOUT_MAX_S) in its header.  The
+# harness passes `--timeout=<seconds>` to `cerastes verify` and allows the run that many seconds plus the slack
+# (the driver stops Silicon at the limit; the slack is for the front end, the encoding and the driver's exit).
+LONG_DIR = Path("tests/long")
+LONG_TIMEOUT_MIN_S = 301
+LONG_TIMEOUT_MAX_S = 3600
+LONG_RUN_SLACK_S = 120
 NATIVE_TIMEOUT_S = 300
 JOBS_VARIABLE = "CERASTES_JOBS"
 
@@ -288,6 +306,10 @@ class Expectation:
     # `// verify-options: --strict-init`: options added to the `cerastes verify` command line of a
     # verified, error or rejected test (each one of VERIFY_OPTIONS_ALLOWED)
     verify_options: list[str] = dataclasses.field(default_factory=list)
+    # `// timeout: <seconds>` (decision 0057): the long-running test's own limit for `cerastes verify`, passed
+    # as `--timeout=<seconds>`; None for every other test.  A field of its own: `verify_options` is forwarded
+    # by scripts/mutate.py and scripts/regen_vpr.py, which must not pass a limit.
+    timeout: int | None = None
 
 
 # Kinds that stand alone: each must be the only outcome line of its test
@@ -301,6 +323,7 @@ _TWIN_EXEMPT_RE = re.compile(r"^//\s*twin-exempt:\s*(.*?)\s*$")
 _FE_OPTIONS_RE = re.compile(r"^//\s*cerastes-fe-options:\s*(.*?)\s*$")
 _C_ONLY_RE = re.compile(r"^//\s*c-only:\s*(.*?)\s*$")
 _VERIFY_OPTIONS_RE = re.compile(r"^//\s*verify-options:\s*(.*?)\s*$")
+_TIMEOUT_RE = re.compile(r"^//\s*timeout:\s*(.*?)\s*$")
 # A leading-block line that nearly spells the directive (`// verify-option:`, `// verify options:`, `// Verify-Options:`) is a
 # comment to every other rule, so a strict-mode test with a misspelt line would pass without its option: it is a header error.
 _VERIFY_OPTIONS_NEAR_RE = re.compile(r"^//\s*verify[-_ ]?options?\b", re.IGNORECASE)
@@ -344,6 +367,9 @@ DRIVER_CATEGORIES = frozenset({
     "pointer-comparison", "unsequenced", "invalid-free", "leak"})
 # The outcomes whose test runs `cerastes verify` (when it is a C or C++ file).
 VERIFY_KINDS = ("verified", "error", "rejected")
+# The outcomes of a long-running test (decision 0057): a run that reaches Silicon.  A `rejected` test stops in the
+# front end, so a limit for Silicon means nothing there.
+LONG_KINDS = ("verified", "error")
 
 # Outcomes that count as "positive" for the native-ok policy and for twins.
 POSITIVE_KINDS = ("golden", "verified")
@@ -413,6 +439,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
     fe_options_lines: list[tuple[int, str]] = []
     c_only_lines: list[tuple[int, str]] = []
     verify_options_lines: list[tuple[int, str]] = []
+    timeout_lines: list[tuple[int, str]] = []
     modes: list[str] = []
     platforms: list[str] = []
     in_header = True
@@ -438,6 +465,8 @@ def parse_header(text: str, suffix: str) -> Expectation:
                 fe_options_lines.append((lineno, m.group(1)))
             elif m := _VERIFY_OPTIONS_RE.match(line):
                 verify_options_lines.append((lineno, m.group(1)))
+            elif m := _TIMEOUT_RE.match(line):
+                timeout_lines.append((lineno, m.group(1)))
             elif _VERIFY_OPTIONS_NEAR_RE.match(line):
                 raise HeaderError(f"L{lineno}: `{line}` looks like the `// verify-options:` directive but is not exactly "
                                   "that (a misspelt line is a comment, and the test would run without its options)")
@@ -453,9 +482,9 @@ def parse_header(text: str, suffix: str) -> Expectation:
         in_header = False
         if (_EXPECT_RE.match(line) or _MODE_RE.match(line) or _TWIN_RE.match(line)
                 or _TWIN_EXEMPT_RE.match(line) or _FE_OPTIONS_RE.match(line)
-                or _C_ONLY_RE.match(line) or _VERIFY_OPTIONS_RE.match(line)):
+                or _C_ONLY_RE.match(line) or _VERIFY_OPTIONS_RE.match(line) or _TIMEOUT_RE.match(line)):
             raise HeaderError(f"L{lineno}: expect:/mode:/twin:/twin-exempt:/c-only:/"
-                              "cerastes-fe-options:/verify-options: lines must be in the leading "
+                              "cerastes-fe-options:/verify-options:/timeout: lines must be in the leading "
                               "comment block")
 
     if not expects:
@@ -595,12 +624,33 @@ def parse_header(text: str, suffix: str) -> Expectation:
         if not verify_options:
             raise HeaderError(f"L{lineno}: `verify-options:` takes one or more options")
         for option in verify_options:
+            if option == "--timeout" or option.startswith("--timeout="):
+                raise HeaderError(f"L{lineno}: `verify-options:` does not set `{option}`: the limit of a "
+                                  "long-running test is its `// timeout: <seconds>` line (decision 0057)")
             if option not in VERIFY_OPTIONS_ALLOWED:
                 raise HeaderError(f"L{lineno}: `verify-options:` does not allow `{option}` "
                                   "(allowed: " + ", ".join(VERIFY_OPTIONS_ALLOWED) + "; "
                                   "VERIFY_OPTIONS_ALLOWED in scripts/run_tests.py)")
         if len(set(verify_options)) != len(verify_options):
             raise HeaderError(f"L{lineno}: `verify-options:` names an option twice")
+
+    timeout: int | None = None
+    if timeout_lines:
+        lineno, text = timeout_lines[0]
+        if len(timeout_lines) != 1:
+            raise HeaderError(f"L{timeout_lines[1][0]}: more than one `timeout:` line")
+        if kind not in LONG_KINDS or suffix == ".vpr":
+            raise HeaderError(f"L{lineno}: `timeout:` is only valid with `expect: "
+                              + "`, `expect: ".join(LONG_KINDS) + "` in a .c or .cpp test (it is the limit "
+                              "of the `cerastes verify` run of a long-running test, decision 0057)")
+        if re.fullmatch(r"[1-9][0-9]*", text, re.ASCII) is None:
+            raise HeaderError(f"L{lineno}: `timeout: {text}` is not a whole number of seconds "
+                              "(a decimal integer without sign, space or leading zero)")
+        timeout = int(text)
+        if not LONG_TIMEOUT_MIN_S <= timeout <= LONG_TIMEOUT_MAX_S:
+            raise HeaderError(f"L{lineno}: `timeout: {timeout}` is outside {LONG_TIMEOUT_MIN_S} to "
+                              f"{LONG_TIMEOUT_MAX_S} seconds (a test that needs 300 s or less runs under "
+                              "the driver's own limit and is not a long test)")
 
     twin_exempt = None
     if exempts:
@@ -651,7 +701,7 @@ def parse_header(text: str, suffix: str) -> Expectation:
         raise HeaderError("more than one `platform:`")
     return Expectation(kind, errors, modes, diags, native_ok, twin, twin_exempt,
                        refused, fe_options, c_only, platforms[0] if platforms else None,
-                       verify_options)
+                       verify_options, timeout)
 
 
 def _under(path: Path, directory: Path) -> bool:
@@ -661,6 +711,51 @@ def _under(path: Path, directory: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def long_counterpart(directory: Path) -> Path | None:
+    """The directory of the long-running tests of an area: tests/<area> is tests/long/<area> (decision 0057
+    item 6: a long test follows the rules of its area).  None for a directory outside tests/ (the doc
+    examples) and for tests/long itself."""
+    parts = directory.parts
+    if len(parts) >= 2 and parts[0] == "tests" and parts[1] != LONG_DIR.name:
+        return LONG_DIR.joinpath(*parts[1:])
+    return None
+
+
+def under_area(path: Path, directory: Path) -> bool:
+    """Whether `path` is inside `directory` or inside its long-running counterpart: every rule keyed on a
+    directory of an area (native-ok, both modes, the negative directories, the twins) reads tests/long/<area>/
+    like tests/<area>/, so that a long test cannot escape its area's rules by where it lives."""
+    if _under(path, directory):
+        return True
+    counterpart = long_counterpart(directory)
+    return counterpart is not None and _under(path, counterpart)
+
+
+def is_long(path: Path) -> bool:
+    """Whether `path` is under tests/long/: a long-running test is known by where it lives (the header
+    must agree, see long_tier_problem), never by its header alone."""
+    return _under(path, LONG_DIR)
+
+
+def long_tier_problem(path: Path, exp: Expectation) -> str | None:
+    """Decision 0057 item 2, the header is the tier: a `timeout:` line outside tests/long/ is an error, and
+    so is a test under tests/long/ without one, or outside a directory of a known area (a long test must
+    meet the rules of its area, which are keyed on the area's directory)."""
+    if not is_long(path):
+        if exp.timeout is not None:
+            return (f"`timeout:` is only valid in a test under {LONG_DIR}/ (a long-running test, decision 0057); "
+                    "a test elsewhere runs under the driver's 300 s")
+        return None
+    areas = [c for a, _ in TWIN_AREAS if (c := long_counterpart(a)) is not None]
+    if not any(_under(path, a) for a in areas):
+        return (f"a test under {LONG_DIR}/ lives in the directory of its area: "
+                + ", ".join(f"{a}/" for a in areas) + " (its area's rules apply to it, decision 0057 item 6)")
+    if exp.timeout is None:
+        return (f"a test under {LONG_DIR}/ needs `// timeout: <seconds>` ({LONG_TIMEOUT_MIN_S} to "
+                f"{LONG_TIMEOUT_MAX_S}) and is a `verified` or `error` .c or .cpp test (decision 0057)")
+    return None
 
 
 # `.c` tests under these directories run in both languages (c23 as C, c++20 as C++)
@@ -684,7 +779,7 @@ def policy_problem(path: Path, text: str, exp: Expectation) -> str | None:
     modes or say why not.  None when `path` complies."""
     if path.suffix == ".c" and exp.c_only is None and exp.kind != "frontend-refused":
         for directory in DUAL_MODE_DIRS:
-            if _under(path, directory) and set(exp.modes) != {"c23", "c++20"}:
+            if under_area(path, directory) and set(exp.modes) != {"c23", "c++20"}:
                 return (f"a .c test under {directory}/ must run in both modes "
                         "(`// mode: c23, c++20`: the code is valid C and C++) or carry "
                         "`// c-only: <reason>`")
@@ -692,14 +787,14 @@ def policy_problem(path: Path, text: str, exp: Expectation) -> str | None:
         # stock cpfe does not define __CERASTES__, so the annotations in such a
         # test are not even parsed: it would pass for nothing
         for directory in NATIVE_POLICY_DIRS:
-            if _under(path, directory):
+            if under_area(path, directory):
                 return (f"`expect: frontend-ok` is not allowed under {directory}/: stock cpfe "
                         "does not define __CERASTES__, so the annotations are not parsed "
                         "(use golden, frontend-error or frontend-warning)")
     if exp.kind not in POSITIVE_KINDS or exp.native_ok or path.suffix == ".vpr":
         return None
     for directory in NATIVE_POLICY_DIRS:
-        if _under(path, directory):
+        if under_area(path, directory):
             return (f"a positive test under {directory}/ must carry "
                     "`// expect: native-ok` (it has to build with ordinary compilers)")
     if _CERASTES_H_RE.search(text):
@@ -716,30 +811,38 @@ def expects_failure(exp: Expectation) -> bool:
 
 def twin_scan(area: Path, negative_dir: Path):
     """(positives, named) for an area: the positive tests that need a twin, with
-    their modes, and {positive path: [(kind, modes) of the tests under negative_dir
-    that name it]}."""
-    base = ROOT / area
+    their modes, and {positive path: [(kind, modes, long) of the tests under negative_dir
+    that name it]}, `long` saying that the twin is under tests/long/."""
+    # the area's tests, and its long-running ones (decision 0057 item 6): a twin of either kind counts for both
+    bases = [ROOT / area] + ([ROOT / c] if (c := long_counterpart(area)) is not None else [])
     positives: list[tuple[Path, list[str]]] = []
-    named: dict[Path, list[tuple[str, list[str]]]] = {}
-    for f in sorted(base.rglob("*")):
+    named: dict[Path, list[tuple[str, list[str], bool]]] = {}
+    for f in sorted(g for base in bases for g in base.rglob("*")):
         if f.suffix not in TEST_SUFFIXES or not f.is_file():
             continue
         try:
             exp = parse_header(f.read_text(), f.suffix)
         except HeaderError:
             continue  # reported by its own header check
-        if _under(f, negative_dir):
+        if under_area(f, negative_dir):
             if exp.twin:
-                named.setdefault((ROOT / exp.twin).resolve(), []).append((exp.kind, exp.modes))
+                named.setdefault((ROOT / exp.twin).resolve(), []).append((exp.kind, exp.modes, is_long(f)))
         elif exp.kind in POSITIVE_KINDS and exp.twin_exempt is None:
             positives.append((f, exp.modes))
     return positives, named
 
 
-def uncovered_modes(modes: list[str], twins: list[tuple[str, list[str]]]) -> list[str]:
+def uncovered_modes(modes: list[str], twins: list[tuple]) -> list[str]:
     """The modes of a positive test in which no `error` twin runs: an error twin
     that runs in c23 only says nothing about the c++20 run of its positive."""
-    return [m for m in modes if not any(kind == "error" and m in tmodes for kind, tmodes in twins)]
+    return [m for m in modes if not any(t[0] == "error" and m in t[1] for t in twins)]
+
+
+def counting_twins(positive: Path, twins: list[tuple]) -> list[tuple]:
+    """The twins that count for `positive` (decision 0057 item 6, question 207): every one for a long test, and for any other
+    test only those outside tests/long/.  CI never runs a long test, the PR tier never selects it and mutate.py never mutates
+    it, so the must-fail half of invariant 2 for a test that CI runs cannot rest on one."""
+    return list(twins) if is_long(positive) else [t for t in twins if not t[2]]
 
 
 def cross_file_problems(areas: list[tuple[Path, Path]] | None = None
@@ -753,19 +856,24 @@ def cross_file_problems(areas: list[tuple[Path, Path]] | None = None
     (default: TWIN_AREAS) picks the areas to look at."""
     problems: list[tuple[Path, str]] = []
     for area, negative_dir in (TWIN_AREAS if areas is None else areas):
-        if not (ROOT / area).is_dir():
+        counterpart = long_counterpart(area)
+        if not (ROOT / area).is_dir() and not (counterpart is not None and (ROOT / counterpart).is_dir()):
             continue
         positives, named = twin_scan(area, negative_dir)
         need_error = area in ERROR_TWIN_AREAS
         for f, modes in positives:
-            twins = named.get(f.resolve(), [])
+            all_twins = named.get(f.resolve(), [])
+            twins = counting_twins(f, all_twins)
             if need_error:
                 missing = uncovered_modes(modes, twins)
                 if not missing:
                     continue
-                if not twins:
+                if not twins and all_twins:
+                    why = (f"; its only twins are long-running tests under {LONG_DIR}/, which CI never runs: a positive test outside "
+                           f"{LONG_DIR}/ needs an `error` twin outside it in each of its modes (decision 0057 item 6)")
+                elif not twins:
                     why = ""
-                elif not any(kind == "error" for kind, _ in twins):
+                elif not any(t[0] == "error" for t in twins):
                     why = "; it has only a `rejected` twin"
                 else:
                     why = ("; no `error` twin runs in " + ", ".join(missing)
@@ -787,7 +895,7 @@ def count_error_twins(area: Path = Path("tests/scalar"),
     their modes: the pairs of the acceptance count (a `rejected` twin is not one)."""
     positives, named = twin_scan(area, negative_dir)
     return sum(1 for f, modes in positives
-               if not uncovered_modes(modes, named.get(f.resolve(), [])))
+               if not uncovered_modes(modes, counting_twins(f, named.get(f.resolve(), []))))
 
 
 # What would neutralise the ordinary-compiler check from inside the file: a
@@ -811,7 +919,7 @@ def native_neutralised(text: str) -> str | None:
 def twin_problem(path: Path, exp: Expectation) -> str | None:
     """The `twin:` rules: required under tests/annotations/negative/, and the
     twin must be an existing test outside it with a positive outcome."""
-    negative = next((d for d in NEGATIVE_DIRS if _under(path, d)), None)
+    negative = next((d for d in NEGATIVE_DIRS if under_area(path, d)), None)
     if negative is not None:
         if not expects_failure(exp):
             return (f"a test under {negative}/ must expect at least one error "
@@ -827,7 +935,7 @@ def twin_problem(path: Path, exp: Expectation) -> str | None:
         return f"`twin: {exp.twin}` does not exist (a dangling twin)"
     if target.resolve() == path.resolve():
         return "a test cannot be its own twin"
-    if (inside := next((d for d in NEGATIVE_DIRS if _under(target, d)), None)) is not None:
+    if (inside := next((d for d in NEGATIVE_DIRS if under_area(target, d)), None)) is not None:
         return (f"`twin: {exp.twin}` is itself under {inside}/; a twin is the "
                 "positive test, outside it")
     twin_exp = read_header(target)
@@ -849,7 +957,7 @@ def read_header(path: Path) -> Expectation | HeaderError:
             raise HeaderError(f"a native-ok test cannot switch its own check off: "
                               f"`{neutralised}` (a diagnostic pragma or a definition of "
                               "__CERASTES__)")
-        for problem in (twin_problem(path, exp), policy_problem(path, text, exp)):
+        for problem in (long_tier_problem(path, exp), twin_problem(path, exp), policy_problem(path, text, exp)):
             if problem:
                 raise HeaderError(problem)
         return exp
@@ -1820,11 +1928,21 @@ def evaluate_verify(run: ToolRun, exp: Expectation, registry: TagRegistry | None
 
 
 def verify_command(env: dict[str, str], path: Path, mode: str, vpr: Path,
-                   options: list[str] | tuple[str, ...] = ()) -> list[str]:
+                   options: list[str] | tuple[str, ...] = (), timeout: int | None = None) -> list[str]:
     """The `cerastes verify` command for one mode of a test (run from the root):
-    VERIFY_COMMAND, else the program of CERASTES_VERIFY, then the test's `// verify-options:`."""
+    VERIFY_COMMAND, else the program of CERASTES_VERIFY, then the test's `// verify-options:`, then
+    `--timeout=<n>` for a long-running test (its `// timeout:`, decision 0057; every other test runs under
+    the driver's own 300 s)."""
     base = VERIFY_COMMAND if VERIFY_COMMAND is not None else [env["CERASTES_VERIFY"]]
-    return [*base, "verify", rel(path), VERIFY_STD_OPTIONS[mode], f"--keep-vpr={rel(vpr)}", *options]
+    limit = [] if timeout is None else [f"--timeout={timeout}"]
+    return [*base, "verify", rel(path), VERIFY_STD_OPTIONS[mode], f"--keep-vpr={rel(vpr)}", *options, *limit]
+
+
+def verify_run_limit(exp: Expectation) -> int:
+    """The harness's own limit for one `cerastes verify` run of a test: VERIFY_TIMEOUT_S, and for a
+    long-running test its `timeout:` plus LONG_RUN_SLACK_S, so that the driver's `--timeout` is what ends a
+    run that is too slow (exit 3), never the harness's cap."""
+    return VERIFY_TIMEOUT_S if exp.timeout is None else exp.timeout + LONG_RUN_SLACK_S
 
 
 def vpr_path(path: Path, mode: str) -> Path:
@@ -2486,7 +2604,8 @@ def run_verify(path: Path, exp: Expectation, env: dict[str, str],
         for f in (vpr, vpr.with_name(vpr.name + ".map")):
             f.unlink(missing_ok=True)
         vpr.parent.mkdir(parents=True, exist_ok=True)
-        run = run_tool(verify_command(env, path, mode, vpr, exp.verify_options), env, VERIFY_TIMEOUT_S)
+        run = run_tool(verify_command(env, path, mode, vpr, exp.verify_options, exp.timeout), env,
+                       verify_run_limit(exp))
         problems = evaluate_verify(run, exp, opts.registry, rel(path))
         if run.returncode in (VERIFY_OK, VERIFY_ERRORS) and vpr_expected(exp):
             problems += vpr_problems(vpr, rel(path),
@@ -2535,6 +2654,9 @@ class Selection:
     unrecognized: list[Path] = dataclasses.field(default_factory=list)  # source-like, not tests
     hidden: list[Path] = dataclasses.field(default_factory=list)  # tests inside skipped dirs
     helpers: list[Path] = dataclasses.field(default_factory=list)  # helper headers (headers/)
+    # resolved tests under tests/long/ that a path of the command line named (a file, or a directory inside
+    # tests/long/): they run without `--long` (decision 0057 item 3)
+    named_long: set[Path] = dataclasses.field(default_factory=set)
 
 
 UNRECOGNIZED_MESSAGE = ("looks like a C/C++/Viper source file, but its suffix is not a "
@@ -2739,7 +2861,10 @@ class PrTier:
     changed: set[Path]  # resolved files changed since `base`, the working tree included
 
     def selects(self, test: Path) -> bool:
-        """Whether the PR tier makes the Silicon runs of `test`."""
+        """Whether the PR tier makes the Silicon runs of `test`.  Never for a long-running test, changed or
+        sampled (decision 0057 item 3): the tier is the fast one."""
+        if is_long(test):
+            return False
         return (test.resolve() in self.changed or _under(test, DOC_EXAMPLES) or in_pr_sample(test)
                 or any(h in self.changed for h in helpers_included(test)))
 
@@ -2898,6 +3023,8 @@ def discover(paths: list[str]) -> Selection:
             if p.suffix not in TEST_SUFFIXES:
                 raise UsageError(f"not a test file or directory: {p}")
             add_test(p)
+            if is_long(p):
+                sel.named_long.add(p.resolve())
             continue
         tests: list[Path] = []
         goldens: list[Path] = []
@@ -2919,6 +3046,8 @@ def discover(paths: list[str]) -> Selection:
                     (helpers if is_helper(f, p) else unrecognized).append(f)
         for f in sorted(tests):
             add_test(f)
+            if is_long(p) and is_long(f):
+                sel.named_long.add(f.resolve())
         sel.helpers += [f for f in sorted(helpers) if f not in sel.helpers]
         sel.unrecognized += [f for f in sorted(unrecognized) if f not in sel.unrecognized]
         for g in sorted(goldens):
@@ -3004,6 +3133,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="write the golden files of the selected golden tests "
                              "instead of comparing (review the diff; never in "
                              "check.sh)")
+    parser.add_argument("--long", action="store_true",
+                        help=f"also run the long-running tests under {LONG_DIR}/ (decision 0057): without it a "
+                             "run skips them and counts them in the summary; a path inside "
+                             f"{LONG_DIR}/ named on the command line is run either way (check.sh passes it "
+                             "when CERASTES_LONG=1; not with --pr-base, which never selects a long test)")
     parser.add_argument("--pr-base", metavar="REF", default="",
                         help="the PR tier of CI (decision 0016 item 14): Silicon runs only for the "
                              "tests changed since `git merge-base REF HEAD`, the doc examples and a "
@@ -3013,6 +3147,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.count_error_twins:
         print(count_error_twins())
         return 0
+    if args.long and args.pr_base:
+        # the PR tier never selects a long test (decision 0057 item 3): `--long` would promise a run that
+        # the tier cannot make, so the pair is refused rather than one of them quietly winning
+        print("run_tests.py: --long cannot be combined with --pr-base: the PR tier never selects a "
+              "long-running test (decision 0057)", file=sys.stderr)
+        return 2
 
     try:
         sel = discover(args.paths or default_paths())
@@ -3037,7 +3177,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # the twin rule looks at the whole tree of each area that a selected test is in
     cross = cross_file_problems([(area, neg) for area, neg in TWIN_AREAS
-                                 if any(_under(f, area) for f in headers)])
+                                 if any(under_area(f, area) for f in headers)])
     helper_probs = helper_problems(sel.helpers)
 
     if args.check_headers:
@@ -3076,6 +3216,18 @@ def main(argv: list[str] | None = None) -> int:
         except UsageError as err:
             print(f"run_tests.py: {err}", file=sys.stderr)
             return 2
+
+    # decision 0057 item 3: a long-running test is skipped unless `--long` or a path inside tests/long/
+    # named it, and counted.  Only a test whose header is good is skipped: a bad header fails every run
+    # (item 4), and a skipped test leaves the run entirely (no tools required, no Viper expected of it).
+    # (a named path is run, except under the PR tier, which never selects a long test: counted as skipped)
+    long_skipped = [f for f in sel.tests if isinstance(headers[f], Expectation) and is_long(f)
+                    and not args.long and (f.resolve() not in sel.named_long or bool(args.pr_base))]
+    for f in long_skipped:
+        print(f"SKIP  {rel(f)}: long-running test (`--long`, CERASTES_LONG=1 for check.sh, or naming it "
+              "runs it; decision 0057)")
+        del headers[f]
+    sel.tests = [f for f in sel.tests if f in headers]
 
     try:
         require(env, *required_env(headers))
@@ -3172,6 +3324,8 @@ def main(argv: list[str] | None = None) -> int:
     unchanged = sum(1 for o in outcomes if not o.problems and o.label == "UNCHANGED")
     passed = len(outcomes) - failed - updated - unchanged
     summary = f"{passed} passed, {failed} failed, {len(sel.skipped) + len(elsewhere)} skipped"
+    if long_skipped:
+        summary += f", {len(long_skipped)} long skipped"
     if exclusions:
         diverging = sum(1 for o in outcomes if o.label == DIVERGES)
         summary += f", {diverging} diverging as the profile {profile} records"

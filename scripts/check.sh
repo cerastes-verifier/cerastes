@@ -9,6 +9,10 @@
 # check.  CI's pull requests and pushes set it to the commit they are compared with (decision 0016
 # item 14): the PR tier, in which both test runs below make Silicon runs only for the tests changed
 # since that commit, the doc examples and a fixed sample; the nightly CI run is the full check.
+#
+# CERASTES_LONG unset or 0 (the default): the long-running tests under tests/long are skipped, counted in the
+# test summary, and the last line says so.  CERASTES_LONG=1 runs them (decision 0057); any other value, the
+# empty string included, is an error, and so is 1 together with the PR tier, which never runs them.
 
 set -euo pipefail
 
@@ -20,6 +24,23 @@ step() { printf '\n==== %s\n' "$*"; }
 pr_base="${CERASTES_CHECK_BASE:-}"
 if [[ -n "$pr_base" ]]; then
   printf 'check.sh: the PR tier, against %s (decision 0016 item 14)\n' "$pr_base"
+fi
+
+long_tier="${CERASTES_LONG-0}"
+case "$long_tier" in
+  0 | 1) ;;
+  *)
+    echo "check.sh: CERASTES_LONG=$long_tier is not 0 or 1 (unset it, or set 1 to run tests/long: decision 0057)" >&2
+    exit 1
+    ;;
+esac
+if [[ -n "$pr_base" && "$long_tier" == 1 ]]; then
+  echo "check.sh: CERASTES_LONG=1 cannot be combined with the PR tier, which never runs tests/long (decision 0057)" >&2
+  exit 1
+fi
+long_flag=""
+if [[ "$long_tier" == 1 ]]; then
+  long_flag="--long"
 fi
 
 step "edg tree"
@@ -68,7 +89,7 @@ python3 scripts/test_vlibc_contracts.py
 python3 scripts/test_object_identity.py
 
 step "tests"
-python3 scripts/run_tests.py --pr-base="$pr_base"
+python3 scripts/run_tests.py --pr-base="$pr_base" ${long_flag:+"$long_flag"}
 
 step "viper lint"
 # the Viper that the tests above left in build/vpr (invariant 4)
@@ -107,4 +128,9 @@ if [[ -n "$pr_base" ]]; then
   printf '\ncheck.sh: green in the PR tier (not the full check)\n'
 else
   printf '\ncheck.sh: all green\n'
+fi
+if [[ "$long_tier" == 1 ]]; then
+  printf 'check.sh: long tier: ran (CERASTES_LONG=1)\n'
+else
+  printf 'check.sh: long tier: skipped (set CERASTES_LONG=1 to run tests/long)\n'
 fi
