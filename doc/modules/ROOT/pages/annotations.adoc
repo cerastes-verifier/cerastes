@@ -303,7 +303,7 @@ memory]). It is read on a function declared in your files; on a member function,
 a template, a `predicate` or `pure` function, or a redeclaration of a function a
 system header declares, it is `cerastes-unsupported_annotation`. On a pointer
 local it is an owner variable (<<marked-locals,Owning and marked locals>>); on a
-global or a structure's member see there as well.
+global see there as well, and on a structure's member <<owning-members>>.
 
 === Initialization markers
 
@@ -416,8 +416,27 @@ Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
 
 A global declared more than once carries the same attributes on every declaration;
 otherwise the error is `cerastes-annotation_mismatch`, naming both declarations.
-`owning` on a structure's member is the front end's own error until a later
-version.
+
+[#owning-members]
+=== Owning members
+
+`cerastes::owning` on a pointer member of a structure (C structures and pass:[C++]
+aggregates) makes the member own the block it points to, as long as the structure
+does: every `owns` of the structure gives and takes that block too, and a store
+into the member must give it null or a block the function holds whole
+(xref:memory.adoc#owning-fields[Owning fields]). It goes before the member's
+declaration or after its name, on each declarator that owns. These are
+`cerastes-unsupported_annotation`, reported at the member:
+
+* a member that is not a pointer to an object, a pointer to a function, `void *`,
+  a pointer to a `const` or `volatile` object, a bit-field, a union's member;
+* `owning(n)`, and the attribute twice on one member;
+* a structure that owns itself through its owning members, directly or through
+  another structure (reported at the member that closes the cycle);
+* a non-null initializer of an owning member of a global or `static` local
+  structure.
+
+`ref_to_uninit` and `must_init` on a member are the front end's own error.
 
 `cerastes::must_init` stays a parameter attribute: P4222 defines it for parameters
 only, and the front end reports that it does not apply to a local.

@@ -1096,8 +1096,7 @@ otherwise still be null:
 include::example$memory/owning_loop_handoff.c[tag=source]
 ----
 
-An owner that is a structure's member is planned for the next version
-(<<not-yet,What is not supported yet>>).
+An owner can also be a structure's member (<<owning-fields>>).
 
 [#owning-globals]
 == Owning globals and `static` locals
@@ -1146,6 +1145,149 @@ checked like an assignment. A function that receives its address decides by its
 contract what happens to the block: with `cerastes_owns(*pp)` alone it may change
 the pointer, and with `cerastes_owns(*pp) && (*pp == NULL ||
 cerastes_owns_block(*pp))` in both lists it borrows the block too.
+
+[#owning-fields]
+== Owning fields
+
+A pointer member of a structure marked `cerastes::owning` owns the block it points
+to, for as long as the structure does: a structure that owns its buffer. Whoever
+owns the structure owns the buffer too, so a contract that says
+`cerastes_owns(*b)` of a `struct buf *b` gives and takes the block `b->data`
+points to whenever it is not null, as if it also said `b->data == NULL ||
+cerastes_owns_block(b->data)`. You do not write that clause; cerastes adds it
+after every `owns` that covers the member (`cerastes_owns(*b)`, an `owns` of an
+enclosing member, of the member itself, or of a structure global), after an
+`owning` parameter's and result's block, and after `cerastes_owns_block(b)`. A
+member whose pointee is itself a structure with owning members adds their blocks
+too, to any depth, as long as no structure owns itself:
+
+[source,c]
+----
+include::example$memory/owning_field.c[tag=source]
+----
+
+`buf_init` is the initializer: its `requires` gives the structure without values
+(`CERASTES_MUST_INIT`), which owns nothing yet, and its `ensures` gives back a
+structure whose member is null or holds a whole block. `buf_put` borrows the
+structure and its block, and may replace the block. `buf_destroy` takes the
+structure's block and, through its member, the buffer: it must free both.
+`cerastes_reads(*b)` gives the member's value and nothing it owns; a function
+that reads the buffer writes `cerastes_reads(*b->data)` beside it. The attribute
+goes on a pointer to an object, in either position (`int *data
+CERASTES_OWNING;` or `[[cerastes::owning]] int *data;`), on each declarator that
+owns.
+
+*Storing into the member.* The value stored must be null or the start of a block
+the function holds whole, or the store is
+xref:error-messages.adoc#_permission[`permission`]:
+
+[source,c]
+----
+include::example$memory/owning_field_store_error.c[tag=source]
+----
+
+A block the member held when it is overwritten, or when the structure is freed,
+is not reported at that line: cerastes cannot tell, for a structure reached
+through a pointer, whether another owner took the block first. The function
+still holds it, so it is a xref:error-messages.adoc#_leak[`leak`] at the
+function's last line ("may return while it still owns an allocation that its
+`ensures` does not hand back"), or at a loop's back edge if it happens in a
+loop:
+
+[source,c]
+----
+include::example$memory/owning_field_drop_error.c[tag=source]
+----
+
+*A structure in a variable.* An owning member of a local structure, of a global
+structure or of a `static` local structure is an owner like an owning variable
+(<<owning-locals>>, <<owning-globals>>). Assigning to it while it holds a block
+is a `leak` at the assignment, and a local structure whose member still holds a
+block when its lifetime ends is a `leak` there ("owning field `s.data` still holds
+its block"). A function given `&s` decides by its
+contract, as for `&v`: with `cerastes_owns(*b)` it borrows the structure and the
+block, and may replace it.
+
+[source,c]
+----
+include::example$memory/owning_field_local.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/owning_field_local_error.c[tag=source]
+----
+
+`main` may end while a structure global or a `static` local structure still
+holds blocks through its owning members, and through theirs: as for an owning
+global, an owner with static storage keeps its object for the whole program.
+
+[source,c]
+----
+include::example$memory/owning_field_global.c[tag=source]
+----
+
+*Copies.* Copying a structure (`t = s;`, `*q = *p;`, `struct buf t = *p;`) copies
+its members, and each owning member of the copy is a store to an owner: the
+copy and the original then hold the same block, as two owning variables do after
+`b = a;`. One of them must be set to `NULL` before both are handed to a function
+or returned, and a function that only reads the original (`cerastes_reads(*p)`)
+cannot copy it into an owner. A structure passed or returned by value owns
+nothing unless its contract says so (`s.data == NULL ||
+cerastes_owns_block(s.data)`).
+
+[source,c]
+----
+include::example$memory/owning_field_copy.c[tag=source]
+----
+
+*Loops.* A loop invariant `cerastes_owns(*b)` carries the member's block too, so
+a loop may free and replace it on every iteration:
+
+[source,c]
+----
+include::example$memory/owning_field_loop.c[tag=source]
+----
+
+Each owning member's block in a loop invariant costs time, and two of them in one
+loop take minutes; a loop that replaces two members' blocks verifies, but
+slowly.
+
+*The buffer must hold values.* Where a contract owns the structure, the member's
+block must hold values, as every block a contract owns must: a structure whose
+buffer was allocated but not yet written cannot be passed to `buf_put` (an
+`uninitialized` error at the call). Write the buffer first.
+
+[#p4417-owners]
+=== P4417R0's owners in cerastes
+
+P4417R0's invalidation profile marks owners with `[[owner]]`. In cerastes:
+
+[cols="1,1"]
+|===
+|P4417R0 |cerastes
+
+|`[[owner]]` on a local variable, a global or a `static` local
+|`cerastes::owning` (<<owning-locals>>, <<owning-globals>>)
+
+|`[[owner]]` on a member
+|`cerastes::owning` (this section)
+
+|`[[owner]]` on a result
+|`cerastes::owning` on the function (<<heap>>)
+
+|`[[owner]]` on a parameter: the callee takes the object and must delete it
+|`CERASTES_REQUIRES(p == NULL \|\| cerastes_owns_block(p))` with no `ensures` about `p`
+
+|(no attribute: a borrow)
+|`cerastes::owning` on a parameter, which lends the block for the call
+
+|a static owner need not delete its object
+|`main` may end while a static owner holds its block
+
+|raw storage (`malloc`, `free`) is outside the profile
+|checked like any other block
+|===
 
 [#block-guards]
 == A block that depends on memory
@@ -1212,9 +1354,31 @@ These are rejected with a diagnostic, never approximated
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and of
   a global itself in an invariant (`cerastes_owns(g)`: the loop holds it
   already);
-* the attribute `cerastes::owning` on a structure's member (planned for the next
-  version), an owning or marked global or `static` local whose initializer is not
-  a null pointer, and `owning(n)`;
+* a structure that owns itself through its owning members (`struct node { struct
+  node *next CERASTES_OWNING; }`, or two structures that own each other: a list,
+  planned with recursive predicates), `cerastes::ref_to_uninit` on a member and on
+  a pointer to a structure with an owning member (planned for the next version),
+  an owning member that is not a pointer to an object, and a function without a
+  body in the file that hands over a new structure whose owning members hold
+  blocks, other than a pointer with `cerastes_owns(*r)` whose structure owns one
+  block (<<owning-fields>>);
+* an owning or marked global, `static` local or owning member whose initializer is
+  not a null pointer, and `owning(n)`;
+* a loop that frees or replaces the block of an owning member reached through an
+  owning global pointer (`gp->data` of a `struct buf *gp` marked `cerastes::owning`)
+  is reported as `permission` although it is correct (a loop over a local
+  structure, a global structure or an owning local pointer verifies); and a function
+  that returns the address of a `static` local structure on some paths and a new
+  structure whose owning member holds a block on others is reported as a `leak`;
+* some loops over owning members are reported although they are correct: a loop
+  that works on the structure through a second, non-owning pointer to it, or that
+  passes a pointer to a local structure held in another variable to a function; a
+  loop in `main` that reaches a global structure's owning member only through a
+  function's contract; a chain of three owning members; a loop that frees an owning
+  pointer to a structure and gives it a new one, if it also frees the member's block;
+  and a read after a loop
+  that neither stores into the member's block nor hands the structure on, which may
+  be reported as `uninitialized`;
 * `cerastes::uninit` on anything but a local, and `cerastes::must_init` on
   anything but a parameter (P4222 defines it for parameters only);
 * the attributes of the P4417R0 and P4418R0 invalidation profile: a pointer

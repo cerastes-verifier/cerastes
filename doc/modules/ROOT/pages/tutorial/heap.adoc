@@ -159,6 +159,37 @@ include::example$tutorial/heap_global_owner_error.c[tag=source]
 heap_global_owner_error.c:16: error: permission: returns while owning global `g` does not hold its block: set it to `NULL` after freeing it
 ----
 
+== A structure that owns its buffer
+
+A structure can own an allocation through one of its members. `CERASTES_OWNING` on
+the member `data` says that the block it points to belongs to the structure. So
+whoever owns the structure owns the buffer too: `buf_make` hands both to its caller
+(its result is `owning`), and `buf_destroy`, which takes the structure's block,
+takes the buffer with it, without saying so in its contract:
+
+[source,c]
+----
+include::example$tutorial/heap_owning_field.c[tag=source]
+----
+
+A destructor must therefore free the buffer before the structure. One that frees
+only the structure still holds the buffer when it returns, and nothing else can
+free it:
+
+[source,c]
+----
+include::example$tutorial/heap_owning_field_error.c[tag=source]
+----
+
+[source,console]
+----
+heap_owning_field_error.c:33: error: leak: `buf_destroy` may return while it still owns an allocation that its `ensures` does not hand back
+----
+
+A function that borrows the structure with `cerastes_owns(*b)` borrows the buffer
+too, and may free it and store a new one, but a pointer it stores into the member
+must be null or a whole allocation it holds.
+
 == What you have learned
 
 * The result of `malloc` must be tested against `NULL` before it is used.
@@ -170,12 +201,16 @@ heap_global_owner_error.c:16: error: permission: returns while owning global `g`
   its scope while it still holds the block is a `leak` at that path.
 * A global marked `CERASTES_OWNING` owns its allocation across calls: a contract's
   `cerastes_owns(g)` carries the block with it, and `main` may end while it holds one.
+* A member marked `CERASTES_OWNING` owns its allocation for its structure: whoever
+  owns the structure owns the buffer, and a destructor frees both.
 
 That is the end of the tutorial for this version. The
 xref:memory.adoc#heap[reference on allocated memory] covers `calloc`, loops
 over allocations, the attribute `cerastes::owning`
-(xref:memory.adoc#owning-locals[owning locals] and
-xref:memory.adoc#owning-globals[owning globals] in full) and
+(xref:memory.adoc#owning-locals[owning locals],
+xref:memory.adoc#owning-globals[owning globals] and
+xref:memory.adoc#owning-fields[owning fields] in full, with the mapping of
+P4417R0's owners) and
 xref:memory.adoc#vlibc-allocator[vlibc's own allocator] (`vlibc_malloc` and
 `vlibc_free`, a heap of its own whose blocks only `vlibc_free` frees), and
 xref:memory.adoc#not-yet[What is not supported yet] says what is still

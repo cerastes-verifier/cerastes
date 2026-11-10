@@ -689,6 +689,67 @@ over the leaves of the atom's pointee type: `cov := res == leaf_0 || …`. Value
 only for leaf covers. A contract read of `*res` after a leaf-covered atom is routed through the covering leaf when two
 or more leaves of the type exist.
 
+**Owning fields (M4.5d2b2b, decision 0055).** `vir::StructMember::owning` (and `StructLeaf::owning`) marks a pointer
+member; the encoder reads it in `struct_info` from the field's own attribute list and rejects the shapes of item 2
+there (`owning_field`, `owning_reaches` for cycles; `check.cpp` has a backstop). The Viper shapes of the named leaves
+are pinned by `tests/viper-smoke/memory/s40_*` (spike S40) and the VIR self-test cases `owning_field_*`,
+`owning_leaf_*`, `owning_cover_*`, `owning_main_*` and `owning_global_leaf_*`.
+
+*The closure (item 3).* `apply_owning_closure` runs after `apply_owning` and `apply_owning_globals`, before
+`finish_atoms`: `close_source` replaces each `Owns` atom (and each `OwnsBlock` atom on a pointer to such a structure)
+that covers owning leaves by `atom && (L == NULL || (owns_block(L) && <the closure of L's own leaves>))`, wherever the
+atom sits in its clause, so the clause stands under the atom's guards. Only clauses are added, never atoms. A user
+site of the same shape (or the vlibc spelling) is merged; another block site on `L`, or a `reads`/`live` atom on its
+block, beside the covering atom is rejected. Markers (`closure_marked`) and the heap views (built by `heap_view`,
+never through the pass) carry none. In a bodiless contract a partnerless closure is accepted only for an `owns(*r)`
+result that gives exactly one block. `deep_expr` closes the deep atom of an owning `struct S *` global, and
+`add_static_local_atoms` appends `global_closure(g)` after a `static` struct local's implicit atom.
+`apply_invariant_closure` does the same for written loop invariants. `check.cpp` admits a contract read of a `static`
+struct local's owning leaf (`owning_leaf_place`) and an invariant `owns_block(s.q)` of a struct local's leaf.
+
+*The value rule (item 4).* `owning_leaf_of(addr)` finds an owning member at a store; `leaf_value_rule` asserts `v !=
+null ==> offset_of(v) == 0 && perm(tok slot of v) == write` (`permission`) at `store`, `cell_write`, `struct_store`
+and `struct_cell_write`, before `owner_alias_rows`. No dropped-block row. `is_heap_program` is true when any struct
+type has an owning member.
+
+*Owners at named leaves (item 5).* The owner key is `OwnerRef {var, global, path}` (a neutral re-keying first:
+`held_name`, `owner_value`, `tv_name`, `owners_in_scope`, `LoopOwner::owner`). Leaf owners come from
+`global_owners_of(g)` (struct globals and `static` struct locals, in `fn_.gowners`) and `Fn::Scope::leaves`
+(struct locals, a by-value parameter's copy in the function scope). Ghosts `held_<GB>_<k…>` and `held_v_<var>__<n>_<k…>`.
+- **Entry:** true where a `requires` site names the leaf (`site_leaf_owner`, `param_leaf_sites_at_entry`), through a
+  temp `t := <guard> ? <cell> : null; held := t != null` for a guarded site; false in `main` and at a local's block
+  entry.
+- **After calls and frees** (`held_updates`): the framed `held := (held && perm(<cell>) > none) && (L != null &&
+  perm(tok(block_of L)) > none)`; after a callee whose `ensures` has an `owns` atom covering the leaf and that is
+  given exactly `&s` (`gives_param_leaf`, `gives_global`), `t := perm(<cell>) > none ? <cell> : null; held := t !=
+  null`.
+- **Stores by name** go through `global_owner_rows` generalised to `OwnerRef` (the reassignment `leak` row and the
+  value rule); whole-struct stores find each leaf's owner with `tracked_owner_at`. `returned_owners` skips a leaf
+  site of a struct global.
+- **Lifetime end:** `owners_exit` has a leaf loop ("owning field `s.data` still holds its block"); `scope_end` runs
+  owners' exits before the cells go when a scope has leaves; a void function's fall-through runs the parameter
+  scope's rows.
+- **`main`:** the exemption term `held_GB_g__0_0 && t == loc(block_of(<leaf cell>.v_ptr_T), -1)` with the
+  `program_start` tag `// cerastes:owning-global GB_g__0/0` (member indices after `/`). Deeper owners (a chain under a
+  static owner, `gp->q` of an owning `struct S *` global) use Bool locals assigned before the leak row, since Silicon
+  refuses `perm` inside `forperm`: `exm_0 := (held_GB_g__0_0 && <leaf> != null) && (perm(<next cell>) > none)`,
+  `exm_1 := (exm_0 && <next> != null) && (perm(<cell>) > none)`, and the disjuncts `exm_n && t ==
+  loc(block_of(<chain>), -1)`.
+- **The cover** (audit S6, then round 2's S3 and the re-audit's B1): `closure_cover()` marks the closure site of an
+  output `owns` atom that `cov_of` can cover; such a site is never given (`block_atom` gives `true`), never returned
+  (`block_returns`' guard `false`) and never exempt (`leak_exemption` skips it, `closure_cover_ret`).
+
+*Loops (item 7).* `owner_loop_sites` builds a synthetic site `L == NULL || owns_block(L)` for each leaf owner the loop
+reaches (it names the structure, stores through a pointer of its type, or calls a function whose contract names cells
+of that type; a global leaf reached only by type is carried outside `main` and only where the function holds it at
+entry), unless a written site names it; `loop_leaf_owners` carries its ghost with `leaf_held_agrees`: an entry snapshot
+`hp_<held>__<loop>` and the invariant `hp ==> (held == (L != null))`, `!hp ==> !held`, with entry and back-edge rows
+(`permission`). Unreached leaves join `framed_owner_ghosts`. Reads of a leaf owner's value that rest on `held` add
+`perm(cell) > none` (`held_equals`). An owning local `struct S *v`'s loop carries `make_closure`'s site over its
+pointee's owning fields (one level for a struct local's leaf, `closure_deep`), standing only where the cell it is read
+from has a value (`synth_closure_atoms_`, `wfc_<i>__<loop>`), and not built when the loop may replace the owner
+(`may_replace_local`, `call_takes_address_of`).
+
 ## 4. Viper shape
 
 ```

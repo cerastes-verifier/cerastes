@@ -549,6 +549,20 @@ include::example$memory/owning_local_value_rule.c[tag=source]
 owning_local_value_rule.c:10: error: permission: owning `q` receives a pointer that is not the start of a block the function holds
 ----
 
+An owning member of a structure follows the same rule, whether it is reached
+through a pointer or named (xref:memory.adoc#owning-fields[Owning fields]); a copy
+of a structure stores into each of its owning members:
+
+[source,c]
+----
+include::example$memory/owning_field_store_error.c[tag=source]
+----
+
+[source,console]
+----
+owning_field_store_error.c:19: error: permission: owning field `b->data` receives a pointer that is not the start of a block the function holds
+----
+
 An owning local that a loop assigns must hold its block, or be null, at the start and
 at the end of every iteration (xref:memory.adoc#owning-locals[Owning locals]). This loop
 frees the owner and leaves it pointing at the freed block, which is reported at the
@@ -809,4 +823,21 @@ owning_local_overwrite.c:16: error: leak: assigning to owning `p` still holds it
 assignment that drops its block the same way ("assigning to owning `g` still holds its
 block"). It is not reported when `main` returns while it holds its block
 (xref:memory.adoc#owning-globals[Owning globals and `static` locals]).
+
+*An owning member.* An owning member of a local, global or `static` structure is
+reported like an owning variable: "assigning to owning field `s.data` still holds its
+block" at an assignment, and "owning field `s.data` still holds its block" where a
+local structure's lifetime ends (xref:memory.adoc#owning-fields[Owning fields]).
+A block dropped through a pointer (`b->data = NULL;`, or `free(b)` while
+`b->data` holds one) is reported at the function's closing brace, as above:
+
+[source,c]
+----
+include::example$memory/owning_field_local_error.c[tag=source]
+----
+
+[source,console]
+----
+owning_field_local_error.c:37: error: leak: owning field `s.data` still holds its block
+----
 

@@ -1,4 +1,4 @@
-# Handoff at M4.5d2b2b's planning — owning fields planned (2026-11-09); M4.5d2b2b's Step 0 next
+# Handoff after M4.5d2b2b — owning fields done (2026-11-10); M4.5d2b2c's planning next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -6,71 +6,51 @@ rediscover, and holds only what is live (owner, 2026-10-26).
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09, at the owner's request). The history of finished sessions,
 the notes that had moved into session plans and the digests of answered questions were cut, and the open notes were
-re-filed under the session that consumes each. **The text before this consolidation is
-`git show 2430529:internal/handoff.md`**, whose header names every earlier version. Each note below keeps its origin
-in brackets, so its full wording can be found there. Session plans approved from M4.5b1a on are in `.claude/plans/`;
-the notes a session consumes move into its plan's "Inputs".
+re-filed under the session that consumes each. **The text before that consolidation is
+`git show 2430529:internal/handoff.md`**, whose header names every earlier version; the version M4.5d2b2b started from
+is `git show 19d977a:internal/handoff.md`. Each note below keeps its origin in brackets, so its full wording can be
+found there. Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into
+its plan's "Inputs".
 
 ## 1. State
 
-- **M4.5d2b2a** (2026-11-09; record 0054; plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`) is on `origin/main`
-  (`8302d24`; pushed without a PR). Its result is in `internal/status.md`. Its worktree and `build/m4.5d2b2a/` are
-  gone, and with them `vprdiff.py`, `regen.py` and S39's summary (`build/m4.5d2b2a/s39/README.md`, which record 0054
-  cites). The kept S39 fixtures are `tests/viper-smoke/memory/s39_*`.
-- **Its one full `check.sh` is on the x86-64 box** and had not finished at this planning. It started 2026-11-10 00:13
-  UTC in S8's `cerastes-s8-ubuntu-26.04` container, on `b6b3298`, which differs from `origin/main` only in
-  `scripts/test_run_tests.py` and `tests/README.md` (the 360-minute timeout text). At 01:09 UTC its main suite had
-  finished with 11,779 `PASS` lines and no `FAIL` line, and the Viper lint and the VIR self-test (1669 lowering
-  cases, 270 rejection cases, 0 problems) had passed; the later steps were still running, with no `.exit` file
-  yet. The result is `~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.{exit,log}` (§2).
-- **M4.5d2b2b is planned** (2026-11-09, a session that only planned; plan
-  `.claude/plans/m4-5d2b2b-owning-fields.md`; questions 188–193): owning fields, complete, with the `[[owner]]`
-  mapping. **Its Step 0 is next.** M4.5d2b2 is three sessions now (question 188): d2b2a is done, d2b2b is owning
-  fields, and **d2b2c** takes `not_invalidating`, `--strict-owner`, marked fields and d2b2b's cuts (§3 "M4.5d2b2c").
-- **CI** runs toolchain profiles (`scripts/ci_toolchains.toml`; record 0053): the references `macos-27` and
-  `ubuntu-26.04` on every event, other toolchains nightly or on dispatch. The nightly full check was cancelled at its
-  220-minute timeout every night from 2026-10-29 to 2026-11-09. The owner raised both full-check jobs to
-  `timeout-minutes: 360` (`99b587e`; the guard's bound and record 0016 item 9 follow in `8302d24`). The push run on
-  `86b9b88` failed in both `check` jobs on the guard self-test, which still expected 220; `8302d24`'s run was past
-  that point and still going at this planning. The `profiles=all` dispatch has never run (§2).
-- **The Linux host** `matt@clang4.cpp.al` cannot bootstrap natively (no root; no libc++ 21, JDK 17, GCC 16 there).
-  Runs go in containers built from clean `ubuntu` images: `~/cerastes-s8` holds a base checkout, one checkout and one
-  container `cerastes-s8-<profile>` per profile, and `run.sh setup|update|check <profile>` (§6). Its
-  `p-ubuntu-26.04` checkout is detached at `b6b3298` (from `~/cerastes-d2b2a.bundle`).
-- **vlibc** `6e41fbe` (the pin), **vlibm** `1e6982e` and the website (`cerastes-verifier.github.io` `45a3d2f`) are
-  level with their `origin/main`.
-- **The EDG pin** is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits behind upstream `main` (§4.1).
+- **M4.5d2b2b** (2026-11-09/10; record 0055; plan `.claude/plans/m4-5d2b2b-owning-fields.md`) is done on branch
+  `m4.5d2b2b-owning-fields`, local only (the owner pushes). Its result is in `internal/status.md`. Owning fields are
+  complete in contracts, bodies, copies and loops, with P4417R0's `[[owner]]` mapping in the docs; the loop limits
+  it pins are listed in §3 "From M4.5d2b2b".
+- **Its one full `check.sh`** ran on the x86-64 box, in S8's `cerastes-s8-ubuntu-26.04` container, on the branch's
+  last code commit; the result is in `internal/status.md` ("Checks") and in
+  `~/cerastes-s8/p-ubuntu-26.04/d2b2b-check.{exit,log}` on the box.
+- **Worktrees left for the owner to remove** (§2): `.claude/worktrees/m4.5d2b2b` (the session's), `-aux` (the
+  lowering, detached; its commits were moved onto the branch as tree objects) and `-audit` (the audits' build).
+- **M4.5d2b2c is next** (question 188): `not_invalidating`, `--strict-owner`, `ref_to_uninit` on a field, and the
+  pinned loop limits of d2b2b if the owner takes question 195's recommendation.
+- **CI:** unchanged (record 0053). The `profiles=all` dispatch has still not run, so `macos-26` stays at `dispatch`
+  (question 172; §2).
+- **The Linux host** `matt@clang4.cpp.al`: runs go in containers built from clean `ubuntu` images (`~/cerastes-s8`,
+  `run.sh`; §6). Its `p-ubuntu-26.04` checkout is detached at the branch's commit that `check.sh` ran on (from
+  `~/cerastes-d2b2b.bundle`).
+- **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged; the
+  fork's `cerastes` is behind upstream `main` (§4.1).
 
 ## 2. Owner steps
 
-Only what is pending. The steps of earlier sessions that are done (the d2b2a push, PRs #27–#33, vlibc's, vlibm's and
-the website's pushes) were checked at M4.5d2b2b's planning and dropped.
-
-1. **Push `main`**: this planning's two commits (`2430529`, the owner's answers 169–172 as written, and `49d1775`,
-   the planning commit, with its follow-up). Markdown only. M4.5d2b2b branches from `origin/main` once it holds
-   them; until then it branches from local `main` (its plan's Step 0).
-2. **Read the box's full `check.sh` on `b6b3298`**: `cat ~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.exit` (0 is green)
-   and the summary lines of `d2b2a-check.log` beside it. If it is red, M4.5d2b2b fixes it first, with targeted checks
-   (its Step 0).
-3. **Remove the audit worktree** `.claude/worktrees/m4.5d2b2a-auditA` (`git worktree remove --force`). Its snapshot
-   commits are not on any branch, so nothing is lost.
-4. **CI** (question 176: the owner handles CI).
-   - `8302d24`'s push run should be green in both `check` jobs.
-   - The first nightly under the 360-minute limit shows whether the full check fits in six hours.
-   - Dispatch the workflow once with `profiles` = `all`. Every Linux profile was rehearsed on the box, but `macos-26`
-     has never run. M4.5d2b2b promotes it to `nightly` if its job is green, or records what differs (question 172).
-5. **Your Mac's Command Line Tools** (question 171): 27.0 at S8, the image's 27.2 since `20261104.0337`. Nothing in
-   the repository changes when you update; the Mac's next baseline is then on 27.2.
-6. **Optional.** `git config blame.ignoreRevsFile .git-blame-ignore-revs` locally (GitHub reads the file on its
-   own). On the box, `~/cerastes-m4.5d1` and its container `cerastes-m4.5d1-p71` (idle since 2026-11-04) can go
-   (`docker rm -f`, `rm -rf`); `~/cerastes-s8` stays, since it runs each session's `check.sh`.
+1. **Push the branch** `m4.5d2b2b-owning-fields` and open its PR (or merge it to `main`), after reading
+   `internal/status.md`'s "Checks".
+2. **Remove the three worktrees** of the session (`git worktree remove --force .claude/worktrees/m4.5d2b2b-aux`,
+   then `-audit`, then `m4.5d2b2b` once the branch is pushed). The snapshot commits they hold are not on any branch, so
+   nothing is lost. The d2b2a audit worktree (`.claude/worktrees/m4.5d2b2a-auditA`) is still there too.
+3. **CI** (question 176): dispatch the workflow once with `profiles` = `all`; the next session promotes `macos-26` to
+   `nightly` if its job is green (question 172).
+4. **Answer §8's questions 194–197** (each has a recommendation).
+5. **Optional.** On the box, `~/cerastes-m4.5d1` and its container `cerastes-m4.5d1-p71` can go (`docker rm -f`,
+   `rm -rf`); `~/cerastes-s8` stays.
 
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
 
-**M4.5d2b2b owning fields:** its notes are in its plan's Inputs (`.claude/plans/m4-5d2b2b-owning-fields.md`).
 
 **M4.5d2b2c `not_invalidating`, `--strict-owner`, marked fields** (question 188; after d2b2b, before M4.5e1; the
 spellings were decided at d2b2a's planning, questions 175 and 177–179; sources: P4222R3, P4416R0, P4418R0, P4417R0,
@@ -140,12 +120,35 @@ wording in P4417R0)
   `--strict-init` a store to a marked field follows 0052 item 4's rule for a marked local, and the pin
   `tests/memory/negative/reject_strict_init_malloc_member.c` flips. d2b2b pins EDG's #1835 on such a field, naming
   d2b2c. [d2b2b planning]
-- **d2b2b's cuts 1 and 2, if taken** (its plan, "Pre-agreed cuts"): loops over the owning leaves of struct locals and
-  globals; the dropped-block rows for an owning field reached through a pointer. Cut 3 (chains) names M4.5f2.
-  [d2b2b planning]
+- **d2b2b's cuts:** none was taken. Its S40 (d) chose no dropped-block row through a pointer (the end-of-function row
+  reports the block; record 0055 item 4), a design decision, not cut 2: a row that names the other owner needs a ghost
+  per heap object (M4.5f). [d2b2b]
+- **From M4.5d2b2b** (record 0055 item 7, "Further limits"; each a pinned false alarm in `tests/memory/negative/`,
+  `owning_field_loop_*_false_alarm.c`, and in `memory.adoc`'s not-yet list; question 195 recommends d2b2c fixes them):
+  - a loop through a non-owning heap alias of a borrowed structure (`v = p;`, `free(v->q)`): 0047 item 10's heap place
+    does not carry its pointee's closure (audit S5's second half, not built);
+  - a call through an alias `ps = &s` in a loop: the leaf's ghost is not refreshed (only `&s` itself is matched);
+  - an owning `struct S *gp` global's field freed in a loop: the loop's places miss the cells of the global's block,
+    and a written invariant fails the same way;
+  - in `main`, a struct global's leaf reached only by type: no carry, since `program_start` does not fix a global's
+    value; the il-analyst's proposal is a ghost-guarded synthetic site that carries the leaf only where `held_g` was
+    true at entry;
+  - the flag of a leaf carried by type, or of an owning local that may be null at the loop's entry, is lost when the
+    loop neither stores the type nor hands the owner on (`uninitialized` on a later read; 0054 item 5's `wef`
+    heuristic and the full carrier's flag loss);
+  - a three-level chain in a loop (one level of closure is carried; recursing hit unplaced cells);
+  - a loop that may replace the owner itself (no closure is carried across the replacement).
+  Also from d2b2b's audits: a bodiless untied borrow gets two messages, the first misleading when the borrow is
+  unguarded (round 2 on Part A, N1); a `static` cache cannot hand out a pointer into the buffer its leaf owns (N2;
+  0054 item 7's cover does not reach blocks owned by a static leaf). [d2b2b]
 - **Pins.** No P4418R0 attribute has a pin of its own, though 0054 item 10 promised one each. `not_invalidating` on
   a function, and `no_dangling` (an unknown name in the closed namespace; question 179), get theirs here.
   [d2b2b planning survey]
+
+**M4.8 C parity close-out, from M4.5d2b2b** (with questions 66 and 189): two owning fields replaced in one loop under
+written invariants take 218.5 s (S40 `g3_two.c`, loaded machine; one field 6.3 s); the audit probe `cover_twice.c`
+(two calls of a function returning `&s` of a `static` struct with an owning field, then frees through both, a failing
+program) takes over 300 s. [d2b2b]
 
 **M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
 through `void*` cannot be written [M4.5a]; accepted completeness gap for e2's relational comparisons: `&s.x < &s.y` is
@@ -436,7 +439,7 @@ Finished sessions: `plan.md`'s Done table has a row each, `.claude/plans/` their
 `internal/status.md` their results and the commits it names. The warning sweep (was M4.4e) is an M8 entry in
 `plan.md`.
 
-**Pending side sessions** (none blocks M4.5d2b2b):
+**Pending side sessions** (none blocks M4.5d2b2c):
 - **The EDG box session** (§4.1, pending since M4.2c).
 - **The vlibc `<stdlib.h>` shim session** (owner, 2026-11-09, question 170: "Follow recommendation using a vlibc
   session"). With clang 20 and 18, vlibc's `<stdlib.h>` shim meets glibc's declarations with an incompatible linkage
@@ -487,17 +490,14 @@ plans. The narrative of their splits, the original d2 paragraph and d2's depende
 and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:`
 comment name the new session.
 
-**M4.5d2b2b Owning fields** (planned; plan `.claude/plans/m4-5d2b2b-owning-fields.md`; record 0055; questions
-188–193). Acyclic owning fields (target `d`), complete: owning a structure is `owns(*p)` plus `p->q == NULL ||
-owns_block(p->q)` per owning field (the closure, under the atom's own guards, to any acyclic depth); owning leaves of
-struct locals, struct globals and `static` struct locals as owners in memory; copies as stores to an owner; loops; the
-docs table that maps P4417R0's `[[owner]]` positions. Its one flip is `reject_struct_owning_field.c`. The planning
-survey measured 1,260–2,400 `src/` lines (plan for 1,700–3,300).
+**M4.5d2b2b Owning fields:** done (2026-11-10; record 0055; `internal/status.md`). It landed about 2,750 `src/`
+lines against the plan's 1,700–3,300.
 
 **M4.5d2b2c `not_invalidating`, `--strict-owner`, marked fields** (after d2b2b; question 188).
 `cerastes::not_invalidating` on a pointer parameter, checked (178); `--strict-owner`, P4417R0's p4 and p6 as an
-opt-in (177); `ref_to_uninit` on a field (192); d2b2b's cuts 1 and 2 if taken. No `no_dangling` in C (179). Its design
-notes are §3 "M4.5d2b2c"; the survey measured 290–440 and 200–280 lines.
+opt-in (177); `ref_to_uninit` on a field (192); d2b2b's pinned loop limits if question 195 is answered as recommended
+(none of d2b2b's cuts was taken). No `no_dangling` in C (179). Its design notes are §3 "M4.5d2b2c" with "From
+M4.5d2b2b"; the survey measured 290–440 and 200–280 lines, before the loop limits.
 
 **M4.5e1 Arrays.** Local arrays as blocks, `a[i]`, array parameters, `owns_range` as quantified permissions over the
 absolute slot, the marked range rows in the driver (owner, after S25), `forall` in C (0029 item 4: its planning decides
@@ -773,6 +773,13 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   re-run a generator over files in the tree) held after that. The audits ran on snapshot commits made with a
   temporary index (`GIT_INDEX_FILE=… git add -A; git write-tree; git commit-tree`) in a second worktree with its own
   build. So round 2 audited each part while the next part was built, with no mixed working tree. [d2b2a]
+- **Snapshot worktrees for the lowering and the audits** (M4.5d2b2b): the session tree kept Part A while the
+  lowering of Parts B–D was built in `.claude/worktrees/<session>-aux` (detached, committed there), and each audit ran
+  on a snapshot in `-audit` with its own build; the branch's commits were then made from the snapshots' trees with a
+  temporary index (`git read-tree`, `git ls-tree -r <snap> -- src/ | git update-index --index-info`,
+  `git commit-tree`, `git update-ref`, then `git reset -q`). A shell `rm` inside `bash -c` is refused by the safety
+  check: `git read-tree` replaces a temporary index anyway. The harness refuses a subagent's second hand-back, which
+  silently drops the report: have agents write each report to `build/<session>/…-report-<n>.md` as well. [d2b2b]
 - **Every session that changes CI:** a new toolchain is one `[[profile]]` in `scripts/ci_toolchains.toml` at `dispatch`,
   promoted to `nightly` after a green full check; the developer guide's "Adding a toolchain" has the fields. The guard
   pins every assertion line of `ci.sh`/`ci-linux.sh` literally (messages included) and `ci.yml` as a pattern tree, so a
@@ -850,4 +857,19 @@ Other answers that steer a later session are in that session's notes (§3, §4):
 - **192** `ref_to_uninit` on a field: in d2b2c, with the strict rules.
 - **193** the session tools are committed under `scripts/`, and spike summaries into `internal/il-inventory.md`.
 
-**Open:** none.
+**At M4.5d2b2b (2026-11-10), open:**
+- **194** The cover decision taken in the session (record 0055 item 3, "Covered atoms"). An output `owns(*r)` that
+  the implicit atom of a `static` struct can cover carries no closure: two calls of `where()` returning `&s` took
+  Silicon past 170 s with the closure under `!cov`, 11 s without it. The cost: a function that returns `&s` on some
+  paths and a fresh structure whose owning field holds a block on others is reported (`leak` in that function), and
+  a caller cannot free `r->q` of such a result. **Recommended: keep it** (sound; the re-audit's B1 made the leak
+  exemption follow it); revisit with M4.8's cost work if a ported example needs the mixed shape.
+- **195** The pinned loop limits of §3 "From M4.5d2b2b" (seven false alarms, each pinned and documented).
+  **Recommended: M4.5d2b2c takes them** before `not_invalidating` (they are the owner's "complete now" kind and touch
+  the same carriers), sized at its planning; the cost items go to M4.8.
+- **196** Two owning fields in one loop (218.5 s) and `cover_twice.c` (over 300 s, a failing program).
+  **Recommended: M4.8**, with questions 66 and 189.
+- **197** `reject_owning_field_function_pointer.c` and the other collision pins name the owning-specific reason at the
+  field, where 0043 item 2 would also reject the shape; `ref_to_uninit` on any variable whose pointee has an owning
+  field is now rejected (audit round 2 on Part A, S3, extended to locals). **Recommended: keep both** (one error per
+  field; d2b2c's `ref_to_uninit` on a field revisits the second).

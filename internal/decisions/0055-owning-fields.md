@@ -1,11 +1,16 @@
 # 0055 — Owning fields (M4.5d2b2b)
 
-- **Status:** draft (2026-11-09, M4.5d2b2b), written before code (invariant 6), revised after spike S40
+- **Status:** accepted (2026-11-10, M4.5d2b2b), written before code (invariant 6), revised after spike S40
   (`il-inventory.md`, chapter M4.5d2b2b): S40 (d) decided item 4 for the fallback, S40 (f) left chains in (no cut 3),
   and S40 added the bodiless initializer's rejection (item 3) and the two-field loop's cost (item 7). Revised after
   audit round 1 (Opus; no blocking item; should-fix S1–S7 and notes N1–N10 taken in items 3–7 and 11): the two open
   points are settled, item 3's bodiless fresh result by S2 (the rejection kept, its scope and reason restated) and item
-  5's `&s.q` as a `T**` by question 3(b) (no row, sound). Owner decisions from M4.5d2b2b's planning, 2026-11-09 (plan
+  5's `&s.q` as a `T**` by question 3(b) (no row, sound). Audit round 2 per part, on snapshots: Part A (`4e2cdc2`; no
+  blocking item; S1 tests, S2 a message, S3 a marked owning global rejected), Parts B and C (`d299fb9`; B1 leaf ghosts
+  havocked by loops, S1 an unguarded entry read, S2 owner lists without leaves, S3 the cover's cost), and the re-audit
+  with Part D (`7ba961f`; B1 the S3 change left a covered site exempt from the leak row — unsound, fixed; B2 a global
+  leaf reached by type neither framed nor carried; S1 an assigned owner's closure; S2 chains in loops), then a focused
+  review of those fixes. Owner decisions from M4.5d2b2b's planning, 2026-11-09 (plan
   `.claude/plans/m4-5d2b2b-owning-fields.md`), each the recommendation:
   - **188:** M4.5d2b2 is three sessions; this record is d2b2b's, owning fields complete with the `[[owner]]` mapping.
     `not_invalidating`, `--strict-owner` and `ref_to_uninit` on a field are d2b2c's.
@@ -170,9 +175,16 @@ keeps raw storage out of the profile. cerastes checks raw storage (0047).
      of unknown value (a C tentative definition, a C++ global with external linkage) gives no token at entry, so `main`
      assigns its owning leaves before a callee whose closure needs them ("calls `f`, which needs to own the whole
      allocation `g.q` points to"; pinned).
-   - **Covered atoms** (audit S6). An atom covered by the implicit `owns(s)` of a `static` struct (0052 item 2's
-     `return &s;` with `ensures(r, owns(*r))`, 0054 item 7's leaf cover) carries its closure under `!cov`, as its value
-     facts do; otherwise the block of `s.q` would be returned twice (a false alarm at the callee's return row).
+   - **Covered atoms** (audit S6; audit round 2 on Parts B and C, S3). An output atom that the implicit `owns(s)` of a
+     `static` struct can cover (0052 item 2's `return &s;` with `ensures(r, owns(*r))`, 0054 item 7's leaf cover)
+     carries **no** closure: the block of `s.q` travels with the implicit atom, and a closure beside it would hand it
+     over twice. The first build put the closure under `!cov`, as the atom's value facts are; it was right, but two
+     calls of such a function in one caller took Silicon past 170 s (`p = where(); p->n = 1; p2 = where();`, against
+     10 s without the clause). So the closure is dropped where a cover is possible. This is sound: a function that
+     returns a fresh structure on some path, whose owning field holds a block there, still holds that block at its
+     return and is reported (a false alarm for that rare shape; recorded for the owner, handoff question 194). The
+     caller of a function that returns `&s` neither receives nor frees `r->q`'s block: the static owner keeps it, and
+     `main` may end holding it.
 
 4. **Stores to an owning field through a pointer** (`p->q = x`, `p->t.q = x`, `(*pp)->q = x`, inside an expression
    too; amends 0043 item 9).
@@ -209,7 +221,7 @@ keeps raw storage out of the profile. cerastes checks raw storage (0047).
    - **Ghost** `held_<var>_<path>`: false at a local's declaration; at method entry true exactly where a `requires`
      site gives the leaf's block (a clause of item 3 on the leaf, or a written site).
    - **Rows at stores by name** (`s.q = x`, `s.t.q = x`, `g.q = x`): the value rule of item 4 and 0052 item 3's
-     reassignment row (`leak`: "assigning to owning field `s.q` drops the block it holds"), reading the old value under
+     reassignment row (`leak`: "assigning to owning field `s.q` still holds its block", 0052's wording), reading the old value under
      the leaf's flag. After every call and every `free`, the ghost is updated framed, as 0054 item 5 does for an owning
      global. **The two updates** (audit S3): after a callee whose `ensures` closes over the leaf (a borrow of `&s`, a
      call that takes `owns(g)`), the plain `held := L != NULL`, under the atom's guard; after every other call
@@ -224,7 +236,7 @@ keeps raw storage out of the profile. cerastes checks raw storage (0047).
      this item (audit S3): its rows are `perm(tok) == none` rather than 0052's owner list, its passing program never
      stores `s.q` by name, and its ghost update is the plain one only. The session's tests cover the rest.
    - **Lifetime end** of a struct local: 0052 item 3's ending row at each exit from its scope (`leak`, at the exit:
-     "owning field `s.q` still holds its block when `s`'s lifetime ends").
+     "owning field `s.q` still holds its block", worded as 0052's "owning `p` still holds its block").
    - **Globals and `static` locals.** An owning leaf's initializer is absent or a null pointer constant
      (`unsupported_annotation` otherwise: "an owning field starts null; it owns only what it is given"; fact (h)).
      `main` starts with every leaf's `held` false (0054 item 5's `program_start` rule). `main`'s leak row exempts the
@@ -273,11 +285,48 @@ keeps raw storage out of the profile. cerastes checks raw storage (0047).
      rejected, and the same loop without it is a false `permission` ("writes `*s.q` without owning it", S40 (g)
      `g2_named*.c`); this item lifts both. (Pre-agreed cut 1: loops that write a named leaf are rejected at the loop,
      naming d2b2c.)
+   - **As built (Part D).** A loop reaches a named leaf when it names its structure, stores through a pointer of the
+     structure's type, or calls a function whose contract names cells of that type. A reached leaf gets a synthetic
+     site `s.q == NULL || owns_block(s.q)` (a written site on it takes precedence) and its ghost is carried by the
+     invariant `held == (s.q != NULL)`, with entry and back-edge rows (`permission`: "the loop needs owning field `s.q`
+     to point to a block the function holds, or to be null"). An unreached leaf keeps its ghost in the loop's frame
+     (audit round 2 on Parts B and C, B1: without it a loop with any call havocked the ghost, a false `leak` on an
+     ordinary program and exit 3 on others).
    - **Owning locals and heap places of `struct S *`** (audit S5). An owning automatic local `struct S *v` (0052 item
      3) gets no closure at its declaration (its blocks are the function's, backstopped by the end row), but its loop
-     carrier and 0047 item 10's heap place of a `struct S *` carry the closure of the pointee's owning fields, so a
-     loop that frees or replaces `v->q` verifies. (Fallback: a conservative `invalid-free` or `permission`, documented
-     and pinned.)
+     carries the synthetic site `v == NULL || (v->q == NULL || owns_block(v->q) && …)`, so a loop that frees or
+     replaces `v->q` verifies. **Limit:** an owning `struct S *` global's field in a loop (`gp->q` freed and replaced)
+     is a false `permission` ("this loop invariant reads `gp->q`, which this loop does not hold"): the loop's places do
+     not include the cells of an owning global pointer's block, and a written invariant fails the same way (pinned,
+     `owning_field_loop_global_pointer_false_alarm.c`; handoff, for M4.5d2b2c or M4.8).
+   - **Further limits, each a pinned false alarm** (the re-audit; none hides an error, since a carrier or a frame can
+     only add checks):
+     - a loop through a non-owning heap alias of a borrowed structure (`v = p;` then `free(v->q)`): 0047 item 10's
+       heap place does not carry its pointee's closure (`owning_field_loop_alias_false_alarm.c`);
+     - a call through an alias `ps = &s` in a loop (`refill(ps)`): the leaf's ghost is not refreshed
+       (`owning_field_loop_alias_call_false_alarm.c`);
+     - in `main`, a struct global's leaf that the loop reaches only by type is not carried, since `program_start` does
+       not fix a global's value; outside `main` it is carried where the function holds it at entry
+       (`owning_field_loop_main_holds_false_alarm.c`);
+     - a leaf carried by type, or an owning local that may be null at the loop's entry, loses its contents' flag when
+       the loop neither stores that type nor passes the owner on: a later read is `uninitialized`
+       (`owning_field_loop_pointer_arg_false_alarm.c`, `owning_field_loop_owning_local_maybe_null_false_alarm.c`);
+     - a chain of three owning levels in a loop: one level of closure is carried
+       (`owning_field_loop_chain3_false_alarm.c`);
+     - a loop that may replace the owner itself: an owning `struct S *v` assigned a non-null value (also inside an
+       expression, or through a pointer of its type), a leaf stored by name with a non-null value, its address passed
+       to a call, or, for an address-taken owning local, any call in the loop. No closure is carried across the
+       replacement, so freeing the field inside such a loop is reported (`owning_field_loop_owner_replaced*` and
+       `owning_field_loop_owner_renewed_false_alarm.c`; the focused review of the re-audit's fixes, whose probes
+       showed that a closure carried across a replacement asserted a flag of the wrong object: exit 3).
+   - **Fixes from the re-audit** (as built): a covered closure site has no leak exemption either (B1); a global leaf
+     that a loop neither uses nor reaches through a callee stays in the frame, and one it reaches by type is carried
+     outside `main` where the function holds it, with the invariant `known ==> (held == (L != NULL))`, `!known ==>
+     !held` over an entry snapshot; every read of a leaf owner's value that rests on `held` is also guarded by
+     `perm(cell) > none` (B2); an assigned owning local's synthetic closure stands only where its cell has a value
+     (S1), and is not built at all where the loop may replace the owner (the focused review: a snapshot of the flag
+     cannot follow a replaced object); a struct local's leaf whose pointee has owning fields carries one level of
+     closure (S2).
    - **Cost** (S40 (g), loaded machine). One owning field replaced under the written invariant: 6.3 s; a loop that only
      reads through the field: 3.0 s. Two owning fields replaced under two written invariants: **218.5 s**, worse than
      0054's 33–148 s for two load sites. The tests pin one owning field per loop, and the two-field figure goes to the
