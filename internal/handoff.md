@@ -846,7 +846,12 @@ should have been asked):
   (`unsupported_expression`) and is `permission` when spelled `(*pv)->data`. **Recommended:** M4.8 admits a written
   block site on an address-taken owning local's field (record 0054 item 6's owner in memory), with the other loop false
   alarms; the pin stays until then.
+
+Follow recommendation.
+
 - **216** The older `stores_type` clause of the `wef` rule (0054 item 3): a loop copying a whole structure that holds an
   `int` beside an owning pointer gets a false `uninitialized` at the back edge (pinned,
   `owning_field_loop_struct_copy_int_false_alarm.c`; the same on the base). **Recommended:** M4.8, with question 212's
   places test, both refinements of 0054's carriers; nothing in M4.5d2b2d needs it.
+
+Follow recommendation.
