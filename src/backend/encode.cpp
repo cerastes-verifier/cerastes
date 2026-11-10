@@ -1915,6 +1915,44 @@ private:
     // Decision 0047 item 5: `[[cerastes::owning]]` and `[[cerastes::ref_to_uninit]]` on a function (target `r`), written by the program.  `owning` is
     // `ensures(r == NULL || owns_block(r))` (merged with an identical explicit clause); `ref_to_uninit` needs an `ensures` `owns_block` on the result and
     // drops that atom's flags (`result_init`).  Both need a pointer result.
+    // The `ensures` block sites of `f` on its result itself (the site through a load of it, `owns_block(r->q)`, decision 0054 item 2, is another block).
+    static std::vector<vir::AtomSite> result_block_sites(const vir::Function& f)
+    {
+        std::vector<vir::AtomSite> out;
+        for (const vir::AtomSite& st : vir::contract_block_atoms(f))
+        {
+            if (st.in_ensures && vir::atom_place(*st.atom) == vir::PlaceKey {vir::kResultSiteKey, {}, {}})
+            {
+                out.push_back(st);
+            }
+        }
+        return out;
+    }
+    // Whether the contract of `f` gives the block its result points to: an `ensures` block site on the result.
+    static bool gives_result_block(const vir::Function& f)
+    {
+        return !result_block_sites(f).empty();
+    }
+    // Whether the contract of `f` consumes the block parameter `k` points to: a `requires` block site on the parameter itself and no `ensures` site on
+    // the same place (the encoder's twin of lowering's `block_consumes`; a borrow, `owning`, has both).
+    static bool param_consumes_block(const vir::Function& f, size_t k)
+    {
+        const vir::PlaceKey place {static_cast<int>(k), {}, {}};
+        bool taken {false};
+        for (const vir::AtomSite& st : vir::contract_block_atoms(f))
+        {
+            if (vir::atom_place(*st.atom) != place)
+            {
+                continue;
+            }
+            if (st.in_ensures)
+            {
+                return false;
+            }
+            taken = true;
+        }
+        return taken;
+    }
     void apply_function_markers(a_routine_ptr r, vir::Function* f)
     {
         const an_attribute_ptr none {nullptr};
@@ -1996,16 +2034,7 @@ private:
         }
         auto result_sites = [&]()
         {
-            std::vector<vir::AtomSite> out;
-            for (const vir::AtomSite& st : vir::contract_block_atoms(*f))
-            {
-                // the site on the result itself; one through a load of it (`owns_block(r->q)`, decision 0054 item 2) is another block
-                if (st.in_ensures && vir::atom_place(*st.atom) == vir::PlaceKey {vir::kResultSiteKey, {}, {}})
-                {
-                    out.push_back(st);
-                }
-            }
-            return out;
+            return result_block_sites(*f);
         };
         if (owning != nullptr)
         {
@@ -2064,7 +2093,7 @@ private:
         }
         if (uninit != nullptr)
         {
-            if (result_sites().empty())
+            if (!gives_result_block(*f))
             {
                 reject(
                     Diag::unsupported_annotation, uninit->position,
