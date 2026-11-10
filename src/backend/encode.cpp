@@ -2489,6 +2489,12 @@ private:
             case Expr::Kind::GlobalAddr:
                 r = e->global != nullptr ? b_.global_addr(e->global, l) : nullptr;
                 break;
+            case Expr::Kind::Local: // the pointer variable of a loop invariant's atom
+                r = e->var != nullptr ? b_.local(e->var, l) : nullptr;
+                break;
+            case Expr::Kind::AddrOf: // the cell of a loop invariant's atom
+                r = e->var != nullptr ? b_.addr_of(e->var, l) : nullptr;
+                break;
             case Expr::Kind::Deref:
             case Expr::Kind::MemberAddr:
             case Expr::Kind::Field:
@@ -2728,12 +2734,13 @@ private:
                 {
                     continue;
                 }
+                const std::string first {leaf_name(*st, owning_leaves(*st).front().path)};
                 reject(
                     Diag::unsupported_annotation, m.pos,
                     "\"cerastes::ref_to_uninit\" on `" +
                         (f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name) +
-                        "`, a pointer to " + st->c_name + ", which has the owning field `" + st->members[0U].name +
-                        "` (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 3)");
+                        "`, a pointer to " + st->c_name + ", which has the owning field `" + first +
+                        "` (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 11)");
             }
         }
         const vir::StructType* rs {pointee_struct(f->ret)};
@@ -2748,9 +2755,214 @@ private:
                 reject(
                     Diag::unsupported_annotation, a->position,
                     "\"cerastes::ref_to_uninit\" on `" + f->c_name + "`, which returns a pointer to " + rs->c_name +
-                        ", which has an owning field (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 3)");
+                        ", which has an owning field (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 11)");
                 return;
             }
+        }
+    }
+
+    // What the closure of one source atom needs (decision 0055 items 3 and 7): the lists of the function's or the loop's atoms, and where the source stands.
+    struct CloseEnv
+    {
+        vir::Function* f {nullptr};
+        const std::vector<vir::AtomSite>* perms {nullptr};
+        const std::vector<vir::AtomSite>* blocks {nullptr};
+        std::vector<vir::Clause>* clauses {nullptr}; // the clause list the source is in
+        bool ensures {false};                        // the source is in the `ensures`
+        bool contract {true}; // a function's contract (a loop's invariants have no markers and no partners)
+        std::vector<vir::PlaceKey>* added {nullptr};
+        const std::vector<vir::PlaceKey>* taken {
+            nullptr}; // the `requires` places, for the partner rule of an `ensures` (null: no such rule)
+        bool bodiless {false};
+    };
+    // The block sites the pass added, with the covering atom each stands for (`owns(*p)`): finish_atoms words its messages about them.
+    std::map<const Expr*, std::string> closure_source_;
+
+    // The number of `owns_block` atoms in the tree `e`.
+    static size_t block_sites_in(const Expr* e)
+    {
+        if (e == nullptr)
+        {
+            return 0U;
+        }
+        size_t n {e->kind == Expr::Kind::Atom && e->atom == vir::AtomKind::OwnsBlock ? 1U : 0U};
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            n += block_sites_in(x);
+        }
+        for (const Expr* x : e->args)
+        {
+            n += block_sites_in(x);
+        }
+        return n;
+    }
+    // The closure of the source atom `src`: the clause `L == NULL || owns_block(L)` after it for each owning leaf `L` it covers (see apply_owning_closure).
+    void close_source(const vir::AtomSite* src, CloseEnv& env)
+    {
+        vir::Function* f {env.f};
+        auto pos_of = [&](const Expr* atom)
+        {
+            const auto it {atom_pos_.find(atom)};
+            return it != atom_pos_.end() ? it->second : cx_.stmt_pos;
+        };
+        const Expr* a {src->atom->a};
+        const bool block {src->atom->atom == vir::AtomKind::OwnsBlock};
+        if (a->type.pointee == nullptr || (env.contract && closure_marked(*f, *src)))
+        {
+            return;
+        }
+        const SrcLoc l {src->clause >= 0 && static_cast<size_t>(src->clause) < env.clauses->size()
+                            ? (*env.clauses)[static_cast<size_t>(src->clause)].loc
+                            : f->loc};
+        const a_source_position pos {pos_of(src->atom)};
+        // what the atom covers: (a maker of the pointer to the leaf's cell's value place, the leaf's pointer type)
+        struct Cover
+        {
+            Maker make;
+            vir::Type ptype;
+            std::string member; // the member's name
+        };
+        std::vector<Cover> covers;
+        const vir::Type& pointee {*a->type.pointee};
+        if (pointee.is_struct())
+        {
+            for (const OwnLeaf& lf : owning_leaves(*pointee.struct_type))
+            {
+                const std::vector<int> path {lf.path};
+                covers.push_back(Cover {[this, a, f, path, l]()
+                                        {
+                                            return leaf_read(clone_place(a, *f, l), path, l);
+                                        },
+                                        lf.type, leaf_name(*pointee.struct_type, lf.path)});
+            }
+        }
+        else if (!block && a->kind == Expr::Kind::MemberAddr && a->a != nullptr && a->a->type.is_ptr() &&
+                 a->a->type.pointee != nullptr && a->a->type.pointee->is_struct() && a->index >= 0 &&
+                 static_cast<size_t>(a->index) < a->a->type.pointee->struct_type->members.size() &&
+                 a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].owning)
+        {
+            // the leaf's own cell: `owns(p->q)`
+            covers.push_back(Cover {[this, a, f, l]()
+                                    {
+                                        return b_.deref(clone_place(a, *f, l), l);
+                                    },
+                                    pointee,
+                                    a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].name});
+        }
+        // the number of blocks the closure of this atom gives (a clause's own block and those of its nested leaves), for the rule of a bodiless fresh result
+        size_t given_blocks {0U};
+        for (const Cover& cv : covers)
+        {
+            given_blocks += block_sites_in(close_leaf(cv.make, cv.ptype, pos, l, nullptr));
+        }
+        std::vector<const Expr*> add;
+        for (const Cover& cv : covers)
+        {
+            const Expr* site {nullptr};
+            const Expr* clause {close_leaf(cv.make, cv.ptype, pos, l, &site)};
+            const vir::PlaceKey pk {vir::atom_place(*site)};
+            // the leaf's and the atom's spelling for messages; a place without one (the result of an `owning` function) is named by its member
+            const std::string field {cv.make()->c_text.empty() ? cv.member : cv.make()->c_text};
+            const std::string at {block ? val_text(*src->atom->a) : atom_text(*src->atom)};
+            const std::string source {std::string(block ? "owns_block(" : "owns(") +
+                                      (at.empty() ? std::string("the result") : at) + ")"};
+            if (!pk.valid())
+            {
+                return;
+            }
+            closure_source_[site] = source;
+            // a block site written on the leaf in this list: the clause's own shape takes its place, any other shape is refused
+            const vir::AtomSite* written {nullptr};
+            for (const vir::AtomSite& b : *env.blocks)
+            {
+                if (b.in_ensures == env.ensures && b.atom != src->atom && vir::atom_place(*b.atom) == pk)
+                {
+                    written = &b;
+                }
+            }
+            if (written != nullptr)
+            {
+                bool shape {written->guards.size() == src->guards.size() + 1U &&
+                            is_null_guard_of(written->guards.back(), cv.make())};
+                for (size_t g {0U}; shape && g < src->guards.size(); ++g)
+                {
+                    shape = src->guards[g].holds == written->guards[g].holds &&
+                            same_tree(src->guards[g].cond, written->guards[g].cond);
+                }
+                if (!shape)
+                {
+                    reject(Diag::unsupported_annotation, pos_of(written->atom),
+                           "a block site on the owning field `" + field + "` beside `" + source +
+                               "`, which already includes the block of owning field `" + field +
+                               "`: to say it holds a block, write `" + field + " != NULL`; to name the block, write `" +
+                               field + " == NULL || owns_block(" + field + ")` or nothing (decision 0055 item 3)");
+                }
+                return;
+            }
+            // a permission atom on the leaf's block (`reads(*p->q)` beside `owns(*p)`): the structure's `owns` already holds that block whole
+            const vir::AtomSite* beside {nullptr};
+            for (const vir::AtomSite& o : *env.perms)
+            {
+                if (o.in_ensures == env.ensures && o.atom != src->atom && vir::atom_place(*o.atom) == pk)
+                {
+                    beside = &o;
+                }
+            }
+            if (beside != nullptr)
+            {
+                reject(
+                    Diag::unsupported_annotation, pos_of(beside->atom),
+                    std::string(beside->atom->atom == vir::AtomKind::Reads  ? "`reads("
+                                : beside->atom->atom == vir::AtomKind::Live ? "`live("
+                                                                            : "`owns(") +
+                        atom_text(*beside->atom) + ")` beside `" + source +
+                        "`, which already holds the block of the owning field `" + field +
+                        "` (a borrower that only reads writes `reads` of the structure and of the field's block, not `owns` of the structure; decision 0055 item 3)");
+                return;
+            }
+            if (std::find(env.added->begin(), env.added->end(), pk) != env.added->end())
+            {
+                return; // two atoms on one place: finish_atoms reports the overlap
+            }
+            if (env.taken != nullptr && env.ensures && env.bodiless &&
+                std::find(env.taken->begin(), env.taken->end(), pk) == env.taken->end())
+            {
+                // a block the contract gives, with no `requires` partner (0054 item 2, 0052 item 2a).  A token inhaled from a bodiless `ensures` is distinct from
+                // every block the caller holds, so an `owns(*r)` of the result (not itself a block) whose closure gives exactly ONE block is accepted (audit S2);
+                // what no bodiless contract can state is the pairwise distinctness of two given blocks, which the result's own block and its field's are.
+                const bool on_result {vir::atom_place(*src->atom).root == vir::kResultSiteKey};
+                if (!(on_result && !block && given_blocks == 1U))
+                {
+                    reject(
+                        Diag::unsupported_annotation, pos,
+                        "`" + source + "` in the `ensures` of `" + f->c_name + "` covers the owning field `" + field +
+                            "`, " +
+                            (on_result
+                                 ? (block
+                                        ? "a block that the fresh result would hand over beside the result's own block"
+                                        : "one of " + std::to_string(given_blocks) +
+                                              " blocks that the fresh result would hand over")
+                                 : "a block that `" + f->c_name + "` would give") +
+                            " with no `requires` partner, and `" + f->c_name +
+                            "` has no body in this unit: nothing verifies that these blocks are distinct from every block the caller holds and from each other, so a contract nothing verifies may not promise them (the contract manifest, M6; decision 0055 item 3)");
+                    return;
+                }
+            }
+            env.added->push_back(pk);
+            add.push_back(clause);
+        }
+        if (add.empty())
+        {
+            return;
+        }
+        const Expr* joined {src->atom};
+        for (const Expr* c : add)
+        {
+            joined = b_.binary(vir::BinaryOp::LAnd, joined, c, l);
+        }
+        if (!replace_node((*env.clauses)[static_cast<size_t>(src->clause)].expr, src->atom, joined))
+        {
+            lib_internal_error(pos, "the closure of an atom over owning fields could not be placed after the atom");
         }
     }
 
@@ -2760,11 +2972,6 @@ private:
         const std::vector<vir::AtomSite> perms {vir::contract_atoms(*f)};
         const std::vector<vir::AtomSite> blocks {vir::contract_block_atoms(*f)};
         const bool bodiless {verified_body(r) == nullptr};
-        auto pos_of = [&](const Expr* atom)
-        {
-            const auto it {atom_pos_.find(atom)};
-            return it != atom_pos_.end() ? it->second : cx_.stmt_pos;
-        };
         // the places of the clauses of the `requires` (added or written): an `ensures` clause on one of them has its `requires` partner
         std::vector<vir::PlaceKey> taken;
         for (const vir::AtomSite& b : blocks)
@@ -2776,7 +2983,6 @@ private:
         }
         for (int list {0}; list < 2; ++list)
         {
-            std::vector<vir::Clause>& cl {list == 0 ? f->requires_ : f->ensures_};
             std::vector<vir::PlaceKey> added;
             std::vector<const vir::AtomSite*> sources;
             for (const vir::AtomSite& st : perms)
@@ -2793,154 +2999,67 @@ private:
                     sources.push_back(&st);
                 }
             }
+            CloseEnv env;
+            env.f = f;
+            env.perms = &perms;
+            env.blocks = &blocks;
+            env.clauses = list == 0 ? &f->requires_ : &f->ensures_;
+            env.ensures = list == 1;
+            env.added = &added;
+            env.taken = &taken;
+            env.bodiless = bodiless;
             for (const vir::AtomSite* src : sources)
             {
-                const Expr* a {src->atom->a};
-                const bool block {src->atom->atom == vir::AtomKind::OwnsBlock};
-                if (a->type.pointee == nullptr || closure_marked(*f, *src))
-                {
-                    continue;
-                }
-                const SrcLoc l {src->clause >= 0 && static_cast<size_t>(src->clause) < cl.size()
-                                    ? cl[static_cast<size_t>(src->clause)].loc
-                                    : f->loc};
-                const a_source_position pos {pos_of(src->atom)};
-                // what the atom covers: (a maker of the pointer to the leaf's cell's value place, the leaf's pointer type)
-                struct Cover
-                {
-                    Maker make;
-                    vir::Type ptype;
-                    std::string member; // the member's name
-                };
-                std::vector<Cover> covers;
-                const vir::Type& pointee {*a->type.pointee};
-                if (pointee.is_struct())
-                {
-                    for (const OwnLeaf& lf : owning_leaves(*pointee.struct_type))
-                    {
-                        const std::vector<int> path {lf.path};
-                        covers.push_back(Cover {[this, a, f, path, l]()
-                                                {
-                                                    return leaf_read(clone_place(a, *f, l), path, l);
-                                                },
-                                                lf.type, leaf_name(*pointee.struct_type, lf.path)});
-                    }
-                }
-                else if (!block && a->kind == Expr::Kind::MemberAddr && a->a != nullptr && a->a->type.is_ptr() &&
-                         a->a->type.pointee != nullptr && a->a->type.pointee->is_struct() && a->index >= 0 &&
-                         static_cast<size_t>(a->index) < a->a->type.pointee->struct_type->members.size() &&
-                         a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].owning)
-                {
-                    // the leaf's own cell: `owns(p->q)`
-                    covers.push_back(
-                        Cover {[this, a, f, l]()
-                               {
-                                   return b_.deref(clone_place(a, *f, l), l);
-                               },
-                               pointee, a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].name});
-                }
-                std::vector<const Expr*> add;
-                for (const Cover& cv : covers)
-                {
-                    const Expr* site {nullptr};
-                    const Expr* clause {close_leaf(cv.make, cv.ptype, pos, l, &site)};
-                    const vir::PlaceKey pk {vir::atom_place(*site)};
-                    // the leaf's and the atom's spelling for messages; a place without one (the result of an `owning` function) is named by its member
-                    const std::string field {cv.make()->c_text.empty() ? cv.member : cv.make()->c_text};
-                    const std::string at {block ? val_text(*src->atom->a) : atom_text(*src->atom)};
-                    const std::string source {std::string(block ? "owns_block(" : "owns(") +
-                                              (at.empty() ? std::string("the result") : at) + ")"};
-                    if (!pk.valid())
-                    {
-                        continue;
-                    }
-                    // a block site written on the leaf in this list: the clause's own shape takes its place, any other shape is refused
-                    const vir::AtomSite* written {nullptr};
-                    for (const vir::AtomSite& b : blocks)
-                    {
-                        if (b.in_ensures == (list == 1) && b.atom != src->atom && vir::atom_place(*b.atom) == pk)
-                        {
-                            written = &b;
-                        }
-                    }
-                    if (written != nullptr)
-                    {
-                        bool shape {written->guards.size() == src->guards.size() + 1U &&
-                                    is_null_guard_of(written->guards.back(), cv.make())};
-                        for (size_t g {0U}; shape && g < src->guards.size(); ++g)
-                        {
-                            shape = src->guards[g].holds == written->guards[g].holds &&
-                                    same_tree(src->guards[g].cond, written->guards[g].cond);
-                        }
-                        if (!shape)
-                        {
-                            reject(Diag::unsupported_annotation, pos_of(written->atom),
-                                   "a block site on the owning field `" + field + "` beside `" + source +
-                                       "`, which already includes the block of `" + field + "`: write `" + field +
-                                       " == NULL || owns_block(" + field + ")` or nothing (decision 0055 item 3)");
-                        }
-                        continue;
-                    }
-                    // a permission atom on the leaf's block (`reads(*p->q)` beside `owns(*p)`): the structure's `owns` already holds that block whole
-                    const vir::AtomSite* beside {nullptr};
-                    for (const vir::AtomSite& o : perms)
-                    {
-                        if (o.in_ensures == (list == 1) && o.atom != src->atom && vir::atom_place(*o.atom) == pk)
-                        {
-                            beside = &o;
-                        }
-                    }
-                    if (beside != nullptr)
-                    {
-                        reject(
-                            Diag::unsupported_annotation, pos_of(beside->atom),
-                            std::string(beside->atom->atom == vir::AtomKind::Reads  ? "`reads("
-                                        : beside->atom->atom == vir::AtomKind::Live ? "`live("
-                                                                                    : "`owns(") +
-                                atom_text(*beside->atom) + ")` beside `" + source +
-                                "`, which already holds the block of the owning field `" + field +
-                                "` (a borrower that only reads writes `reads` of the structure and of the field's block, not `owns` of the structure; decision 0055 item 3)");
-                        continue;
-                    }
-                    if (std::find(added.begin(), added.end(), pk) != added.end())
-                    {
-                        continue; // two atoms on one place: finish_atoms reports the overlap
-                    }
-                    if (list == 1 && bodiless && std::find(taken.begin(), taken.end(), pk) == taken.end())
-                    {
-                        // a block the contract gives, with nothing proving it distinct from every block the caller holds (0054 item 2, 0052 item 2a)
-                        const bool on_result {vir::atom_place(*src->atom).root == vir::kResultSiteKey};
-                        reject(
-                            Diag::unsupported_annotation, pos,
-                            "`" + source + "` in the `ensures` of `" + f->c_name + "` covers the owning field `" +
-                                field + "`, " +
-                                (on_result ? "a block that the fresh result would hand over"
-                                           : "a block that `" + f->c_name + "` would give") +
-                                " with no `requires` partner, and `" + f->c_name +
-                                "` has no body in this unit: nothing verifies that this block is distinct from every block the caller holds, so a contract nothing verifies may not promise it (the contract manifest, M6; decision 0055 item 3)");
-                        continue;
-                    }
-                    added.push_back(pk);
-                    add.push_back(clause);
-                }
-                if (add.empty())
-                {
-                    continue;
-                }
-                const Expr* joined {src->atom};
-                for (const Expr* c : add)
-                {
-                    joined = b_.binary(vir::BinaryOp::LAnd, joined, c, l);
-                }
-                if (!replace_node(cl[static_cast<size_t>(src->clause)].expr, src->atom, joined))
-                {
-                    lib_internal_error(pos,
-                                       "the closure of an atom over owning fields could not be placed after the atom");
-                }
+                close_source(src, env);
             }
             if (list == 0)
             {
                 taken.insert(taken.end(), added.begin(), added.end());
+            }
+        }
+    }
+
+    // Decision 0055 item 7: the closure of the atoms written in the `invariant` clauses of a loop, as in a contract: a written `owns(*p)` on a structure with
+    // owning fields is followed, under its guards, by `L == NULL || owns_block(L)` for each owning leaf, a written block site of the same shape taking its place.
+    void apply_invariant_closure(std::vector<vir::Clause>& invariants)
+    {
+        if (cx_.fn == nullptr)
+        {
+            return;
+        }
+        vir::Stmt tmp;
+        tmp.kind = vir::Stmt::Kind::While;
+        tmp.invariants = invariants;
+        const std::vector<vir::AtomSite> all {vir::loop_atoms(tmp)};
+        const std::vector<vir::AtomSite> blocks {vir::loop_block_atoms(tmp)};
+        std::vector<vir::AtomSite> perms;
+        for (const vir::AtomSite& st : all)
+        {
+            if (st.atom->atom != vir::AtomKind::OwnsBlock)
+            {
+                perms.push_back(st);
+            }
+        }
+        std::vector<vir::PlaceKey> added;
+        CloseEnv env;
+        env.f = cx_.fn;
+        env.perms = &perms;
+        env.blocks = &blocks;
+        env.clauses = &invariants;
+        env.contract = false;
+        env.added = &added;
+        for (const vir::AtomSite& st : perms)
+        {
+            if (st.atom->atom == vir::AtomKind::Owns && st.atom->a != nullptr)
+            {
+                close_source(&st, env);
+            }
+        }
+        for (const vir::AtomSite& st : blocks)
+        {
+            if (st.atom->a != nullptr)
+            {
+                close_source(&st, env);
             }
         }
     }
@@ -7502,10 +7621,30 @@ private:
                 continue;
             }
             bool mixed {false};
+            const Expr* closure_site {nullptr}; // the one of the two that the closure of a covering atom added
             for (size_t j {0U}; j < i; ++j)
             {
-                mixed = mixed || (vir::atom_place(*block_sites[j].atom) == bk &&
-                                  block_sites[j].atom->vlibc_block != b.atom->vlibc_block);
+                if (vir::atom_place(*block_sites[j].atom) == bk &&
+                    block_sites[j].atom->vlibc_block != b.atom->vlibc_block)
+                {
+                    mixed = true;
+                    closure_site = closure_source_.count(b.atom) != 0U                ? b.atom
+                                   : closure_source_.count(block_sites[j].atom) != 0U ? block_sites[j].atom
+                                                                                      : nullptr;
+                }
+            }
+            if (mixed && closure_site != nullptr)
+            {
+                const std::string field {closure_site->a != nullptr ? val_text(*closure_site->a)
+                                                                    : std::string("the field")};
+                reject(
+                    Diag::unsupported_annotation, pos_of(closure_site),
+                    "\"cerastes_owns_vlibc_block\" and \"owns_block\" of the same pointer in one contract: the `owns_block` of `" +
+                        field + "` is the block of owning field `" + field + "` that `" +
+                        closure_source_[closure_site] +
+                        "` includes in the other list (decision 0055 item 3), and a contract may not name both allocators' blocks on one root: write the same spelling in both lists, `" +
+                        field + " == NULL || cerastes_owns_vlibc_block(" + field + ")` (decision 0052 item 7)");
+                continue;
             }
             if (mixed)
             {
@@ -8344,6 +8483,23 @@ private:
                         "\"" + an + "\" on `" + name +
                             "`, which has an initializer that is not a null pointer constant (an owning or marked variable starts null; it owns only what it is given, decision 0054 item 5)");
                     r.bad = true;
+                    continue;
+                }
+            }
+            if (k == Annot::ref_to_uninit && is_struct_kind(pe))
+            {
+                // decision 0055 item 11: an object with an owning field may not be marked as holding no value (M4.5d2b2c's strict rules decide it)
+                const StructInfo& si {struct_info(pe)};
+                const std::vector<OwnLeaf> leaves {si.ok && si.type.is_struct() ? owning_leaves(*si.type.struct_type)
+                                                                                : std::vector<OwnLeaf> {}};
+                if (!leaves.empty())
+                {
+                    reject(
+                        Diag::unsupported_annotation, at,
+                        "\"" + an + "\" on `" + name + "`, a pointer to " + si.type.struct_type->c_name +
+                            ", which has the owning field `" + leaf_name(*si.type.struct_type, leaves.front().path) +
+                            "` (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 11)");
+                    r.skip = r.bad = true;
                     continue;
                 }
             }
@@ -12026,6 +12182,7 @@ private:
             invariants.push_back(vir::Clause {c, clause_loc});
         }
         // positions of the arguments of a CERASTES_* macro are the user's own (decision 0006 item 10)
+        apply_invariant_closure(invariants); // decision 0055 item 7
         cx_.annotation = true;
         if (!check_invariant_atoms(invariants))
         {

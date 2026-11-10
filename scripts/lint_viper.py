@@ -1798,26 +1798,55 @@ def lint_carrier_clauses(src: Source, decls: list[Decl], add: Callable[[int, str
                 i = text.find(TOK_ACC, i + 1)
 
 
-# Owning globals, `static` locals and address-taken owners (decision 0054 items 5, 6 and 8).  The lowering gives each such owner the
-# method-level ghost `held_<o>` (for a global or `static` local `<o>` is its block's name, `GB_<name>`; an owning local also has `tv_<o>`), and `main`'s leak
-# row exempts the block of an owning global by a term `held_GB_x && t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`.  The lint reads only
-# the Viper, so:
-#   * `program_start` carries one tag line `// cerastes:owning-global GB_<name>` per owning global (right after its head, before its
-#     first clause), each naming a declared `unique function GB_<name>()` once; `held_GB_x` exists only for a tagged block;
-#   * a `held_<o>` is assigned only: `false`; `<x> != null` (the owner received a value; its value row precedes); `held_<o> && ((<x> != null)
-#     && (perm(tok(<x>)) > none))` (after a call or a free, local); `(held_<o> && (perm(<C>) > none)) && ((<C> != null) && (perm(tok(<C>))
-#     > none))` (after a call or a free, global or address-taken owner, `<C>` the owner's own cell `loc(GB_x(), 0).v_ptr_T` or
-#     `<o>.v_ptr_T`); `held_<o> || (((<x> != null) && (offset_of(<x>) == 0)) && (perm(tok(<x>)) == write))` (an address-taken owner that
-#     received a block): it never becomes `true` without a read of the token's permission;
+# Owning globals, `static` locals and address-taken owners (decision 0054 items 5, 6 and 8) and the owning leaves of struct objects
+# (decision 0055 items 5 and 9).  The lowering gives each such owner the method-level ghost `held_<o>` (for a global or `static` local
+# `<o>` is its block's name, `GB_<name>`; an owning local also has `tv_<o>`), and `main`'s leak row exempts the block of an owning global
+# by a term `held_GB_x && t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`.  An owning leaf of a struct has the ghost `held_<root>_<k>...`
+# (`<root>` the global's block `GB_x` or the struct local's variable, `k...` the member path) and the leaf's cell `loc(member(<chain>, k),
+# 0).v_ptr_T` in place of the owner's own cell.  The lint reads only the Viper, so:
+#   * `program_start` carries one tag line `// cerastes:owning-global GB_<name>` per owning pointer global, and
+#     `// cerastes:owning-global GB_<name>/<k>[/<k>...]` per owning leaf of a struct global (right after its head, before its first
+#     clause), each naming a declared `unique function GB_<name>()` once; a member path is pinned against the global's `program_start`
+#     row (a pointer leaf of that struct, 0055 item 9), a struct global is tagged only by member paths; `held_GB_x...` exists only for a
+#     tagged block or leaf, under the name the tag spells (`held_GB_x_<k>_<k>`);
+#   * a `held_<o>` is assigned only: `false`; `<x> != null` (the owner received a value; its value row precedes) or `<leaf cell> != null`
+#     (an owning leaf, the cell of that very leaf); `held_<o> && ((<x> != null) && (perm(tok(<x>)) > none))` (after a call or a free,
+#     local); `(held_<o> && (perm(<C>) > none)) && ((<C> != null) && (perm(tok(<C>)) > none))` (after a call or a free, global or
+#     address-taken owner, `<C>` the owner's own cell `loc(GB_x(), 0).v_ptr_T` or `<o>.v_ptr_T`, or the leaf's cell: the ghost's name must
+#     be the one that cell spells); `held_<o> || (((<x> != null) && (offset_of(<x>) == 0)) && (perm(tok(<x>)) == write))` (an address-taken
+#     owner that received a block): it never becomes `true` without a read of the token's permission;
 #   * a `tv_<o>` (an owning local's allocator ghost) is assigned only `(<x> != null) ? tok(<x>) : tv_<o>`;
-#   * an exemption term of a `forperm` row with a `held_GB_x` guard names exactly `t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`;
-#   * a comparison of `held_GB_x` with a value is `held_GB_x == (loc(GB_x(), 0).v_ptr_T != null)`, as the loop invariant and its rows say.
+#   * an exemption term of a `forperm` row with a `held_GB_x` guard names exactly `t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`, with a
+#     leaf's ghost exactly `t == loc(block_of(<that leaf's cell>), -1)` (a deeper term, 0055 S4, extends `exemption_term_problem`);
+#   * a comparison of `held_GB_x...` with a value is `held_GB_x == (<its cell> != null)`, as the loop invariant and its rows say.
 OWNING_GLOBAL_TAG_RE = re.compile(r"//\s*cerastes:owning-global\b[ \t]*(?P<name>\S+)?")
 GB_CALL_RE = re.compile(r"(?<![\w$'])(?P<name>GB_[A-Za-z0-9_$']+)\s*\(\s*\)")
-GB_GHOST_RE = re.compile(r"(?<![\w$'.])held_(?P<name>GB_[A-Za-z0-9_$']+)(?![\w$'])")
+GHOST_ANY_RE = re.compile(r"(?<![\w$'.])(?P<ghost>held_GB_[\w$']*)")
 OWNER_ASSIGN_RE = re.compile(r"(?<![\w$'.])(?P<g>(?:held|tv)_[\w$']+)\s*:=")
 _ID = r"[A-Za-z_$][\w$']*"
 _SLOT = r"loc\(block_of\((?P<{n}>.+?)\),\(?-1\)?\)\.tok"
+_LEAF_CELL_RE = re.compile(r"^(?P<slot>loc\(member\(.*,[0-9]+\),0\))\.v_ptr_[\w$']+$")
+_PATH_INDEX_RE = re.compile(r"0|[1-9][0-9]*")
+
+
+def leaf_cell_owner(c: str) -> tuple[str, str, tuple[int, ...]] | None:
+    """A leaf's cell `loc(member(<chain>, k), 0).v_ptr_T` (normalized text) as (`global` or `local`, the block `GB_x` or the variable, the
+    member path), the chain rooted at `loc(GB_x(), 0)` or at the variable and nothing else inside (the grammar of decision 0043 item 13)."""
+    m = _LEAF_CELL_RE.match(c)
+    if m is None:
+        return None
+    slot = m.group("slot")
+    if g := re.search(r"loc\((GB_[\w$']+)\(\),0\)", slot):
+        path = parse_struct_chain(slot, g.group(0))
+        return ("global", g.group(1), path) if path else None
+    if v := re.search(rf"member\(({_ID}),", slot):
+        path = parse_struct_chain(slot, v.group(1))
+        return ("local", v.group(1), path) if path else None
+    return None
+
+
+def leaf_ghost_name(root: str, path: tuple[int, ...]) -> str:
+    return "held_" + root + "".join(f"_{k}" for k in path)
 
 
 def owner_assignment_ok(g: str, rhs: str) -> bool:
@@ -1827,6 +1856,10 @@ def owner_assignment_ok(g: str, rhs: str) -> bool:
         return re.fullmatch(rf"\((?P<x>{_ID})!=null\)\?loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok:{e}", r) is not None
     if r == "false" or re.fullmatch(rf"{_ID}!=null", r):
         return True
+    if m := re.fullmatch(r"(?P<c>.+)!=null", r):
+        lo = leaf_cell_owner(m.group("c"))
+        if lo is not None:
+            return g == leaf_ghost_name(lo[1], lo[2])
     if re.fullmatch(rf"{e}&&\(\((?P<x>{_ID})!=null\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)>none\)\)", r):
         return True
     if re.fullmatch(rf"{e}\|\|\(\(\((?P<x>{_ID})!=null\)&&\(offset_of\((?P=x)\)==0\)\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)==write\)\)", r):
@@ -1834,10 +1867,37 @@ def owner_assignment_ok(g: str, rhs: str) -> bool:
     m = re.fullmatch(rf"\({e}&&\(perm\((?P<c>.+?)\)>none\)\)&&\(\((?P=c)!=null\)&&\(perm\(loc\(block_of\((?P=c)\),\(?-1\)?\)\.tok\)>none\)\)", r)
     if m:
         c = m.group("c")
+        if lo := leaf_cell_owner(c):
+            return g == leaf_ghost_name(lo[1], lo[2])
         if gm := re.fullmatch(r"loc\((?P<gb>GB_[\w$']+)\(\),0\)\.v_ptr_[\w$']+", c):
             return g == "held_" + gm.group("gb")
         return re.fullmatch(rf"{_ID}\.v_ptr_[\w$']+", c) is not None and c.split(".")[0] == g[len("held_"):]
     return False
+
+
+def program_start_shapes(src: Source, start: Decl | None) -> dict[str, set[tuple[tuple[int, ...], str]]]:
+    """The struct globals of `program_start`'s rows, each as the set of its leaves (member path, field suffix): what a member path of an
+    owning-leaf tag is pinned against.  A row that does not parse is `lint_globals`' problem, not read here."""
+    if start is None:
+        return {}
+    fields = {m.group("suffix"): m.group("type") for l in src.code if (m := FIELD_DECL_RE.match(l))}
+    shapes: dict[str, set[tuple[tuple[int, ...], str]]] = {}
+    for _k, _ln, text in clause_texts(src, start):
+        row = norm_viper(text)
+        if row.startswith("acc(loc(member("):
+            r = struct_row(row, fields)
+            if not isinstance(r, str):
+                shapes[r[0]] = {(c, sfx) for c, sfx, _t in r[1]}
+    return shapes
+
+
+def exemption_term_problem(ghost: tuple[str, tuple[int, ...] | None], loc_text: str) -> bool:
+    """Whether `t == <loc_text>` is the exemption term of the ghost `ghost` = (block, member path or None for a pointer global): exactly the
+    block of that owner's own cell and no other.  A deeper term (a chain under a static owner, record 0055 S4) is added here."""
+    gb, path = ghost
+    cell = f"loc({gb}(),0)" if not path else slot_text(gb, path)
+    want = rf"loc\(block_of\({re.escape(cell)}\.v_ptr_[\w$']+\),\(?-1\)?\)"
+    return re.fullmatch(want, _nospace(loc_text)) is not None
 
 
 def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
@@ -1850,43 +1910,73 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
     if start is not None:
         clauses = [n for n in range(start.line + 1, start.end_line + 1) if re.match(r"^\s*(requires|ensures|decreases)\b", src.code[n - 1])]
         first_clause, last_clause = (clauses[0], clauses[-1]) if clauses else (None, start.line)
-    tagged: set[str] = set()
+    shapes = program_start_shapes(src, start)
+    tagged: set[str] = set()                              # owning pointer globals
+    tagged_leaves: set[tuple[str, tuple[int, ...]]] = set()   # owning leaves of struct globals
     for lineno, comment in enumerate(src.comments, start=1):
         m = OWNING_GLOBAL_TAG_RE.search(comment) if comment else None
         if m is None:
             continue
         name = m.group("name")
+        gb, *rest = name.split("/") if name else [None]
+        path = tuple(int(k) for k in rest) if all(_PATH_INDEX_RE.fullmatch(k) for k in rest) else None
         if start is None or not start.line <= lineno <= last_clause:
             add(lineno, "`// cerastes:owning-global` stands only inside `method program_start`: it names an owning global whose block "
                         "`main`'s leak row exempts (decision 0054 item 8)")
-        elif name is None or declared.get(name, 0) != 1:
+        elif name is None or declared.get(gb, 0) != 1:
             add(lineno, f"`// cerastes:owning-global {name or ''}` names no single `unique function GB_...` declared in this file "
                         "(decision 0054 item 8)")
-        elif name in tagged:
+        elif path is None or (rest and not path):
+            add(lineno, f"`// cerastes:owning-global {name}`: the member path is `/<k>[/<k>...]`, each `k` a decimal index (decision 0055 item 9)")
+        elif path and not any(c == path and sfx.startswith("ptr_") for c, sfx in shapes.get(gb, ())):
+            add(lineno, f"`// cerastes:owning-global {name}`: `{path}` is not a pointer leaf of the struct global `{gb}` in `program_start`'s "
+                        "rows: the member path names the owning field's leaf (decision 0055 item 9)")
+        elif not path and gb in shapes:
+            add(lineno, f"`// cerastes:owning-global {name}` tags a struct global without a member path: write `{gb}/<k>` for each owning "
+                        "leaf (decision 0055 item 9)")
+        elif (gb, path) in tagged_leaves or (not path and gb in tagged):
             add(lineno, f"`{name}` is tagged `// cerastes:owning-global` twice (decision 0054 item 8)")
         elif first_clause is not None and lineno > first_clause:
             add(lineno, "`// cerastes:owning-global` stands right after the head of `method program_start`, before its first clause "
                         "(decision 0054 item 8)")
+        elif path:
+            tagged_leaves.add((gb, path))
         else:
-            tagged.add(name)
+            tagged.add(gb)
+    ghosts: dict[str, tuple[str, tuple[int, ...] | None]] = {}
+    for gb in tagged:
+        ghosts["held_" + gb] = (gb, None)
+    for gb, path in tagged_leaves:
+        ghosts.setdefault(leaf_ghost_name(gb, path), (gb, path))
+    tagged_blocks = tagged | {gb for gb, _p in tagged_leaves}
     for lineno, code in enumerate(src.code, start=1):
-        for gm in sorted({m.group("name") for m in GB_GHOST_RE.finditer(code)}):
-            if gm not in tagged:
-                add(lineno, f"the ownership ghost `held_{gm}` of `{gm}` in a program whose `program_start` does not tag "
-                            f"`// cerastes:owning-global {gm}`: only an owning global has one (decision 0054 item 5)")
+        for gm in sorted({m.group("ghost") for m in GHOST_ANY_RE.finditer(code)}):
+            if gm not in ghosts:
+                if gm[len("held_"):] in declared:
+                    add(lineno, f"the ownership ghost `{gm}` of `{gm[len('held_'):]}` in a program whose `program_start` does not tag "
+                                f"`// cerastes:owning-global {gm[len('held_'):]}`: only an owning global has one (decision 0054 item 5)")
+                else:
+                    add(lineno, f"the ownership ghost `{gm}` in a program whose `program_start` tags no `// cerastes:owning-global GB_x/<k>...` "
+                                "that spells it: only a tagged owning global or an owning leaf of a tagged struct global has one "
+                                "(decision 0055 item 9)")
                 break
         for a in OWNER_ASSIGN_RE.finditer(code):
             rhs = _statement_rhs(code, a.end())
             if not owner_assignment_ok(a.group("g"), rhs):
                 add(lineno, f"`{a.group('g')}` is assigned `{rhs}`: an owner's ghost is assigned `false`, `<x> != null`, `held && ...` "
                             "(the update after a call or a free, which reads the token's permission), `held || ...` (a block received "
-                            "through an address) or, for `tv_`, the conditional read of the token (decision 0054 items 5 and 6)")
-        for gm in sorted({m.group("name") for m in re.finditer(r"(?<![\w$'.])held_(?P<name>GB_[\w$']+)\s*==(?!>)", code)}):
+                            "through an address) or, for `tv_`, the conditional read of the token (decision 0054 items 5 and 6); an owning "
+                            "leaf's ghost names its own leaf's cell (decision 0055 item 9)")
+        for gm in sorted({m.group("ghost") for m in re.finditer(r"(?<![\w$'.])(?P<ghost>held_GB_[\w$']*)\s*==(?!>)", code)}):
+            if gm not in ghosts:
+                continue
+            gb, path = ghosts[gm]
+            cell_text = f"loc({gb}(),0)" if not path else slot_text(gb, path)
+            cell = rf"{re.escape(cell_text)}\.v_ptr_[\w$']+"
             n = _nospace(code)
-            cell = rf"loc\({re.escape(gm)}\(\),0\)\.v_ptr_[\w$']+"
-            if not (re.fullmatch(rf"invariantheld_{re.escape(gm)}==\({cell}!=null\)", n)
-                    or re.fullmatch(rf"if\(!\(held_{re.escape(gm)}==\({cell}!=null\)\)\)\{{", n)):
-                add(lineno, f"`held_{gm}` is compared with something but `(loc({gm}(), 0).v_ptr_T != null)`, in the loop invariant "
+            if not (re.fullmatch(rf"invariant{re.escape(gm)}==\({cell}!=null\)", n)
+                    or re.fullmatch(rf"if\(!\({re.escape(gm)}==\({cell}!=null\)\)\)\{{", n)):
+                add(lineno, f"`{gm}` is compared with something but `({cell_text.replace(',', ', ')}.v_ptr_T != null)`, in the loop invariant "
                             "or its row (decision 0054 item 5)")
     for lineno, code in enumerate(src.code, start=1):
         m = FORPERM_LINE_RE.match(code)
@@ -1903,17 +1993,17 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                 if t is None:
                     continue
                 gbs = {g.group("name") for g in GB_CALL_RE.finditer(t.group("loc"))}
-                for g in sorted(gbs - tagged):
+                for g in sorted(gbs - tagged_blocks):
                     add(lineno, f"an exemption term `held_... && t == loc(block_of(...{g}()...), -1)` names the cell of `{g}`, which "
                                 f"`program_start` does not tag `// cerastes:owning-global {g}`: only an owning global's block is exempt "
                                 "at `main`'s end (decision 0054 item 8)")
                 for h in helds:
-                    gm = GB_GHOST_RE.fullmatch(h)
-                    if gm is None:
+                    if h not in ghosts:
                         continue
-                    want = rf"loc\(block_of\(loc\({re.escape(gm.group('name'))}\(\),0\)\.v_ptr_[\w$']+\),\(?-1\)?\)"
-                    if not re.fullmatch(want, _nospace(t.group("loc"))):
-                        add(lineno, f"the exemption term guarded by `{h}` is exactly `t == loc(block_of(loc({gm.group('name')}(), 0).v_ptr_T), "
+                    if not exemption_term_problem(ghosts[h], t.group("loc")):
+                        gb, path = ghosts[h]
+                        own = f"loc({gb}(), 0)" if not path else slot_text(gb, path).replace(",", ", ")
+                        add(lineno, f"the exemption term guarded by `{h}` is exactly `t == loc(block_of({own}.v_ptr_T), "
                                     "-1)`: a held owning global exempts its own block and no other (decision 0054 item 8)")
 
 

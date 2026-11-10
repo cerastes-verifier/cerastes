@@ -1130,10 +1130,16 @@ private:
         m.decreases_assumed = true; // 0013 item 5
         for (const Global& g : prog_.globals())
         {
-            if (g.owning)
+            for (const OwnerRef& o : global_owners_of(g))
             {
-                // decision 0054 item 8: the lint admits `main`'s exemption term only for a block tagged here
-                m.tags.push_back("cerastes:owning-global " + g.viper_name());
+                // decision 0054 item 8: the lint admits `main`'s exemption term only for a block tagged here; decision 0055 item 5: an owning leaf of a struct global is tagged
+                // with its member path (`GB_g__0/0/1`)
+                std::string tag {"cerastes:owning-global " + g.viper_name()};
+                for (const int k : o.path)
+                {
+                    tag += "/" + std::to_string(k);
+                }
+                m.tags.push_back(tag);
             }
         }
         auto clause = [&](E expr, const SrcLoc& at, const std::string& what)
@@ -1468,9 +1474,13 @@ private:
             SrcLoc end;                    // the closing brace
             // decision 0052 item 3: the `owning` locals declared directly in the block, in declaration order
             std::vector<OwnerRef> owners;
+            // decision 0055 item 5: the owning leaves of the struct locals declared directly in the block, in declaration order
+            std::vector<OwnerRef> leaves;
         };
         // the owning locals whose ghosts (`held_v`, `tv_v`) the method declares
         std::set<int> owner_ghosts;
+        // the ghosts (`held_<var>_<path>`) of owning leaves of struct locals the method declares
+        std::set<std::string> leaf_ghosts;
         // decision 0054 item 5: the owning globals and `static` locals whose ghosts (`held_g`) every method of the program declares
         std::vector<OwnerRef> gowners;
         // the owning locals whose declaration has been lowered: a loop carries those (a `for` initializer's owner
@@ -2026,6 +2036,28 @@ private:
         }
         return owners;
     }
+    // The owning leaves of the struct locals declared directly in a block (decision 0055 item 5), in declaration order.
+    static std::vector<OwnerRef> leaf_owners_of(const Stmt& block)
+    {
+        std::vector<OwnerRef> r;
+        for (const Stmt* c : block.stmts)
+        {
+            if (c != nullptr && c->kind == Stmt::Kind::Decl && c->var != nullptr && c->var->type.is_struct() &&
+                c->var->type.struct_type != nullptr)
+            {
+                for (const StructLeaf& l : struct_leaves(*c->var->type.struct_type))
+                {
+                    if (l.owning)
+                    {
+                        OwnerRef o {c->var};
+                        o.path = l.path;
+                        r.push_back(o);
+                    }
+                }
+            }
+        }
+        return r;
+    }
     // Whether lowering opens a scope for the block: it holds a cell or an owner.
     static bool opens_scope(const Stmt& block)
     {
@@ -2033,7 +2065,14 @@ private:
     }
     Fn::Scope scope_of(const Stmt& block, const std::vector<const Var*>& cells, const SrcLoc& end)
     {
-        Fn::Scope sc {cells, end, owners_of(block)};
+        Fn::Scope sc {cells, end, owners_of(block), leaf_owners_of(block)};
+        for (const OwnerRef& l : sc.leaves)
+        {
+            if (fn_.leaf_ghosts.insert(held_name(l)).second)
+            {
+                fn_.snapshots.push_back(low::LVar {held_name(l), low::LType::Bool});
+            }
+        }
         for (const OwnerRef& o_ref : sc.owners)
         {
             const Var* o {o_ref.var};
@@ -2069,6 +2108,12 @@ private:
     // The value of an owner: the owning local's variable, or the value of its cell when it is address-taken (decision 0054 item 6); an owning global's cell value.
     E owner_value(const OwnerRef& o)
     {
+        if (!o.path.empty())
+        {
+            // decision 0055 item 5: an owning leaf of a struct global or local, read from its cell
+            const E root {o.global != nullptr ? global_ref(o.global->id) : low::var(var_name(*o.var))};
+            return cell_value(chain_ref(root, o.path), owner_type(o));
+        }
         if (o.global != nullptr)
         {
             return cell_value(global_ref(o.global->id), o.global->type);
@@ -2080,6 +2125,57 @@ private:
     {
         return "tv_" + var_name(*o.var) + owner_suffix(o);
     }
+    // The type of the pointer an owner holds, and its cell: the leaf's for an owning leaf of a struct, the global's or variable's own otherwise.
+    static Type owner_type(const OwnerRef& o)
+    {
+        const Type& root {o.global != nullptr ? o.global->type : o.var->type};
+        return o.path.empty() ? root : struct_member_type(*root.struct_type, o.path);
+    }
+    E owner_cell(const OwnerRef& o)
+    {
+        return o.global != nullptr ? chain_ref(global_ref(o.global->id), o.path)
+                                   : chain_ref(low::var(var_name(*o.var)), o.path);
+    }
+    // How a message names an owner: `g`, or `g.q` / `s.t.q` for an owning leaf.
+    static std::string owner_text(const OwnerRef& o)
+    {
+        const Type& root {o.global != nullptr ? o.global->type : o.var->type};
+        const std::string name {o.global != nullptr ? o.global->c_name : o.var->name};
+        if (o.path.empty())
+        {
+            return name;
+        }
+        for (const StructLeaf& l : struct_leaves(*root.struct_type, name, false))
+        {
+            if (l.path == o.path)
+            {
+                return l.text;
+            }
+        }
+        return name;
+    }
+    // The owners of a global or `static` local: the global itself when it is an owning pointer, else one per owning leaf of a struct global (decision 0055 item 5).
+    static std::vector<OwnerRef> global_owners_of(const Global& g)
+    {
+        std::vector<OwnerRef> r;
+        if (g.owning)
+        {
+            r.emplace_back(&g);
+        }
+        else if (g.type.is_struct() && g.type.struct_type != nullptr)
+        {
+            for (const StructLeaf& l : struct_leaves(*g.type.struct_type))
+            {
+                if (l.owning)
+                {
+                    OwnerRef o {&g};
+                    o.path = l.path;
+                    r.push_back(o);
+                }
+            }
+        }
+        return r;
+    }
     // The owning locals of every open scope, outermost first.
     std::vector<OwnerRef> owners_in_scope() const
     {
@@ -2087,6 +2183,26 @@ private:
         for (const Fn::Scope& sc : fn_.scopes)
         {
             r.insert(r.end(), sc.owners.begin(), sc.owners.end());
+        }
+        return r;
+    }
+    // The owning leaves of every open scope's struct locals, outermost first.
+    std::vector<OwnerRef> leaf_owners_in_scope() const
+    {
+        std::vector<OwnerRef> r;
+        for (const Fn::Scope& sc : fn_.scopes)
+        {
+            r.insert(r.end(), sc.leaves.begin(), sc.leaves.end());
+        }
+        return r;
+    }
+    // Every owner of the open scopes: the owning locals, then the owning leaves.
+    std::vector<OwnerRef> owners_with_leaves_in_scope() const
+    {
+        std::vector<OwnerRef> r {owners_in_scope()};
+        for (const OwnerRef& l : leaf_owners_in_scope())
+        {
+            r.push_back(l);
         }
         return r;
     }
@@ -2140,26 +2256,61 @@ private:
             }
             assign(out, held_name(*o), low::and_(low::var(held_name(*o)), holds_token(low::var(var_name(*o)))));
         }
+        // decision 0055 item 5 (audit S3): an owning leaf of a struct local.  Every call and free frames the ghost as 0054 item 5 does for a global (the cell is read only where
+        // the function still holds it, so a callee that consumed `s`'s cells clears it); a callee given `&s` whose `ensures` closes over the leaf gives back what the leaf holds.
+        for (const OwnerRef& l : leaf_owners_in_scope())
+        {
+            if (framed_ghosts_.count(held_name(l)) != 0U)
+            {
+                continue;
+            }
+            assign(
+                out, held_name(l),
+                low::and_(low::and_(low::var(held_name(l)),
+                                    low::bin(low::BinOp::Gt, value_perm(owner_cell(l), owner_type(l)), low::no_perm())),
+                          holds_token(owner_value(l))));
+            for (size_t i {0U}; callee != nullptr && args != nullptr && i < args->size() && i < callee->params.size();
+                 ++i)
+            {
+                if ((*args)[i].leaves.empty() && (*args)[i].e != nullptr &&
+                    same_expr((*args)[i].e, low::var(var_name(*l.var))) &&
+                    gives_param_leaf(*callee, static_cast<int>(i), l.path))
+                {
+                    // the callee's `ensures` atom may be guarded (`c ? owns(*p) : 1`), and when its guard is false the callee has consumed the cell: read it only where the
+                    // function holds it again (else the update is the framed one above)
+                    const std::string t {new_temp(low::LType::Ref)};
+                    assign(out, t,
+                           low::ite(low::bin(low::BinOp::Gt, value_perm(owner_cell(l), owner_type(l)), low::no_perm()),
+                                    owner_value(l), low::null_()));
+                    assign(out, held_name(l), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
+                }
+            }
+        }
         // decision 0054 item 5 (Updates are framed): the cell is read only where the function still holds it; a callee that consumed `owns(g)` has taken the
         // cell and the block, so `held_g` becomes false without a read.  A callee that gives `owns(g)` back (an `ensures` atom) returns what `g` holds.
         for (const OwnerRef& g_ref : fn_.gowners)
         {
-            const Global* g {g_ref.global};
-            if (framed_ghosts_.count(held_name(*g)) != 0U)
+            if (framed_ghosts_.count(held_name(g_ref)) != 0U)
             {
                 continue; // framed out of the enclosing loop
             }
-            const E cell {global_ref(g->id)};
-            assign(out, held_name(*g),
-                   low::and_(low::and_(low::var(held_name(*g)),
-                                       low::bin(low::BinOp::Gt, value_perm(cell, g->type), low::no_perm())),
-                             holds_token(owner_value(*g))));
-            if (callee != nullptr && gives_global(*callee, *g))
+            const E cell {owner_cell(g_ref)};
+            assign(out, held_name(g_ref),
+                   low::and_(low::and_(low::var(held_name(g_ref)),
+                                       low::bin(low::BinOp::Gt, value_perm(cell, owner_type(g_ref)), low::no_perm())),
+                             holds_token(owner_value(g_ref))));
+            if (callee != nullptr && gives_global(*callee, g_ref))
             {
                 const std::string t {new_temp(low::LType::Ref)};
-                assign(out, t, owner_value(*g));
+                // an owning leaf of a struct global (decision 0055 item 5): the `ensures` atom may be guarded (`c ? owns(g) : 1`), and where its guard is false the callee has
+                // consumed the cell, so it is read only where the function holds it (an owning global itself has no guarded atom: 0054 item 5)
+                assign(out, t,
+                       g_ref.path.empty()
+                           ? owner_value(g_ref)
+                           : low::ite(low::bin(low::BinOp::Gt, value_perm(cell, owner_type(g_ref)), low::no_perm()),
+                                      owner_value(g_ref), low::null_()));
                 const E v {low::var(t)};
-                assign(out, held_name(*g), low::bin(low::BinOp::Ne, v, low::null_()));
+                assign(out, held_name(g_ref), low::bin(low::BinOp::Ne, v, low::null_()));
             }
         }
     }
@@ -2197,26 +2348,99 @@ private:
         return nullptr;
     }
     // Whether the `requires` of `f` holds the block of owning global `g` (the deep atom `g == NULL || owns_block(g)` after `owns(g)`).
-    bool holds_global_at_entry(const Function& f, const Global& g)
+    // An owning leaf of a struct global a block site names by its value (`g.q`: `Deref(MemberAddr(GlobalAddr g, k))`, decision 0055 item 3), or an empty owner.
+    static OwnerRef site_leaf_owner(const AtomSite& s)
+    {
+        OwnerRef r;
+        const Expr* a {s.atom != nullptr ? s.atom->a : nullptr};
+        if (a == nullptr || a->kind != Expr::Kind::Deref)
+        {
+            return r;
+        }
+        std::vector<int> rev;
+        const Expr* b {a->a};
+        while (b != nullptr && b->kind == Expr::Kind::MemberAddr)
+        {
+            rev.push_back(b->index);
+            b = b->a;
+        }
+        if (b != nullptr && b->kind == Expr::Kind::GlobalAddr && b->global != nullptr && !rev.empty())
+        {
+            r.global = b->global;
+            r.path.assign(rev.rbegin(), rev.rend());
+        }
+        return r;
+    }
+    bool holds_global_at_entry(const Function& f, const OwnerRef& g)
     {
         for (const AtomSite& s : blocks_of(f).sites)
         {
-            if (!s.in_ensures && site_global(s) == &g)
+            if (s.in_ensures)
+            {
+                continue;
+            }
+            if (g.path.empty() ? site_global(s) == g.global : site_leaf_owner(s) == g)
             {
                 return true;
             }
         }
         return false;
     }
+    // The block sites of the `requires` of `f` on the member of by-value parameter `k` at `path` (`owns_block(s.q)`): where one holds, the callee's copy holds the block at
+    // entry (decision 0055 item 6).
+    std::vector<const AtomSite*> param_leaf_sites_at_entry(const Function& f, int k, const std::vector<int>& path)
+    {
+        std::vector<const AtomSite*> r;
+        std::vector<int> steps;
+        for (int m : path)
+        {
+            steps.push_back(field_step(m));
+        }
+        for (const AtomSite& s : blocks_of(f).sites)
+        {
+            if (s.in_ensures || s.atom == nullptr)
+            {
+                continue;
+            }
+            const PlaceKey pk {atom_place(*s.atom)};
+            // a block site names a pointer value, so the members are in `via` as field steps (`s.q` of a by-value parameter: root `s`, steps {field q}, no load step)
+            if (pk.root == k && pk.path.empty() && pk.via == steps)
+            {
+                r.push_back(&s);
+            }
+        }
+        return r;
+    }
     // Whether a callee's `ensures` gives owning global `g` back (an `owns(g)` atom): after the call the function holds `g`'s cell and block.
-    bool gives_global(const Function& callee, const Global& g)
+    bool gives_global(const Function& callee, const OwnerRef& o)
+    {
+        const Global& g {*o.global};
+        for (const AtomSite& s : atoms_of(callee).sites)
+        {
+            if (s.in_ensures && s.atom != nullptr && s.atom->atom == AtomKind::Owns)
+            {
+                const PlaceKey pk {atom_place(*s.atom)};
+                // an atom on the whole place, or on a struct that holds the leaf, gives it back
+                if (pk.root == kGlobalSiteBase + g.id && pk.via.empty() && pk.path.size() <= o.path.size() &&
+                    std::equal(pk.path.begin(), pk.path.end(), o.path.begin()))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    // Whether the `ensures` of `callee` has an `owns` atom on formal `k` covering the struct member at `path` (an atom on the whole struct, or on a member that holds the leaf): the caller
+    // holds the leaf's cell and block again after the call (decision 0055 item 5).
+    bool gives_param_leaf(const Function& callee, int k, const std::vector<int>& path)
     {
         for (const AtomSite& s : atoms_of(callee).sites)
         {
             if (s.in_ensures && s.atom != nullptr && s.atom->atom == AtomKind::Owns)
             {
                 const PlaceKey pk {atom_place(*s.atom)};
-                if (pk.root == kGlobalSiteBase + g.id && pk.path.empty() && pk.via.empty())
+                if (pk.root == k && pk.via.empty() && pk.path.size() <= path.size() &&
+                    std::equal(pk.path.begin(), pk.path.end(), path.begin()))
                 {
                     return true;
                 }
@@ -2279,6 +2503,10 @@ private:
         for (const OwnerRef& g_ref : fn_.gowners)
         {
             const Global* g {g_ref.global};
+            if (!g_ref.path.empty())
+            {
+                continue; // an owning leaf is not carried by a loop yet (decision 0055 item 7)
+            }
             for (const WBlock& b : wbs)
             {
                 if (b.site != nullptr && site_global(*b.site) == g)
@@ -2463,6 +2691,10 @@ private:
         for (const OwnerRef& g_ref : fn_.gowners)
         {
             const Global* g {g_ref.global};
+            if (!g_ref.path.empty())
+            {
+                continue; // its ghost is havocked at the loop head
+            }
             if (std::find(carried_globals.begin(), carried_globals.end(), g) == carried_globals.end() &&
                 !loop_calls_reach_cells_of(loop, g->type))
             {
@@ -2514,62 +2746,68 @@ private:
     {
         for (const OwnerRef& g_ref : fn_.gowners)
         {
-            const Global* g {g_ref.global};
-            if (&f != prog_.entry() && holds_global_at_entry(f, *g))
+            if (&f != prog_.entry() && holds_global_at_entry(f, g_ref))
             {
                 // the value goes through a temp, the one shape of `held := x != null` the lint admits
                 const std::string t {new_temp(low::LType::Ref)};
-                assign(out, t, owner_value(*g));
-                assign(out, held_name(*g), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
+                assign(out, t, owner_value(g_ref));
+                assign(out, held_name(g_ref), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
             }
             else
             {
-                assign(out, held_name(*g), low::bool_lit(false));
+                assign(out, held_name(g_ref), low::bool_lit(false));
             }
         }
     }
     // The owning globals other than `except` that the function holds, as owners that outlive an ending: `held_o && self == o`.
-    void global_outlives(const E& self, const Global* except, std::vector<E>& others)
+    void global_outlives(const E& self, const OwnerRef* except, std::vector<E>& others)
     {
         for (const OwnerRef& o_ref : fn_.gowners)
         {
-            const Global* o {o_ref.global};
-            if (o != except)
+            if (except == nullptr || o_ref != *except)
             {
-                others.push_back(low::and_(low::var(held_name(*o)), low::bin(low::BinOp::Eq, self, owner_value(*o))));
+                others.push_back(
+                    low::and_(low::var(held_name(o_ref)), low::bin(low::BinOp::Eq, self, owner_value(o_ref))));
             }
         }
     }
     // The rows before a store of `value` into owning global (or `static` local) `g` (item 5, Stores): the old block must still have an owner (`leak`), the
     // new value is the start of a block the function holds whole (`permission`).  Returns the temp that holds the value; `global_owner_after` follows the write.
-    E global_owner_rows(const Global& g, const SrcLoc& loc, const E& value, std::vector<low::LStmt>& out)
+    E global_owner_rows(const OwnerRef& g, const SrcLoc& loc, const E& value, std::vector<low::LStmt>& out)
     {
         const std::string t {new_temp(low::LType::Ref)};
         assign(out, t, value);
         const E nv {low::var(t)};
         const E self {owner_value(g)};
         std::vector<E> others {low::bin(low::BinOp::Eq, self, nv)};
-        for (const OwnerRef& o_ref : owners_in_scope())
+        for (const OwnerRef& o_ref : owners_with_leaves_in_scope())
         {
-            const Var* o {o_ref.var};
-            others.push_back(low::and_(low::var(held_name(*o)), low::bin(low::BinOp::Eq, self, owner_value(*o))));
+            if (o_ref != g)
+            {
+                others.push_back(
+                    low::and_(low::var(held_name(o_ref)), low::bin(low::BinOp::Eq, self, owner_value(o_ref))));
+            }
         }
         global_outlives(self, &g, others);
         for (const E& e : returned_owners(self, false))
         {
             others.push_back(e);
         }
-        ending_row(out, low::var(held_name(g)), g.c_name, others, loc, "assigning to owning");
+        const bool leaf {!g.path.empty()};
+        const std::string text {owner_text(g)};
+        ending_row(out, low::var(held_name(g)), text, others, loc,
+                   leaf ? "assigning to owning field" : "assigning to owning");
         emit_ending_assert(
             out,
             low::implies(low::bin(low::BinOp::Ne, nv, low::null_()),
                          low::and_(low::bin(low::BinOp::Eq, low::dom("offset_of", {nv}), low::int_lit("0")),
                                    low::bin(low::BinOp::Eq, low::perm_of(tok_slot(nv), "tok"), low::write_perm()))),
             meta("permission", loc,
-                 "owning `" + g.c_name + "` receives a pointer that is not the start of a block the function holds"));
+                 std::string(leaf ? "owning field `" : "owning `") + text +
+                     "` receives a pointer that is not the start of a block the function holds"));
         return nv;
     }
-    void global_owner_after(const Global& g, const E& nv, std::vector<low::LStmt>& out)
+    void global_owner_after(const OwnerRef& g, const E& nv, std::vector<low::LStmt>& out)
     {
         assign(out, held_name(g), low::bin(low::BinOp::Ne, nv, low::null_()));
     }
@@ -2580,6 +2818,51 @@ private:
                        addr->global->owning
                    ? addr->global
                    : nullptr;
+    }
+    // The tracked owner an owning leaf's store address names by name (`s.q = x`, `g.q = x`, `ls.t.q = x`: the member chain over a struct local's slot or a struct global),
+    // or an empty owner (a store through a pointer, or a leaf nothing tracks).
+    OwnerRef leaf_owner_of(const Expr* addr) const
+    {
+        return owning_leaf_of(addr) != nullptr ? tracked_owner_at(addr, {}) : OwnerRef {};
+    }
+    // The tracked owner at `addr` followed by the member path `extra` (a whole-struct store's destination `&s` or `&g.t` and one owning leaf of its type), or an empty owner.
+    OwnerRef tracked_owner_at(const Expr* addr, const std::vector<int>& extra) const
+    {
+        OwnerRef r;
+        std::vector<int> rev;
+        const Expr* b {addr};
+        while (b != nullptr && b->kind == Expr::Kind::MemberAddr)
+        {
+            rev.push_back(b->index);
+            b = b->a;
+        }
+        if ((rev.empty() && extra.empty()) || b == nullptr)
+        {
+            return r;
+        }
+        std::vector<int> path(rev.rbegin(), rev.rend());
+        path.insert(path.end(), extra.begin(), extra.end());
+        if (b->kind == Expr::Kind::GlobalAddr && b->global != nullptr)
+        {
+            r.global = b->global;
+        }
+        else if (b->kind == Expr::Kind::AddrOf && b->var != nullptr)
+        {
+            r.var = b->var;
+        }
+        else
+        {
+            return r;
+        }
+        r.path = path;
+        for (const OwnerRef& o : r.global != nullptr ? fn_.gowners : leaf_owners_in_scope())
+        {
+            if (o == r)
+            {
+                return r;
+            }
+        }
+        return OwnerRef {};
     }
     // Decision 0055 item 4: the owning field a store's address names (`p->q`, `s.q`, `s.t.q`: the last MemberAddr's member), or null.
     static const StructMember* owning_leaf_of(const Expr* addr)
@@ -2649,9 +2932,9 @@ private:
             {
                 r.push_back(low::bin(low::BinOp::Eq, v, low::var(formal_name(*fn_.f, k))));
             }
-            else if (site_global(bs) == nullptr)
+            else if (site_global(bs) == nullptr && site_leaf_owner(bs).global == nullptr)
             {
-                // (the block of an owning global is an owner by its `held_g`, global_outlives)
+                // (the block of an owning global, or of an owning leaf of a struct global, is an owner by its `held_g`, global_outlives)
                 r.push_back(low::bin(low::BinOp::Eq, v, block_ptr_ret(bs, contract_env())));
             }
         }
@@ -2700,6 +2983,43 @@ private:
                 others.push_back(e);
             }
             ending_row(out, v, others, at, "owning");
+        }
+        // decision 0055 item 5: the owning leaves of this scope's struct locals end with it; the owners of the outer scopes, the plain owners and the earlier leaves of this scope
+        // outlive the exit, as the owners of 0052 item 3 do
+        for (size_t i {sc.leaves.size()}; i-- > 0U;)
+        {
+            const OwnerRef& l {sc.leaves[i]};
+            std::vector<E> others;
+            auto outlives = [&](const OwnerRef& o)
+            {
+                others.push_back(
+                    low::and_(low::var(held_name(o)), low::bin(low::BinOp::Eq, owner_value(l), owner_value(o))));
+            };
+            for (size_t j {0U}; j < k; ++j)
+            {
+                for (const OwnerRef& o : fn_.scopes[j].owners)
+                {
+                    outlives(o);
+                }
+                for (const OwnerRef& o : fn_.scopes[j].leaves)
+                {
+                    outlives(o);
+                }
+            }
+            for (const OwnerRef& o : sc.owners)
+            {
+                outlives(o);
+            }
+            for (size_t j {0U}; j < i; ++j)
+            {
+                outlives(sc.leaves[j]);
+            }
+            global_outlives(owner_value(l), nullptr, others);
+            for (const E& e : returned_owners(owner_value(l), returning))
+            {
+                others.push_back(e);
+            }
+            ending_row(out, low::var(held_name(l)), owner_text(l), others, at, "owning field");
         }
     }
     // The value rule and the write of an owning local (a declaration with an initializer, or an assignment): the old
@@ -2829,7 +3149,8 @@ private:
     void scope_end(std::vector<low::LStmt>& out, const std::vector<const Var*>& cells, size_t k, const SrcLoc& at,
                    bool returning)
     {
-        bool cell_owner {false};
+        // an owning leaf of a struct local is read from its cells: the row precedes their exhale, as an address-taken owner's does
+        bool cell_owner {!fn_.scopes[k].leaves.empty()};
         for (const OwnerRef& o_ref : fn_.scopes[k].owners)
         {
             const Var* o {o_ref.var};
@@ -3330,12 +3651,21 @@ private:
                                        "` needs `owns(" + named[i].text + ")` in its contract"
                                  : "writes " + quoted(named[i].text, "the object the pointer points to") +
                                        " without owning it: the object it points to may have ended"));
+            OwnerRef lo;
             if (plain[i].owning)
             {
-                // decision 0055 item 4: the value rule of an owning field (a copy, an initializer or a call's result stores each owning leaf)
-                values[i] = leaf_value_rule(named[i].text, s.loc, values[i], out);
+                // decision 0055 items 4 and 5: the value rule of an owning field (a copy, an initializer or a call's result stores each owning leaf); a leaf of a tracked named
+                // structure also takes the reassignment row and its ghost follows the value
+                lo = tracked_owner_at(s.addr, plain[i].path);
+                values[i] = lo.var != nullptr || lo.global != nullptr
+                                ? global_owner_rows(lo, s.loc, values[i], out)
+                                : leaf_value_rule(named[i].text, s.loc, values[i], out);
             }
             write_fields(out, t, plain[i].type, values[i]);
+            if (lo.var != nullptr || lo.global != nullptr)
+            {
+                global_owner_after(lo, values[i], out);
+            }
         }
     }
 
@@ -3388,6 +3718,15 @@ private:
             const E nv {global_owner_rows(*og, s.loc, vs[1U].e, out)};
             write_fields(out, recv->text, t, nv);
             global_owner_after(*og, nv, out);
+            return;
+        }
+        if (const OwnerRef lo {t.is_ptr() ? leaf_owner_of(s.addr) : OwnerRef {}};
+            lo.var != nullptr || lo.global != nullptr)
+        {
+            // decision 0055 item 5 (Stores by name): the rows of an owning leaf of a named structure, then the write, then its ghost follows the value
+            const E nv {global_owner_rows(lo, s.loc, vs[1U].e, out)};
+            write_fields(out, recv->text, t, nv);
+            global_owner_after(lo, nv, out);
             return;
         }
         E value {vs[1U].e};
@@ -4004,9 +4343,14 @@ private:
         {
             kept = site_guard(*partner, env);
         }
-        return {block_conj(p, block_ptr_type(site), e.a->c_text, block_mode(*cf_, site), kept,
-                           cf_->allocator == Allocator::Vlibc || e.vlibc_block),
-                {}};
+        E conj {block_conj(p, block_ptr_type(site), e.a->c_text, block_mode(*cf_, site), kept,
+                           cf_->allocator == Allocator::Vlibc || e.vlibc_block)};
+        if (const E cv = closure_cover(atoms_of(*cf_), site, env))
+        {
+            // decision 0055 item 3 (audit S6): the closure of a covered output atom is returned by the implicit atom's own closure
+            conj = low::implies(low::not_(cv), conj);
+        }
+        return {conj, {}};
     }
 
     // `perm(loc(b, -1).tok) == write && loc(b, -1).tok` as ONE atomic assertion (Silicon reports each conjunct of an asserted `&&` as its own error).
@@ -6278,12 +6622,20 @@ private:
                          " without owning it: its object may have ended"));
             const std::string t {new_temp(low::LType::Ref)};
             assign(fx.stmts, t, place);
+            OwnerRef lo;
             if (plain[i].owning)
             {
-                // decision 0055 item 4: the value rule of an owning field, in the effect, before the write
-                values[i] = leaf_value_rule(named[i].text, e.loc, values[i], fx.stmts);
+                // decision 0055 items 4 and 5: the value rule of an owning field, in the effect, before the write; a tracked named leaf also takes its rows and ghost
+                lo = tracked_owner_at(e.c, plain[i].path);
+                values[i] = lo.var != nullptr || lo.global != nullptr
+                                ? global_owner_rows(lo, e.loc, values[i], fx.stmts)
+                                : leaf_value_rule(named[i].text, e.loc, values[i], fx.stmts);
             }
             write_fields(fx.stmts, t, plain[i].type, values[i]);
+            if (lo.var != nullptr || lo.global != nullptr)
+            {
+                global_owner_after(lo, values[i], fx.stmts);
+            }
         }
         fx.deps = wset;
         fx.seq = full.next_seq++;
@@ -6421,6 +6773,14 @@ private:
             const E nv {global_owner_rows(*og, e.loc, stored.e, fx.stmts)};
             write_fields(fx.stmts, recv_name, t, nv);
             global_owner_after(*og, nv, fx.stmts);
+        }
+        else if (const OwnerRef lo {store && t.is_ptr() ? leaf_owner_of(e.c) : OwnerRef {}};
+                 lo.var != nullptr || lo.global != nullptr)
+        {
+            // decision 0055 item 5: the rows of an owning leaf of a named structure written inside an expression
+            const E nv {global_owner_rows(lo, e.loc, stored.e, fx.stmts)};
+            write_fields(fx.stmts, recv_name, t, nv);
+            global_owner_after(lo, nv, fx.stmts);
         }
         else if (!store && e.var->owning)
         {
@@ -9507,6 +9867,11 @@ private:
                         // re-entering the block)
                         assign(out, held_name(*o), low::bool_lit(false));
                     }
+                    for (const OwnerRef& l : fn_.scopes.back().leaves)
+                    {
+                        // an owning leaf of a struct local holds nothing at its scope's entry, as an owning local does
+                        assign(out, held_name(l), low::bool_lit(false));
+                    }
                 }
                 // A goto past a declaration lands in this block with the variable in scope: it starts indeterminate at the block's
                 // entry (decision 0019 item 4).
@@ -10690,11 +11055,41 @@ private:
         }
     }
 
+    // The exemption terms of the blocks the owning leaves of the structure `base` points to hold (decision 0055 item 5), to any depth.  Per owning leaf `L`, the framing
+    // `guard && perm(<L's cell>) > none` is a method-level Bool `exm_<n>` assigned before the row (Silicon's `forperm` bodies may not contain `perm`), and the term is
+    // `exm_<n> && t == loc(block_of(L), -1)`; for a leaf whose pointee has owning fields in turn the same under `exm_<n> && L != NULL`.  `guard` says `base` is non-null and
+    // its owner held, so `base`'s own cells are read only where `main` holds them.
+    void exempt_owned_fields(const E& base, const StructType& st, const E& guard, E& r, std::vector<low::LStmt>& out)
+    {
+        for (const StructLeaf& l : struct_leaves(st))
+        {
+            if (!l.owning)
+            {
+                continue;
+            }
+            const E cell {chain_ref(base, l.path)};
+            const E v {cell_value(cell, l.type)};
+            const E g {low::and_(guard, low::bin(low::BinOp::Gt, value_perm(cell, l.type), low::no_perm()))};
+            const std::string n {"exm_" + std::to_string(exm_count_++)};
+            fn_.snapshots.push_back(low::LVar {n, low::LType::Bool});
+            assign(out, n, g);
+            const E term {low::and_(low::var(n), low::bin(low::BinOp::Eq, low::var("t"), tok_slot(v)))};
+            r = r ? low::bin(low::BinOp::Or, r, term) : term;
+            if (l.type.is_ptr() && l.type.pointee != nullptr && l.type.pointee->is_struct() &&
+                l.type.pointee->struct_type != nullptr)
+            {
+                exempt_owned_fields(v, *l.type.pointee->struct_type,
+                                    low::and_(low::var(n), low::bin(low::BinOp::Ne, v, low::null_())), r, out);
+            }
+        }
+    }
+    int exm_count_ {0};
     // The exemption of the leak row (item 7): the tokens a function hands back, `g && t == loc(block_of(q), -1)` for each `ensures` block site (`g` its guard as written, `q`
     // its pointer: the result, or a borrowed formal, which never changes), or `false` without one.
-    E leak_exemption(const Function& f, const Env& env)
+    E leak_exemption(const Function& f, const Env& env, std::vector<low::LStmt>& out)
     {
         E r;
+        exm_count_ = 0;
         CtxSave save(*this);
         for (const AtomSite& s : blocks_of(f).sites)
         {
@@ -10715,10 +11110,21 @@ private:
             // guarded by `held_g`, so the cell is read only where `main` holds it
             for (const OwnerRef& g_ref : fn_.gowners)
             {
-                const Global* g {g_ref.global};
-                const E term {low::and_(low::var(held_name(*g)),
-                                        low::bin(low::BinOp::Eq, low::var("t"), tok_slot(owner_value(*g))))};
+                const E term {low::and_(low::var(held_name(g_ref)),
+                                        low::bin(low::BinOp::Eq, low::var("t"), tok_slot(owner_value(g_ref))))};
                 r = r ? low::bin(low::BinOp::Or, r, term) : term;
+                // decision 0055 item 5 (audit S4; P4417R0 Note 3): a static owner owns what its owning fields own, so the blocks reached through the owner's pointee's owning
+                // fields are exempt too (a chain `g.q->r`, the field `gp->q` of an owning `struct S *`), each term framed by the cells it reads: `main` can hold a block's token
+                // without its cells
+                const Type ot {owner_type(g_ref)};
+                if (ot.is_ptr() && ot.pointee != nullptr && ot.pointee->is_struct() &&
+                    ot.pointee->struct_type != nullptr)
+                {
+                    exempt_owned_fields(owner_value(g_ref), *ot.pointee->struct_type,
+                                        low::and_(low::var(held_name(g_ref)),
+                                                  low::bin(low::BinOp::Ne, owner_value(g_ref), low::null_())),
+                                        r, out);
+                }
             }
         }
         return r ? r : low::bool_lit(false);
@@ -10731,7 +11137,7 @@ private:
             return;
         }
         const Env env {contract_env()};
-        emit_assert(out, low::for_perm(leak_exemption(f, env)),
+        emit_assert(out, low::for_perm(leak_exemption(f, env, out)),
                     meta("leak", f.end_loc,
                          "`" + f.c_name +
                              "` may return while it still owns an allocation that its `ensures` does not hand back"));
@@ -10777,6 +11183,36 @@ private:
         }
     }
 
+    // The condition under which the `ensures` block site `b` is the closure of an output `owns` atom that an implicit `owns(s)` covers (decision 0055 item 3, audit S6), or
+    // null.  The closure's site names a pointer read from a cell of the atom's object: its steps are the atom's member path, then members and loads, ending in a load.
+    E closure_cover(const FnAtoms& fa, const AtomSite& b, const Env& env)
+    {
+        if (!b.in_ensures || b.via.empty() || b.via.back() != kLoadStep)
+        {
+            return nullptr;
+        }
+        const PlaceKey pb {atom_place(*b.atom)};
+        E r;
+        for (const AtomSite& j : fa.sites)
+        {
+            if (!j.in_ensures || j.atom->atom != AtomKind::Owns || !j.via.empty() || !is_output(fa, j) ||
+                j.atom->implicit_atom)
+            {
+                continue;
+            }
+            const PlaceKey pj {atom_place(*j.atom)};
+            if (pj.root != pb.root || pj.root == kNoPlaceKey || pb.via.size() <= pj.path.size() ||
+                !std::equal(pj.path.begin(), pj.path.end(), pb.via.begin()))
+            {
+                continue;
+            }
+            if (const E cv = cov_of(fa, j, env))
+            {
+                r = r ? low::bin(low::BinOp::Or, r, cv) : cv;
+            }
+        }
+        return r;
+    }
     // The rows of the `ensures` block sites at a return (item 4; 0037 item 10), after atom_returns' rows: the separation of every `ensures` block site from every other
     // `ensures` site (`lvloc` rows, audit S4: `return p` with owns_block(p) and owns_block(r) fails here, never in Silicon's own postcondition check), then each site's rows.
     void block_returns(const SrcLoc& at, std::vector<low::LStmt>& out, const Env& env)
@@ -10799,7 +11235,14 @@ private:
         for (size_t i {static_cast<size_t>(fb.nreq)}; i < fb.sites.size(); ++i)
         {
             const AtomSite& s {fb.sites[i]};
-            rs.push_back(R {&s, block_ptr(s, env), site_guard(s, env)});
+            E g {site_guard(s, env)};
+            // decision 0055 item 3 (audit S6): the block of an owning field that an output `owns` atom closes over is returned once, by the implicit `owns(s)` of the
+            // `static` struct that covers the atom, so its clause stands under `!cov` as the atom's own permissions do
+            if (const E cv = closure_cover(fa, s, env))
+            {
+                g = g ? low::and_(g, low::not_(cv)) : low::not_(cv);
+            }
+            rs.push_back(R {&s, block_ptr(s, env), g});
         }
         if (rs.empty())
         {
@@ -14285,6 +14728,10 @@ private:
         for (const OwnerRef& g_ref : fn_.gowners)
         {
             const Global* g {g_ref.global};
+            if (!g_ref.path.empty())
+            {
+                continue;
+            }
             if (gused.count(g->id) == 0U || named(g, nullptr) ||
                 !(fn_.f == prog_.entry() || holds_global_at_entry(*fn_.f, *g)))
             {
@@ -15708,10 +16155,10 @@ private:
             // decision 0054 item 5: every owning global and `static` local has its ghosts in every method with a body
             for (const Global& g : prog_.globals())
             {
-                if (g.owning)
+                for (const OwnerRef& o : global_owners_of(g))
                 {
-                    fn_.gowners.push_back(&g);
-                    fn_.snapshots.push_back(low::LVar {held_name(g), low::LType::Bool});
+                    fn_.gowners.push_back(o);
+                    fn_.snapshots.push_back(low::LVar {held_name(o), low::LType::Bool});
                 }
             }
         }
@@ -15905,14 +16352,72 @@ private:
                 assign(m.body, var_name(copy), low::var(formal_name(f, static_cast<int>(k))));
             }
         }
+        // decision 0055 item 6: an owning leaf of a by-value struct parameter's copy is an owner from the entry, true exactly where the contract's `requires` has a block site on it
+        std::vector<OwnerRef> param_leaf_owners;
+        std::vector<int> param_leaf_formals;
+        for (size_t k {0U}; k < f.params.size(); ++k)
+        {
+            const Var& copy {*f.param_var(static_cast<int>(k))};
+            if (copy.address_taken && copy.type.is_struct() && copy.type.struct_type != nullptr)
+            {
+                for (const StructLeaf& l : struct_leaves(*copy.type.struct_type))
+                {
+                    if (l.owning)
+                    {
+                        OwnerRef o {&copy};
+                        o.path = l.path;
+                        param_leaf_owners.push_back(o);
+                        param_leaf_formals.push_back(static_cast<int>(k));
+                    }
+                }
+            }
+        }
         if (!param_cells.empty())
         {
-            fn_.scopes.push_back(Fn::Scope {param_cells, f.end_loc, {}});
+            fn_.scopes.push_back(Fn::Scope {param_cells, f.end_loc, {}, param_leaf_owners});
+            for (const OwnerRef& l : param_leaf_owners)
+            {
+                if (fn_.leaf_ghosts.insert(held_name(l)).second)
+                {
+                    fn_.snapshots.push_back(low::LVar {held_name(l), low::LType::Bool});
+                }
+            }
         }
         entry_snapshots(f, m.body, cenv);
         entry_checks(f, m.body);
         block_entry_checks(f, m.body); // decision 0047 item 4
         global_owner_entry(f, m.body); // decision 0054 item 5: `held_g`
+        for (size_t i {0U}; i < param_leaf_owners.size(); ++i)
+        {
+            const OwnerRef& l {param_leaf_owners[i]};
+            const std::vector<const AtomSite*> sites {param_leaf_sites_at_entry(f, param_leaf_formals[i], l.path)};
+            if (!sites.empty())
+            {
+                // the value goes through a temp, the one shape of `held := x != null` the lint admits; a site under a guard (`c ? owns_block(s.q) : 1`) holds the block only
+                // where its guard does
+                E held_if;
+                bool unguarded {false};
+                for (const AtomSite* st : sites)
+                {
+                    if (const E g = site_guard(*st, cenv))
+                    {
+                        held_if = held_if ? low::bin(low::BinOp::Or, held_if, g) : g;
+                    }
+                    else
+                    {
+                        unguarded = true;
+                    }
+                }
+                const std::string t {new_temp(low::LType::Ref)};
+                assign(m.body, t,
+                       unguarded || !held_if ? owner_value(l) : low::ite(held_if, owner_value(l), low::null_()));
+                assign(m.body, held_name(l), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
+            }
+            else
+            {
+                assign(m.body, held_name(l), low::bool_lit(false));
+            }
+        }
         prologue(m.body, &f);
         user_targets_.clear();
         user_names_.clear();
@@ -15932,7 +16437,8 @@ private:
         {
             if (!param_cells.empty())
             {
-                scope_exit(m.body, param_cells, f.end_loc); // fall-through (decision 0037 item 4)
+                // fall-through (decision 0037 item 4); the owning leaves of a by-value struct parameter's copy end with the function (decision 0055 item 6)
+                scope_end(m.body, param_cells, fn_.scopes.size() - 1U, f.end_loc, true);
             }
             postconditions(f.end_loc, m.body);
         }

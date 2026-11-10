@@ -2538,7 +2538,10 @@ private:
                         (in_invariant_
                              ? ((broot->kind == Expr::Kind::Local && broot->var != nullptr &&
                                  !broot->var->address_taken) ||
-                                (broot->kind == Expr::Kind::GlobalAddr && e.a->kind != Expr::Kind::GlobalAddr))
+                                (broot->kind == Expr::Kind::GlobalAddr && e.a->kind != Expr::Kind::GlobalAddr) ||
+                                // decision 0055 item 7: the leaf of a struct local (`s.q`, `s.t.q`: a load through a member of its cell)
+                                (broot->kind == Expr::Kind::AddrOf && broot->var != nullptr &&
+                                 broot->var->type.is_struct() && e.a->kind == Expr::Kind::Deref))
                              : (broot->kind == Expr::Kind::Formal || broot->kind == Expr::Kind::GlobalAddr ||
                                 (broot->kind == Expr::Kind::Result && ctx == Ctx::Ensures)))};
                     if (!value_form || !rooted)

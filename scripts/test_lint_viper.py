@@ -5179,5 +5179,214 @@ class OwningGlobalTagTests(unittest.TestCase):
                 self.assertTrue(any("`held_GB_g__0` is compared with something but" in p for p in probs), probs)
 
 
+
+class OwningLeafTests(unittest.TestCase):
+    """Decision 0055 item 9: the owning leaves of struct objects.  `program_start` tags an owning leaf of a struct global
+    `// cerastes:owning-global GB_x/<k>[/<k>...]` (the member path pinned against the global's own row: a pointer leaf of
+    that struct; a struct global only by member paths); the ghost `held_GB_x_<k>` of the leaf (a struct local's: `held_<var>_<k>`)
+    is assigned only `false`, `x != null`, the leaf's own cell `!= null`, or the framed update that reads the cell's and the
+    token's permission, the ghost's name being the one that leaf's cell spells; `main`'s exemption term for it is exactly the
+    block of that leaf's cell; a comparison only with that cell's nullness.  Each rule has twins that break exactly it, and the
+    pointer-global rules of OwningGlobalTagTests keep their meaning."""
+
+    L0 = "loc(member(loc(GB_g__0(), 0), 0), 0)"        # the owning pointer leaf, path (0)
+    L1 = "loc(member(loc(GB_g__0(), 0), 1), 0)"        # an int leaf, path (1)
+    CELL = L0 + ".v_ptr_int"
+    ROW = (f"  ensures acc({L0}.v_ptr_int) && acc({L0}.d_ptr_int) && {L0}.d_ptr_int && ({L0}.v_ptr_int == null) && "
+           f"acc({L1}.v_int) && acc({L1}.d_int) && {L1}.d_int && ({L1}.v_int == 0) && acc(lvloc(GB_g__0()).lv)")
+    TERM = f"held_GB_g__0_0 && (t == loc(block_of({CELL}), (-1)))"
+    TAG = "  // cerastes:owning-global GB_g__0/0"
+
+    @staticmethod
+    def upd(ghost, cell):
+        return (f"  {ghost} := ({ghost} && (perm({cell}) > none)) && (({cell} != null) && "
+                f"(perm(loc(block_of({cell}), (-1)).tok) > none))")
+
+    LEGAL = ["  held_GB_g__0_0 := false", "  held_GB_g__0_0 := t != null", f"  held_GB_g__0_0 := {CELL} != null",
+             upd.__func__("held_GB_g__0_0", CELL),
+             "  held_v_s__0_0 := false", "  held_v_s__0_0 := t != null",
+             "  held_v_s__0_0 := loc(member(v_s__0, 0), 0).v_ptr_int != null",
+             upd.__func__("held_v_s__0_0", "loc(member(v_s__0, 0), 0).v_ptr_int"),
+             upd.__func__("held_v_s__1_0_1", "loc(member(loc(member(v_s__1, 0), 0), 1), 0).v_ptr_int")]
+
+    @staticmethod
+    def strict(lines):
+        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+
+    def fixture(self, tags=("  // cerastes:owning-global GB_g__0/0",), body=None, term=None, row=None, extra=()):
+        return [
+            "field v_ptr_int: Ref",
+            "field d_ptr_int: Bool",
+            "field v_int: Int",
+            "field d_int: Bool",
+            "field tok: Bool",
+            "unique function GB_g__0(): Block",
+            "method program_start()",
+            *tags,
+            "  ensures len(GB_g__0()) == 1",
+            row if row is not None else self.ROW,
+            "  decreases _",
+            "method f__1(p: Ref)",
+            Check("  requires true", WF, "internal"),
+            "  decreases",
+            "{",
+            "  var held_GB_g__0_0: Bool",
+            "  var held_v_s__0_0: Bool",
+            "  var t: Ref",
+            *(body if body is not None else self.LEGAL),
+            *extra,
+            Check(f"  assert forperm t: Ref [t.tok] :: {term or self.TERM}", A, "leak"),
+            "}",
+        ]
+
+    def probs(self, **kw):
+        return [p for p in self.strict(self.fixture(**kw)) if "decision 0054" in p or "decision 0055" in p]
+
+    def test_the_emitters_shapes_are_clean(self):
+        self.assertEqual(self.probs(), [])
+
+    def test_a_deeper_member_path_pinned_against_the_row_is_clean(self):
+        leaf = "loc(member(loc(member(loc(GB_g__0(), 0), 0), 0), 2), 0)"
+        row = (f"  ensures acc({leaf}.v_ptr_int) && acc({leaf}.d_ptr_int) && {leaf}.d_ptr_int && ({leaf}.v_ptr_int == null) && "
+               "acc(lvloc(GB_g__0()).lv)")
+        ghost = "held_GB_g__0_0_2"
+        body = [f"  {ghost} := false", self.upd(ghost, leaf + ".v_ptr_int")]
+        term = f"{ghost} && (t == loc(block_of({leaf}.v_ptr_int), (-1)))"
+        lines = self.fixture(tags=("  // cerastes:owning-global GB_g__0/0/2",), row=row, body=body, term=term)
+        lines[lines.index("  var held_GB_g__0_0: Bool")] = f"  var {ghost}: Bool"
+        probs = [p for p in self.strict(lines) if "decision 0054" in p or "decision 0055" in p]
+        self.assertEqual(probs, [])
+        # and the same program with the tag for another path is a problem (the pin reads the tag, not the ghost)
+        lines = [l.replace("GB_g__0/0/2", "GB_g__0/0/1") if isinstance(l, str) else l for l in lines]
+        self.assertTrue(any("is not a pointer leaf" in p for p in self.strict(lines)))
+
+    # tags ----------------------------------------------------------------------------------------------------------------------------
+    def test_a_member_path_must_name_a_pointer_leaf_of_the_globals_row(self):
+        for tag in ("GB_g__0/1", "GB_g__0/5", "GB_g__0/0/0", "GB_g__0/0/1"):
+            with self.subTest(tag=tag):
+                probs = self.probs(tags=(f"  // cerastes:owning-global {tag}",), body=["  held_v_s__0_0 := false"], term="t == t")
+                self.assertTrue(any("is not a pointer leaf of the struct global" in p for p in probs), probs)
+
+    def test_a_path_on_a_global_with_no_struct_row_is_a_problem(self):
+        probs = self.probs(row="  ensures len(GB_g__0()) == 1", body=["  held_v_s__0_0 := false"], term="t == t")
+        self.assertTrue(any("is not a pointer leaf of the struct global" in p for p in probs), probs)
+
+    def test_a_struct_global_is_tagged_only_by_member_paths(self):
+        probs = self.probs(tags=("  // cerastes:owning-global GB_g__0",), body=["  held_v_s__0_0 := false"], term="t == t")
+        self.assertTrue(any("tags a struct global without a member path" in p for p in probs), probs)
+
+    def test_a_malformed_member_path_is_a_problem(self):
+        for tag in ("GB_g__0/a", "GB_g__0/00", "GB_g__0/", "GB_g__0//0", "GB_g__0/0/", "GB_g__0/-1"):
+            with self.subTest(tag=tag):
+                probs = self.probs(tags=(f"  // cerastes:owning-global {tag}",), body=["  held_v_s__0_0 := false"], term="t == t")
+                self.assertTrue(any("the member path is" in p for p in probs), probs)
+
+    def test_a_leaf_tagged_twice_or_a_tag_of_an_undeclared_block_is_a_problem(self):
+        probs = self.probs(tags=(self.TAG, self.TAG))
+        self.assertTrue(any("is tagged `// cerastes:owning-global` twice" in p for p in probs), probs)
+        probs = self.probs(tags=("  // cerastes:owning-global GB_h__0/0",), body=["  held_v_s__0_0 := false"], term="t == t")
+        self.assertTrue(any("names no single `unique function GB_...`" in p for p in probs), probs)
+
+    def test_a_leaf_tag_stands_right_after_the_head_of_program_start(self):
+        lines = self.fixture(tags=())
+        lines.insert(lines.index("  decreases _"), self.TAG)
+        probs = [p for p in self.strict(lines) if "decision 0054" in p]
+        self.assertTrue(any("right after the head of `method program_start`" in p for p in probs), probs)
+
+    # ghosts ---------------------------------------------------------------------------------------------------------------------------
+    def test_the_ghost_of_an_untagged_leaf_is_a_problem(self):
+        probs = self.probs(tags=())
+        self.assertTrue(any("`held_GB_g__0_0` in a program whose `program_start` tags no" in p for p in probs), probs)
+
+    def test_a_ghost_needs_the_tag_that_spells_it(self):
+        probs = self.probs(body=["  held_GB_g__0_1 := false"], term="t == t")
+        self.assertTrue(any("`held_GB_g__0_1` in a program whose `program_start` tags no" in p for p in probs), probs)
+        probs = self.probs(body=["  held_GB_g__0 := false"], term="t == t")
+        self.assertTrue(any("ownership ghost `held_GB_g__0` of `GB_g__0`" in p for p in probs), probs)
+
+    # assignments ---------------------------------------------------------------------------------------------------------------------
+    def test_a_leafs_flag_never_becomes_true_without_a_read_of_the_cells_permission(self):
+        other = "loc(member(loc(GB_h__0(), 0), 0), 0).v_ptr_int"
+        l1 = self.L1 + ".v_ptr_int"
+        good = self.upd("held_GB_g__0_0", self.CELL)
+        bad = [
+            "held_GB_g__0_0 := true",
+            "held_GB_g__0_0 := held_GB_g__0_0 || true",
+            f"held_GB_g__0_0 := {other} != null",
+            f"held_GB_g__0_0 := {l1} != null",
+            f"held_GB_g__0_0 := {self.CELL} == null",
+            good.replace("held_GB_g__0_0 :=", "held_GB_g__0_1 :=").lstrip().replace("(held_GB_g__0_0 &&", "(held_GB_g__0_1 &&"),
+            good.lstrip().replace(f"(perm({self.CELL}) > none)", "true"),
+            good.lstrip().replace("(perm(loc(block_of(" + self.CELL + "), (-1)).tok) > none)", "true"),
+            good.lstrip().replace("> none", ">= none"),
+            good.lstrip().replace(f"(({self.CELL} != null)", f"(({other} != null)"),
+            good.lstrip().replace(f"perm({self.CELL})", f"perm({l1})", 1),
+            good.lstrip().replace("(held_GB_g__0_0 &&", "(held_GB_g__0_0 ||"),
+        ]
+        for rhs in bad:
+            with self.subTest(rhs=rhs):
+                probs = self.probs(body=[f"  {rhs.lstrip()}"])
+                self.assertTrue(any("is assigned" in p for p in probs), probs)
+
+    def test_the_framed_update_of_a_struct_locals_leaf_names_its_own_variable_and_path(self):
+        cell = "loc(member(v_s__0, 0), 0).v_ptr_int"
+        for ghost, c in (("held_v_s__0_0", "loc(member(v_s__1, 0), 0).v_ptr_int"),    # another variable's cell
+                         ("held_v_s__0_0", "loc(member(v_s__0, 1), 0).v_ptr_int"),    # another member's cell
+                         ("held_v_s__0_1", cell),                                     # the ghost of another member
+                         ("held_v_t__0_0", cell),                                     # the ghost of another variable
+                         ("held_v_s__0", cell)):                                      # no path in the name
+            with self.subTest(ghost=ghost, cell=c):
+                probs = self.probs(body=[self.upd(ghost, c)])
+                self.assertTrue(any(f"`{ghost}` is assigned" in p for p in probs), probs)
+        self.assertEqual(self.probs(body=[self.upd("held_v_s__0_0", cell)]), [])
+
+    def test_a_leaf_cell_is_a_canonical_chain_rooted_at_its_block(self):
+        for c in ("loc(member(loc(GB_g__0(), 1), 0), 0).v_ptr_int",       # a chain whose path is not the ghost's
+                  "loc(member(loc(GB_g__0(), 0), 0), 0).v_ptr_int + 0",    # arithmetic in the cell
+                  "loc(member(block_of(loc(GB_g__0(), 0)), 0), 0).v_ptr_int"):
+            with self.subTest(cell=c):
+                probs = self.probs(body=[self.upd("held_GB_g__0_0", c)])
+                self.assertTrue(any("`held_GB_g__0_0` is assigned" in p for p in probs), probs)
+
+    # exemption terms -----------------------------------------------------------------------------------------------------------------
+    def test_an_exemption_term_of_a_held_leaf_names_its_own_leafs_block(self):
+        l1 = self.L1 + ".v_ptr_int"
+        for cell in (l1, "loc(GB_g__0(), 0).v_ptr_int", "loc(member(loc(GB_h__0(), 0), 0), 0).v_ptr_int",
+                     "loc(member(loc(member(loc(GB_g__0(), 0), 0), 0), 0), 0).v_ptr_int", "v_s__0"):
+            with self.subTest(cell=cell):
+                term = f"held_GB_g__0_0 && (t == loc(block_of({cell}), (-1)))"
+                probs = self.probs(term=term)
+                self.assertTrue(any("guarded by `held_GB_g__0_0`" in p for p in probs), probs)
+        probs = self.probs(term=f"held_GB_g__0_0 && (t == loc(block_of({self.CELL}), 0))")
+        self.assertTrue(any("guarded by `held_GB_g__0_0`" in p for p in probs), probs)
+
+    def test_the_exemption_of_a_leaf_of_an_untagged_block_is_a_problem(self):
+        probs = self.probs(tags=())
+        self.assertTrue(any("exemption term" in p and "does not tag" in p for p in probs), probs)
+
+    def test_a_pointer_globals_term_still_names_the_globals_own_cell(self):
+        # the pointer-global rule is not widened to the leaf's cell: the ghost `held_GB_g__0` spells the whole global
+        lines = self.fixture(tags=("  // cerastes:owning-global GB_h__0",), body=["  held_GB_g__0 := false"],
+                             term=f"held_GB_g__0 && (t == loc(block_of({self.CELL}), (-1)))")
+        lines.insert(lines.index("unique function GB_g__0(): Block"), "unique function GB_h__0(): Block")
+        probs = [p for p in self.strict(lines) if "decision 0054" in p or "decision 0055" in p]
+        self.assertTrue(any("`held_GB_g__0`" in p for p in probs), probs)
+
+    # comparisons ---------------------------------------------------------------------------------------------------------------------
+    def test_the_flag_of_a_leaf_is_compared_only_with_its_cells_nullness(self):
+        def body(inv):
+            return [*self.LEGAL, "  var i: Int := 0", "  while (i < 3)", Check(inv, INV, "internal"),
+                    Check("    decreases 3 - i", "termination.failed", "termination"), "  {", "    i := i + 1", "  }"]
+        good = f"    invariant held_GB_g__0_0 == ({self.CELL} != null)"
+        self.assertEqual(self.probs(body=body(good)), [])
+        for inv in (f"    invariant held_GB_g__0_0 == ({self.CELL} == null)", "    invariant held_GB_g__0_0 == true",
+                    f"    invariant held_GB_g__0_0 == ({self.CELL} != null) || true",
+                    f"    invariant held_GB_g__0_0 == ({self.L1}.v_ptr_int != null)",
+                    "    invariant held_GB_g__0_0 == (loc(GB_g__0(), 0).v_ptr_int != null)"):
+            with self.subTest(inv=inv):
+                probs = self.probs(body=body(inv))
+                self.assertTrue(any("`held_GB_g__0_0` is compared with something but" in p for p in probs), probs)
+
+
 if __name__ == "__main__":
     unittest.main()
