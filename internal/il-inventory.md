@@ -8064,8 +8064,13 @@ session's other agents).
 1. **(b) needs the value rule on a site's block cells.** Without the snapshot of `a.b->c`, Silicon reports two
    `null-dereference`s of `(a.b)->c` (in the body and after the loop); without the third site instead, three errors.
    So item 6's cells are places with the loop's value rule, not framing permissions alone.
-2. **(b) needs no reordering.** The third site's pointer pre-read sits beside the others and verifies; the planning's
-   "pre-read after the earlier sites' rows" is not made (item 7).
+2. **The order of the pre-reads** (corrected after audit round 1, S1). The spikes placed each deeper site's pointer
+   pre-read after the earlier sites' rows (S41 (b) `b_c23.vpr`: at the entry `te0` at L342 after L256–259's rows; at
+   the back edge `tc0` at L625 after L525–528's; S41 (a) likewise), not beside them as this finding first said. The
+   auditor's variant with the pre-reads beside the others verifies too (16.2 s; its twin one error at the back edge,
+   20.6 s), so a correct program does not depend on the order; a failing one does: on the base build a two-level
+   chain whose loop frees the middle block exits 3 at the hoisted pre-read (the auditor's probe `chain_free_mid.c`),
+   and with the move only mapped rows remain. Item 7 builds the move (question 206).
 3. **(a) needs no new flag ghost** (the site's `wef_0_0` covers `gp->data`'s flag) and no `held` in the guard
    (`held == (gp != NULL)` is already invariant).
 4. **(c):** the loop had no back-edge leak row before (no site was carried); the synthetic site needs one. `hs` is
@@ -8090,5 +8095,5 @@ one-site loops read no cell of a site's block and are unchanged if the new permi
 keyed places; the twelve owning-local closure programs (`owning_field_loop_owning_local{,_both,_n,_read,_free,_free_empty}.c`
 and their five negatives) are unchanged only if a site merged with an owner adds no places. **Item 7:** `closure_deep`
 matters only to the `chain3` pin; the intermediate flags change nothing for two-level sites; moving every pre-read would
-reorder `chain.c`, `chain_drop`, `chain3`, the `pointer_arg` pin and the twelve owning-local programs (not made).
+reorder `chain.c`, `chain_drop`, `chain3`, the `pointer_arg` pin and the twelve owning-local programs, so item 7 makes it only for struct-leaf and owning-global closures (question 206), leaving the owning-local programs as they are.
 **Item 5:** only the `main_holds` pin (the other struct-global leaf loops are not in `main`).

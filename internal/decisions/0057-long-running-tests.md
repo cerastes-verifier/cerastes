@@ -67,8 +67,10 @@ test cannot simply join the default run.
    - A skip happens only after the test's header has been read and checked: a bad header under `tests/long/` fails the
      default run.
    - Their headers and twins are checked in every run, skipped or not: `--check-headers` reads `tests/long/`, and the
-     twin rule (`tests/README.md`, "Twins") sees long tests and their twins in either tree (a twin in either tier
-     counts for a positive in either).
+     twin rule (`tests/README.md`, "Twins") sees long tests and their twins in either tree. A long positive may count
+     a twin in either tier; a positive outside `tests/long/` needs an `error` twin outside it in each of its modes
+     (owner, 2026-11-10, question 207: else the must-fail half of invariant 2 would run only at a session's box check,
+     never in CI or under `mutate.py`; audit round 1, S6).
    - A long test that reaches its limit fails (exit 3), like any other test; a limit is there to catch a hang, never to
      measure speed.
 

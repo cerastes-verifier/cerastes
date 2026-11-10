@@ -1,7 +1,7 @@
 // expect: error assert:assertion.false @ L429
 // S41 (c) twin: the loop body allocates a block it never frees: the back-edge forperm row (the tokens an iteration may end with) fails, not main's end.
 // S41 hand-edited fixture (not emitted by the tool; see README.md). base: encoder output of s41_c_main_holds_ok with `lk := f_malloc__6()` added to the loop body. No inhale or assume.
-// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+// (the Viper below began as the tool's output and was edited by hand: a spike fixture, not regenerated, and not checked by lint_viper.py)
 
 // the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
 field v_int: Int

@@ -1,7 +1,7 @@
 // expect: verified
 // S41 (c): a struct global with an owning field that `main` never names, reached by the loop only by type: `hs` is false (nothing is held), nothing is asked or carried, `!hs ==> !held` holds, and `main` ends as before.
 // S41 hand-edited fixture (not emitted by the tool; see README.md). base: encoder output of build/m4.5d2b2c/s41/c/v3.c (the pin without `g.data = NULL; g.n = 0; fill();`), same edit. No inhale or assume.
-// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+// (the Viper below began as the tool's output and was edited by hand: a spike fixture, not regenerated, and not checked by lint_viper.py)
 
 // the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
 field v_int: Int

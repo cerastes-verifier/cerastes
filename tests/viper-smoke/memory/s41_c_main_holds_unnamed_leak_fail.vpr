@@ -1,7 +1,7 @@
 // expect: error assert:assertion.false @ L393
 // S41 (c) twin of the unnamed global: `main` leaks a block after the loop; the exit row fails although `hs` is false.
 // S41 hand-edited fixture (not emitted by the tool; see README.md). base: encoder output of build/m4.5d2b2c/s41/c/v3_twin.c, same edit. No inhale or assume.
-// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+// (the Viper below began as the tool's output and was edited by hand: a spike fixture, not regenerated, and not checked by lint_viper.py)
 
 // the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
 field v_int: Int

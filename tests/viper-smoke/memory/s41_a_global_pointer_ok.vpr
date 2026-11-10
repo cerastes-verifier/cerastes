@@ -1,7 +1,7 @@
 // expect: verified
 // S41 (a): a loop over an owning `struct buf *gp` global that frees and replaces `gp->data` verifies once the loop carries the block of `gp->data` as a closure site under the guard `gp != NULL && gp->data's flag && gp->data != NULL` (the global's own block is already carried by the WBlock invariants).
 // S41 hand-edited fixture (not emitted by the tool; see README.md). base: encoder output of tests/memory/negative/owning_field_loop_global_pointer_false_alarm.c (c23), build/m4.5d2b2c/cerastes-base; generator build/m4.5d2b2c/s41/a/gen_a.py. No inhale or assume.
-// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+// (the Viper below began as the tool's output and was edited by hand: a spike fixture, not regenerated, and not checked by lint_viper.py)
 
 // the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
 field v_int: Int

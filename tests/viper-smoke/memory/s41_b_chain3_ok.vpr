@@ -1,7 +1,7 @@
 // expect: verified
 // S41 (b): three owning levels `a.b->c->x` under a struct local: the loop carries the third level (a closure site for the block of `a.b->c->x`, guarded by the second site's guard and the cell's flag) and keeps the unwritten intermediate cell `a.b->c` at its entry value (`vsc`; the loop stores no `struct leaf *`).
 // S41 hand-edited fixture (not emitted by the tool; see README.md). base: encoder output of tests/memory/negative/owning_field_loop_chain3_false_alarm.c (c23), build/m4.5d2b2c/cerastes-base; generator build/m4.5d2b2c/s41/b/gen_b.py. No inhale or assume.
-// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+// (the Viper below began as the tool's output and was edited by hand: a spike fixture, not regenerated, and not checked by lint_viper.py)
 
 // the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
 field v_int: Int
