@@ -246,8 +246,11 @@ keeps raw storage out of the profile. cerastes checks raw storage (0047).
      (`tests/viper-smoke/memory/s40_h_*`). **Deeper owners** (audit S4; P4417 Note 3): a static owner owns what its
      owning fields own, so the exemption also covers the blocks reached through owning leaves from a static owner — a
      chain `g.q->r` and the owning field `gp->q` of an owning `struct S *` global — each term framed by the cells it
-     reads, since `main` can hold a block's token without its cells: `held_g_q && g.q != NULL && perm(<g.q->r's cell>)
-     > none && t == loc(block_of(g.q->r), −1)`. (Fallback if the framing cannot be proved: a documented limit, pinned.)
+     reads, since `main` can hold a block's token without its cells. As built, Silicon refuses `perm` inside a
+     `forperm` body, so the framing is in Bool ghosts assigned before the leak row: `exm_0 := (held_g_q && g.q !=
+     NULL) && perm(<g.q->r's cell>) > none`, `exm_1 := (exm_0 && g.q->r != NULL) && perm(<next cell>) > none`, and
+     the disjuncts `exm_n && t == loc(block_of(<chain>), −1)`; after the re-audit (B2) the leaf's own term is framed the
+     same way, `exm_0 := held_g_q && perm(<g.q's cell>) > none`. The lint pins each `exm_` to a tagged owner.
    - **`&s` to a callee:** the callee's contract decides, by its closure: an `owns(*p)` borrow takes and returns the
      leaf's block, and then `held := s.q != NULL` read framed; a consuming `owns_block(p)` cannot take a struct
      local's address (0047: not the start of a heap block).

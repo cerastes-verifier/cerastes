@@ -24,7 +24,7 @@ its plan's "Inputs".
 - **Worktrees left for the owner to remove** (§2): `.claude/worktrees/m4.5d2b2b` (the session's), `-aux` (the
   lowering, detached; its commits were moved onto the branch as tree objects) and `-audit` (the audits' build).
 - **M4.5d2b2c is next** (question 188): `not_invalidating`, `--strict-owner`, `ref_to_uninit` on a field, and the
-  pinned loop limits of d2b2b if the owner takes question 195's recommendation.
+  pinned loop limits of d2b2b first (question 195, answered).
 - **CI:** unchanged (record 0053). The `profiles=all` dispatch has still not run, so `macos-26` stays at `dispatch`
   (question 172; §2).
 - **The Linux host** `matt@clang4.cpp.al`: runs go in containers built from clean `ubuntu` images (`~/cerastes-s8`,
@@ -42,7 +42,7 @@ its plan's "Inputs".
    nothing is lost. The d2b2a audit worktree (`.claude/worktrees/m4.5d2b2a-auditA`) is still there too.
 3. **CI** (question 176): dispatch the workflow once with `profiles` = `all`; the next session promotes `macos-26` to
    `nightly` if its job is green (question 172).
-4. **Answer §8's questions 194–197** (each has a recommendation).
+4. **Answer §8's questions 196 and 197** (each has a recommendation; 194 and 195 are answered).
 5. **Optional.** On the box, `~/cerastes-m4.5d1` and its container `cerastes-m4.5d1-p71` can go (`docker rm -f`,
    `rm -rf`); `~/cerastes-s8` stays.
 
@@ -124,7 +124,7 @@ wording in P4417R0)
   reports the block; record 0055 item 4), a design decision, not cut 2: a row that names the other owner needs a ghost
   per heap object (M4.5f). [d2b2b]
 - **From M4.5d2b2b** (record 0055 item 7, "Further limits"; each a pinned false alarm in `tests/memory/negative/`,
-  `owning_field_loop_*_false_alarm.c`, and in `memory.adoc`'s not-yet list; question 195 recommends d2b2c fixes them):
+  `owning_field_loop_*_false_alarm.c`, and in `memory.adoc`'s not-yet list; question 195: d2b2c fixes them first):
   - a loop through a non-owning heap alias of a borrowed structure (`v = p;`, `free(v->q)`): 0047 item 10's heap place
     does not carry its pointee's closure (audit S5's second half, not built);
   - a call through an alias `ps = &s` in a loop: the leaf's ghost is not refreshed (only `&s` itself is matched);
@@ -495,7 +495,7 @@ lines against the plan's 1,700–3,300.
 
 **M4.5d2b2c `not_invalidating`, `--strict-owner`, marked fields** (after d2b2b; question 188).
 `cerastes::not_invalidating` on a pointer parameter, checked (178); `--strict-owner`, P4417R0's p4 and p6 as an
-opt-in (177); `ref_to_uninit` on a field (192); d2b2b's pinned loop limits if question 195 is answered as recommended
+opt-in (177); `ref_to_uninit` on a field (192); d2b2b's pinned loop limits, first (question 195)
 (none of d2b2b's cuts was taken). No `no_dangling` in C (179). Its design notes are §3 "M4.5d2b2c" with "From
 M4.5d2b2b"; the survey measured 290–440 and 200–280 lines, before the loop limits.
 
@@ -857,7 +857,11 @@ Other answers that steer a later session are in that session's notes (§3, §4):
 - **192** `ref_to_uninit` on a field: in d2b2c, with the strict rules.
 - **193** the session tools are committed under `scripts/`, and spike summaries into `internal/il-inventory.md`.
 
-**At M4.5d2b2b (2026-11-10), open:**
+**Answered at the end of M4.5d2b2b (2026-11-10), each the recommendation:**
+- **194** "Keep it (Recommended)": the cover rule stays (record 0055 item 3, "Covered atoms").
+- **195** "Keep pins; d2b2c fixes (Recommended)": M4.5d2b2c takes the pinned loop limits first (§3 "From M4.5d2b2b").
+
+**At M4.5d2b2b (2026-11-10), open:** 196 and 197 below. (194 and 195, as asked, for the record:)
 - **194** The cover decision taken in the session (record 0055 item 3, "Covered atoms"). An output `owns(*r)` that
   the implicit atom of a `static` struct can cover carries no closure: two calls of `where()` returning `&s` took
   Silicon past 170 s with the closure under `!cov`, 11 s without it. The cost: a function that returns `&s` on some

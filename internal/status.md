@@ -20,10 +20,13 @@ Plan: `.claude/plans/m4-5d2b2b-owning-fields.md`. Record 0055 (amends 0029 item 
 and 8, 0052 items 3 and 8, 0054 items 2, 5, 6 and 10). Read `internal/handoff.md` next: §1, §2, §3 "M4.5d2b2c" (with
 "From M4.5d2b2b") and §8 (questions 194 on).
 
-**Owner decisions.** At planning: 188–193 (each the recommendation; the plan's "Owner decisions"). During the session
-none was asked. One decision was taken in-session and is put to the owner as question 194: a covered output atom
-carries no closure (record item 3, "Covered atoms"; it fixed a timeout over 170 s, and its first form was unsound,
-caught by the re-audit and fixed).
+**Owner decisions.** At planning: 188–193 (each the recommendation; the plan's "Owner decisions"). Two decisions that
+the plan reserves for the owner were first taken in the session and then put to the owner before the end (2026-11-10),
+who answered both with the recommendation: **194**, a covered output atom carries no closure (record item 3, "Covered
+atoms"; it fixed a timeout over 170 s; its first form was unsound, caught by the re-audit and fixed): keep it; **195**,
+the loop shapes left as pinned false alarms rather than rejections (record item 7): keep the pins, and M4.5d2b2c fixes
+them first. The agents' own questions (the S6 caller side, the replaced-owner loops, `main_hold_type`, the two
+timeouts) were settled in the session as the record says, each sound and conservative, and are covered by 194–196.
 
 **Step 0 and Step 1.**
 - The box's full `check.sh` on `b6b3298` (d2b2a): exit 0, all green (11,779 passed). `origin/main` held `49d1775`, so
@@ -55,11 +58,16 @@ twice and was taken over by a fresh one each time, as the plan allows):
   an owning local's closure in its loop carrier; audit round 2's fixes on Parts B and C.
 - **The re-audit's fixes** (`f344559`): the covered site's leak exemption (unsound, now closed), global leaves reached
   by type, an assigned owner's closure (not built where the loop may replace the owner), one level of chain closure
-  in loops.
+  in loops. The auditor reviewed the fixes and the first form of the replaced-owner rule; its two later extensions
+  (assignments inside expressions and through a pointer of the owner's type; any call for an address-taken owner)
+  came after and were not audited: both only narrow where a closure is built (no closure: the field's token stays
+  outside the loop and the end row still reports a drop), and the il-analyst's probes show no exit 3.
+- **The lint for those shapes** (`776583e`): found by running `lint_viper.py` over the final build's Viper (225
+  problems, all in the session's new tests); two rules added with twins, none loosened.
 - **Tests.** 217 new test, fixture and example files (755 runs, all passing on the Mac): positives with twins, the
-  audits' tests, 23 rejection pins and 15 pinned false alarms (record 0055 item 7's loop limits). The one flip of the plan: `reject_struct_owning_field.c` retired for `struct_owning_field.c` and its
+  audits' tests, 23 rejection pins and 15 pinned false alarms (record 0055 item 7's loop limits; question 195). The one flip of the plan: `reject_struct_owning_field.c` retired for `struct_owning_field.c` and its
   twin. No other existing outcome changed. VIR self-test 1707 cases (was 1669). Lint rules for every new shape
-  (`test_lint_viper.py` 612, was 539), each mutation-checked.
+  (`test_lint_viper.py` 660, was 539), each mutation-checked.
 - **Docs and record** (the last commit): Memory and ownership ("Owning fields", "P4417R0's owners in cerastes", the not-yet list), Annotations
   ("Owning members"), Error messages (`permission`, `leak`), the tutorial's heap chapter ("A structure that owns its
   buffer"), the developer guide's Testing page; `internal/encoding.md`; record 0055 accepted.
@@ -71,14 +79,30 @@ twice and was taken over by a fresh one each time, as the plan allows):
 **Checks**
 - vprdiff against the baseline: every existing program's Viper byte-identical (4,668 entries, 0 differences) after
   every part and at the end. No allow-list was needed.
-- The VIR self-test (1707 lowering cases, 274 rejection cases, 0 problems), `test_lint_viper.py`, `test_run_tests.py`,
-  `format.sh --check`, `build_docs.sh` with `check_doc_examples.py --html` (0 problems).
+- The VIR self-test (1707 lowering cases, 274 rejection cases, 0 problems; the session's 38 `owning_*` cases through
+  Silicon, all passing), `lint_viper.py` over the final build's 5028 `.vpr` and the VIR output (6735 files clean),
+  `test_lint_viper.py` (660), `test_run_tests.py` (OK), `format.sh --check`, `build_docs.sh` with
+  `check_doc_examples.py --html` (0 problems).
 - `check.sh` (full) on the x86-64 box: run on the docs-and-status commit after it was made; its result is in the follow-up commit (the next line is updated then).
 
-**Corrections of new tests' expect lines** (question 160): the vlibc view twin L24→L25 (a header line miscounted);
-the two `stddef.h` additions (+1 line each in their twins); the `#550`/`#177` fixes in four twins (a read added; lines
-kept or +3); the S6 pair changed and then restored to its original program by the in-session decision (question 194).
-Program changes made before a first meaningful run are listed in the agents' reports (`build/m4.5d2b2b/tm-report-*.md`).
+**Corrections of new tests after their first run** (question 160; each listed, none audited separately):
+- `tests/vlibc/negative/owning_field_vlibc_view_free_with_block.c`: L24→L25 (a header line miscounted).
+- `negative/owning_field_noheap_value_address.c` L16→L17 and `negative/owning_field_complit_live.c` L17→L18:
+  `#include <stddef.h>` added to the pair (`NULL` was undefined).
+- `negative/owning_field_global_main_other_leak.c` L20→L23 and `negative/owning_field_gives_back_global_unknown.c`
+  L21→L24: a read of the global added, since EDG's #550 ("set but never used") fails a test with warnings;
+  `negative/owning_field_take_pointer_leak.c`, `owning_field_owner_to_leaf_leak.c`, `owning_field_leaf_to_owner_leak.c`:
+  the same for #550/#177, lines kept.
+- `negative/owning_field_value_result_dropped.c` L27→L30: `make` writes the buffer before returning it (a structure
+  owned in a contract needs its buffer's values).
+- `negative/owning_field_cover_caller_free.c`: one expected error became three (`invalid-free` twice at L27, the
+  caller's return row `permission` at L29), all from its one mistake, freeing a block the caller does not own under
+  question 194's rule.
+- `negative/owning_field_loop_owning_local_read_drop.c`: the drop moved before the read (the first version also read
+  freed memory in the next iteration).
+- The static-return pair: changed so `main` frees `r->data`, then restored to its original program when question
+  194's rule was taken.
+- The 15 pinned false alarms record their actual errors (by design).
 
 **Not done** (each pinned, documented and in the handoff for M4.5d2b2c or M4.8): a loop through a non-owning heap alias
 of a borrowed structure (S5's second half); a call through an alias of `&s` in a loop; an owning `struct S *` global's
