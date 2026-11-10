@@ -1113,13 +1113,24 @@ cheaper one, its cost recorded), 187 (three twins list their consequential lines
 - **169** `ubuntu-24.04-clang18` (EDG emulating clang 18 differs on eight tests, record 0053 item 11): (a,
   recommended) keep it at `dispatch` as the record of what the clang-18 emulation changes, and revisit at M8's
   inventory; (b) exclusions for its eight tests and `nightly`; (c) remove it.
+
+Follow recommendation
+
 - **170** vlibc's `<stdlib.h>` shim under libc++ 20 and 18 (`reject_coroutine.cpp`'s `incompatible_linkage_specifier`):
   (a, recommended) a vlibc session (or M4.6, which works in vlibc's headers) finds the cause and fixes the shim, then the
   clang-20 profiles drop their exclusion; (b) leave the exclusion.
+
+Follow recommendation using a vlibc session
+
 - **171** Your Mac's Command Line Tools: (a, recommended) update to 27.2 once GitHub's rollout has finished, so the Mac
   and CI agree to the build; (b) stay on 27.0 (both satisfy the profile; a result that differs is drift).
+
+I will handle the update tonight. 
+
 - **172** `macos-26`: (a, recommended) after your `profiles=all` dispatch, the next session promotes it to `nightly` if
   its job is green, or records what differs; (b) leave it at `dispatch`.
+
+Follow recommendation. 
 
 At M4.5d2b2a's planning (2026-11-09, each the recommendation; recorded in its plan): 173 (M4.5d2b2 is two sessions:
 d2b2a block sites through memory, owners in memory, written `owns_block` invariants and the carrier redesign lifting the
