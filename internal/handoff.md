@@ -18,9 +18,9 @@ its plan's "Inputs".
   `m4.5d2b2b-owning-fields`, local only (the owner pushes). Its result is in `internal/status.md`. Owning fields are
   complete in contracts, bodies, copies and loops, with P4417R0's `[[owner]]` mapping in the docs; the loop limits
   it pins are listed in §3 "From M4.5d2b2b".
-- **Its one full `check.sh`** ran on the x86-64 box, in S8's `cerastes-s8-ubuntu-26.04` container, on the branch's
-  last code commit; the result is in `internal/status.md` ("Checks") and in
-  `~/cerastes-s8/p-ubuntu-26.04/d2b2b-check.{exit,log}` on the box.
+- **Its full `check.sh`** ran on the x86-64 box, in S8's `cerastes-s8-ubuntu-26.04` container, on `aae35c2`: **all
+  green** (12,528 passed, 0 failed; `internal/status.md`, "Checks"; `~/cerastes-s8/p-ubuntu-26.04/d2b2b-check.{exit,log}`
+  on the box). The only commit after it records that result.
 - **Worktrees left for the owner to remove** (§2): `.claude/worktrees/m4.5d2b2b` (the session's), `-aux` (the
   lowering, detached; its commits were moved onto the branch as tree objects) and `-audit` (the audits' build).
 - **M4.5d2b2c is next** (question 188): `not_invalidating`, `--strict-owner`, `ref_to_uninit` on a field, and the
@@ -780,6 +780,10 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   `git commit-tree`, `git update-ref`, then `git reset -q`). A shell `rm` inside `bash -c` is refused by the safety
   check: `git read-tree` replaces a temporary index anyway. The harness refuses a subagent's second hand-back, which
   silently drops the report: have agents write each report to `build/<session>/…-report-<n>.md` as well. [d2b2b]
+- **Before the one box `check.sh`:** run `scripts/regen_vpr.py` over the final build and `scripts/lint_viper.py` over
+  its output and a fresh VIR self-test directory, and run the session's VIR cases through Silicon. M4.5d2b2b's first
+  box run had to be stopped: the last fixes had changed Viper shapes the lint pins, and the lint step comes late in
+  `check.sh`. [d2b2b]
 - **Every session that changes CI:** a new toolchain is one `[[profile]]` in `scripts/ci_toolchains.toml` at `dispatch`,
   promoted to `nightly` after a green full check; the developer guide's "Adding a toolchain" has the fields. The guard
   pins every assertion line of `ci.sh`/`ci-linux.sh` literally (messages included) and `ci.yml` as a pattern tree, so a

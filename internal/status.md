@@ -83,7 +83,12 @@ twice and was taken over by a fresh one each time, as the plan allows):
   Silicon, all passing), `lint_viper.py` over the final build's 5028 `.vpr` and the VIR output (6735 files clean),
   `test_lint_viper.py` (660), `test_run_tests.py` (OK), `format.sh --check`, `build_docs.sh` with
   `check_doc_examples.py --html` (0 problems).
-- `check.sh` (full) on the x86-64 box: run on the docs-and-status commit after it was made; its result is in the follow-up commit (the next line is updated then).
+- `check.sh` (full) on the x86-64 box, on `aae35c2` (the last change to code, tests or docs), in S8's
+  `cerastes-s8-ubuntu-26.04` container at `CERASTES_JOBS=32`, from a clean `build/cmake` (Tue Nov 10 12:41:01 PM UTC 2026 to 13:49 UTC):
+  **all green**. 12,528 passed, 0 failed, 10 skipped (native-ok runs clang 2,399, GCC 2,399); the Viper lint 5,032
+  files clean; the VIR self-test 1,707 lowering and 274 rejection cases, 0 problems; the walker oracle; the docs. A
+  first run on `7cf5359` was stopped before its lint step, once `lint_viper.py` over the final build had found the
+  shapes it did not know (`776583e`). The log is `~/cerastes-s8/p-ubuntu-26.04/d2b2b-check.{exit,log}` on the box.
 
 **Corrections of new tests after their first run** (question 160; each listed, none audited separately):
 - `tests/vlibc/negative/owning_field_vlibc_view_free_with_block.c`: L24→L25 (a header line miscounted).
