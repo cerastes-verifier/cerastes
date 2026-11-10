@@ -18,7 +18,8 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 - **M4.5d2b2c** (2026-11-10; records 0056 and 0057; plan `.claude/plans/m4-5d2b2c-loop-limits.md`) is done on branch
   `m4.5d2b2c-loop-limits` (worktree `.claude/worktrees/m4.5d2b2c`), not merged: `main` is still the planning commit
   `e3f4b9f`. Its result is in `internal/status.md`; its full `check.sh` with `CERASTES_LONG=1` on the x86-64 box
-  was started on the final commit, and the commit after it records the result. Six of d2b2b's loop false alarms are lifted, five pins stay under the written-invariant rule (four renamed,
+  is all green on `ee2ae5c`, the last change (12,745 passed, 0 failed; the long tier ran, 16 runs passed; 73 minutes
+  at `-j32`). Six of d2b2b's loop false alarms are lifted, five pins stay under the written-invariant rule (four renamed,
   one kept), and the long-running tier holds six of the session's tests that are slow on the box (question 217);
   question 196's two programs ran past 1800 s (M4.8).
 - **M4.5d2b2d** is next, with its approved plan `.claude/plans/m4-5d2b2d-invalidation-profile.md` (written at
@@ -28,7 +29,7 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
   The nightlies of 2026-11-07 to 11-09 were cancelled at 220 minutes and all started before the 360-minute limit
   (`99b587e`); none had run under it by the session's end, so whether the full check fits is still open.
 - **The Linux host** `matt@clang4.cpp.al`: runs go in containers from clean `ubuntu` images (`~/cerastes-s8`, `run.sh`;
-  §6). Its `p-ubuntu-26.04` checkout is detached at this session's final commit (from `~/cerastes-d2b2c.bundle`), with
+  §6). Its `p-ubuntu-26.04` checkout is detached at `ee2ae5c`, this session's last change (from `~/cerastes-d2b2c.bundle`), with
   the slow programs' tries in its `build/slow-d2b2c/`.
 - **The main checkout's `build/`** was last built on 2026-11-09. Sessions build in their own worktree (§6).
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged; the
@@ -42,7 +43,7 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
    (`git worktree remove .claude/worktrees/m4.5d2b2c`).
 2. **CI** (question 176): dispatch the workflow once with `profiles` = `all`; the next session promotes `macos-26` to
    `nightly` if its job is green (question 172). A `dispatch` job for the long tier (`CERASTES_LONG=1`) is yours to add
-   when the tier has tests (record 0057 item 7).
+   (record 0057 item 7); the tier now has six tests, the slowest about 11 minutes alone on the box (limit 22).
 3. **Optional.** On the box, `~/cerastes-m4.5d1` and its container `cerastes-m4.5d1-p71` can go (`docker rm -f`,
    `rm -rf`); `~/cerastes-s8` stays.
 

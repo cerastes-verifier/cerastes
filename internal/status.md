@@ -143,8 +143,14 @@ resumed between tasks; the orchestrator consulted the Fable advisor):
 - The VIR self-test (1,732 lowering cases, 274 rejection cases, 0 problems; the session's cases through Silicon),
   `lint_viper.py` over the final regeneration and the VIR output, `test_lint_viper.py`, `test_run_tests.py`,
   `test_mutate.py`, `format.sh --check`, `build_docs.sh` with `check_doc_examples.py --html`.
-- `CERASTES_LONG=1 scripts/check.sh` (full) on the x86-64 box, on the final commit: running when this entry was
-  committed; the next commit records its result.
+- `CERASTES_LONG=1 scripts/check.sh` (full, `CERASTES_JOBS=32`, clean `build/cmake`) on the x86-64 box in S8's
+  `ubuntu-26.04` container, on `ee2ae5c` (the last change; the commit after it only records this result): **all
+  green**, 12,745 passed, 0 failed, 10 skipped (the nine macOS-only tests of record 0031 and the VeriFast originals),
+  `native-ok` runs clang 2,445 and GCC 2,445; `lint_viper` 5,148 files clean; the VIR self-test 1,732 lowering cases
+  and 274 rejection cases, 0 problems, and its 1,732 cases through Silicon passed and lint-clean; the walker oracle 136
+  goldens, 1,924 facts, 0 failed; the last line `check.sh: long tier: ran (CERASTES_LONG=1)`, the six long tests'
+  16 runs (both modes and `chain3`'s `native-ok`) all passed. It took 73 minutes (20:49–22:02 UTC); the box's load
+  was 0.4 at the start and its 15-minute average about 100 a minute after the end (the cause not determined).
 
 **First step for the next session:** M4.5d2b2d (`.claude/plans/m4-5d2b2d-invalidation-profile.md`): its Step 0 checks
 that `origin/main` holds this branch's merge, and its survey refresh re-reads `lower.cpp`'s line numbers (this session
