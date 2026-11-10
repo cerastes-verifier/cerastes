@@ -9,9 +9,9 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start. The last was M4.5d2b2b's planning (2026-11-09), which also cut the Done table to one line per
-row; the rows as they were are `git show 2430529:plan.md`. The plans of the finished milestones, the superseded text
-and the appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
+each session's start. The last was M4.5d2b2c's planning (2026-11-10); M4.5d2b2b's (2026-11-09) cut the Done table to
+one line per row, and the rows as they were are `git show 2430529:plan.md`. The plans of the finished milestones,
+the superseded text and the appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
 entries keep the numbers they were written with.
 
@@ -54,7 +54,7 @@ Cerastes/
     il-inventory.md         # M1 output
     encoding.md             # C/C++ → Viper encoding spec (grows each milestone)
     differential.md         # agreement table vs VeriFast (M5+)
-    soundness/              # arguments the encoder relies on
+    soundness/              # arguments the encoder relies on (from M5; until then: the records and encoding.md §3)
   third_party/
     edg/                    # submodule: the owner's fork mborland/compiler, branch cerastes (decision 0009)
     silicon/                # submodule: viperproject/silicon (recursive), pinned
@@ -148,8 +148,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above. `internal/status.md` has a
 row per session with its outcome, each record has the detail, and the approved session plans from M4.5b1a on are in
-`.claude/plans/`. The rows above were cut to one line each at M4.5d2b2b's planning (owner, 2026-11-09); as they
-were: `git show 2430529:plan.md`.
+`.claude/plans/`.
 
 ## M4 — The rest of C
 
@@ -169,7 +168,7 @@ history of `internal/status.md`).
 | **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 (done) |
 | **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (contracts on `strlen`/`memcpy`/`memcmp`/`strcmp`, and their verified implementations `vlibc_strlen`, `vlibc_memcpy`, `vlibc_memcmp`, `vlibc_strcmp`, record 0048; the rule that verifies vlibc's own `src/`, 0048 item 5), `main(argc, argv)`; `const` objects as cells held below `write` after their initializer, lifting record 0040 item 2's contract rules across `const` (owner, 2026-10-30, handoff question 78) | M4.5e2, M4.5f3 |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1b |
-| **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8; the cost of aliasing `reads`/`live` parameters (handoff question 66: fixed here), with the false alarm of written atoms on moved pointers (question 79) and the cost of two written `owns_block` sites through loads (question 189) | all |
+| **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8; the cost of aliasing `reads`/`live` parameters (handoff question 66: fixed here), with the false alarm of written atoms on moved pointers (question 79) and the cost of two written `owns_block` sites through loads (question 189); what M4.5d2b2c's long-running tier could not carry (question 196), the `static` cache's cover (with question 194), automatic closure sites for borrowed structures in loops (question 201) | all |
 
 **A vlibc session** (owner, 2026-11-09, handoff question 170; any time, it blocks nothing): vlibc's `<stdlib.h>` shim
 meets glibc's declarations with an incompatible linkage under libc++ 20 and 18 (record 0053). The session finds the
@@ -178,15 +177,17 @@ cause and fixes the shim; the clang-20 CI profiles then drop their exclusion.
 **M4.5 Pointers** (one 4.x for pointers, owner, 2026-10-20; the C parts of the former memory-model milestone). M4.5a
 designed it (records 0028 memory model, 0029 ownership annotations and C spec functions, 0030 vlibc);
 `internal/handoff.md` §4.2 has each remaining session's plan and the VeriFast ports it takes. The owner split it
-session by session, as each planning's survey measured the work (b1c, c, c2, d2, d2b, d2b2: `internal/status.md`'s
-history, and `git show 2430529:plan.md` for the wording). The last split (owner, 2026-11-09, question 188; the
-surveys measured 1,750–3,100 changed lines): d2b2b is owning fields, d2b2c `not_invalidating` and `--strict-owner`.
+session by session, as each planning's survey measured the work (b1c, c, c2, d2, d2b, d2b2, d2b2c:
+`internal/status.md`'s history, and `git show 2430529:plan.md` for the wording). The last split (owner, 2026-11-10,
+question 198; the surveys measured 295–495 changed lines for the loop limits and 740–1,170 for the rest): d2b2c is
+d2b2b's loop limits and the long-running test tier, d2b2d `not_invalidating`, `--strict-owner` and marked fields.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5d2b2c `not_invalidating`, `--strict-owner`** | right after d2b2b and before M4.5e1: the rest of P4418R0's invalidation profile (owner, 2026-11-02, question 91; split from d2b2b, question 188): `cerastes::not_invalidating` on a pointer parameter as a checked attribute (178); `--strict-owner` with P4417R0's p4 and p6 as an opt-in (177); `ref_to_uninit` on a field (192); d2b2b's pinned loop limits, first (question 195; handoff §3); no `no_dangling` in C (179: M7 reads `std::no_dangling` as a checked identity); C++'s parts are M7's | M4.5d2b2b |
+| **M4.5d2b2c Loop limits, long-running tests** | right after d2b2b (plan `.claude/plans/m4-5d2b2c-loop-limits.md`; owner, 2026-11-10, questions 195–201): d2b2b's pinned loop limits (six false alarms lifted; five pins kept under the written-invariant rule, each with a verifying twin); a long-running test tier (`tests/long/`, a `// timeout:` header, opt-in by `CERASTES_LONG=1`) and the two slow programs of question 196 tried under 1800 s | M4.5d2b2b |
+| **M4.5d2b2d `not_invalidating`, `--strict-owner`, marked fields** | after d2b2c and before M4.5e1 (plan `.claude/plans/m4-5d2b2d-invalidation-profile.md`): the rest of P4418R0's invalidation profile (owner, 2026-11-02, question 91; split from d2b2b, question 188, and from d2b2c, question 198): `cerastes::not_invalidating` on a pointer parameter as a checked attribute (178, 203); `--strict-owner` with P4417R0's p4 and p6 as an opt-in (177); `ref_to_uninit` on a field (192) and on a pointer to a structure with an owning field (197, 202); no `no_dangling` in C (179: M7 reads `std::no_dangling` as a checked identity); C++'s parts are M7's | M4.5d2b2c |
 | **M4.5e1 Arrays** | local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants; inner arrays and arrays of structs on M4.5c1's member blocks | M4.5c1 |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))`, `realloc` (from M4.5d2a, question 120); `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2a |
 | **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c2b, M4.5d2b2b |
