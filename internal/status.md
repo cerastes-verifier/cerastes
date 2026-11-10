@@ -10,88 +10,98 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 5ffb1a2:internal/status.md`, M4.5b2a's `git show 38877b4:internal/status.md`, M4.5b2b's
 `git show 1bfa705:internal/status.md`, M4.5c1's `git show cbdcce5:internal/status.md`, and M4.5c2a's
 `git show 7f11706:internal/status.md`, M4.5c2b's `git show d26a87c:internal/status.md`, and M4.5d1's
-`git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, S6's `git show 9255b93:internal/status.md`, M4.5d2v's `git show c2bc48d:internal/status.md`, S7's `git show a660abc:internal/status.md`, and M4.5d2b1's
-`git show c1b691d:internal/status.md`.
+`git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, S6's `git show 9255b93:internal/status.md`, M4.5d2v's `git show c2bc48d:internal/status.md`, S7's `git show a660abc:internal/status.md`, M4.5d2b1's
+`git show c1b691d:internal/status.md`, and S8's `git show 15bcdc6:internal/status.md`.
 
-## S8 — CI toolchain profiles (2026-11-06): done on branch `s8b-ci-profiles` (S8a's two commits first)
+## M4.5d2b2a — block sites through memory, owners in memory, block carriers in loops (2026-11-09): done on branch `m4.5d2b2a-owners-in-memory`
 
-Plan: `.claude/plans/s8-ci-toolchains.md`. Record 0053 (amends 0001, 0016 items 2, 3, 9, 10, 0031 items 1, 2). Read
-`internal/handoff.md` next: §2 (owner steps), §3 "From S8", §8 (questions 169–172).
+Plan: `.claude/plans/m4-5d2b2a-owners-in-memory.md`. Record 0054 (amends 0029 item 1, 0041 items 7, 10 and 12, 0045
+items 2, 7 and 10, 0047 items 4, 7 and 10, 0052 items 2, 3, 4, 6(a) and 8). Read `internal/handoff.md` next: §1, §2, §3
+"From M4.5d2b2a", §4.2 (d2b2b) and §8 (questions 188 on).
 
-**Why:** GitHub's `xcode-27` image `20261104.0337` (a pre-release, still deploying) moved the Command Line Tools from
-27.0.0.0.1788430756 to 27.2.0.0.1792721180, and runs got either image, so CI's exact pins failed both ways (runs
-42158664485 and 42232697813). `c1b691d` moved `ci.sh` without the self-test's copy, so `main` also failed the harness
-self-test. The owner: "These scripts should be far more robust and allow different versions of clang and gcc on linux to
-be tested in the future. Like using default macos-16, 26, ubuntu-26.04, ubuntu-24.04 etc." (there is no `macos-16`).
+**Owner decisions** (2026-11-09).
+- At planning: 173 (d2b2 split; d2b2b takes owning fields and P4418R0), 174 (static owners exempt at `main`'s end,
+  P4417R0), 175 (`owning` on a parameter stays a borrow), 176 (the nightly CI timeout is the owner's), 177
+  (`--strict-owner`), 178 (`cerastes::not_invalidating`, checked), 179 (no `no_dangling` in C). 177–179 are d2b2b's.
+- During the session: 180 (the alias pin's positive adds an invariant), 181 (the flag after a handoff: tried, and it
+  verifies), 182 (the test-mutator's eight pre-registered readings), 183, 185 and 187 (consequential extra lines
+  listed; 185 not the recommendation), 184 (two VIR cases' outcomes as part of the flips), 186 (a cheaper twin, the
+  cost recorded).
 
-**Owner decisions** (2026-11-06, at planning, each the recommendation but 168): 162 (assert declared majors, record the
-exact builds), 163 (a different outcome fails the job; fix it or record a named exclusion; no per-toolchain `expect:`),
-164 (the references in both tiers, other toolchains nightly and on dispatch), 165 (the guard as structural rules and a
-profile schema), 166 (a small fix first, the profiles stacked), 167 (other ubuntu-26.04 majors, ubuntu-24.04, macos-26),
-168 (GCC builds of cerastes and EDG in this work; not the recommendation, which was a later session). During the session
-the owner pushed `s8b-ci-profiles` at `3fcbf92` (PR #33) instead of S8a alone.
-
-**Done**
-- `bdefc29` planning and record 0053; `d0e318a` S8a: both setup scripts assert majors (CLT 27, Apple clang 21, SDK 27,
-  GCC 16; clang 21 with libc++ 21 at one package version, GCC 16, glibc 2.43 exactly) and record the builds; the guard's
-  copies followed.
-- `15357b6` S8b part 1: `scripts/ci_toolchains.toml` and `scripts/ci_profile.py` (schema, selection, `get`, `matrix`,
-  `exclusions`); `ci.yml` with a `profiles` job and two matrix jobs, a `profiles` dispatch input; `ci.sh`/`ci-linux.sh`
-  take the profile; `bootstrap.sh`'s `CERASTES_CLANG_MAJOR`, `CERASTES_GCC_MAJOR`, `CERASTES_BUILD_COMPILER`
-  (`build/toolchain.env` for `--build-only`, a compilers stamp); `run_tests.py`'s exclusions (`DIVERGES`).
-- `7b69beb` S8b part 2: the guard as rules (a pinned assertion order, a line-shape allow-list, ci.yml's pattern tree,
-  `CI_REFERENCE_PROFILES`, 112 schema mutations; test-mutator agent, reviewed); the developer guide's CI section and
-  "Adding a toolchain"; `tests/README.md`.
-- `3fcbf92`, `7dd76f5`, `fc499cc` and the final commit, S8c: clang 18's bit-field narrowing (`encode.cpp`, objects
-  identical); `CERASTES_WARNINGS` with GCC's `-Wdangling-pointer=1`; EDG's clang base named for GCC builds;
-  `ubuntu-24.04` on clang 20, `ubuntu-24.04-clang18` at dispatch; the builder's evaluation-order bug (`vir.cpp`, see
-  Surprises) with a new pair for a compound store used as a value (`tests/memory/compound_store_value.c`,
-  `negative/compound_store_value_div_zero.c`; no test had one); ShellCheck 0.9.0's SC2015 in `check_edg_options.sh`;
-  the exclusions; profiles promoted to `nightly` (below).
-- Soundness audits (read-only Opus): the S8c build diff (no blocking item; its should-fix, `-Wdangling-pointer=1` over
-  turning the warning off, taken) and the builder fix (no blocking item; clang-tidy's `bugprone-use-after-move` over all
-  29 TUs finds only the two fixed lines; an empty file can change only a message; its should-fixes: the compound-store
-  pair, taken, and a position map that refuses an empty file, to the handoff §3 "From S8").
+**Done** (all three Sonnet roles and the Opus reviewer, from `.claude/agents/`):
+- **Step 1 and the record.**
+  - `e0d9816`: the planning commit.
+  - `491d00c` and `5434b8e`: record 0054, written before code. It was revised after spike S39 (60 kept fixtures,
+    `tests/viper-smoke/memory/s39_*`), audit round 1 (B1–B3) and its re-audit (S1, S2).
+  - P75 in `il-inventory.md`.
+- **Part A, block sites through loads and on globals** (`owns_block(*pp)`, `(p->q)`, `(g)`, `(*gp)`, `r->q`, by-value
+  leaves):
+  - a neutral re-keying first (`block_key` gone; every consumer on `site_key`/`site_root`), proved byte-identical;
+  - whole-key duplicate and "beside" rules;
+  - post-state reads in the leak exemption and the returned owners;
+  - entry and loop snapshots;
+  - the bodiless tie with the partner's guard (audit B1).
+- **Part B, loop carriers by current state** (the entry snapshot kept as the exclusivity clause; sharing pairs; value
+  sets; held-guarded owners the loop does not name; the flag that follows the block): the four pinned d2b1 false
+  alarms are lifted. Written `owns_block` invariants (a plain whole-block carrier, pair rows at entry and back edge, a
+  back-edge `forperm` whenever a loop has a site).
+- **Part C, owners in memory:**
+  - owning and marked globals and `static` locals: the deep atom `owns(g) && (g == NULL || owns_block(g))`, `held_g`,
+    store rows, framed updates, `main`'s exemption, the `program_start` tag, synthetic loop sites;
+  - owning address-taken locals (no cut taken).
+- **Part D:** the static struct leaf cover.
+- **Tests.**
+  - 193 new test and example files: positives with twins, the audits' probes, pins for every still-rejected shape.
+  - 12 retired pins (the plan's Flips).
+  - 4 pins re-messaged.
+  - VIR self-test 1669 cases (was 1642).
+  - Lint rules for every new Viper shape (`test_lint_viper.py` 539).
+- **Docs:**
+  - Memory and ownership: blocks through memory, written invariants, owners that change hands in loops, owning
+    globals, the not-yet list;
+  - Annotations, Error messages, Verifying;
+  - the tutorial's heap chapter (an owner that outlives a call);
+  - `internal/encoding.md`.
+- **Audits** (read-only Opus): round 1 on the draft, then its re-audit; round 2 per part on snapshots (`f9ee68e` A,
+  `18cf5b5` B, `81e46a0` C/D); one re-audit of round 2's blocking fixes (`1a1d172`). No wrong verdict survived.
+  - Round 2 Part A: B1 bodiless path partners, and rules without tests.
+  - Round 2 Part B: B1, a written site that drops a block without a leak row.
+  - Round 2 C/D: B1, six VIR cases; B2, loops over owners in memory untested; S3–S5, three exit-3 paths. All fixed.
 
 **Checks**
-- The harness self-test: 1159 OK (1 skip) after the guard; the CI classes after each later edit.
-- `check.sh` on the Mac (the full check, run once at `3fcbf92`'s tree plus the 24.04 profile change): all green, the
-  suite 11072 passed, 0 failed, 10 skipped (native-ok Apple clang 2085, GCC 2085), the VIR self-test 1642. The
-  later edits are covered by targeted checks: `check_edg_options.sh` and ShellCheck; the CI classes; `vir.cpp`'s fix by
-  1262 byte-identical `.vpr`/`.map` runs under Apple clang 21.
-- `scripts/ci.sh macos-27` rehearsed on the Mac (CLT 27.0): passes, installs nothing.
-- GitHub, PR #33 at `3fcbf92`, PR tier: `profiles` selected the two references; `check (macos-27)` ran on the new image
-  (`20261104.0337.1`: CLT 27.2.0.0.1792721180, banner `clang-2100.4.1.1`, SDK 27.2 build `26B118`, all three of which the
-  old pins refused) and is green (7280 passed, VIR 183, PR tier).
-- The x86-64 box (`~/cerastes-s8`, one container per profile from a clean `ubuntu` image, `ci-linux.sh <profile>` then
-  the full `check.sh` at `-j 16`): `ubuntu-26.04` (the reference) and `ubuntu-26.04-clang22-gcc14` all green (the suite
-  11072 passed, 0 failed, 10 skipped, native-ok clang 2087, GCC 2087; VIR self-test 1642; both at `3fcbf92`);
-  `ubuntu-26.04-clang20-gcc15` and `ubuntu-26.04-gcc15-build` all green at `32c4ee9` (11080 passed, 0 failed, 10
-  skipped, the clang-20 one with 1 diverging as it records; native-ok clang 2089, GCC 2089; VIR 1642);
-  `ubuntu-24.04` (clang 20) 11068 passed and 4 failed before its exclusions, then all green at `51b9861` (11080 passed,
-  4 diverging as it records); `ubuntu-24.04-clang18` (the suite only) 11064 passed, 8 failed (record 0053 item 11).
-  The four green profiles besides the reference are `nightly`; `ubuntu-24.04-clang18` and `macos-26` stay `dispatch`.
-- GitHub at `fc499cc`: both jobs failed five CI profile self-tests (their fixture profile had gained an exclusion;
-  fixed in `32c4ee9`, the CI classes and the full harness self-test, 1159 OK, rerun after it).
+- `check.sh` (full) on `b6b3298`: **not completed in the session.** The Mac's run passed its build, the Viper lint
+  (4668 files clean) and the VIR self-test (1669 lowering cases, 270 rejection cases, 0 problems). It was stopped in
+  its main suite when the owner moved the end-of-session `check.sh` to the x86-64 box (2026-11-09: "much faster, and
+  doesn't lock up the local machine"). The box run, in the `ubuntu-26.04` container at `CERASTES_JOBS=32`, started
+  2026-11-10 00:13 UTC. It was still running when the owner ended the session. Its result is in
+  `~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.{exit,log}` (handoff §2).
+- The x86-64 box (`ubuntu-26.04` profile, S8's container `cerastes-s8-ubuntu-26.04`, branch shipped as a git bundle,
+  clean `build/cmake`): `run_tests.py -j 16 tests/memory tests/vlibc doc/modules/ROOT/examples` at `b6b3298` gives
+  6026 passed, 0 failed, 1 skipped (native-ok clang 1237, GCC 1237).
+- Targeted runs before the one `check.sh` (owner, 2026-11-09: run it once, at the end): every owner, block-site, loop
+  and related doc test after the last patch, 1259 passed, 0 failed. The first `check.sh`, stopped once a patch was
+  still to come, had passed its main suite on the pre-patch tree (11779 passed, 0 failed).
+- vprdiff against the baseline (`15bcdc6`, 11080 passed): every existing program's Viper is byte-identical except
+  the ten allow-listed owner-loop tests of record item 3 (`build/m4.5d2b2a/allow-partB.txt`), with the same outcomes.
 
-**Not done:** macos-26 never ran (it cannot be rehearsed on a macOS 27 Mac: the owner dispatches it, question 172);
-`ubuntu-24.04-clang18` stays at `dispatch` (question 169); vlibc's linkage fix for libc++ 20 (question 170); the GitHub
-Linux jobs of the new workflow on the final tip (CI decides when the owner pushes).
+**Not done:** owning fields and P4418R0 (d2b2b).
 
-**Surprises:** the Apple clang build moved too (`2100.3.34.2` → `2100.4.1.1`) with the CLT 27.2 image, which the release
-notes did not list. EDG's CMake picks `EDG_BASE` (the emulated compiler's predefined macros) from the compiler that
-builds it. GCC 15 found a real bug clang's argument order hides: `Builder::compound_assign_expr` and
-`compound_store_expr` moved their `SrcLoc` in the same argument list that copied it, so errors of `x /= d` used as a
-value lost their file in a GCC build. EDG's clang-18 emulation is another language for eight tests (record 0053
-item 11). A `find -name "._*"` cleanup on the box matched EDG test directories named `._…` (nothing tracked was lost).
+**Surprises.**
+- **The carriers.** A guard on current values alone loses two blocks' distinctness, as 0052 had recorded. The audit
+  predicted the regression and S39 part 2 confirmed it, so the hybrid design keeps the entry snapshot.
+- **A lost hand edit.** A test generator re-run wiped three hand-added expect lines (question 183). The audit caught
+  it, and handoff §6's rule was restated to the agent.
+- **Cost.** Two written sites through loads over parameter places cost 33–148 s (question 186).
+- **CI.** The nightly CI has timed out at 220 minutes since 2026-10-29 (question 176).
 
-**First step for the next session:** M4.5d2b2's planning (plan.md's row; handoff §3 "M4.5d2b2" and "From M4.5d2b1"),
-after the owner merges PR #33 and dispatches the workflow once with `profiles=all`.
+**First step for the next session:** M4.5d2b2b's planning (owning fields, P4418R0 per questions 175, 177–179;
+handoff §3 "M4.5d2b2b" and "From M4.5d2b2a").
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5d2b2a Owners in memory | 2026-11-09 | `m4.5d2b2a-owners-in-memory` | 0054 | block sites through loads and on globals; owning and marked globals, `static` locals and address-taken locals (the deep atom; static owners exempt at `main`'s end); written `owns_block` invariants; loop carriers by current state lifting d2b1's four false alarms; the static struct leaf cover; d2b2 split (owning fields and P4418R0 to d2b2b) |
 | S8 CI toolchain profiles | 2026-11-06 | `s8b-ci-profiles`, PR #33 | 0053 (0001, 0016, 0031 amended) | CI asserts declared majors and records exact builds; toolchain profiles (`scripts/ci_toolchains.toml`), a matrix with a `profiles` job, cadences `every`/`nightly`/`dispatch`, exclusions; the guard as rules and a schema; GCC builds of cerastes and EDG; a builder evaluation-order bug found by GCC fixed |
 | M4.5d2b1 Partnerless results, owning locals | 2026-11-05 | `m4.5d2b1-results-locals` | 0052 | `ensures` atoms with no partner (covered by implicit atoms or given an output amount; bodiless contracts fresh results only), owning automatic locals (leaks at every exit and reassignment, loops), marked locals and P4222R3's strict rules, block-site guards over memory, `cerastes_owns_vlibc_block`, two d2a holes closed; written `owns_block` invariants cut to d2b2 |
 | S7 Code style | 2026-11-05 | `s7-code-style` | 0051 (0001 amended) | cerastes's tool code in the owner's Boost style: the pinned clang-format 23.1.3 (`format.sh`, a `check.sh` step, fail-closed guards), then brace initialization, `U` and one declarator per declaration; proved by `object_identity.py` (objects and IR at every commit, macOS and Linux; tokens) and by `.vpr`/`.map` identical over the suite and the VIR self-test; the docs lockfile fixed |

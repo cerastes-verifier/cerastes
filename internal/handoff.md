@@ -1,4 +1,4 @@
-# Handoff at M4.5d2b2a's planning (2026-11-09); M4.5d2b2a in progress, M4.5d2b2b next
+# Handoff at M4.5d2b2a's end — owners in memory (record 0054) (2026-11-09); M4.5d2b2b next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`. `status.md` has the formal entry. This file adds what a cold start would otherwise have to
@@ -6,8 +6,8 @@ rediscover, and holds only what is live (owner, 2026-10-26; consolidated again a
 regrouped by the session that consumes each note; updated at M4.5c1's, M4.5c2a's, M4.5c2b's, M4.5d1's and M4.5d2a's starts, and
 by S6, a docs session that changed no code: its additions are marked "S6"; at M4.5d2v's start, 2026-11-04; at S7's
 planning, 2026-11-05; at S7's end, the same day: §1, §2, §3's "From S7", §8; at M4.5d2b1's planning, the same
-day: §1, §2, §3, §4.2, §8; at S8's end, 2026-11-06: §1, §2, §3's "From S8", §8; and at M4.5d2b2a's planning, 2026-11-09: §1, §2, §3, §4.2,
-§8). The text before M4.5d2b2a is `git show 15bcdc6:internal/handoff.md`, before M4.5d2b1 `git show a660abc:internal/handoff.md`, before S7
+day: §1, §2, §3, §4.2, §8; at S8's end, 2026-11-06: §1, §2, §3's "From S8", §8; at M4.5d2b2a's planning, 2026-11-09: §1, §2, §3, §4.2,
+§8; and at its end, the same day: §1, §2, §3's "From M4.5d2b2a", §4.2, §8). The text before M4.5d2b2a is `git show 15bcdc6:internal/handoff.md`, before M4.5d2b1 `git show a660abc:internal/handoff.md`, before S7
 `git show c2bc48d:internal/handoff.md`, before M4.5d2v is `git show 9255b93:internal/handoff.md`, before S6
 `git show bb41d55:internal/handoff.md`, before M4.5d2a `git show 9d98fe8:internal/handoff.md`, before M4.5d1 `git show d26a87c:internal/handoff.md`, before M4.5c2b `git show 7f11706:internal/handoff.md`, before M4.5c2a `git show cbdcce5:internal/handoff.md`, before M4.5c1
 `git show 1bfa705:internal/handoff.md`, and before M4.5b2b `git show 38877b4:internal/handoff.md`, whose header names
@@ -16,11 +16,13 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 
 ## 1. State
 
-- **M4.5d2b2a** (2026-11-09; record 0054 to come; plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`, questions
-  173–179): in progress on branch `m4.5d2b2a-owners-in-memory` (from `origin/main` `15bcdc6`, which holds S8's PR #33)
-  in the worktree `.claude/worktrees/m4.5d2b2a`. M4.5d2b2 is split (question 173): d2b2a block sites through memory,
-  owners in memory (globals, `static` locals, address-taken locals), written `owns_block` invariants and the loop
-  carriers; **d2b2b next**: owning fields and P4418R0, whose spellings were decided at d2b2a's planning (§4.2, §8).
+- **M4.5d2b2a** (2026-11-09; record 0054; plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`, questions 173–187):
+  done on branch `m4.5d2b2a-owners-in-memory` (from `origin/main` `15bcdc6`, which holds S8's PR #33) in the worktree
+  `.claude/worktrees/m4.5d2b2a`. The result is in `internal/status.md`. **M4.5d2b2b is next** (§4.2; §3 "M4.5d2b2b"
+  and "From M4.5d2b2a"): owning fields and P4418R0, whose spellings were decided at d2b2a's planning (questions 175,
+  177–179). The session's scratch files (S39, P75, audit snapshots' notes, `vprdiff.py`, `regen.py`, `cmp.sh`, the
+  baseline) are in the worktree's `build/m4.5d2b2a/`. The audits ran in a second worktree,
+  `.claude/worktrees/m4.5d2b2a-auditA`, detached at snapshot commits that are not on any branch; remove it (§2).
 
 - **S8** (2026-11-06; record 0053; plan `.claude/plans/s8-ci-toolchains.md`, questions 162–168): done on branch
   `s8b-ci-profiles`, which holds S8a's two commits first (`bdefc29`, `d0e318a`); the owner pushed it at `3fcbf92` as PR
@@ -87,6 +89,21 @@ The EDG pin is unchanged (`f0ed5525af`); the fork's `cerastes` is 29 commits beh
 
 ## 2. Owner steps
 
+M4.5d2b2a's (2026-11-09):
+0. **Read the box's full `check.sh` on `b6b3298`.** It is the session's one full check, moved from the Mac at the
+   owner's word. It started 2026-11-10 00:13 UTC in the box's `cerastes-s8-ubuntu-26.04` container and was still
+   running when the session ended. Read `cat ~/cerastes-s8/p-ubuntu-26.04/d2b2a-check.exit` (0 is green) and the
+   summary lines of `d2b2a-check.log` beside it. If it is red, the next session fixes it first, with targeted checks.
+1. **Push `m4.5d2b2a-owners-in-memory` and open its PR.** It touches `src/`, so dispatch the full check once (both
+   reference jobs). Note that the nightly full check times out (below, question 176). The Linux run on the x86-64 box
+   passed (`tests/memory`, `tests/vlibc` and the doc examples, 6026 passed, 0 failed; status).
+   The box's `~/cerastes-s8/p-ubuntu-26.04`
+   checkout is now detached at `b6b3298` (from `~/cerastes-d2b2a.bundle`), with its `build/cmake` rebuilt; `run.sh
+   update` moves it back to an `s8b-ci-profiles` bundle for an S8-style rehearsal.
+2. **Remove the audit worktree** `.claude/worktrees/m4.5d2b2a-auditA` (`git worktree remove --force`). Its snapshot
+   commits are not on any branch, so nothing is lost. After the merge, remove `.claude/worktrees/m4.5d2b2a` too
+   (copy `build/m4.5d2b2a/` first if wanted).
+
 At M4.5d2b2a's planning (2026-11-09): PR #33 is merged (`15bcdc6`). The `profiles=all` dispatch has not run, and the
 nightly full check has been cancelled at its 220-minute timeout on every profile, `macos-27` and `ubuntu-26.04`
 included, every night since 2026-10-29 (runs 42378726945 and 42488514070 the latest; the pull request and push tiers
@@ -132,6 +149,38 @@ done yet still apply.
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
+
+**From M4.5d2b2a** (record 0054; the audits' reports were relayed into the record's items; probes in the session's
+scratchpad, not kept)
+- **Costs to watch:** two written `owns_block` sites through loads over parameter places cost about 33 s for the loop
+  alone and about 148 s with one drop in the body, quiet. The tests pin cheaper shapes (question 186). The `?:`
+  framing chains repeat in every pair row and every `forperm` instantiation; the reads are hoisted, and the next step
+  is the pair and exclusivity structure. This belongs to M4.8 with question 66. [d2b2a]
+- **Documented limits** (record 0054 items 2–5):
+  - a loop that calls a borrower tied on `*pp` needs `*pp == keep` in its invariant;
+  - `--strict-init` does not check a store to a marked global through an alias;
+  - a fresh result beside a tied load in a bodiless contract cannot be proved distinct;
+  - the syntactic sharing test misses `int *t = a; b = t;`;
+  - the becomes-shared body nested in an outer loop is a false alarm;
+  - a block shared between an owning global and an owning local inside a loop is a false alarm;
+  - a synthetic site's `wef` heuristic gives `uninitialized` to a read of `*g` after a loop that stores nothing;
+  - an address-taken owner reached in a loop only through a hidden alias stays in the frame;
+  - a vlibc block stored into an owning `static` local is reported at the return, and in `main` not at all;
+  - a loop over an owner in memory that holds a vlibc block is a false alarm: the synthetic site assumes the platform's
+    allocator (the re-audit's s4/v2–v5; conservative);
+  - an owning global reached in a loop only through an alias invariant (`*pg`, `pg == &g`) whose callee frees it, with
+    a `break`, is a false `leak` at `main`'s end: the global is neither carried nor framed, so `held_g` is havocked at the
+    loop head (the re-audit's t5; the cost of the N2 fix, which closed an exit 3). A loop carry for owners reached
+    through alias invariants would lift it;
+  - `owning_loop_stops_shared_drop.c`'s first line is a false alarm pinned by question 185. [d2b2a]
+- **For M4.5e1 (arrays):** the `held_v`/`held_g` updates and `main`'s exemption need `offset_of == 0` once interior
+  pointers exist (audit round 1, note 20), and the flag clause of item 3(e) is restated on `hb_w`'s cell. [d2b2a]
+- **Lint:** `owner_assignment_ok` admits `held_X := <x> != null` anywhere. This is harmless (audit round 2 on C/D,
+  N2), but it is a place where a later rule could be tightened. [d2b2a]
+- **Process:** a test generator re-run wiped three hand-added expect lines. The audit caught it, and §6's rule (never
+  re-run a generator over files in the tree) held after that. The audits ran on snapshot commits made with a
+  temporary index (`GIT_INDEX_FILE=… git add -A; git write-tree; git commit-tree`) in a second worktree with its own
+  build. So round 2 audited each part while the next part was built, with no mixed working tree. [d2b2a]
 
 **From S8** (record 0053)
 - **Every session that changes CI:** a new toolchain is one `[[profile]]` in `scripts/ci_toolchains.toml` at `dispatch`,
@@ -222,7 +271,10 @@ M4.5d2a's plan's Inputs (`.claude/plans/m4-5d2a-heap.md`); those d2a hands on ar
 *M4.5d2b1's notes for d2b2 (the cut (a), the four pinned false alarms, record 0052's limits, the notes not taken, the
 process note) and `alloc_<t>`'s `GB_g` note moved into M4.5d2b2a's plan's Inputs (`.claude/plans/m4-5d2b2a-owners-in-memory.md`).*
 
-**M4.5d2b2b owning fields and P4418R0** (from M4.5d2a's planning; sources: P4222R3, P4416R0, P4418R0, P4417R0, all
+**M4.5d2b2b owning fields and P4418R0** (d2b2a's notes for it: owning fields reuse Part A's block sites through
+loads (`owns_block(p->q)`), Part B's carriers and Part C's deep atom: owning a structure is `owns(*p)` plus `p->q ==
+NULL || owns_block(p->q)` per owning field, as `owns(g)` of an owning global is; `not_invalidating` adds implicit
+`ensures(p->q == old(p->q))` per owning field reachable through `p`; from M4.5d2a's planning; sources: P4222R3, P4416R0, P4418R0, P4417R0, all
 2026-10-22, read again at M4.5d2b1's and M4.5d2b2a's planning; d2b2a's planning decided the spellings: questions 174
 (static owners exempt at `main`'s end, P4417 (2.3), built in d2b2a), 175 (`owning` on a parameter stays a borrow), 177
 (`--strict-owner`), 178 (`cerastes::not_invalidating`, checked), 179 (no `no_dangling` in C); d2b1's notes moved into
@@ -463,7 +515,11 @@ decision record before code (invariant 6); must-verify/must-fail pairs (invarian
 probes, IL evidence, Silicon spikes, `src/vir` + `src/viper`; test-mutator: tests, harness, compiler matrices, `mutate.py`,
 `lint_viper.py`) and the Opus soundness-auditor (one round per diff plus a re-audit of blocking fixes; should-fix items
 not taken go to §3); single-file runs while working (`build/cerastes verify` directly: `run_tests.py` locks `build/vpr`);
-builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` at most twice; the EDG
+builds serialized (`lockf build/<session>/build.lock cmake --build build/cmake`); `check.sh` once, at the end, after the last code change (owner, 2026-11-09: "Since each run of check.sh now takes hours
+we should change our future work to run it less"; targeted runs and the neutrality regeneration before it), and that
+one run is on the x86-64 box only, never the Mac (owner, 2026-11-09: "limit to just the linux because it's much faster,
+and doesn't lock up the local machine": the branch as a git bundle into S8's `ubuntu-26.04` container,
+`~/cerastes-s8/p-ubuntu-26.04`, then `scripts/check.sh` there; the Mac keeps its targeted runs); the EDG
 suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes to `matt@clang4.cpp.al`
 automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the fallback when the host is down).
 Record numbers are the next free ones when written (0047 is M4.5d2a's, 0048 and 0049 are taken, 0050 is M4.5d2v's, 0051 is S7's, 0052 is M4.5d2b1's, 0053 is S8's, 0054 is M4.5d2b2a's). The
@@ -550,7 +606,7 @@ strict rules (questions 154, 155); the d2a/d2v leftovers (written `owns_block` i
 read the heap, `owning` beside `owns_block`, `restrict` beside a block-only parameter, `two((free(p), 0), p)`);
 `cerastes_owns_vlibc_block` (question 153). **M4.5d2b2** (after d2b1) is **split in two** at its
 planning (owner, 2026-11-09, question 173; the surveys measured 3,000–4,600 changed lines). **M4.5d2b2a** (record 0054;
-plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`): block sites through loads and on globals (`owns_block(*pp)`,
+plan `.claude/plans/m4-5d2b2a-owners-in-memory.md`; done, questions 173–187): block sites through loads and on globals (`owns_block(*pp)`,
 `owns_block(p->q)`, `owns_block(g)`), owning and marked globals, `static` locals and address-taken locals (the block travels
 in `owns(g)`; static owners exempt at `main`'s end, question 174), written `owns_block` in loop invariants, and loop carriers
 keyed by current state (d2b1's four pinned false alarms). **M4.5d2b2b** (after d2b2a): acyclic owning fields (target `d`)
@@ -1035,6 +1091,20 @@ other toolchains nightly and on dispatch), 165 (the guard as structural rules an
 facts pinned), 166 (a small fix first, the profiles stacked), 167 (the first other toolchains: other ubuntu-26.04 majors,
 ubuntu-24.04, macos-26; there is no `macos-16` label), 168 (GCC builds of cerastes and EDG in this work; not the
 recommendation, a later session). Each but 168 the recommendation.
+
+During M4.5d2b2a (2026-11-09, each the recommendation except 185; recorded in its plan and record 0054): 180 (the alias
+pin's positive adds `i < 3 || v != NULL` to its invariant), 181 (the flag after a handoff: tried in Part B; it
+verified, no cut), 182 (the test-mutator's eight pre-registered readings), 183 (the unframed twins list both
+`permission` lines), 184 (two VIR cases' new outcomes accepted as part of the flips), 185 (the two `_drop` twins list
+every line; not the recommendation, which was to redesign them), 186 (the slow two-load-site twin replaced by a
+cheaper one, its cost recorded), 187 (three twins list their consequential lines).
+
+**Open, from M4.5d2b2a** (each with a recommended answer):
+- **188** M4.5d2b2b's size: owning fields (1,000–1,500 lines by d2b1's survey, less now that Parts A–C exist) and
+  P4418R0's rest (`not_invalidating`, `--strict-owner`, the `[[owner]]` mapping): (a, recommended) one session,
+  with `--strict-owner` as the pre-agreed cut; (b) two sessions.
+- **189** The cost of two written load-sites (§3, "From M4.5d2b2a"): (a, recommended) M4.8 with question 66's cost
+  work; (b) a short session of its own before M4.5e1.
 
 **Open, from S8** (each with a recommended answer):
 - **169** `ubuntu-24.04-clang18` (EDG emulating clang 18 differs on eight tests, record 0053 item 11): (a,
