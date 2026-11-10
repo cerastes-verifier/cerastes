@@ -561,4 +561,173 @@ void define_loop_limits_l2()
        });
 }
 
+// Part F (decision 0056 items 2, 11 and 12; owner questions 208 to 210).
+void define_loop_limits_f()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto PI = [](Kit& k)
+    {
+        return k.ptr(k.i32);
+    };
+    auto mk_s = [](Kit& k)
+    {
+        StructType* S {k.strukt("S", {{"q", k.ptr(k.i32)}, {"n", k.i32}})};
+        S->members[0U].owning = true;
+        return S;
+    };
+
+    // item 11: a struct local whose address does not escape is reached only by name.
+    //   int tick(int i) requires(0 <= i < 10) ensures(r, r == i + 1);
+    //   void f(void) { struct S s; s.n = 0; s.q = NULL; int k = 0; int *pk = &k; int *z = NULL; int **pz = &z; [struct S *a = &s;] int i = 0;
+    //                  while (i < 3) { *pz = pk; i = tick(i); } if (s.q != NULL) { int x = *s.q; } free(s.q); }
+    // escape false: s never escapes, so the loop (which does not name it) frames it out: its leaf is still NULL after the loop and the read is never reached (verified)
+    // escape true: `a = &s` escapes the address, the loop reaches s.q by type, may store a pointer into it and no flag is kept: the read after the loop is uninitialized
+    // (the call to `tick` matters: without a method call in the body Silicon itself sees that the only heap write is to z, the leaf stays NULL, and the escaping program verifies
+    // too, correctly: it is not an encoder verdict; `negative/owning_field_loop_escape_*_unwritten.c` are the C twins, where the loop fills s.data through the alias)
+    const auto nonescape = [=](Kit& k, bool escape) -> SrcLoc
+    {
+        StructType* S {mk_s(k)};
+        Function* fr {heap_free_view(k, k.i32)};
+        Function* f {k.fn("f", k.vd)};
+        Function* tk {k.fn("tick", k.i32, {{"i", k.i32}})};
+        k.req(tk, k.range(k.F(tk, 0), k.i32, "0", "9"));
+        k.ens(tk, k.eq(k.R(tk), k.add(k.F(tk, 0), N(k, "1"))));
+        k.trusted(tk);
+        k.done(tk);
+        Var* s {k.scell(f, "s", S)};
+        Var* kk {k.cell(f, "kk", k.i32)};
+        Var* pk {k.local(f, "pk", PI(k))};
+        Var* z {k.cell(f, "z", PI(k))};
+        Var* pz {k.local(f, "pz", k.ptr(PI(k)))};
+        Var* a {k.local(f, "a", k.ptr(k.st(S)))};
+        Var* i {k.local(f, "i", k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        std::vector<const Stmt*> body {k.decl(s, nullptr),
+                                       k.lstore(k.addr(s), 1, N(k, "0")),
+                                       k.lstore(k.addr(s), 0, k.nul(PI(k))),
+                                       k.decl(kk, N(k, "0")),
+                                       k.decl(pk, k.addr(kk)),
+                                       k.decl(z, k.nul(PI(k))),
+                                       k.decl(pz, k.addr(z))};
+        if (escape)
+        {
+            body.push_back(k.decl(a, k.addr(s)));
+        }
+        body.push_back(k.decl(i, N(k, "0")));
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                              {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                              k.blkc({k.store(k.pn(pz), k.pn(pk)), k.asg(i, k.call(tk, {k.v(i)}))}))};
+        body.push_back(lp);
+        const Expr* rd {k.deref(k.leaf(k.addr(s), 0))};
+        body.push_back(k.iff(k.ne(k.leaf(k.addr(s), 0), k.nul(PI(k))), k.blk({k.decl(x, rd)})));
+        body.push_back(k.es(k.call(fr, {k.leaf(k.addr(s), 0)})));
+        f->body = k.blkc(body);
+        k.done(f);
+        return rd->loc;
+    };
+    lc("loop_nonescape_store",
+       "a struct local whose address never escapes, a loop that stores a pointer through another pointer and does not name it: the struct is framed out, its leaf is still NULL after the loop",
+       [=](Kit& k)
+       {
+           nonescape(k, false);
+       });
+    lc("loop_escape_store",
+       "the same with a = &s before the loop: the address escapes, the loop reaches s.q by type and may fill it, and the read after the loop is uninitialized",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", nonescape(k, true));
+       });
+    // the routes of loop_may_fill (decision 0056 item 2), each pinned in the auditor's model shape: the site is NULL at the loop's entry, the loop fills it by that route with a
+    // block it never writes, and the read after the loop is `uninitialized`; with the route dropped `wef` is true and the error moves to the loop's back-edge row
+    // whole-structure store: void f(void) { struct S s; s.q = NULL; s.n = 0; int i = 0; while (i < 3) { free(s.q); *&s = (struct S){malloc(), 0}; i++; }
+    //                                       if (s.q != NULL) { int x = *s.q; } free(s.q); }
+    lc("loop_site_struct_store_route",
+       "s.q is NULL at the entry and the loop stores a whole structure holding an unwritten block into s (a Store of a structure): the read after the loop is uninitialized",
+       [=](Kit& k)
+       {
+           StructType* S {mk_s(k)};
+           Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+           Function* fr {heap_free_view(k, k.i32)};
+           Function* f {k.fn("f", k.vd)};
+           Var* s {k.scell(f, "s", S)};
+           Var* i {k.local(f, "i", k.i32)};
+           Var* x {k.local(f, "x", k.i32)};
+           const Stmt* lb {k.blkc({k.es(k.call(fr, {k.leaf(k.addr(s), 0)})),
+                                   k.store(k.addr(s), k.b.aggregate(k.st(S), {k.call(m, {}), N(k, "0")}, k.at())),
+                                   k.asg(i, k.add(k.v(i), N(k, "1")))})};
+           const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                                 {k.cl(k.sub(N(k, "3"), k.v(i)))}, lb)};
+           const Expr* rd {k.deref(k.leaf(k.addr(s), 0))};
+           f->body = k.blkc({k.decl(s, nullptr), k.lstore(k.addr(s), 0, k.nul(PI(k))),
+                             k.lstore(k.addr(s), 1, N(k, "0")), k.decl(i, N(k, "0")), lp,
+                             k.iff(k.ne(k.leaf(k.addr(s), 0), k.nul(PI(k))), k.blk({k.decl(x, rd)})),
+                             k.es(k.call(fr, {k.leaf(k.addr(s), 0)}))});
+           k.done(f);
+           k.fail("uninitialized", rd->loc);
+       });
+
+    // decision 0056 item 11 / question 211 (B1 of audit round 2 on Part L-2): the entry ghosts, splits and kept values of a closure site read the cells of a block, so they come after
+    // the entry rows that check the function holds it.
+    // int main(void) { gp = calloc(1, sizeof(struct S)); if (gp == NULL) { return 1; } free(gp); int i = 0; while (i < 3) { free(gp->q); gp->q = malloc(); i++; } gp = NULL; return 0; }
+    // (gp is an owning global; gp is freed before the loop and left dangling: the loop's entry row says it does not own the block, and Silicon never reads through the freed block)
+    lc("loop_global_freed_before",
+       "main frees the owning global gp before a loop that frees and replaces gp->q: the entry row of the loop reports the block it does not own, no Silicon error of its own",
+       [=](Kit& k)
+       {
+           StructType* S {mk_s(k)};
+           Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
+           Function* ca {heap_alloc_view(k, "calloc", k.st(S), true)};
+           Function* fr {heap_free_view(k, k.i32)};
+           Function* frs {heap_free_view(k, k.st(S))};
+           Function* f {k.fn("main", k.i32)};
+           k.prog.set_entry(f);
+           Global* gp {k.prog.add_global("gp", k.ptr(k.st(S)), k.at())};
+           gp->init_kind = Global::Init::Null;
+           gp->owning = true;
+           const auto gv = [&]()
+           {
+               return k.deref(k.b.global_addr(gp, k.at()));
+           };
+           Var* i {k.local(f, "i", k.i32)};
+           const Stmt* lb {k.blkc({k.es(k.call(fr, {k.leaf(gv(), 0)})), k.lstore(gv(), 0, k.call(m, {})),
+                                   k.asg(i, k.add(k.v(i), N(k, "1")))})};
+           const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                                 {k.cl(k.sub(N(k, "3"), k.v(i)))}, lb)};
+           f->body = k.blkc({k.store(k.b.global_addr(gp, k.at()), k.call(ca, {})),
+                             k.iff(k.eq(gv(), k.nul(k.ptr(k.st(S)))), k.blk({k.ret(N(k, "1"))})),
+                             k.es(k.call(frs, {gv()})), k.decl(i, N(k, "0")), lp,
+                             k.store(k.b.global_addr(gp, k.at()), k.nul(k.ptr(k.st(S)))), k.ret(N(k, "0"))});
+           k.done(f);
+           k.fail_only("permission", lp->loc, 11U, 1U, "needs to own the whole allocation");
+       });
+
+    // decision 0056 item 11 (question 214): a loop that leaves the struct's scope keeps its cells as places.
+    // int f(int n) requires(0 <= n <= 3) { struct S s; s.n = 0; s.q = NULL; int kk = 0; int *pk = &kk; int i = 0; while (i < 3) { *pk = i; if (i == n) { return 0; } i = i + 1; } return 1; }
+    // (the loop does not name s: it is framed out only where the body has no return or outward goto, since the scope exit at the return needs the cells and the liveness token)
+    lc("loop_nonescape_return",
+       "a struct local with an owning leaf that the loop does not name, a return inside the loop: the scope exit at the return holds the struct's cells, no lifetime error",
+       [=](Kit& k)
+       {
+           StructType* S {mk_s(k)};
+           Function* f {k.fn("f", k.i32, {{"n", k.i32}})};
+           k.req(f, k.range(k.F(f, 0), k.i32, "0", "3"));
+           Var* s {k.scell(f, "s", S)};
+           Var* kk {k.cell(f, "kk", k.i32)};
+           Var* pk {k.local(f, "pk", PI(k))};
+           Var* i {k.local(f, "i", k.i32)};
+           const Stmt* lb {
+               k.blkc({k.store(k.pn(pk), k.v(i)), k.iff(k.eq(k.v(i), k.pv(f, 0)), k.blk({k.ret(N(k, "0"))})),
+                       k.asg(i, k.add(k.v(i), N(k, "1")))})};
+           const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                                 {k.cl(k.sub(N(k, "3"), k.v(i)))}, lb)};
+           f->body =
+               k.blkc({k.decl(s, nullptr), k.lstore(k.addr(s), 1, N(k, "0")), k.lstore(k.addr(s), 0, k.nul(PI(k))),
+                       k.decl(kk, N(k, "0")), k.decl(pk, k.addr(kk)), k.decl(i, N(k, "0")), lp, k.ret(N(k, "1"))});
+           k.done(f);
+       });
+}
+
 } // namespace

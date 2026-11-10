@@ -2801,8 +2801,9 @@ private:
         {
             for (const AtomSite& s : blocks_of(*c).sites)
             {
+                // decision 0056 item 2 (question 208): a plain site hands back only a block whose cells have values; the route counts the other modes
                 if (s.in_ensures && s.atom != nullptr && s.atom->a != nullptr && steps_have_load(s.via) &&
-                    s.atom->a->type == pt)
+                    s.atom->a->type == pt && block_mode(*c, s) != BlockMode::Plain)
                 {
                     return true;
                 }
@@ -2917,6 +2918,120 @@ private:
     // ghost would then say the function still holds what the callee kept.  An owner whose cell type some callee of the loop names a place of is not framed: its
     // ghost is updated after each call as before.
     std::set<std::string> framed_ghosts_;
+    // decision 0056 item 11: a struct local escapes when its address, or the address of any member at any depth, is used as a value anywhere in the function (an argument,
+    // a stored or assigned or initializing value, a return value, an operand of anything but a member access, a load or a store, a comparison with a pointer that is not the
+    // null constant), loops' invariants included.  VIR marks every struct local address-taken, so the scan is over the body.
+    static void escapes_in_expr(const Expr* e, bool place, std::set<const Var*>& out)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        if (place && e->kind != Expr::Kind::AddrOf && e->kind != Expr::Kind::MemberAddr)
+        {
+            place = false;
+        }
+        switch (e->kind)
+        {
+            case Expr::Kind::AddrOf:
+                if (!place && e->var != nullptr && e->var->type.is_struct())
+                {
+                    out.insert(e->var);
+                }
+                return;
+            case Expr::Kind::MemberAddr:
+                escapes_in_expr(e->a, place, out);
+                return;
+            case Expr::Kind::Deref:
+                escapes_in_expr(e->a, true, out);
+                return;
+            case Expr::Kind::StoreE:
+                escapes_in_expr(e->c, true, out);
+                escapes_in_expr(e->a, false, out);
+                escapes_in_expr(e->b, false, out);
+                return;
+            case Expr::Kind::Binary:
+                if (e->bop == BinaryOp::Eq || e->bop == BinaryOp::Ne)
+                {
+                    const bool left_null {e->a != nullptr && e->a->kind == Expr::Kind::Null};
+                    const bool right_null {e->b != nullptr && e->b->kind == Expr::Kind::Null};
+                    escapes_in_expr(e->a, right_null, out);
+                    escapes_in_expr(e->b, left_null, out);
+                    return;
+                }
+                break;
+            default:
+                break;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            escapes_in_expr(x, false, out);
+        }
+        for (const Expr* x : e->args)
+        {
+            escapes_in_expr(x, false, out);
+        }
+    }
+    static void escapes_in_stmt(const Stmt* s, std::set<const Var*>& out)
+    {
+        if (s == nullptr)
+        {
+            return;
+        }
+        escapes_in_expr(s->expr, false, out);
+        escapes_in_expr(s->addr, s->kind == Stmt::Kind::Store, out);
+        for (const Clause& c : s->invariants)
+        {
+            escapes_in_expr(c.expr, false, out);
+        }
+        for (const Clause& c : s->measure)
+        {
+            escapes_in_expr(c.expr, false, out);
+        }
+        for (const Stmt* c : {s->then_body, s->else_body, s->body, s->step})
+        {
+            escapes_in_stmt(c, out);
+        }
+        for (const Stmt* c : s->stmts)
+        {
+            escapes_in_stmt(c, out);
+        }
+    }
+    std::map<const Function*, std::set<const Var*>> escaped_structs_;
+    bool struct_local_escapes(const Var& v)
+    {
+        auto it {escaped_structs_.find(fn_.f)};
+        if (it == escaped_structs_.end())
+        {
+            std::set<const Var*> out;
+            escapes_in_stmt(fn_.f->body, out);
+            it = escaped_structs_.emplace(fn_.f, std::move(out)).first;
+        }
+        return it->second.count(&v) != 0U;
+    }
+    // decision 0056 item 11 (question 214): a struct local with an owning leaf whose address does not escape and that the loop does not name (`used`) is framed out of the loop,
+    // unless the loop's body or step leaves the struct's scope (a `return`, a `goto` out of the loop): the scope exit's checks there need the struct's cells and liveness token
+    bool struct_local_framed_in(const Stmt& loop, const Var& v, const std::set<int>& used)
+    {
+        if (!v.type.is_struct() || v.type.struct_type == nullptr || used.count(v.id) != 0U ||
+            !has_owning_leaf(*v.type.struct_type) || struct_local_escapes(v))
+        {
+            return false;
+        }
+        bool has_return {false};
+        std::set<int> gotos;
+        std::set<int> labels;
+        exits_of(loop.body, has_return, gotos, labels);
+        exits_of(loop.step, has_return, gotos, labels);
+        for (const int g : gotos)
+        {
+            if (labels.count(g) == 0U)
+            {
+                return false;
+            }
+        }
+        return !has_return;
+    }
     // Whether a callee in the loop has an atom on a place that holds a value of type `t` (a cell of an owner of that type, reached through a pointer, a
     // load or a struct member).
     bool loop_calls_reach_cells_of(const Stmt& loop, const Type& t)
@@ -2989,8 +3104,12 @@ private:
             // reaches its cell by type, when the function holds it) is framed unless a callee of the loop can reach its cell through an alias (audit round 3, N2): a store of its
             // type in the loop decides nothing for it (d_ret.c: the loop's own stores).  Left unframed its ghost was havocked at the loop head and a later row read the cell
             // under the ghost alone.  A leaf of a local struct keeps both tests
-            const bool by_type {(l.global == nullptr && touches_cells_of_type(&loop, owner_type(l))) ||
-                                loop_calls_reach_cells_of(loop, owner_type(l))};
+            // decision 0056 item 11: a struct local whose address does not escape is reached only by name
+            std::set<int> loop_uses;
+            collect_local_uses(&loop, loop_uses);
+            const bool by_type {((l.global == nullptr && touches_cells_of_type(&loop, owner_type(l))) ||
+                                 loop_calls_reach_cells_of(loop, owner_type(l))) &&
+                                (l.var == nullptr || !struct_local_framed_in(loop, *l.var, loop_uses))};
             if (std::find(carried_leaves.begin(), carried_leaves.end(), l) == carried_leaves.end() &&
                 (l.var == nullptr || declared.count(l.var->id) == 0U) && !by_type &&
                 !(l.global != nullptr && loop_global_uses(loop).count(l.global->id) != 0U))
@@ -4838,29 +4957,64 @@ private:
         {
             obl(full, guard, adep, std::move(cond), {}, meta(category, e.loc, message), &pre.ex);
         };
-        // separation: block against block, and block against every other `requires` atom's root
+        // separation: block against block, and block against every other `requires` atom's root.  Decision 0056 item 12: a row that reads the pointer of a site read through
+        // the block of an earlier block site (a closure site `p->q` of `owns_block(p)`, which is read from a cell of the block of `p`) comes after the rows that check the caller holds that block, so that a
+        // caller that does not hold it (`free(gp)` before the call) gets the mapped rows and never a Silicon `insufficient.permission` of its own
+        const auto deep = [&](size_t i)
+        {
+            // a site read through the block of an earlier block site of the callee (its pointer is read from a cell of that block)
+            const PlaceKey pi {atom_place(*bs[i].site->atom)};
+            for (size_t k {0U}; k < i; ++k)
+            {
+                const PlaceKey pk {atom_place(*bs[k].site->atom)};
+                if (pi.root != kNoPlaceKey && pk.root == pi.root && pk.via.size() < pi.via.size() &&
+                    std::equal(pk.via.begin(), pk.via.end(), pi.via.begin()))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        struct Sep
+        {
+            E guard;
+            E cond;
+            std::string message;
+        };
+        std::vector<Sep> later;
+        const auto sep_row = [&](bool defer, const E& guard, E cond, std::string message)
+        {
+            if (defer)
+            {
+                later.push_back(Sep {guard, std::move(cond), std::move(message)});
+            }
+            else
+            {
+                row("permission", guard, std::move(cond), message);
+            }
+        };
         const FnAtoms& fa {atoms_of(callee)};
         for (size_t i {0U}; i < bs.size(); ++i)
         {
             for (size_t j {i + 1U}; j < bs.size(); ++j)
             {
-                row("permission", low::and_(bs[i].g, bs[j].g),
-                    low::bin(low::BinOp::Ne, live_cell(bs[i].ptr), live_cell(bs[j].ptr)),
-                    "passes " + (bs[i].text.empty() ? std::string("a pointer") : "`" + bs[i].text + "`") + " and " +
-                        (bs[j].text.empty() ? std::string("a pointer") : "`" + bs[j].text + "`") + " to `" +
-                        callee.c_name +
-                        "`, which needs to own the whole allocation of both, but they may be the same object");
+                sep_row(deep(i) || deep(j), low::and_(bs[i].g, bs[j].g),
+                        low::bin(low::BinOp::Ne, live_cell(bs[i].ptr), live_cell(bs[j].ptr)),
+                        "passes " + (bs[i].text.empty() ? std::string("a pointer") : "`" + bs[i].text + "`") + " and " +
+                            (bs[j].text.empty() ? std::string("a pointer") : "`" + bs[j].text + "`") + " to `" +
+                            callee.c_name +
+                            "`, which needs to own the whole allocation of both, but they may be the same object");
             }
             for (int j {0}; j < fa.nreq; ++j)
             {
                 const AtomSite& o {fa.sites[static_cast<size_t>(j)]};
                 const E og {site_guard(o, cenv)};
                 const E oroot {site_root(o, cenv)};
-                row("permission", low::and_(bs[i].g, og),
-                    low::bin(low::BinOp::Ne, live_cell(bs[i].ptr), live_cell(oroot)),
-                    "passes " + (bs[i].text.empty() ? std::string("a pointer") : "`" + bs[i].text + "`") + " and " +
-                        quoted(site_call_text(o, e), "another object") + " to `" + callee.c_name +
-                        "`, which needs to own the whole allocation of the first, but they may be the same object");
+                sep_row(deep(i), low::and_(bs[i].g, og),
+                        low::bin(low::BinOp::Ne, live_cell(bs[i].ptr), live_cell(oroot)),
+                        "passes " + (bs[i].text.empty() ? std::string("a pointer") : "`" + bs[i].text + "`") + " and " +
+                            quoted(site_call_text(o, e), "another object") + " to `" + callee.c_name +
+                            "`, which needs to own the whole allocation of the first, but they may be the same object");
             }
         }
         for (const B& b : bs)
@@ -4883,6 +5037,10 @@ private:
                 : b.site->atom->vlibc_block ? Allocator::Vlibc
                                             : Allocator::Platform,
                 callee.c_name);
+        }
+        for (Sep& d : later)
+        {
+            row("permission", d.guard, std::move(d.cond), d.message);
         }
     }
 
@@ -12609,10 +12767,21 @@ private:
                 places[first_of_key].slots.emplace_back(places[first_of_key].type, rootref);
             }
         }
+        // decision 0056 item 11 (question 214): a struct local with an owning leaf, whose address does not escape and that the loop does not name, in a loop with no exit from its scope, is framed out: its cells and block are not in the invariant
+        // (a body that reached them anyway has no permission to them, a mapped error), and keep their state across the loop
+        std::set<int> loop_used;
+        if (loop != nullptr)
+        {
+            collect_local_uses(loop, loop_used);
+        }
         for (const Fn::Scope& sc : fn_.scopes)
         {
             for (const Var* cell : sc.cells)
             {
+                if (loop != nullptr && struct_local_framed_in(*loop, *cell, loop_used))
+                {
+                    continue;
+                }
                 const E ref {low::var(var_name(*cell))};
                 auto push = [&](const E& recv, const Type& t, const std::string& label, const std::vector<int>& mpath,
                                 bool live)
@@ -14316,14 +14485,36 @@ private:
             wblock_splits(wbs, places, owners, bws, false);
             wblock_splits(wbs, places, owners, bbs, true);
             // decision 0056 item 6: the sites' ghosts first (the case splits and rows read the later sites' pointers through them)
+            // decision 0056 item 11 (B1 of audit round 2 on Part L-2): what reads the cells of a block comes after the entry rows that check the function holds it: the ghosts
+            // and splits of a site read through an earlier site's block (a closure site) and every split after one, and each site's kept cell values
             std::vector<low::LStmt> ghs;
-            wblock_ghosts(wbs, ghs);
+            std::vector<low::LStmt> early_bws;
+            WBlockEntry later;
+            later.pre.resize(wbs.size());
+            later.post.resize(wbs.size());
+            bool seen_dependent {false};
+            for (size_t j {0U}; j < wbs.size(); ++j)
+            {
+                const bool dependent {wblock_dependent(wbs, j)};
+                seen_dependent = seen_dependent || dependent;
+                if (dependent)
+                {
+                    wblock_ghost_pointer(wbs[j], later.pre[j]);
+                }
+                else
+                {
+                    wblock_ghost_pointer(wbs[j], ghs);
+                }
+                wblock_ghost_values(wbs[j], later.post[j]);
+                wblock_splits_of(wbs, places, owners, j, seen_dependent ? later.pre[j] : early_bws, false);
+            }
             entry.insert(entry.begin() + static_cast<std::ptrdiff_t>(snap_mark), ghs.begin(), ghs.end());
-            entry.insert(entry.begin() + static_cast<std::ptrdiff_t>(snap_mark + ghs.size()), bws.begin(), bws.end());
+            entry.insert(entry.begin() + static_cast<std::ptrdiff_t>(snap_mark + ghs.size()), early_bws.begin(),
+                         early_bws.end());
             bsplits_post.insert(bsplits_post.end(), bws.begin(), bws.end());
             bsplits.insert(bsplits.end(), bbs.begin(), bbs.end());
             wblock_invariants(wbs, places, s.loc, w.invariants);
-            wblock_rows(wbs, owners, places, false, s.loc, entry);
+            wblock_rows(wbs, owners, places, false, s.loc, entry, &later);
             // decision 0054 item 5 (Loops): an owning global the loop's written site names is carried by its current value, with `held_g` loop-carried
             for (const Global* g : loop_global_owners(wbs))
             {
@@ -15358,9 +15549,11 @@ private:
         {
             // a leaf the loop reaches (names its structure, stores through a pointer of its type, or calls a function that names cells of its type) is carried; one it cannot
             // reach keeps its ghost (framed_owner_ghosts), so no ghost is left to the loop head's havoc
+            // decision 0056 item 11: a struct local whose address does not escape is reached only by name
             if (declared.count(l.var->id) != 0U ||
-                !(lused.count(l.var->id) != 0U || touches_cells_of_type(&s, owner_type(l)) ||
-                  loop_calls_reach_cells_of(s, owner_type(l))) ||
+                !(lused.count(l.var->id) != 0U ||
+                  (!struct_local_framed_in(s, *l.var, lused) &&
+                   (touches_cells_of_type(&s, owner_type(l)) || loop_calls_reach_cells_of(s, owner_type(l))))) ||
                 named_leaf(l))
             {
                 continue;
@@ -15637,6 +15830,12 @@ private:
             if (base != nullptr && base->kind == Expr::Kind::AddrOf)
             {
                 return false;
+            }
+            // decision 0056 item 6 (question 213): a leaf of a struct global is also replaced by a member store of its type through a pointer to the structure
+            // (`pga->b = n`) and by a whole-structure store through one (`*pga = t`)
+            if (!path.empty() && value != nullptr && (value->type == t || value->type.is_struct()))
+            {
+                return true;
             }
             return rev.empty() && value != nullptr && value->type == t;
         };
@@ -16042,31 +16241,37 @@ private:
         return false;
     }
     // The ghosts of the sites whose cells are places (item 6), taken at the entry in the sites' order: the pointer and the `on` of each site, then the values of the cells the
-    // loop keeps where the site stands.
-    void wblock_ghosts(const std::vector<WBlock>& wbs, std::vector<low::LStmt>& out)
+    // loop keeps where the site stands.  Decision 0056 item 11: the values are read after the site's own entry rows (`wblock_ghost_values`).
+    void wblock_ghost_pointer(const WBlock& b, std::vector<low::LStmt>& out)
     {
-        for (const WBlock& b : wbs)
+        if (b.epg.empty())
         {
-            if (b.epg.empty())
-            {
-                continue;
-            }
-            assign(out, b.epg, b.p);
-            assign(out, b.eog, wblock_on(b, {}));
-            if (b.cellvs.empty())
-            {
-                continue;
-            }
-            low::LStmt ifs;
-            ifs.kind = low::LStmt::Kind::If;
-            ifs.expr = low::var(b.eog);
-            for (const WBlock::CellVs& c : b.cellvs)
-            {
-                assign(ifs.then_body, c.vs, cell_value(c.recv, c.type));
-            }
-            out.push_back(std::move(ifs));
+            return;
         }
+        assign(out, b.epg, b.p);
+        assign(out, b.eog, wblock_on(b, {}));
     }
+    void wblock_ghost_values(const WBlock& b, std::vector<low::LStmt>& out)
+    {
+        if (b.epg.empty() || b.cellvs.empty())
+        {
+            return;
+        }
+        low::LStmt ifs;
+        ifs.kind = low::LStmt::Kind::If;
+        ifs.expr = low::var(b.eog);
+        for (const WBlock::CellVs& c : b.cellvs)
+        {
+            assign(ifs.then_body, c.vs, cell_value(c.recv, c.type));
+        }
+        out.push_back(std::move(ifs));
+    }
+    // What the entry rows of the sites hold back (decision 0056 item 11): statements emitted before the rows of site j (`pre`) and after them (`post`).
+    struct WBlockEntry
+    {
+        std::vector<std::vector<low::LStmt>> pre;
+        std::vector<std::vector<low::LStmt>> post;
+    };
     // The guard of a site's carrier clauses: its own guard and `p != null`.  The block is no place's of the loop: rows at the entry and the back edge say so
     // (wblock_place_rows) and the invariant keeps the facts, so Silicon never has to decide a guard (a pointer read through a load is not decidable by it; the
     // written atoms' NOTAUTO guards of decision 0040 item 5 are replaced by checks here, so that a site that shares a cell with a place is reported, not switched off).
@@ -16201,7 +16406,8 @@ private:
     // The ending rows of the sites at the loop's entry (`back` false: reported at the atom) and at its back edge (reported at `at`): the whole block, then the
     // pair rows between two sites, and between a site and each owner carrier that is another variable's (a merged owner is the site's own).
     void wblock_rows(const std::vector<WBlock>& wbs0, const std::vector<LoopOwner>& owners,
-                     const std::vector<Place>& places, bool back, const SrcLoc& at, std::vector<low::LStmt>& out)
+                     const std::vector<Place>& places, bool back, const SrcLoc& at, std::vector<low::LStmt>& out,
+                     const WBlockEntry* held_back = nullptr)
     {
         using low::BinOp;
         // A site through loads has a pointer and a guard that are chains over the framing disjuncts; each of the rows below would repeat them.  They are read once, here, in
@@ -16238,6 +16444,10 @@ private:
         }
         for (size_t j {0U}; j < wbs.size(); ++j)
         {
+            if (held_back != nullptr)
+            {
+                out.insert(out.end(), held_back->pre[j].begin(), held_back->pre[j].end());
+            }
             if (deferred[j])
             {
                 hoist(wbs[j]);
@@ -16267,6 +16477,10 @@ private:
                                          : "the invariant of this loop needs") +
                             " " + part + " to have a value; it may not have one here");
                 }
+                if (held_back != nullptr)
+                {
+                    out.insert(out.end(), held_back->post[j].begin(), held_back->post[j].end());
+                }
                 continue;
             }
             block_rows(b.p, b.pt, b.text, b.unflagged ? BlockMode::Uninit : BlockMode::Plain, false, add,
@@ -16293,6 +16507,10 @@ private:
                                  quoted(c.text.empty() ? b.text : c.text, "an owned object") +
                                  " holding something other than what it began with"));
                 }
+            }
+            if (held_back != nullptr)
+            {
+                out.insert(out.end(), held_back->post[j].begin(), held_back->post[j].end());
             }
         }
         for (size_t j {0U}; j < wbs.size(); ++j)
@@ -16344,12 +16562,20 @@ private:
     void wblock_splits(const std::vector<WBlock>& wbs, const std::vector<Place>& places,
                        const std::vector<LoopOwner>& owners, std::vector<low::LStmt>& out, bool body)
     {
+        for (size_t j {0U}; j < wbs.size(); ++j)
+        {
+            wblock_splits_of(wbs, places, owners, j, out, body);
+        }
+    }
+    // The splits of site j alone (decision 0056 item 11 emits those of a site read through an earlier site's block after that site's entry rows).
+    void wblock_splits_of(const std::vector<WBlock>& wbs, const std::vector<Place>& places,
+                          const std::vector<LoopOwner>& owners, size_t j, std::vector<low::LStmt>& out, bool body)
+    {
         using low::BinOp;
         auto pn = [&](const WBlock& b)
         {
             return body ? b.qb : b.p;
         };
-        for (size_t j {0U}; j < wbs.size(); ++j)
         {
             const WBlock& b {wbs[j]};
             const E p {pn(b)};

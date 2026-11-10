@@ -1,7 +1,7 @@
 // expect: error uninitialized @ L37
 // mode: c23, c++20
-// twin: tests/memory/owning_field_loop_pointer_arg.c
-// Pins: 0056 item 2, audit round 1 S4: the route of loop_may_fill that is a non-null store of the site's pointer type through memory (`*pz = pk;`, a Store of an int *): the loop has it, so wef is false (a loop that may fill the site gives no guarantee about its flag), and the block of s.data, malloc'd and never written, is returned after the loop: uninitialized at the return. A scan that drops this route makes wef true and moves the error to the loop's entry row, on the line of the loop
+// twin: tests/memory/owning_field_loop_site_store_written.c
+// Pins: 0056 item 2: a struct local's owning leaf s.data holds a malloc'd block that is never written, a loop that stores a pointer of the leaf's type through memory (`*pz = pk;`) does not touch it, and the block is returned after the loop: uninitialized at the return. This twin does not pin the route of item 2: the block is there before the loop, so the flag is false at the entry whatever wef is (audit round 2 B1; the models owning_field_loop_site_store_null_unwritten.c and owning_field_loop_site_addr_null_unwritten.c pin the routes); it is the error twin of the returned-block loop
 // Pre-registered from record 0056 item 2 and audit S4 (designed outcome; build/m4.5d2b2c/t5/r1.c on the L-1 build before filing): uninitialized at the return of s.data, in both modes
 #include <cerastes.h>
 #include <stdlib.h>
