@@ -5340,6 +5340,107 @@ class OwningLeafTests(unittest.TestCase):
                 self.assertTrue(any(f"`{ghost}` is assigned" in p for p in probs), probs)
         self.assertEqual(self.probs(body=[self.upd("held_v_s__0_0", cell)]), [])
 
+    # the guarded update of a call through a pointer that may be the owner's struct (decision 0056 item 4(a)) -------------------------
+    LCELL = "loc(member(v_s__0, 0), 0).v_ptr_int"
+
+    @staticmethod
+    def guarded(ghost, a, r, cell, t="t", read_guard=None, other="null", else_=None, read_t=None, upd_guard=None):
+        """The two lines of the guarded update: the conditional read of the leaf's cell, then the ghost's conditional update."""
+        guard = read_guard if read_guard is not None else f"({a} == {r}) && (perm({cell}) > none)"
+        read = f"  {read_t or t} := ({guard}) ? {cell} : {other}"
+        upd = f"  {ghost} := {upd_guard or f'({a} == {r})'} ? ({t} != null) : {else_ or ghost}"
+        return [read, upd]
+
+    def guarded_probs(self, lines):
+        return self.probs(body=lines)
+
+    def test_the_guarded_update_of_a_struct_locals_and_a_globals_leaf_is_clean(self):
+        g = self.guarded
+        for lines in (g("held_v_s__0_0", "v_a__1", "v_s__0", self.LCELL),
+                      g("held_GB_g__0_0", "v_p__0", "loc(GB_g__0(), 0)", self.CELL),
+                      # other statements may stand between the read and the update
+                      [g("held_v_s__0_0", "v_a__1", "v_s__0", self.LCELL)[0], "  var_unused := 0",
+                       g("held_v_s__0_0", "v_a__1", "v_s__0", self.LCELL)[1]]):
+            with self.subTest(lines=lines):
+                self.assertEqual(self.guarded_probs(lines), [])
+
+    def test_a_guarded_update_names_the_owners_own_root_address(self):
+        g = self.guarded
+        for what, lines in (
+                ("another struct local", g("held_v_s__0_0", "v_a__1", "v_s__1", self.LCELL)),
+                ("another struct local, the read of its own cell", g("held_v_s__0_0", "v_a__1", "v_s__1", "loc(member(v_s__1, 0), 0).v_ptr_int")),
+                ("the address of a member, not of the struct", g("held_v_s__0_0", "v_a__1", "loc(member(v_s__0, 0), 0)", self.LCELL)),
+                ("another global", g("held_GB_g__0_0", "v_p__0", "loc(GB_h__0(), 0)", self.CELL)),
+                ("the global's block, not its slot", g("held_GB_g__0_0", "v_p__0", "GB_g__0()", self.CELL)),
+                ("the global's other member", g("held_GB_g__0_0", "v_p__0", "loc(GB_g__0(), 1)", self.CELL)),
+                ("a null root", g("held_v_s__0_0", "v_a__1", "null", self.LCELL))):
+            with self.subTest(what):
+                probs = self.guarded_probs(lines)
+                self.assertTrue(probs, probs)
+
+    def test_a_guarded_update_reads_the_cell_under_the_same_guard_and_the_permission(self):
+        g = self.guarded
+        a, r, c = "v_a__1", "v_s__0", self.LCELL
+        for what, lines in (
+                ("a read without the root guard", g("held_v_s__0_0", a, r, c, read_guard=f"perm({c}) > none")),
+                ("a read without the permission", g("held_v_s__0_0", a, r, c, read_guard=f"{a} == {r}")),
+                ("a read under a weaker permission test", g("held_v_s__0_0", a, r, c, read_guard=f"({a} == {r}) && (perm({c}) >= none)")),
+                ("a read under a guard of another pointer", g("held_v_s__0_0", a, r, c, read_guard=f"(v_b__2 == {r}) && (perm({c}) > none)")),
+                ("a read under a disjunction", g("held_v_s__0_0", a, r, c, read_guard=f"({a} == {r}) || (perm({c}) > none)")),
+                ("a read that is not null in the else branch", g("held_v_s__0_0", a, r, c, other="v_x__0")),
+                ("a read that is a bare cell", [f"  t := {c}", g("held_v_s__0_0", a, r, c)[1]]),
+                ("a read of the value stored beside it", [f"  t := v_x__0", g("held_v_s__0_0", a, r, c)[1]]),
+                ("an update guarded by an inequality", g("held_v_s__0_0", a, r, c, upd_guard=f"({a} != {r})")),
+                ("an update guarded by another pointer", g("held_v_s__0_0", a, r, c, upd_guard=f"(v_b__2 == {r})")),
+                ("an update that keeps something else", g("held_v_s__0_0", a, r, c, else_="false")),
+                ("an update that keeps another ghost", g("held_v_s__0_0", a, r, c, else_="held_v_s__0_1")),
+                ("an update that becomes true unguarded", ["  held_v_s__0_0 := true"]),
+                ("an update that is true under the guard", g("held_v_s__0_0", a, r, c)[:1] + [f"  held_v_s__0_0 := ({a} == {r}) ? true : held_v_s__0_0"]),
+                ("an update of the value being null", g("held_v_s__0_0", a, r, c)[:1] + [f"  held_v_s__0_0 := ({a} == {r}) ? (t == null) : held_v_s__0_0"])):
+            with self.subTest(what):
+                probs = self.guarded_probs(lines)
+                self.assertTrue(probs, probs)
+
+    def test_a_guarded_update_needs_the_read_just_before_it(self):
+        g = self.guarded
+        a, r, c = "v_a__1", "v_s__0", self.LCELL
+        read, upd = g("held_v_s__0_0", a, r, c)
+        for what, lines in (
+                ("no read at all", [upd]),
+                ("the read assigned to another temp", [read.replace("t :=", "t2 :=", 1), upd]),
+                ("the temp assigned again in between", [read, "  t := null", upd]),
+                ("the temp assigned a stored value in between", [read, "  t := v_x__0", upd]),
+                ("the read after the update", [upd, read]),
+                ("a read under another pointer than the update's", [g("held_v_s__0_0", "v_b__2", r, c)[0], upd]),
+                ("a read under another root than the update's", [g("held_v_s__0_0", a, "v_s__1", c)[0], upd])):
+            with self.subTest(what):
+                probs = self.guarded_probs(lines)
+                self.assertTrue(probs, probs)
+
+    def test_a_guarded_update_reads_the_cell_its_ghost_spells(self):
+        g = self.guarded
+        a, r = "v_a__1", "v_s__0"
+        for what, ghost, cell in (
+                ("the ghost of another member", "held_v_s__0_1", self.LCELL),
+                ("the ghost of another variable", "held_v_t__0_0", self.LCELL),
+                ("a ghost with no path", "held_v_s__0", self.LCELL),
+                ("another member's cell", "held_v_s__0_0", "loc(member(v_s__0, 1), 0).v_ptr_int"),
+                ("a cell that is not a leaf's", "held_v_s__0_0", "loc(v_s__0, 0).v_ptr_int"),
+                ("a global's ghost over a local's cell", "held_GB_g__0_0", self.LCELL)):
+            with self.subTest(what):
+                probs = self.guarded_probs(g(ghost, a, r, cell))
+                self.assertTrue(probs, probs)
+
+    def test_the_guarded_update_is_for_a_leaf_ghost_only(self):
+        # an owning local's `held_<v>` and a pointer global's `held_GB_x` have no leaf cell to read: the old rule stands
+        for ghost, r in (("held_v_p__0", "v_p__0"), ("held_GB_g__0", "loc(GB_g__0(), 0)")):
+            with self.subTest(ghost):
+                lines = self.guarded(ghost, "v_a__1", r, "loc(GB_g__0(), 0).v_ptr_int")
+                self.assertTrue(self.guarded_probs(lines))
+        # and a tv_ ghost is not an owner ghost of this kind
+        probs = self.probs(body=["  tv_v__0 := (v_a__1 == v_s__0) ? (t != null) : tv_v__0"])
+        self.assertTrue(any("is assigned" in p for p in probs), probs)
+
     def test_a_leaf_cell_is_a_canonical_chain_rooted_at_its_block(self):
         for c in ("loc(member(loc(GB_g__0(), 1), 0), 0).v_ptr_int",       # a chain whose path is not the ghost's
                   "loc(member(loc(GB_g__0(), 0), 0), 0).v_ptr_int + 0",    # arithmetic in the cell

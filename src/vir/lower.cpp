@@ -2229,10 +2229,27 @@ private:
         return low::and_(low::bin(low::BinOp::Ne, p, low::null_()),
                          low::bin(low::BinOp::Gt, low::perm_of(tok_slot(p), "tok"), low::no_perm()));
     }
+    static const Expr* expr_at(const std::vector<const Expr*>* v, size_t i)
+    {
+        return v != nullptr && i < v->size() ? (*v)[i] : nullptr;
+    }
+    // decision 0056 item 4(a): whether argument `arg` of a call is a plain pointer variable (its value is the same after the call as before it) that parameter `k` of `callee` takes
+    // as a pointer to structure `st`
+    static bool aliases_struct_arg(const Function& callee, int k, const LV& arg, const Expr* arg_expr, const Type& st)
+    {
+        // a pointer variable by syntax (`ps`): an `&t` of another structure is not an alias of `&s` to guess at
+        if (!arg.leaves.empty() || arg.e == nullptr || arg.e->kind != low::LExpr::Kind::Var || arg_expr == nullptr ||
+            arg_expr->kind != Expr::Kind::Local || k < 0 || static_cast<size_t>(k) >= callee.params.size())
+        {
+            return false;
+        }
+        const Type& pt {callee.params[static_cast<size_t>(k)].type};
+        return pt.is_ptr() && pt.pointee != nullptr && *pt.pointee == st;
+    }
     // After a call or a free (audit S5): an owner whose block was consumed holds nothing, even if a later allocation
     // returns the same block.
     void held_updates(std::vector<low::LStmt>& out, const Function* callee = nullptr,
-                      const std::vector<LV>* args = nullptr)
+                      const std::vector<LV>* args = nullptr, const std::vector<const Expr*>* arg_exprs = nullptr)
     {
         for (const OwnerRef& o_ref : owners_in_scope())
         {
@@ -2300,6 +2317,21 @@ private:
                                     owner_value(l), low::null_()));
                     assign(out, held_name(l), low::bin(low::BinOp::Ne, low::var(t), low::null_()));
                 }
+                else if (aliases_struct_arg(*callee, static_cast<int>(i), (*args)[i], expr_at(arg_exprs, i),
+                                            l.var->type) &&
+                         gives_param_leaf(*callee, static_cast<int>(i), l.path))
+                {
+                    // decision 0056 item 4(a): the argument is a pointer variable of the structure's type (`refill(ps)` after `ps = &s`): where it is `&s`, the callee gave
+                    // back what the leaf holds, read as above; where it is not, the framed update stands
+                    const std::string t {new_temp(low::LType::Ref)};
+                    const E is_s {low::bin(low::BinOp::Eq, (*args)[i].e, low::var(var_name(*l.var)))};
+                    assign(out, t,
+                           low::ite(low::and_(is_s, low::bin(low::BinOp::Gt, value_perm(owner_cell(l), owner_type(l)),
+                                                             low::no_perm())),
+                                    owner_value(l), low::null_()));
+                    assign(out, held_name(l),
+                           low::ite(is_s, low::bin(low::BinOp::Ne, low::var(t), low::null_()), low::var(held_name(l))));
+                }
             }
         }
         // decision 0054 item 5 (Updates are framed): the cell is read only where the function still holds it; a callee that consumed `owns(g)` has taken the
@@ -2327,6 +2359,26 @@ private:
                                       owner_value(g_ref), low::null_()));
                 const E v {low::var(t)};
                 assign(out, held_name(g_ref), low::bin(low::BinOp::Ne, v, low::null_()));
+            }
+            // decision 0056 item 4(a): a leaf of a struct global, the callee given a pointer variable of the structure's type (`refill(pg)` after `pg = &g`)
+            for (size_t i {0U}; callee != nullptr && args != nullptr && !g_ref.path.empty() && i < args->size() &&
+                                i < callee->params.size();
+                 ++i)
+            {
+                if (aliases_struct_arg(*callee, static_cast<int>(i), (*args)[i], expr_at(arg_exprs, i),
+                                       g_ref.global->type) &&
+                    gives_param_leaf(*callee, static_cast<int>(i), g_ref.path))
+                {
+                    const std::string t {new_temp(low::LType::Ref)};
+                    const E is_g {low::bin(low::BinOp::Eq, (*args)[i].e, global_ref(g_ref.global->id))};
+                    assign(out, t,
+                           low::ite(low::and_(is_g, low::bin(low::BinOp::Gt, value_perm(cell, owner_type(g_ref)),
+                                                             low::no_perm())),
+                                    owner_value(g_ref), low::null_()));
+                    assign(out, held_name(g_ref),
+                           low::ite(is_g, low::bin(low::BinOp::Ne, low::var(t), low::null_()),
+                                    low::var(held_name(g_ref))));
+                }
             }
         }
     }
@@ -2605,6 +2657,10 @@ private:
     {
         const Global* g {site_global(w)};
         const Var* v {site_cell_var(w)};
+        // decision 0056 item 4(b): an owning leaf of a struct (`s.data`) is taken by a callee whose `requires` has a block site through a load of the leaf's pointer type
+        // (the closure of `owns(*p)` is such a site: `p->data`)
+        const OwnerRef leaf {site_leaf_owner(w)};
+        const bool is_leaf {leaf.var != nullptr || leaf.global != nullptr};
         std::vector<const Function*> calls;
         calls_in_stmt(&loop, calls, false);
         for (const Function* c : calls)
@@ -2615,12 +2671,109 @@ private:
                 {
                     continue;
                 }
+                if (is_leaf && s.atom != nullptr && s.atom->a != nullptr && w.atom != nullptr && w.atom->a != nullptr &&
+                    steps_have_load(s.via) && s.atom->a->type == w.atom->a->type)
+                {
+                    return true;
+                }
                 if (g != nullptr && site_global(s) == g)
                 {
                     return true;
                 }
                 const PlaceKey pk {atom_place(*s.atom)};
                 if (v != nullptr && pk.via.size() == 1U && pk.via[0U] == kLoadStep && pk.path.empty())
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    // decision 0056 item 2: whether the loop may put a block into a place whose pointer has type `pt`: a store of a value of that type that is not the null
+    // pointer (or of a structure), a write of a cell of that type, or a call whose `ensures` has a block site through a load of that type.  A loop that cannot has
+    // no way to give a site a block without a value.
+    static bool expr_may_fill(const Expr* e, const Type& pt)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e->kind == Expr::Kind::StoreE && e->a != nullptr && e->a->kind != Expr::Kind::Null &&
+            (e->type == pt || e->type.is_struct()))
+        {
+            return true;
+        }
+        if (e->kind == Expr::Kind::AssignE && e->var != nullptr && e->var->address_taken && e->var->type == pt &&
+            e->a != nullptr && e->a->kind != Expr::Kind::Null)
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (expr_may_fill(x, pt))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (expr_may_fill(x, pt))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool stmt_may_fill(const Stmt* s, const Type& pt)
+    {
+        if (s == nullptr)
+        {
+            return false;
+        }
+        if (s->kind == Stmt::Kind::Store && s->expr != nullptr && s->expr->kind != Expr::Kind::Null &&
+            (s->expr->type == pt || s->expr->type.is_struct()))
+        {
+            return true;
+        }
+        if ((s->kind == Stmt::Kind::Assign || s->kind == Stmt::Kind::Decl) && s->var != nullptr &&
+            s->var->address_taken && s->var->type == pt && s->expr != nullptr && s->expr->kind != Expr::Kind::Null)
+        {
+            return true;
+        }
+        if (expr_may_fill(s->expr, pt) || expr_may_fill(s->addr, pt))
+        {
+            return true;
+        }
+        for (const Stmt* c : {s->then_body, s->else_body, s->body, s->step})
+        {
+            if (stmt_may_fill(c, pt))
+            {
+                return true;
+            }
+        }
+        for (const Stmt* c : s->stmts)
+        {
+            if (stmt_may_fill(c, pt))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    bool loop_may_fill(const Stmt& loop, const Type& pt)
+    {
+        if (stmt_may_fill(&loop, pt))
+        {
+            return true;
+        }
+        std::vector<const Function*> calls;
+        calls_in_stmt(&loop, calls, false);
+        for (const Function* c : calls)
+        {
+            for (const AtomSite& s : blocks_of(*c).sites)
+            {
+                if (s.in_ensures && s.atom != nullptr && s.atom->a != nullptr && steps_have_load(s.via) &&
+                    s.atom->a->type == pt)
                 {
                     return true;
                 }
@@ -2655,7 +2808,8 @@ private:
                 // a loop that stores into the objects it owns is held to initializing them (what begins as NULL or initialized ends so); one that does not asks nothing
                 // of an object that begins without a value
                 assign(entry, nm,
-                       low::bool_lit(stores_type(&loop, *b.pt.pointee) || callee_takes_owner(loop, *b.site)));
+                       low::bool_lit(stores_type(&loop, *b.pt.pointee) || callee_takes_owner(loop, *b.site) ||
+                                     !loop_may_fill(loop, b.pt)));
                 low::LStmt ifs;
                 ifs.kind = low::LStmt::Kind::If;
                 ifs.expr = low::and_(known, low::bin(low::BinOp::Gt, flag_perm(c.recv, c.type), low::no_perm()));
@@ -8266,8 +8420,8 @@ private:
             cenv.result = value;
         }
         given_result_splits(callee, cenv, args, item.after);
-        held_updates(item.after, &callee,
-                     &args); // decision 0052 item 3 (audit S5): the owners that still hold their block
+        held_updates(item.after, &callee, &args,
+                     &e.args); // decision 0052 item 3 (audit S5): the owners that still hold their block
         if (const int nout {atoms_of(callee).nout}; nout > 0)
         {
             // decision 0052 item 2: the callee's output amounts come back in ghost temps after its result (Viper gives
@@ -13471,9 +13625,27 @@ private:
             {
                 others = others || !pl.kt.empty();
             }
+            // decision 0056 item 3: an owner whose closure the loop carries as a synthetic site has another carrier of the block's cells
+            auto has_closure_site = [&](const Var* v)
+            {
+                for (const AtomSite& bs : bsites)
+                {
+                    if (bs.atom == nullptr || synth_closure_atoms_.count(bs.atom) == 0U)
+                    {
+                        continue;
+                    }
+                    const Expr* root {place_root(bs.atom->a, nullptr)};
+                    if (root != nullptr && root->var == v &&
+                        (root->kind == Expr::Kind::Local || root->kind == Expr::Kind::AddrOf))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
             for (LoopOwner& own : owners)
             {
-                if (own.written && own.valset && !own.keyed && others)
+                if (own.written && own.valset && !own.keyed && (others || has_closure_site(own.owner.var)))
                 {
                     own.ev = "ev_" + var_name(*own.owner.var) + "__" + std::to_string(loop_number);
                     fn_.snapshots.push_back(low::LVar {own.ev, low::LType::Ref});

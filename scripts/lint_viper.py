@@ -1814,7 +1814,12 @@ def lint_carrier_clauses(src: Source, decls: list[Decl], add: Callable[[int, str
 #     local); `(held_<o> && (perm(<C>) > none)) && ((<C> != null) && (perm(tok(<C>)) > none))` (after a call or a free, global or
 #     address-taken owner, `<C>` the owner's own cell `loc(GB_x(), 0).v_ptr_T` or `<o>.v_ptr_T`, or the leaf's cell: the ghost's name must
 #     be the one that cell spells); `held_<o> || (((<x> != null) && (offset_of(<x>) == 0)) && (perm(tok(<x>)) == write))` (an address-taken
-#     owner that received a block): it never becomes `true` without a read of the token's permission;
+#     owner that received a block): it never becomes `true` without a read of the token's permission; and, after a call that passes a
+#     pointer variable `<a>` whose value may be the owner's own struct (decision 0056 item 4(a), the guarded update of 0054 item 6),
+#     `(<a> == <R>) ? (<t> != null) : held_<o>` for an owning leaf, `<R>` the leaf's own root address (the struct local's variable, or
+#     `loc(GB_x(), 0)` of the struct global) and `<t>` the temp that the nearest earlier assignment just read from that very leaf's cell
+#     under the same guard, `<t> := ((<a> == <R>) && (perm(<cell>) > none)) ? <cell> : null` (see `guarded_update_problem`): the ghost
+#     changes only where `<a>` is the owner and the cell's permission was read, and never to `true` on a value that was not read there;
 #   * a `tv_<o>` (an owning local's allocator ghost) is assigned only `(<x> != null) ? tok(<x>) : tv_<o>`;
 #   * an exemption term of a `forperm` row with a `held_GB_x` guard names exactly `t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`, with a
 #     leaf's ghost exactly `t == loc(block_of(<that leaf's cell>), -1)` (a deeper term, 0055 S4, extends `exemption_term_problem`);
@@ -1874,6 +1879,51 @@ def owner_assignment_ok(g: str, rhs: str) -> bool:
             return g == "held_" + gm.group("gb")
         return re.fullmatch(rf"{_ID}\.v_ptr_[\w$']+", c) is not None and c.split(".")[0] == g[len("held_"):]
     return False
+
+
+def guarded_update_form(g: str, rhs: str) -> tuple[str, str, str] | None:
+    """`(<a> == <R>) ? (<t> != null) : <g>` (decision 0056 item 4(a)) as (a, R, t), `<R>` an identifier or `loc(GB_x(), 0)`, for an
+    owner ghost `held_...`; None for any other text (which `owner_assignment_ok` and its message then judge)."""
+    if not g.startswith("held_"):
+        return None
+    m = re.fullmatch(rf"\((?P<a>{_ID})==(?P<r>{_ID}|loc\(GB_[\w$']+\(\),0\))\)\?\((?P<t>{_ID})!=null\):{re.escape(g)}", _nospace(rhs))
+    return None if m is None else (m.group("a"), m.group("r"), m.group("t"))
+
+
+def leaf_root_address(lo: tuple[str, str, tuple[int, ...]]) -> str:
+    """The address of the struct a leaf belongs to, as the guard of a guarded update names it: a struct local's variable, a struct
+    global's `loc(GB_x(), 0)` (normalized text)."""
+    kind, root, _path = lo
+    return root if kind == "local" else f"loc({root}(),0)"
+
+
+def guarded_update_problem(src: Source, lineno: int, g: str, form: tuple[str, str, str]) -> str | None:
+    """Why `held_<leaf> := (a == R) ? (t != null) : held_<leaf>` is not the guarded update of decision 0056 item 4(a), or None: the
+    nearest earlier assignment to `t` (in the same method) is exactly `((a == R) && (perm(C) > none)) ? C : null` with the same `a`
+    and `R`, `C` the cell of the very leaf the ghost's name spells, and `R` the address of the struct that leaf belongs to."""
+    a, r, t = form
+    rhs = None
+    for n in range(lineno - 1, max(0, lineno - 40), -1):
+        code = src.code[n - 1]
+        if re.match(r"^(method|function)\b", code):
+            break
+        m = re.match(rf"^\s*{re.escape(t)}\s*:=", code)
+        if m:
+            rhs = _nospace(_statement_rhs(code, m.end()))
+            break
+    where = "(decision 0054 item 6, decision 0056 item 4(a))"
+    if rhs is None:
+        return f"`{g}` is updated under `{a} == {r}` but `{t}` is not read just before it {where}"
+    m = re.fullmatch(rf"\(\({re.escape(a)}=={re.escape(r)}\)&&\(perm\((?P<c>.+)\)>none\)\)\?(?P=c):null", rhs)
+    if m is None:
+        return (f"`{g}` is updated from `{t}`, whose nearest earlier assignment `{rhs}` is not `(({a} == {r}) && (perm(<cell>) > none)) ? "
+                f"<cell> : null`: the guard and the permission read belong to the update {where}")
+    lo = leaf_cell_owner(m.group("c"))
+    if lo is None or g != leaf_ghost_name(lo[1], lo[2]):
+        return f"`{g}` is updated from the cell `{m.group('c')}`, which is not the leaf its name spells {where}"
+    if r != leaf_root_address(lo):
+        return f"`{g}` is updated under `{a} == {r}`, which is not the address of the struct its leaf belongs to ({leaf_root_address(lo)}) {where}"
+    return None
 
 
 def program_start_shapes(src: Source, start: Decl | None) -> dict[str, set[tuple[tuple[int, ...], str]]]:
@@ -2155,7 +2205,11 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
             tm = re.fullmatch(rf"({_ID})!=null", _nospace(rhs)) if a.group("g").startswith("held_") else None
             if tm and owner_assignment_ok(a.group("g"), rhs) and (why := temp_entry_problem(src, lineno, tm.group(1), a.group("g"))):
                 add(lineno, f"{why} (decision 0055 items 5 and 6, item 9)")
-            if not owner_assignment_ok(a.group("g"), rhs):
+            guarded = None if owner_assignment_ok(a.group("g"), rhs) else guarded_update_form(a.group("g"), rhs)
+            if guarded is not None:
+                if (why := guarded_update_problem(src, lineno, a.group("g"), guarded)):
+                    add(lineno, why)
+            elif not owner_assignment_ok(a.group("g"), rhs):
                 add(lineno, f"`{a.group('g')}` is assigned `{rhs}`: an owner's ghost is assigned `false`, `<x> != null`, `held && ...` "
                             "(the update after a call or a free, which reads the token's permission), `held || ...` (a block received "
                             "through an address) or, for `tv_`, the conditional read of the token (decision 0054 items 5 and 6); an owning "

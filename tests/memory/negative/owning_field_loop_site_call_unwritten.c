@@ -1,0 +1,48 @@
+// expect: error uninitialized @ L47
+// mode: c23, c++20
+// twin: tests/memory/owning_field_loop_pointer_arg.c
+// Pins: 0056 item 2, audit round 1 S4: the route of loop_may_fill that is a call whose ensures has a block site through a load of the site's pointer type (`give(&z)`, ensures `*pp == NULL || owns_block(*pp)`): the loop has it, so wef is false (a loop that may fill the site gives no guarantee about its flag), and the block of s.data, malloc'd and never written, is returned after the loop: uninitialized at the return. A scan that drops this route makes wef true and moves the error to the loop's entry row, on the line of the loop
+// Pre-registered from record 0056 item 2 and audit S4 (designed outcome; build/m4.5d2b2c/t5/r4.c on the L-1 build before filing): uninitialized at the return of s.data, in both modes
+#include <cerastes.h>
+#include <stdlib.h>
+
+struct buf {
+  int *data CERASTES_OWNING;
+  int n;
+};
+
+int tick(int i)
+    CERASTES_REQUIRES(0 <= i && i < 10)
+    CERASTES_ENSURES(r, r == i + 1)
+{
+  return i + 1;
+}
+
+void give(int **pp)
+    CERASTES_REQUIRES(cerastes_owns(*pp) && *pp == NULL)
+    CERASTES_ENSURES(cerastes_owns(*pp) && (*pp == NULL || cerastes_owns_block(*pp)))
+{
+  *pp = (int *)malloc(sizeof(int));
+  if (*pp != NULL) {
+    **pp = 0;
+  }
+}
+
+CERASTES_OWNING int *f(void)
+{
+  struct buf s;
+  s.n = 0;
+  s.data = (int *)malloc(sizeof(int));
+  int *z CERASTES_OWNING = NULL;
+  int i = 0;
+  CERASTES_INVARIANT(0 <= i && i <= 3)
+  CERASTES_INVARIANT(z == NULL)
+  CERASTES_DECREASES(3 - i)
+  while (i < 3) {
+    give(&z);
+    free(z);
+    z = NULL;
+    i = tick(i);
+  }
+  return s.data;
+}

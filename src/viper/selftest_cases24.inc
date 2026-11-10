@@ -81,7 +81,8 @@ void define_owning_leaves()
     // `fill` frees and refills; the callers keep a struct local and pass `&s`, or an alias of it.
     //   void use(void) { struct S s; s.q = NULL; s.n = 0; [struct S *a = &s;] fill([&s | a]); [free(s.q);] }
     // mode 0: &s, then the free         mode 1: &s, no free: the leaf's own row, "owning field `s.q`"
-    // mode 2: through the alias, then the free   mode 3: through the alias, no free: no ghost row (the framed update leaves `held` false), the end row of the function
+    // mode 2: through the alias, then the free   mode 3: through the alias, no free: the leaf's own row (decision 0056 item 4(a): the guarded update under `a == &s`
+    // sees the block the callee gave; owner, question 205, the mirror of Flip B)
     const auto fill_caller = [=](Kit& k, int mode) -> SrcLoc
     {
         StructType* S {mk_s(k)};
@@ -121,7 +122,7 @@ void define_owning_leaves()
         use->body = bs;
         k.done(use);
         // the lifetime of `s` ends with the body block, an ordinary block's end
-        return mode == 3 ? use->end_loc : bs->end_loc;
+        return bs->end_loc;
     };
     lc("owning_leaf_call_ref_freed",
        "&s to a callee that refills the leaf, then the free: the leaf's ghost follows the value after the call",
@@ -136,16 +137,16 @@ void define_owning_leaves()
            k.fail("leak", fill_caller(k, 1), 1U, "", "owning field");
        });
     lc("owning_leaf_call_alias_freed",
-       "an alias of &s to the callee, then the free of s.q: the framed update keeps the ghost false and the free needs no row",
+       "an alias of &s to the callee, then the free of s.q: the guarded update under a == &s follows the value after the call",
        [=](Kit& k)
        {
            fill_caller(k, 2);
        });
     lc("owning_leaf_call_alias_leak",
-       "the same without the free: the ghost stayed false, so the block is reported by the end row of the function",
+       "the same without the free: the lifetime-end row of the leaf (leak: owning field s.q), as through &s",
        [=](Kit& k)
        {
-           k.fail("leak", fill_caller(k, 3), 1U, "", "may return while it still owns");
+           k.fail("leak", fill_caller(k, 3), 1U, "", "owning field");
        });
 
     // void maybe(struct S *p, int c) requires(owns(*p) && (p->q == NULL || owns_block(p->q))) ensures(c != 0 ? (the same) : 1) { if (c == 0) { free(p->q); } }  (both lists also say p->q == NULL)

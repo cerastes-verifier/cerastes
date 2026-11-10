@@ -1,8 +1,8 @@
-// expect: error uninitialized @ L54
+// expect: verified
+// expect: native-ok
 // mode: c23, c++20
-// twin: tests/memory/owning_field_loop_type.c
-// Pins: 0055 item 7 (a false alarm pinned): an owning function returns a struct local's leaf block after a loop that passes the address of a plain pointer local to a borrower and stores no int: a leaf carried by type loses its contents' flag when the loop neither stores that type nor passes the owner, so the returned block is reported as having no value; with an int store in the loop (owning_field_loop_type.c) it verifies. The expectations are the errors the encoder reports today
-// Pre-registered from the final re-audit (probes r4/ and r5/), observed on the session build after the fixes: ret_leaf_type.c: the expect lines are the actual outcome, recorded as a pin
+// Covers: 0056 item 2 (limit 5): an owning function returns a struct local's leaf block after a loop that passes the address of a plain pointer local to a borrower and stores no int: the loop cannot fill the leaf's type, so the leaf's contents flag survives it (S41 (0) run 5a: the same fact written by hand as a loop invariant verifies)
+// Pre-registered from record 0056 item 2 (not yet run): verifies in both modes; it is the former pin owning_field_loop_pointer_arg_false_alarm.c (uninitialized @ L54 on the base) with a reworded header
 #include <cerastes.h>
 #include <stdlib.h>
 
