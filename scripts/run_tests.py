@@ -17,7 +17,7 @@ expectations (grammar in tests/README.md):
     // expect: frontend-refused <substring>              (needs cerastes-fe-options)
     // cerastes-fe-options: <options>                    (only with frontend-refused)
     // verify-options: <options>                         (only with verified, error or rejected;
-    //                                                    today only --strict-init)
+    //                                                    today --strict-init and --strict-owner)
     // timeout: <seconds>                                (301 to 3600; only with verified or error, and
     //                                                    required exactly under tests/long/: record 0057)
     // expect: golden
@@ -329,7 +329,7 @@ _TIMEOUT_RE = re.compile(r"^//\s*timeout:\s*(.*?)\s*$")
 _VERIFY_OPTIONS_NEAR_RE = re.compile(r"^//\s*verify[-_ ]?options?\b", re.IGNORECASE)
 # The options a `// verify-options:` line may name: a closed list, like VERIFY_WARNING_TAGS, so that a
 # misspelling is a header error and a new driver option is added here with its self-test.
-VERIFY_OPTIONS_ALLOWED = ("--strict-init",)
+VERIFY_OPTIONS_ALLOWED = ("--strict-init", "--strict-owner")
 # The platforms of `; platform:` on a `// mode:` line, and the one this harness runs on (decision 0031).
 PLATFORMS = ("macos", "linux")
 HOST_PLATFORM = "macos" if sys.platform == "darwin" else "linux"

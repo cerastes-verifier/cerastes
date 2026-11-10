@@ -307,6 +307,10 @@ private:
         // encoding of that context fills before it encodes the value.
         std::set<const vir::Var*> ref_marked;
         std::set<const an_expr_node*> strict_result_ok;
+        // Decision 0058 item 3: under `--strict-owner` a call whose contract gives its result's block is accepted only where its node is in
+        // `owner_result_ok` (the value an owner receives, a `return` of a function that gives its result's block, the argument of a parameter that takes a
+        // block), which the encoding of that context fills before it encodes the value.
+        std::set<const an_expr_node*> owner_result_ok;
     };
 
     vir::Program prog_;
@@ -8449,6 +8453,10 @@ private:
         for (size_t i {1U}; i < ops.size(); ++i)
         {
             allow_enum_conversion(ops[i]); // decision 0018 item 6 (iii)
+            if (verify_config().strict_owner && param_consumes_block(*f, i - 1U))
+            {
+                allow_owner_result(ops[i]); // decision 0058 item 3: `release(make())`
+            }
             if (f->params[i - 1U].init == vir::InitMarker::RefToUninit)
             {
                 allow_strict_result(
@@ -8477,6 +8485,15 @@ private:
         if (verify_config().strict_init)
         {
             strict_init_arguments(f, args, name, e->position);
+        }
+        if (verify_config().strict_owner)
+        {
+            strict_owner_arguments(f, args, name, e->position); // p6
+            if (gives_result_block(*f) && !owner_result_allowed(e))
+            {
+                reject_owner_result(name, e->position); // p4
+                return nullptr;
+            }
         }
         // decision 0047 item 8 (audit S6), 0052 item 4
         if (verify_config().strict_init && f->result_init == vir::InitMarker::RefToUninit && !strict_result_allowed(e))
@@ -8936,6 +8953,152 @@ private:
     bool strict_result_allowed(an_expr_node_ptr e) const
     {
         return e != nullptr && cx_.strict_result_ok.count(e) != 0U;
+    }
+
+    // ---- `--strict-owner` (decision 0058 item 3; P4417R0 [profiles.inval.owner] p4 and p6) -------------------------------------------------------
+    // The nodes through which a value reaches its receiver unchanged, from `e` down to the call (casts and lvalue adjustments), may hold a call whose
+    // result owns a block (p4).
+    void allow_owner_result(an_expr_node_ptr e)
+    {
+        if (!verify_config().strict_owner)
+        {
+            return;
+        }
+        for (int guard {0}; e != nullptr && guard < 16; ++guard)
+        {
+            cx_.owner_result_ok.insert(e);
+            if (e->kind != enk_operation ||
+                (e->variant.operation.kind != eok_cast && e->variant.operation.kind != eok_lvalue_adjust) ||
+                e->variant.operation.operands == nullptr || e->variant.operation.operands->next != nullptr)
+            {
+                break;
+            }
+            e = e->variant.operation.operands;
+        }
+    }
+    bool owner_result_allowed(an_expr_node_ptr e) const
+    {
+        return e != nullptr && cx_.owner_result_ok.count(e) != 0U;
+    }
+    // Whether `m` (a member address `&base->member`, any depth of `.` and `->`) names an `owning` member.
+    static bool owning_member_addr(const Expr* m)
+    {
+        if (m == nullptr || m->kind != Expr::Kind::MemberAddr || m->a == nullptr || !m->a->type.is_ptr() ||
+            m->a->type.pointee == nullptr || !m->a->type.pointee->is_struct() ||
+            m->a->type.pointee->struct_type == nullptr)
+        {
+            return false;
+        }
+        const auto& members {m->a->type.pointee->struct_type->members};
+        return m->index >= 0 && static_cast<size_t>(m->index) < members.size() &&
+               members[static_cast<size_t>(m->index)].owning;
+    }
+    // Whether `p` is a leaf of `st` along `path` that is an `owning` member.
+    static bool owning_leaf_at(const vir::StructType& st, const std::vector<int>& path)
+    {
+        const vir::StructType* cur {&st};
+        for (size_t i {0U}; i < path.size(); ++i)
+        {
+            if (cur == nullptr || path[i] < 0 || static_cast<size_t>(path[i]) >= cur->members.size())
+            {
+                return false;
+            }
+            const vir::StructMember& m {cur->members[static_cast<size_t>(path[i])]};
+            if (i + 1U == path.size())
+            {
+                return m.owning;
+            }
+            cur = m.type.is_struct() ? m.type.struct_type : nullptr;
+        }
+        return false;
+    }
+    // Whether storing to the place `target` (a local, or a place address) gives the value to an owner: an `owning` local, global or `static` local, or
+    // an `owning` member (p4's receivers).
+    static bool owner_target(const vir::Var* v, const Expr* addr)
+    {
+        if (v != nullptr)
+        {
+            return v->owning;
+        }
+        return addr != nullptr &&
+               ((addr->kind == Expr::Kind::GlobalAddr && addr->global != nullptr && addr->global->owning) ||
+                owning_member_addr(addr));
+    }
+    // p6: whether `x` (the VIR value of a released pointer) is an owner by name: an `owning` local, global or `static` local, or member read by name (`v`,
+    // `g`, `s.q`, `p->q`, `(*pp)->q`), a parameter of the enclosing function whose own contract takes its block, or a call whose result owns a block (its
+    // own p4 rule decides where that is allowed).
+    bool owner_by_name(const Expr* x) const
+    {
+        while (x != nullptr && x->kind == Expr::Kind::ReportAt)
+        {
+            x = x->a;
+        }
+        if (x == nullptr)
+        {
+            return false;
+        }
+        switch (x->kind)
+        {
+            case Expr::Kind::Local:
+                if (x->var == nullptr)
+                {
+                    return false;
+                }
+                if (x->var->owning)
+                {
+                    return true;
+                }
+                return x->var->is_param_copy && x->var->param_index >= 0 && cx_.fn != nullptr &&
+                       static_cast<size_t>(x->var->param_index) < cx_.fn->params.size() &&
+                       param_consumes_block(*cx_.fn, static_cast<size_t>(x->var->param_index));
+            case Expr::Kind::Deref:
+                // a global or `static` local, an owning member, or an address-taken owning local, read by name
+                return x->a != nullptr &&
+                       ((x->a->kind == Expr::Kind::GlobalAddr && x->a->global != nullptr && x->a->global->owning) ||
+                        owning_member_addr(x->a) ||
+                        (x->a->kind == Expr::Kind::AddrOf && x->a->var != nullptr && x->a->var->owning));
+            case Expr::Kind::Call:
+                return x->callee != nullptr && gives_result_block(*x->callee);
+            default:
+                return false;
+        }
+    }
+    // p6 at a call of `callee`: the argument of each parameter whose contract takes its block.
+    void strict_owner_arguments(const vir::Function* callee, const std::vector<const Expr*>& args,
+                                const std::string& cname, const a_source_position& at)
+    {
+        for (size_t k {0U}; k < args.size() && k < callee->params.size(); ++k)
+        {
+            if (!param_consumes_block(*callee, k) || owner_by_name(args[k]))
+            {
+                continue;
+            }
+            const Expr* a {args[k]};
+            while (a != nullptr && a->kind == Expr::Kind::ReportAt)
+            {
+                a = a->a;
+            }
+            reject_release(cname, a, at);
+        }
+    }
+    void reject_release(const std::string& cname, const Expr* a, const a_source_position& at)
+    {
+        const std::string text {a != nullptr && !a->c_text.empty()            ? "`" + a->c_text + "`"
+                                : a != nullptr && a->kind == Expr::Kind::Null ? "a null pointer"
+                                                                              : "this pointer"};
+        reject(
+            Diag::owner_release_unowned, at,
+            "`" + cname + "` releases " + text +
+                ", which is not an owner: only an `owning` variable or field, a parameter whose contract takes its block, or a call whose result owns "
+                "a block may be released");
+    }
+    void reject_owner_result(const std::string& cname, const a_source_position& at)
+    {
+        reject(
+            Diag::owner_result_unowned, at,
+            "the result of `" + cname +
+                "` owns a block and must go to an owner: the initializer of or an assignment to an `owning` variable or field, the `return` of a "
+                "function that gives its result's block, or an argument that a function releases");
     }
 
     // `--strict-init`, a marked pointer local `var` (decision 0052 item 4): what it receives has no value to read: a
@@ -12008,6 +12171,11 @@ private:
             reject_strict_uninit_result(v, call->position);
             return nullptr;
         }
+        if (verify_config().strict_owner && !owner_result_allowed(call) && !owner_result_allowed(cast))
+        {
+            reject_owner_result(name, call->position); // decision 0058 item 3, p4
+            return nullptr;
+        }
         const Expr* c {b_.call(v, {}, loc_of(call->position))};
         for (auto it {checked.rbegin()}; it != checked.rend(); ++it)
         {
@@ -12105,9 +12273,15 @@ private:
         {
             return nullptr;
         }
+        allow_owner_result(operand); // decision 0058 item 3: `free(make())`
         const Expr* a {expr(operand)};
         if (a == nullptr)
         {
+            return nullptr;
+        }
+        if (verify_config().strict_owner && !owner_by_name(a))
+        {
+            reject_release(name, a, e->position); // p6
             return nullptr;
         }
         if (a->type != from.t || !from.t.is_ptr() || from.t.pointee == nullptr)
@@ -12777,6 +12951,10 @@ private:
             {
                 allow_strict_result(init_expr); // decision 0052 item 4
             }
+            if (var->owning)
+            {
+                allow_owner_result(init_expr); // decision 0058 item 3, p4
+            }
             x = expr(init_expr);
         }
         else if (init_constant != nullptr)
@@ -13255,6 +13433,10 @@ private:
         if (el.e != nullptr)
         {
             allow_enum_conversion(el.e); // decision 0018 item 6 (iii)
+            if (owning_leaf_at(st, el.path))
+            {
+                allow_owner_result(el.e); // decision 0058 item 3, p4: an owning field's leaf in an initializer list
+            }
             x = expr(el.e);
         }
         else
@@ -13748,6 +13930,10 @@ private:
                 ((p->v != nullptr && cx_.ref_marked.count(p->v) != 0U) || marked_global_target(p->addr) != nullptr))
             {
                 allow_strict_result(ops[1U]); // decision 0052 item 4, 0054 item 5
+            }
+            if (target_ok && owner_target(p->v, p->addr))
+            {
+                allow_owner_result(ops[1U]); // decision 0058 item 3, p4
             }
             p->x = expr(ops[1U]);
             if (!target_ok || p->x == nullptr)
@@ -14639,6 +14825,11 @@ private:
         {
             allow_strict_result(
                 s->expr); // decision 0052 item 4: a `ref_to_uninit` call may be returned by a marked function
+        }
+        if (verify_config().strict_owner && gives_result_block(*f))
+        {
+            allow_owner_result(
+                s->expr); // decision 0058 item 3, p4: a function that gives its result's block may return one
         }
         const Expr* x {expr(s->expr)};
         if (x == nullptr)

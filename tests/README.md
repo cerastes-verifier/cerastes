@@ -99,7 +99,7 @@ line of code is an error, so an expectation can never be silently ignored.
   outcome line and is a header error alone, twice or in a `.vpr` file. See
   [Ordinary compilers](#ordinary-compilers-native-ok).
 - **`verify-options: <options>`**: options added to the `cerastes verify` command of a
-  `verified`, `error` or `rejected` test. A closed list: today only `--strict-init`. See
+  `verified`, `error` or `rejected` test. A closed list: today `--strict-init` and `--strict-owner`. See
   [Verify options](#verify-options).
 - **`timeout: <seconds>`**: the limit of the `cerastes verify` run of a long-running test, an integer from
   301 to 3600. It is the mark of `tests/long/`: required there, an error anywhere else, and valid only with
@@ -353,13 +353,15 @@ build/cerastes verify <test path> --std=<c++20|c23> --keep-vpr=build/vpr/<test p
 
 It is how a test runs the verifier in an opt-in mode (`--strict-init`: every local without an initializer
 must be marked `uninit`, and an argument to a marked parameter must be a marked local's address or the caller's own
-marked parameter). The rules, each pinned by the harness self-test:
+marked parameter; `--strict-owner`, decision 0058 item 3: the result of a call that gives a block must go to an owner, and
+what a call that takes a block releases must be an owner by name, P4417R0's p4 and p6). Both may be named on one line
+(`// verify-options: --strict-init --strict-owner`). The rules, each pinned by the harness self-test:
 
 - it is valid only with `verified`, `error` or `rejected`, in a `.c` or `.cpp` test: with `frontend-*`,
   `golden`, `frontend-refused` (which has `cerastes-fe-options:` of its own) or in a `.vpr` file it is a header error;
 - one line at most, in the leading comment block, with at least one option and no option twice;
 - each option must be on the closed list `VERIFY_OPTIONS_ALLOWED` in `scripts/run_tests.py` (today
-  `--strict-init`); any other word, a misspelling or a standard such as `--std=c23` (the harness chooses
+  `--strict-init` and `--strict-owner`); any other word, a misspelling or a standard such as `--std=c23` (the harness chooses
   it from `mode:`) is a header error. A new driver option is added to the list together with its self-test;
 - the options are the same in every mode of the test, and no other test of the run gets them;
 - `scripts/mutate.py` verifies a `verified` test's mutants with the same options as its original, so that a

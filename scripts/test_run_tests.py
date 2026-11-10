@@ -13430,8 +13430,38 @@ class VerifyOptionsHeaderTests(unittest.TestCase):
     def parse(self, text, suffix=".c"):
         return rt.parse_header(text, suffix)
 
-    def test_the_allow_list_holds_only_strict_init(self):
-        self.assertEqual(rt.VERIFY_OPTIONS_ALLOWED, ("--strict-init",))
+    def test_the_allow_list_holds_the_two_strict_options(self):
+        self.assertEqual(rt.VERIFY_OPTIONS_ALLOWED, ("--strict-init", "--strict-owner"))
+
+    def test_strict_owner_is_taken_like_strict_init_by_every_verify_kind(self):
+        # record 0058 item 3: the same header line, kinds and suffixes as --strict-init (twin of
+        # test_every_verify_kind_takes_it_in_c_and_in_cpp)
+        for kind, expect in self.OUTCOMES.items():
+            for suffix in (".c", ".cpp"):
+                with self.subTest(kind, suffix=suffix):
+                    exp = self.parse(expect + "// verify-options: --strict-owner\n", suffix)
+                    self.assertEqual((exp.kind, exp.verify_options), (kind, ["--strict-owner"]))
+
+    def test_both_strict_options_may_share_one_line_in_either_order(self):
+        for words in (["--strict-init", "--strict-owner"], ["--strict-owner", "--strict-init"]):
+            with self.subTest(words):
+                exp = self.parse("// expect: verified\n// verify-options: " + " ".join(words) + "\n")
+                self.assertEqual(exp.verify_options, words)
+        # twins: each is still named at most once, and a bad neighbour is still refused
+        for text in ("--strict-owner --strict-owner", "--strict-init --strict-owner --strict-init"):
+            with self.subTest(text), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse("// expect: verified\n// verify-options: " + text + "\n")
+            self.assertIn("twice", str(ctx.exception))
+        for text in ("--strict-owner --bogus", "--bogus --strict-owner --strict-init"):
+            with self.subTest(text), self.assertRaises(rt.HeaderError):
+                self.parse("// expect: verified\n// verify-options: " + text + "\n")
+
+    def test_a_misspelt_strict_owner_is_refused(self):
+        for word in ("--strict-owners", "--strict_owner", "--strict-ownr", "--strict", "-strict-owner", "--strict-owner=1",
+                     "strict-owner", "--strict-onwer"):
+            with self.subTest(word), self.assertRaises(rt.HeaderError) as ctx:
+                self.parse("// expect: verified\n// verify-options: " + word + "\n")
+            self.assertIn("does not allow", str(ctx.exception))
 
     def test_every_verify_kind_takes_it_in_c_and_in_cpp(self):
         for kind, expect in self.OUTCOMES.items():
@@ -13529,7 +13559,7 @@ class VerifyOptionsHeaderTests(unittest.TestCase):
 
     def test_the_readme_documents_it(self):
         text = (REAL_ROOT / "tests" / "README.md").read_text()
-        for needle in ("verify-options:", "--strict-init", "VERIFY_OPTIONS_ALLOWED"):
+        for needle in ("verify-options:", "--strict-init", "--strict-owner", "VERIFY_OPTIONS_ALLOWED"):
             with self.subTest(needle):
                 self.assertIn(needle, text)
 
@@ -13552,6 +13582,24 @@ class VerifyOptionsRunTests(VerifierMixin, DiagRunCase):
         for call in calls:
             self.assertEqual(call["argv"][-1], "--strict-init", call)
             self.assertEqual(call["argv"].count("--strict-init"), 1, call)
+
+    def test_both_strict_options_reach_every_mode_once_each_in_the_header_order(self):
+        t = self.options_test("a.c", options="--strict-init --strict-owner")
+        status, out, _ = self.run_harness(t)
+        self.assertEqual(status, 0, out)
+        calls = self.verify_calls()
+        self.assertEqual(sorted(c["argv"][2] for c in calls), ["--std=c++20", "--std=c23"])
+        for call in calls:
+            self.assertEqual(call["argv"][-2:], ["--strict-init", "--strict-owner"], call)
+            self.assertEqual(call["argv"].count("--strict-init"), 1, call)
+            self.assertEqual(call["argv"].count("--strict-owner"), 1, call)
+        # twin: one option alone passes just that one
+        t2 = self.options_test("b.c", options="--strict-owner")
+        status, out, _ = self.run_harness(t2)
+        self.assertEqual(status, 0, out)
+        for call in [c for c in self.verify_calls() if c["argv"][1] == rt.rel(t2)]:
+            self.assertEqual(call["argv"][-1], "--strict-owner", call)
+            self.assertNotIn("--strict-init", call["argv"])
 
     def test_a_test_without_the_header_gets_no_option(self):
         with_option = self.options_test("a.c", modes="c23")

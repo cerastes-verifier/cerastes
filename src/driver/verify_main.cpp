@@ -71,6 +71,8 @@ constexpr const char kUsage[] {
     "  --strict-init            P4222's strict profile: every local without an initializer is marked\n"
     "                           [[cerastes::uninit]], and an argument of a ref_to_uninit/must_init parameter\n"
     "                           is &x of such a local or the caller's own marked parameter passed on\n"
+    "  --strict-owner           P4417's owner rules p4 and p6: a call whose result owns a block goes to an owner,\n"
+    "                           and only an owner (or an owner parameter) is released\n"
     "  --help, --version\n"
     "\n"
     "exit status: 0 verified, 1 verification errors, 2 the program is not accepted, 3 tool failure\n"};
@@ -84,7 +86,8 @@ struct Args
     bool keep {false};
     std::string keep_path;
     int timeout {300};
-    bool strict_init {false}; // --strict-init (decision 0042 item 8)
+    bool strict_init {false};  // --strict-init (decision 0042 item 8)
+    bool strict_owner {false}; // --strict-owner (decision 0058 item 3)
     std::string hook;
 };
 
@@ -220,6 +223,10 @@ int parse_args(int argc, char** argv, Args& a)
         else if (s == "--strict-init")
         {
             a.strict_init = true;
+        }
+        else if (s == "--strict-owner")
+        {
+            a.strict_owner = true;
         }
         else if (s.rfind("--timeout=", 0U) == 0U)
         {
@@ -631,6 +638,7 @@ int verify_command(int argc, char** argv)
     cfg.on = true;
     cfg.hook = a.hook;
     cfg.strict_init = a.strict_init;
+    cfg.strict_owner = a.strict_owner;
     cfg.library_dirs = library_dirs;
     // The vlibc directories are not among the platform's: system_dirs is the platform's only (a file below a library directory is never system).
     cfg.system_dirs = cerastes::system_directories(sys_includes, a.includes, library_dirs);

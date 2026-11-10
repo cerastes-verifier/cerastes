@@ -117,6 +117,12 @@ CERASTES_DIAG(uninit_unmarked, error,
               "%s (--strict-init, decision 0042 item 8)")
 CERASTES_DIAG(uninit_ref_initialized, error,
               "%s (--strict-init, decision 0042 item 8)")
+// `--strict-owner` (decision 0058 item 3; P4417R0 [profiles.inval.owner]): p4, a call whose result owns a block that is not given to an owner; p6, a release
+// (the argument of a parameter whose contract takes a block) of something that is not an owner.
+CERASTES_DIAG(owner_result_unowned, error,
+              "%s (--strict-owner, decision 0058 item 3)")
+CERASTES_DIAG(owner_release_unowned, error,
+              "%s (--strict-owner, decision 0058 item 3)")
 CERASTES_DIAG(unsupported_attribute, error,
               "the attribute %s is not supported by \"cerastes verify\": it can change what the code means "
               "(decision 0011 item 7)")

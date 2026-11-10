@@ -32,6 +32,10 @@ struct VerifyConfig
     // `--strict-init` (decision 0042 item 8): every local without an initializer must carry `[[cerastes::uninit]]`, and an argument of a
     // `ref_to_uninit`/`must_init` parameter must be `&x` of such a local or the caller's own marked parameter passed unchanged.
     bool strict_init {false};
+    // `--strict-owner` (decision 0058 item 3; P4417R0 [profiles.inval.owner] p4 and p6): a call whose contract gives its result's block must go to an owner
+    // (an `owning` variable or field, a `return` of a function that gives its result's block, or the argument of a parameter that takes a block), and the
+    // argument of a parameter whose contract takes a block must be an owner by name, an owner parameter or such a call.
+    bool strict_owner {false};
     // Canonical (realpath) system directories: the driver's own system include directories, without
     // /usr/local/include (a user directory).  A file under one of them is a system file.
     std::vector<std::string> system_dirs;

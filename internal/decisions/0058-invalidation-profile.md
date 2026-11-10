@@ -163,10 +163,12 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      reported by the default mode's path-precise rows: an owner by name that is already empty or dangling
      (`invalid-free`); a release on some paths only (`if (c) free(v);`, `leak`); an assignment to an owner that still
      holds a block (`leak`); a member released through two aliases of its structure (`invalid-free`). **Rejected although
-     harmless:** `t = v; free(t);`; `free(c ? a : b)`; `free(*pp)`, `pp == &v` included; a result stored in a non-owning
-     local and released in the same function; a call under `?:` or a comma as the receiver's value (only casts are
-     peeled); the leaves of a by-value struct parameter or result; `(void)make();`. Both lists are on the Verifying
-     page, one test per entry.
+     harmless:** `t = v; free(t);`; `free(c ? a : a)` (with two owners, `free(c ? a : b)` leaks the other, which the
+     default mode reports); `free(*pp)`, `pp == &v` included; a result stored in a non-owning local and released in the
+     same function; a call under `?:` or a comma as the receiver's value (only casts are peeled); the owning leaf of a
+     call's struct result (`free(mk().data)`). A by-value struct parameter is a named owner (`free(s.data)` is
+     accepted), and `(void)make();` is rejected, rightly: the default mode reports its `leak`. Both lists are on the
+     Verifying page, one test per entry.
    - Without the option every program means the same; the option only rejects more. Both strict options may be given
      together (`// verify-options: --strict-init --strict-owner`), and the harness allow-list holds both.
 
@@ -195,7 +197,10 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
    - **A marked pointer to a structure with an owning field** (question 202): accepted, and the marked site closes
      nothing on either side, as 0055 item 3 already says of `malloc`'s view. A callee that leaves a block in the field is
      reported by its own end row (`leak`); a caller whose structure held a block in the field before the call keeps it
-     and its end row reports it if the callee overwrote the field; an initializer is `must_init`. The three rejections
+     and its end row reports it if the callee overwrote the field; an initializer is `must_init`. The price (the sound
+     direction): after such a call the caller does not know the field's value, so a field that may be non-null is
+     reported at the caller's end even when the callee set it to `NULL` (`leak`), unless the contract says so (an
+     `ensures` naming the field's value) or the callee is `must_init`. The three rejections
      (`reject_marked_owning_pointees` for a parameter and a result, `read_variable_markers` for a variable) go, after
      S42 and the audit. If the audit finds a hole, they stay and their pins are re-filed under this record.
 
