@@ -12,141 +12,104 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 7f11706:internal/status.md`, M4.5c2b's `git show d26a87c:internal/status.md`, and M4.5d1's
 `git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, S6's `git show 9255b93:internal/status.md`, M4.5d2v's `git show c2bc48d:internal/status.md`, S7's `git show a660abc:internal/status.md`, M4.5d2b1's
 `git show c1b691d:internal/status.md`, S8's `git show 15bcdc6:internal/status.md`, M4.5d2b2a's
-`git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, and M4.5d2b2c's
-`git show 023ea50:internal/status.md`.
+`git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
+`git show 023ea50:internal/status.md`, and M4.5d2b2d's `git show d88a457:internal/status.md`.
 
-## M4.5e1a — Arrays inside one function (2026-11-11): IN PROGRESS on branch `m4.5e1a-arrays-in-functions`
+## M4.5e1a — Arrays inside one function (2026-11-11): done on branch `m4.5e1a-arrays-in-functions`
 
-Draft, kept current during the session (the final entry replaces it). Plan: `.claude/plans/m4-5e1-arrays.md`
-section 3 (there is no `m4-5e1a-*.md`). Record 0059 (draft).
+Plan: `.claude/plans/m4-5e1-arrays.md` section 3 (there is no `m4-5e1a-*.md`). Record 0059 (amends 0011, 0012, 0024,
+0028, 0032, 0038, 0039, 0042, 0043, 0054). Read `internal/handoff.md` next: §1, §2, §3 "M4.5e1b", §4.2, §8 (questions
+234 on).
 
-**Step 0.** The owner's inline answers to questions 229–233 (each "Follow recommendation") were committed to local
-`main` as `1c5f9bd`, and the branch is from it (not from `origin/main` = `d88a457`, which lacks only that commit).
-CI recorded only: no `workflow_dispatch` run; the 2026-11-10 nightly cancelled at 6 h 01 min; the 2026-11-11 one in
-progress. Baseline: 5,412 `.vpr`/`.map` and the VIR self-test's 1,765 cases, frozen binaries in
-`build/m4.5e1a/cerastes-base/`. R1: `int a[static 3]` verified in C (question 230: rejected from this session); R2's
-messages recorded; R3: 1,875 runs of the `rejected` tests, 0 mismatches on the base.
+**Owner decisions:** 229–233 answered inline before the session ("Follow recommendation" each), committed to local
+`main` as `1c5f9bd`; the branch is from it (not from `origin/main` = `d88a457`, which lacks only that commit). Open,
+each built as its recommendation: **234** array designators rejected in C too (audit round 1, B1); **235** the 1,080
+`.vpr` files of Flips D, where the pre-build allow-list predicted 849.
 
-**Done so far.** P78 and S43 with record 0059's draft (`05b4075`; gates G2–G4 pass; 49 fixtures, now 50 with
-G2's probe). Audit round 1 (B1, B2: array designators rejected; items 3–17 taken). Part A (736 `src/` lines with its
-self-tests) and Part B (1,300 without self-tests, 538 of self-tests): the plan's 300–450 and 1,000–1,500. Snapshots
-`snap/m4.5e1a-partA`, `snap/m4.5e1a-partB-E`, `snap/m4.5e1a-partAB` (side refs, not on the branch).
+**Step 0.** CI recorded only: no `workflow_dispatch` run; the 2026-11-10 nightly cancelled at 6 h 01 min; the
+2026-11-11 one running. Baseline: 5,412 `.vpr`/`.map`, the VIR self-test's 1,765 cases, frozen binaries in
+`build/m4.5e1a/cerastes-base/`. R1: `int a[static 3]` verified in C (question 230: now rejected); R2's messages kept;
+R3: 1,875 runs of the `rejected` tests, 0 mismatches on the base.
+
+**Done** (the three Sonnet roles and the Opus reviewer from `.claude/agents/`; the il-analyst was replaced once, after
+S43; the orchestrator consulted the Fable advisor before audit round 1, at the split point, at Part D's stop and
+before the box run):
+- **Record, P78, S43** (`05b4075`, `d09c3fc`): P78 (F1 a bound naming a local constant, F2 `int a[0]`, F3 C's silent
+  excess initializers, F4 `address_taken`); S43's 49 fixtures (G2–G4 pass; the draft's `p[0]` concern refuted), with
+  G2's probe and the element-type loop addendum (56 fixtures `s43_*`). The Step-0 matrix (#175, #1162 and the
+  compilers' shapes) and audit round 1 (B1, B2: array designators rejected) in the record.
+- **Parts A and B** (`0209647`): VIR's `Array`/`ElemAddr`, the lowered `Forall` and labelled `Old`, the marked map
+  column and the driver's exact-reason gate; local arrays as blocks (`alloc_arr_<t>`, `zero_arr_<t>`), `a[i]`/`&a[i]`,
+  initializers with C's zero fill, `out-of-bounds`, scope exits as marked range rows, sequencing between elements;
+  #175, #1162 and #138 errors; `array_address_null_test`, `c99_designator`, `char_subscripts`; audit round 2's B1
+  (`register`) and the VIR self-test's reasons.
+- **Parts C, D and E** (`ccb5910`): loops carrying arrays (range places, marked entry and back-edge rows at the loop
+  keyword, quantified conjuncts, the reach rule), the decay and `p[i]` on any pointer, the `offset_of == 0` backstops
+  (1,080 `.vpr` files, each changed line classified), `sizeof(a)`, `uninit` on arrays; audit round 3's fixes.
+- **Tests.** 286 new test files in `tests/memory` (positives and twins, pins), 56 S43 fixtures, 6 doc examples; three
+  staging pins deleted by their parts; Flips A and B (plan 3.8) and Flip C's `Pins:` comments. VIR self-test 1,825
+  cases (was 1,765; 303 rejection cases), every expect line now naming Silicon's reason; `test_lint_viper.py` 781 (was
+  736); `test_run_tests.py` 1,221.
+- **`src/` sizes** without self-tests: Part A about 300, Part B 1,300, Parts C–E about 400 net (the plan's 300–450,
+  1,000–1,500, 880–1,500); about 3,200 in all with self-tests.
+- **Docs:** Memory and ownership "Arrays", Error messages `out-of-bounds`, Verifying (the compilers' shapes,
+  `--strict-init`, not-supported), Annotations (`uninit`), the developer guide's map description, `tests/README.md`,
+  `internal/encoding.md` §3 "Arrays", `internal/il-inventory.md` chapter M4.5e1a, ten records amended. No tutorial
+  chapter (e1c, 0049 item 4).
+- **Audits** (one Opus reviewer, resumed per round): round 1 on the draft (B1, B2), round 2 on Parts A+B (B1
+  `register`, five should-fix), round 3 on Parts C–E (no blocking item), the re-audit of round 3's fixes (no blocking
+  item; its lint should-fix taken in `d507551`). No false proof in any round; round 1's B1 (a wrapping designator unchecked) and round 2's B1 (a `register`
+  array, and `&` of a `register` scalar since M4.5b1a) were holes, closed.
 
 **Deviations from the plan, for confirmation:**
-- edg-backend built all of Part A (the plan split it with the il-analyst, who was running S43) and Part B's
-  `check.cpp`; the il-analyst holds `lower.cpp`.
-- Part B's encoder half was started before audit round 1 returned (the record draft existed; invariant 6 held).
-- The first il-analyst (P78, S43) was replaced for Part B's lowering; the second continues into Part C (three Sonnet
-  agents alive at a time).
-- The plan's constant-index twins (`a[3]`, `a[-1]`, `&a[4]`) became rejections: EDG's #175 is an error in verify
-  mode in both modes (the compilers warn; the strictest reading also rejects `if (0) { a[3]; }`, where only EDG warns).
-  C's excess initializers are EDG's #1162 made an error (the IL drops them).
-- New rejections like the compilers: `array_address_null_test`, `c99_designator` (C++), `char_subscripts`.
-- **Question 234 (open):** array designators are rejected in C too (audit round 1, B1: the IL keeps only a folded
-  index, so a wrapping one would pass unchecked; no EDG work this session, question 69). P78 F1's pre-agreed
-  rejection also refuses `constexpr int N = 4; int a[N];`.
+- edg-backend built all of Part A (the plan split it with the il-analyst, then on S43) and Part B's `check.cpp`.
+- Part B's encoder half started before audit round 1 returned (the record draft existed).
+- Parts A and B were committed together from the audited snapshot plus round 2's separable fixes; Parts C, D and E were
+  audited in one round and committed together (Part D's encoder began in the shared tree while Part C's lowering
+  finished, so no Part C-only build existed).
+- The plan's constant-index twins became rejections (EDG's #175 an error in both modes, also inside `if (0)`, where only
+  EDG warns); C's excess initializers are #1162 made an error.
+- The array loop rows are positioned at the loop keyword (`Stmt::keyword_loc`, new), so both modes report one line.
+- VIR self-test expect lines name Silicon's reason (audit round 2): every existing case's header changed.
+- The lint exempts three exact loop-carry shapes from the `offset_of == 0` rule (records 0050, 0056: not restated).
+- Audit round 1 item 15's predicted `pk[0]` false alarm did not reproduce; its pin became a positive with twins.
 
 **Corrections of new tests after their first run** (question 160): `array_reject_self_reading_init.c` lost an unrun
-`frontend-warning used_before_set` line (verify mode disables that warning); the plan's `p[1]` twin on a parameter
-with only `owns(*p)` expects two errors (`out-of-bounds` and `permission`, S43 N1).
+`frontend-warning` line; the `p[1]` twin on a parameter with only `owns(*p)` expects two errors (S43 N1); Flip A's twin
+`r == a + 1` overflowed in its own `ensures`; four Part C tests whose own invariants or bodies were wrong;
+`array_ptr_walk_far.c` and `array_sizeof_bound_bytes.c` widened their `ensures` (a second error);
+`array_loop_clauses_above_keep.c` L21 → L22; `array_ptr_loop_reassigned_false_alarm.c` replaced (above).
 
-## M4.5d2b2d — `not_invalidating`, `--strict-owner`, marked fields (2026-11-10): done on branch `m4.5d2b2d-invalidation-profile`
-
-Plan: `.claude/plans/m4-5d2b2d-invalidation-profile.md`. Record 0058 (amends 0029 items 1–2, 0042 items 4 and 8, 0052
-item 4, 0054 item 2, 0055 items 3 and 11). Read `internal/handoff.md` next: §1, §2, §3 "M4.8", §8 (questions 224 on).
-
-**Owner decisions in the session** (2026-11-10), each the recommendation, each recorded in record 0058:
-- **218** N1's swap may change the Viper of the other programs whose bodiless contracts hold both asserts;
-- **219** a third N1 flip, `owning_global_call_dangling_closure.c` (it corrected 218's premise);
-- **220** fix the return-row order now, with three flips (audit round 2 on Parts S and F, B1);
-- **221** keep the tied-only Kept row, and its amendment of 0054 item 2;
-- **222** the re-audit's older exit 3 goes to M4.8;
-- **223** three VIR cases' `fail_only` index follows 220's reorder (it corrected 220);
-- and 215, 216 (M4.8), answered in the handoff before the session.
-
-**Told to the owner and corrected later** (each in §8 of the handoff): 219 said no VIR case was affected by N1, one was
-(its asserts swapped, still verified; the orchestrator's grep was misread); 220 said `@ L58` went x2→x1, the file held
-three (x3→x2); 223 says the existing VIR cases had not been through Silicon before 220 was asked.
-
-**Step 0 and Step 1.**
-- `main` and `origin/main` held M4.5d2b2c (`023ea50`, merged and pushed; handoff §1's "not merged" was stale); the
-  branch is from it. The survey refresh held: `encode.cpp`, `vir.h` and `vir.cpp` unchanged since `262edb3`, `lower.cpp`'s
-  functions moved uniformly.
-- CI: the 2026-11-10 nightly, the first under the 360-minute limit, was cancelled at 6 h 01 min; no `profiles=all`
-  dispatch has run (`macos-26` stays at `dispatch`, question 172). No CI commit.
-- Baseline: 5,144 `.vpr`/`.map` and the VIR self-test's 1,732 cases from bootstrap's build, with frozen base binaries.
-
-**Done** (the three Sonnet roles and the Opus reviewer from `.claude/agents/`; edg-backend and the il-analyst were each
-replaced by a fresh agent when their context ran low; the orchestrator consulted the Fable advisor before the record,
-each owner question, the box run and the close):
-- **Behaviour-neutral preparation** (`55bd461`, `bfa0537`): the marker plumbing names each kind (an unknown one is an
-  internal error); `gives_result_block`, `param_consumes_block`. vprdiff: all identical.
-- **Record, P77, S42** (`0c06e56`): P77 (`not_invalidating` on parameters, `ref_to_uninit` on fields, `no_dangling`'s
-  #1097; a registered name missing from `kNames` is silently ignored); S42's 33 fixtures (the draft's implicit clause,
-  tied under the site's own null test, let a free-and-null body verify; the framing atom's guards hold in every shape).
-- **N1** (`09d75e6`): the bodiless tie above the partner-guard row; three flips.
-- **Part N** (`14a4cd3`, `8bc0960`): `cerastes::not_invalidating`, its partner check, the spliced `p->q == old(p->q)`,
-  the `f__wf` row taken-implies-returned, the postcondition message; the library-header pin.
-- **Part S** (`28bf393`): `--strict-owner`, p4 and p6 (`owner_result_unowned`, `owner_release_unowned`); with the
-  option on, the 4,555 programs it accepts have byte-identical Viper.
-- **Docs N and S** (`3d03e46`).
-- **Part F with audit rounds 1 and 2's fixes** (`9d41e43`): `ref_to_uninit` on fields, the strict-init rule per leaf, the
-  marked closure Kept only where tied (round 1's B1: 0054 item 5's internal row exited 3 when a body replaced the block),
-  S2, S3, S5 (marked variables close nothing), F2 (question 202's three rejections gone, four pins retired for
-  positives), S1's no-framer rejection (an exit 3), N2–N4.
-- **Round 2 on Parts S and F** (`714796f` the return-row order, B1, question 220; `f0fd5b9` S2, N2, N3, N4 and 0054's
-  docs; `5293eb1` S1, a tie counted by position), the re-audit's notes and question 222 (`133665f`), a lint false
-  positive in the session's own rule (`67d901a`), question 223 and the member-function pins (`3a2a042`).
-- **Tests.** 171 new tests in `tests/memory` (four retired pins deleted, nine expectations flipped: N1's three, B1's three
-  of which two in `tests/long`, and question 223's three VIR indexes), 40 S42 fixtures, 34 doc examples; VIR self-test
-  1,765 cases (was 1,732); `test_lint_viper.py` 736 (was 717; two rules); `test_run_tests.py` 1,221 (was 1,216).
-  `src/` and `include/`: +1,962, −173 (the plan's 740–1,170 without self-tests).
-- **Docs:** Annotations (`not_invalidating`, marked members), Verifying (`--strict-owner`, strict-init's marked fields),
-  Memory and ownership (the P4417R0 table, marked owning fields and pointees, marked owning globals, the not-yet list),
-  Error messages, the tutorial's heap chapter, the developer guide's architecture page, `tests/README.md`,
-  `include/cerastes.h`, `internal/encoding.md`, `internal/il-inventory.md`.
-- **Audits** (one Opus reviewer, resumed per round): round 1 on the draft (B1, S1–S9), round 2 on Part N (no blocking
-  item), round 2 on Parts S and F (B1, S1, S2), the re-audit (no blocking item; its S1 is question 222). No wrong verdict
-  was found in any round; every blocking item was an exit 3.
-
-**Corrections of new tests after their first run** (question 160): `marked_pointee_loop_call_false_alarm.c`'s two
-back-edge errors at the loop body's closing brace (L31, not L28); eight new tests used a set-but-unused `y` (EDG's #550
-in C++20), fixed in their source, outcomes and lines unchanged.
-
-**Not done.** The older exit 3 of question 222 (M4.8); the pinned loop false alarms of record 0058 item 4 ("Limits");
-three marked-closure lint shapes the Viper cannot show (question 225). No cut was taken.
+**Not done.** Nothing of the plan's scope was cut. Pinned limits: a fill loop over an uninitialized array followed by a
+read (`uninitialized`, e1c); a loop that writes an array loses its values (`array_loop_self_write_false_alarm.c`, e1c);
+handoff §3 has the rest.
 
 **Surprises.**
-- **Exit 3s, not wrong verdicts.** Every blocking audit item was an exit 3, and two predated the session (0054 item 5's
-  kept row; the return rows' order), made reachable by what the session accepted.
-- **A registered attribute name is silently ignored** until `kNames` has it (P77), so the registration and the reader
-  land together.
-- **The model does not prove a fresh block differs from a freed one**, so no row can keep flags across a possible
-  replacement (round 1's B1): only a tied site keeps them.
-- **Scope.** `src/` grew by about 1,960 lines with the self-tests (the plan's 740–1,170 without): the audits' fixes and
-  S5 (about 45 lines) added to it.
+- **Front-end facts the plan could not see:** C silently drops excess initializers; a designator keeps only its folded
+  index; `register` arrays verified; C++ positions an attributed statement at its first attribute.
+- **The Flips D allow-list was short** (849 against 1,080): the search missed the token's `.tok` spelling; every changed
+  line was then classified by exact inverse rules.
 
-**Checks** (all on the final source tree, `3a2a042`):
-- vprdiff of the final regeneration against the session's baseline: 384 entries differ, all allowed (N1's eleven
-  programs, the 227 the reorder permuted), 0 unexpected; 31 existing VIR cases permuted, 28 unchanged in outcome and three
-  re-indexed (223).
-- The Mac (`5293eb1`, then the last commits' files singly): 733 runs of the session's 255 tests and doc examples passed
-  with the N1 neighbours, `--long` 4, check-headers 4,884, `test_run_tests.py` 1,221, regeneration 5,412 files and the VIR
-  self-test 1,765 cases lint clean, the session's 33 VIR cases through Silicon, format, docs.
-- The box, before `check.sh`: the session's 391 new, changed or permuted programs timed in both modes (774 runs, the
-  slowest 84 s, exit codes 0–2 only), so none moved to `tests/long/`.
-- `CERASTES_LONG=1 scripts/check.sh` on the box (`ubuntu-26.04` container, `-j32`) on `b0caf2c`, the branch's last change
-  before this status commit: **all green** in 73 minutes (13,428 passed, 0 failed, 10 skipped; native-ok clang 2,572 and
-  GCC 2,572; the long tier ran, its 16 runs passed; lint 5,416 files clean; VIR self-test 1,765 cases, 0 problems, and
-  1,765 passed through Silicon, lint clean; the walker oracle; `test_run_tests.py` 1,221, `test_lint_viper.py` 736;
-  format 84 files; docs, 345 examples, 0 problems).
+**Checks.**
+- The Mac, on the final build (`ccb5910`): 787 runs of the session's tests, S43 fixtures and doc examples passed
+  (native-ok clang 150, GCC 150); VIR self-test 1,825 cases, the 60 array cases through Silicon (1,816 with reasons
+  earlier, and the 156 changed bodies); R3 1,968 runs, only the flips and 95 new pin runs differ; vprdiff 4,332
+  identical, 1,080 allowed, 0 unexpected, no `.map`; lint clean on 5,743 + 1,825 files; `test_lint_viper.py` 781,
+  `test_run_tests.py` 1,221, `--check-headers` 5,164, format 86 files, docs.
+- The box (`ubuntu-26.04` container, `-j32`), before `check.sh`, on `ccb5910`: the 552 tests behind the 1,080 Flips D
+  files (6 in `tests/long`), 2,042 runs passed (native-ok clang 479, GCC 479; 837 s); the six slowest default-tier tests
+  before and after the backstops, one at a time: 794 s against 803 s in all (ratio 1.01, the slowest 74.9 s, none
+  doubled); the `tests/long` ones 111–over 300 s (within their `timeout:` headers).
+- `CERASTES_LONG=1 scripts/check.sh` on the box: [pending].
 
-**First step for the next session:** merge and push (handoff §2), then M4.5e1's planning session (question 224).
+**First step for the next session:** merge and push (handoff §2), then M4.5e1b: its Step 0 and the probes and spikes of
+plan section 4 (P79, S44), then plan again.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5e1a Arrays inside one function | 2026-11-11 | `m4.5e1a-arrays-in-functions` | 0059 (0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043, 0054 amended) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers with C's zero fill, `out-of-bounds`, the marked range rows in the driver, loops carrying arrays, sequencing, `sizeof(a)`, `uninit` on arrays; #175, #1162, #138 as errors; array designators rejected (234); the `offset_of == 0` backstops (235) |
 | M4.5d2b2d `not_invalidating`, `--strict-owner`, marked fields | 2026-11-10 | `m4.5d2b2d-invalidation-profile` | 0058 (0029, 0042, 0052, 0054, 0055 amended) | `cerastes::not_invalidating` checked at the definition (taken implies returned; `p->q == old(p->q)` spliced, a bodiless borrow's tie implied); `--strict-owner` (P4417R0's p4 and p6); `ref_to_uninit` on fields (marked closures keep flags only where tied) and on pointers to structures with owning fields (closing nothing); N1; two older exit 3s fixed (0054's kept row, the return rows' order), a third to M4.8 |
 | M4.5d2b2c Loop limits, long-running tests | 2026-11-10 | `m4.5d2b2c-loop-limits` | 0056, 0057 (0016 amended) | six of d2b2b's loop false alarms lifted (a site the loop cannot fill keeps its flags, the value set of a lone owner, a leaf's ghost through an alias, `main`'s global leaf under an entry snapshot, a site's cells as places, chains at any depth), the escape scan, two exit 3s fixed; five pins kept under the written-invariant rule; the long-running tier (`tests/long/`, `CERASTES_LONG=1`); question 196's two programs past 1800 s, to M4.8 |
 | M4.5d2b2b Owning fields | 2026-11-09/10 | `m4.5d2b2b-owning-fields` | 0055 | `owning` on members: the closure of every atom over owning fields (acyclic, any depth), the value rule at stores, named leaves (struct locals, globals, `static` locals, by-value copies) as owners in memory, copies, loops; P4417R0's `[[owner]]` mapped; the session tools `regen_vpr.py` and `vprdiff.py`; seven loop limits pinned for d2b2c |
