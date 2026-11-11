@@ -12,7 +12,10 @@
     `owning_global_call_dangling_closure.c`, an untied bodiless contract with two sites, keeps one message per site
     (four `permission @ L27` become two, two expect lines turned into comments). **220** "Fix now, 3 flips" (audit
     round 2 on Parts S and F, B1; item 4, "Return rows in order"). **221** "Keep": the tied-only Kept row of item 4
-    and its amendment of 0054 item 2.
+    and its amendment of 0054 item 2. **222** "M4.8": the re-audit's S1, an older exit 3 (a permission atom read
+    through a block site's cell is checked before that block's own rows, at returns and calls; only programs that break
+    their own contract reach it, the same on the base, and none of this session's new reads: seventeen probes) is
+    filed for M4.8 (handoff §3).
   - Standing: 175 (`owning` on a parameter stays a borrow), 177 (`--strict-owner`, an opt-in), 178
     (`cerastes::not_invalidating`, checked), 179 (no `no_dangling` in C), 192 (`ref_to_uninit` on a field here), 197 (the
     collision pins stay until this session revisits them), 198 (the split), 160 (a new test's expect line corrected
@@ -200,9 +203,10 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
    - **Owning and marked field:** its closure clause is a marked block (0047 item 8's mode, as an owning and marked
      global's deep atom in 0054 item 2): a `requires` site claims no flags; a borrowed `ensures` site keeps them
      (`(old(L != null) && old(flag)) ==> flag`) **only where it is tied** (an `E == old(E)` conjunct placed as "What
-     counts as tied" below says: the bodiless tie written, or spliced by `not_invalidating`), and then the row and the tie are one atomic
-     assertion at the return (`assert !(!(clause))`), so a body that replaces the block gets one `postcondition`; an
-     untied or given site claims none (audit round 1, B1 and S2).
+     counts as tied" below says: the bodiless tie written, or spliced by `not_invalidating`), and then the row is asserted atomically
+     with its clause at the return (`assert !(!(clause))`): where the tie is in the site's own clause, a body that
+     replaces the block gets one `postcondition`; where it is a top-level conjunct of another clause, two (the
+     re-audit's N2; never an exit 3). An untied or given site claims none (audit round 1, B1 and S2).
    - **Why not more** (B1). The draft took 0047 item 8's internal row unchanged. For a site through a load it compares
      the old block's flag with the new block's, so a body that replaces the block failed an internal row (exit 3, a
      bug since 0054 item 5's owning `ref_to_uninit` global: the auditor's `g_kept2.c`, `g_kept4.c`). Adding `E ==
@@ -234,7 +238,9 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      unwritten buffer is `uninitialized` at the loop's entry, as for an unmarked field, since a written site is plain
      (`marked_field_loop_written_invariant.c`; the way out is to write the buffer before the loop). A filler cannot
      promise the buffer is written (a tie says it is the same block, not that it holds values): `must_init` is that
-     promise where it applies (audit N4; the Memory page says so).
+     promise where it applies (audit N4; the Memory page says so). A written `owns_block(p->q)` loop invariant on an
+     owning and marked field still closes below the field (`closure_marked` is consulted for contracts only; the
+     re-audit's N1): a false alarm, M4.8.
    - **What counts as tied** (audit round 2 on Parts S and F, S1): an `E == old(E)` conjunct that is unconditional at
      the top of an `ensures` clause, or in an `&&` chain on the path from the clause's root to the site's atom (so it
      stands under the site's own guards: the equality `not_invalidating` splices under an `owning` guard, a guarded

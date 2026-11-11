@@ -1363,7 +1363,10 @@ include::example$memory/owning_field_marked_untied_error.c[tag=source]
 
 A function whose `ensures` has the tie and whose body replaces the buffer is reported
 as xref:error-messages.adoc#_postcondition[`postcondition`], since the equality is
-then false. A `requires` that gives the structure claims no
+then false. When the equality is in the same `ensures` clause as the atom that gives
+the buffer (and when `cerastes::not_invalidating` splices it there), that is one
+error; an equality written as a separate `ensures` clause is reported on its own as
+well, so a replacing body gets two. A `requires` that gives the structure claims no
 value for the buffer, and an `ensures` that gives a structure the caller did not give
 (a result, for instance) claims none either. The closure of a marked member is closed
 no further: if the buffer is a structure with owning members of its own, theirs are not

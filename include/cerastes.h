@@ -20,6 +20,8 @@
 // CERASTES_UNINIT marks an automatic local declared without an initializer (documentation, checked by --strict-init);
 // CERASTES_REF_TO_UNINIT and CERASTES_MUST_INIT mark a pointer parameter whose pointee need not have a value on entry, and
 // (must_init) has one on return (P4222's markers, decision 0042).  Each parameter marker needs an owns(*p) in the contract.
+// CERASTES_REF_TO_UNINIT also marks a pointer member of a structure: the object it points to may have no value (decision 0058
+// item 4); beside CERASTES_OWNING the member's buffer may be allocated and not yet written.
 // CERASTES_NOT_INVALIDATING marks a pointer parameter whose function leaves what the pointer reaches in place: whatever the
 // contract takes through it comes back, and every pointer on the way to it is unchanged (P4418R0, decision 0058).
 #ifndef CERASTES_H
