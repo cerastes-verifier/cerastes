@@ -101,7 +101,11 @@ three marked-closure lint shapes the Viper cannot show (question 225). No cut wa
   self-test 1,765 cases lint clean, the session's 33 VIR cases through Silicon, format, docs.
 - The box, before `check.sh`: the session's 391 new, changed or permuted programs timed in both modes (774 runs, the
   slowest 84 s, exit codes 0–2 only), so none moved to `tests/long/`.
-- `CERASTES_LONG=1 scripts/check.sh` on the box: BOX_RESULT.
+- `CERASTES_LONG=1 scripts/check.sh` on the box (`ubuntu-26.04` container, `-j32`) on `b0caf2c`, the branch's last change
+  before this status commit: **all green** in 73 minutes (13,428 passed, 0 failed, 10 skipped; native-ok clang 2,572 and
+  GCC 2,572; the long tier ran, its 16 runs passed; lint 5,416 files clean; VIR self-test 1,765 cases, 0 problems, and
+  1,765 passed through Silicon, lint clean; the walker oracle; `test_run_tests.py` 1,221, `test_lint_viper.py` 736;
+  format 84 files; docs, 345 examples, 0 problems).
 
 **First step for the next session:** merge and push (handoff §2), then M4.5e1's planning session (question 224).
 

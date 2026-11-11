@@ -17,8 +17,9 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 
 - **M4.5d2b2d** (2026-11-10; record 0058; plan `.claude/plans/m4-5d2b2d-invalidation-profile.md`) is done on branch
   `m4.5d2b2d-invalidation-profile` (worktree `.claude/worktrees/m4.5d2b2d`), not merged: `main` is `023ea50`
-  (M4.5d2b2c, merged and pushed before the session). Its result is in `internal/status.md`, with the box's full
-  `check.sh` (`CERASTES_LONG=1`) on the branch's last code change.
+  (M4.5d2b2c, merged and pushed before the session). Its result is in `internal/status.md`; the box's full
+  `check.sh` with `CERASTES_LONG=1` on `b0caf2c` is all green (13,428 passed, 0 failed; the long tier's 16 runs passed;
+  73 minutes at `-j32`).
 - **M4.5e1 Arrays** is next. It has no approved plan: its session starts with a planning session (§4.2 has the
   design notes; §3 "M4.5e1/e2").
 - **CI:** unchanged (record 0053). The 2026-11-10 nightly was the first under the 360-minute limit and was cancelled at
