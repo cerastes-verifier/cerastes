@@ -159,6 +159,11 @@ MAP_CATEGORIES = frozenset(rt.DRIVER_CATEGORIES | {"internal"})
 # (encoding.md section 5), so no emitted check can produce it.
 MAP_ERROR_IDS = frozenset(viper_id for _text, viper_id, _cat in rt._VIPER_ERRORS
                           if viper_id != "application.precondition")
+# The second column of a map line is `<id>`, or `<id>[<reason>]` on a marked range row (decision 0059 item 7): the only
+# reason the driver accepts on a marked row is `insufficient.permission`, and only `assert.failed` is marked.
+MAP_REASONS = frozenset({"insufficient.permission"})
+MAP_MARKED_ID = "assert.failed"
+MAP_ID_RE = re.compile(r"^(?P<id>[A-Za-z][\w.]*)(?:\[(?P<reason>[^\[\]]*)\])?$")
 
 INHALE_TAG_RE = re.compile(r"//\s*cerastes:inhale-ok\b[ \t]*(?P<reason>\S.*)?$")
 TRUSTED_TAG_RE = re.compile(r"//\s*cerastes:trusted-contract\b[ \t]*(?P<reason>\S.*)?$")
@@ -316,12 +321,16 @@ class MapEntry:
     message: str
     note: str | None
     map_line: int  # line of the map file, for messages
+    # a marked range row (decision 0059 item 7): the Silicon reason that is also this row's failure, written
+    # `<id>[<reason>]` in the second column; "" for every other row
+    expected_reason: str = ""
 
 
 def parse_map(text: str, name: str) -> tuple[list[MapEntry], list[str]]:
     """The entries of a position map and the problems with its format: one line
     per check, tab-separated `vpr line, viper error id, category, file, line,
-    column, message [, note]`."""
+    column, message [, note]`; the id of a marked range row is `assert.failed[insufficient.permission]`
+    (decision 0059 item 7), read as the id and its expected reason."""
     entries: list[MapEntry] = []
     problems: list[str] = []
     for lineno, raw in enumerate(text.split("\n"), start=1):
@@ -342,9 +351,18 @@ def parse_map(text: str, name: str) -> tuple[list[MapEntry], list[str]]:
         if vpr_line < 1 or line < 1 or column < 1:
             bad("the Viper line, line and column of a map entry start at 1")
             continue
-        if fields[1] not in MAP_ERROR_IDS:
+        idm = MAP_ID_RE.match(fields[1])
+        if idm is None or idm.group("id") not in MAP_ERROR_IDS:
             bad(f"unknown Viper error id `{fields[1]}`")
             continue
+        error_id, reason = idm.group("id"), idm.group("reason")
+        if reason is not None:
+            if reason not in MAP_REASONS:
+                bad(f"unknown expected reason `[{reason}]` (known: " + ", ".join(sorted(MAP_REASONS)) + "; decision 0059 item 7)")
+                continue
+            if error_id != MAP_MARKED_ID:
+                bad(f"an expected reason is only on `{MAP_MARKED_ID}`, found `{fields[1]}` (decision 0059 item 7)")
+                continue
         if fields[2] not in MAP_CATEGORIES:
             bad(f"unknown category `{fields[2]}` (known: "
                 + ", ".join(sorted(MAP_CATEGORIES)) + ")")
@@ -355,8 +373,8 @@ def parse_map(text: str, name: str) -> tuple[list[MapEntry], list[str]]:
         if len(fields) == 8 and not fields[7].strip():
             bad("an empty note field")
             continue
-        entries.append(MapEntry(vpr_line, fields[1], fields[2], fields[3], line, column,
-                                fields[6], fields[7] if len(fields) == 8 else None, lineno))
+        entries.append(MapEntry(vpr_line, error_id, fields[2], fields[3], line, column,
+                                fields[6], fields[7] if len(fields) == 8 else None, lineno, reason or ""))
     return entries, problems
 
 
@@ -818,6 +836,8 @@ def lint_allocations(src: Source, decls: list[Decl], add: Callable[[int, str], N
         if d.kind != "method" or not d.name.startswith(ALLOC_PREFIX):
             continue
         suffix = d.name[len(ALLOC_PREFIX):]
+        if d.name.startswith(ARR_ALLOC_PREFIX):
+            continue  # the array allocations have their own rule (lint_array_allocations, decision 0059 item 3)
         if STRUCT_ALLOC_RE.match(suffix):
             why = struct_allocation_problem(src, d, suffix)
             if why is not None:
@@ -1871,11 +1891,12 @@ def owner_assignment_ok(g: str, rhs: str) -> bool:
         lo = leaf_cell_owner(m.group("c"))
         if lo is not None:
             return g == leaf_ghost_name(lo[1], lo[2])
-    if re.fullmatch(rf"{e}&&\(\((?P<x>{_ID})!=null\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)>none\)\)", r):
+    # decision 0059 item 10: `holds_token(x)` is `x != null && offset_of(x) == 0 && perm(tok) > none` (a pointer into the middle of a block holds no token)
+    if re.fullmatch(rf"{e}&&\(\(\((?P<x>{_ID})!=null\)&&\(offset_of\((?P=x)\)==0\)\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)>none\)\)", r):
         return True
     if re.fullmatch(rf"{e}\|\|\(\(\((?P<x>{_ID})!=null\)&&\(offset_of\((?P=x)\)==0\)\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)==write\)\)", r):
         return True
-    m = re.fullmatch(rf"\({e}&&\(perm\((?P<c>.+?)\)>none\)\)&&\(\((?P=c)!=null\)&&\(perm\(loc\(block_of\((?P=c)\),\(?-1\)?\)\.tok\)>none\)\)", r)
+    m = re.fullmatch(rf"\({e}&&\(perm\((?P<c>.+?)\)>none\)\)&&\(\(\((?P=c)!=null\)&&\(offset_of\((?P=c)\)==0\)\)&&\(perm\(loc\(block_of\((?P=c)\),\(?-1\)?\)\.tok\)>none\)\)", r)
     if m:
         c = m.group("c")
         if lo := leaf_cell_owner(c):
@@ -2349,7 +2370,7 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
         body = _strip_wrap(m.group("body").strip())
         enclosing = next((d for d in decls if d.kind == "method" and d.line <= lineno <= d.end_line), None)
         for disjunct in _flatten_or(body):
-            conjuncts = [_strip_wrap(c) for c in _split_top(_strip_wrap(disjunct), "&&")]
+            conjuncts = _and_leaves(disjunct)  # decision 0059 item 10 nests `held && offset_of(p) == 0` as one operand of the term
             helds = [c for c in conjuncts if re.fullmatch(r"held_[\w$']*", c)]
             for e in (c for c in conjuncts if re.fullmatch(r"exm_[0-9]+", c)):
                 got = exm_info.get(enclosing.line if enclosing else -1, {}).get(int(e[len("exm_"):]))
@@ -2359,6 +2380,9 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                 elif tt is None or re.fullmatch(rf"loc\(block_of\({re.escape(got[1])}\),\(?-1\)?\)", _nospace(tt.group("loc"))) is None:
                     add(lineno, f"the exemption term guarded by `{e}` is exactly `t == loc(block_of({got[1]}), -1)`: the block of the cell `{e}` "
                                 "read, one member further than its guard (decision 0055 item 9)")
+                elif not has_offset_zero(conjuncts, got[1]):
+                    add(lineno, f"the exemption term guarded by `{e}` holds `offset_of({got[1]}) == 0`: the cell `{e}` read must start its block "
+                                "(decision 0059 item 10)")
             if not helds:
                 continue
             for c in conjuncts:
@@ -2370,6 +2394,10 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                     add(lineno, f"an exemption term `held_... && t == loc(block_of(...{g}()...), -1)` names the cell of `{g}`, which "
                                 f"`program_start` does not tag `// cerastes:owning-global {g}`: only an owning global's block is exempt "
                                 "at `main`'s end (decision 0054 item 8)")
+                pointer = token_term_pointer(t.group("loc"))
+                if pointer is not None and not has_offset_zero(conjuncts, pointer):
+                    add(lineno, f"the exemption term `held_... && t == loc(block_of({pointer}), -1)` holds `offset_of({pointer}) == 0`: a held owner "
+                                "exempts the block its pointer starts, never one it points into (decision 0059 item 10)")
                 for h in helds:
                     if h not in ghosts:
                         continue
@@ -2727,17 +2755,93 @@ def _flatten_or(text: str) -> list[str]:
     return out
 
 
-def forperm_exemption_problem(body: str) -> str | None:
+def _and_leaves(text: str) -> list[str]:
+    """The conjuncts of a nested `&&` chain at any grouping (`(A && B) && (C && D)` is A, B, C, D), as raw text."""
+    text = _strip_wrap(text.strip())
+    parts = _split_top(text, "&&")
+    if len(parts) == 1:
+        return [text]
+    out: list[str] = []
+    for part in parts:
+        out += _and_leaves(part)
+    return out
+
+
+def token_term_pointer(loc_text: str) -> str | None:
+    """`P` of `loc(block_of(P), -1)` (the token slot of the block of P), the text between `block_of(` and its closing parenthesis."""
+    m = re.match(r"^loc\(\s*block_of\(", loc_text)
+    if m is None:
+        return None
+    end = _group_end(loc_text, m.end() - 1)
+    return None if end < 0 else loc_text[m.end():end]
+
+
+def has_offset_zero(conjuncts: list[str], pointer: str) -> bool:
+    """Whether the conjuncts hold `offset_of(<pointer>) == 0` (decision 0059 item 10: an exemption names a block's token only through a
+    pointer to the start of the block)."""
+    want = _nospace(f"offset_of({pointer}) == 0")
+    return any(_nospace(c) == want for c in conjuncts)
+
+
+# The loop-carried exemption terms of records 0050 and 0056 (record 0059 item 10 leaves them unrestated: they are reached only through owners,
+# whose updates require `offset_of == 0`).  A term that lacks `offset_of(P) == 0` is accepted only when it is exactly one of these families,
+# each over a pointer variable `P` (an identifier), so that a carried shape that is not one of them is refused:
+#   temp      `T && t == loc(block_of(U), -1)` with `T` and `U` the loop's temporaries `t__<n>`;
+#   kt        `P != null && kt_<...> > none && t == loc(block_of(P), -1)` (one kt snapshot compare), with alias guards: `block_of(P) != block_of(X)`,
+#             `!ad_<...>`, `!((P != null && X != null) && block_of(P) == block_of(X))`;
+#   replaced  `P != null && t == loc(block_of(P), -1)` (a replaced or written loop's owner), with the nullness guards `!(P == null)` or
+#             `!(((P == null) ? n : n) != n)` of a block site read through a loop.
+CARRY_ID = r"[A-Za-z_$][\w$']*"
+
+
+def carried_term_family(leaves: list[str], term: str, pointer: str) -> str | None:
+    """The loop-carry family of a term (`temp`, `kt` or `replaced`, see above), or None."""
+    p = _nospace(pointer)
+    if not re.fullmatch(CARRY_ID, p):
+        return None
+    others = [_nospace(l) for l in leaves if l != term]
+    if len(others) == 1 and re.fullmatch(r"t__[0-9]+", others[0]) and re.fullmatch(r"t__[0-9]+", p):
+        return "temp"
+    nonnull = f"{p}!=null"
+    if nonnull not in others:
+        return None
+    rest = list(others)
+    rest.remove(nonnull)
+    kts = [x for x in rest if re.fullmatch(r"kt_[\w$']*>none", x)]
+    if len(kts) == 1:
+        rest.remove(kts[0])
+        e = re.escape(p)
+        if all(re.fullmatch(rf"block_of\({e}\)!=block_of\({CARRY_ID}\)|!ad_[\w$']*|"
+                            rf"!\(\(\({e}!=null\)&&\({CARRY_ID}!=null\)\)&&\(block_of\({e}\)==block_of\({CARRY_ID}\)\)\)", x)
+               for x in rest):
+            return "kt"
+        return None
+    e = re.escape(p)
+    if all(re.fullmatch(rf"!\({e}==null\)|!\(\(\({e}==null\)\?[0-9]+:[0-9]+\)!=[0-9]+\)", x) for x in rest):
+        return "replaced"
+    return None
+
+
+def forperm_exemption_problem(body: str, carried_ok: bool = False) -> str | None:
     """Decision 0054 item 8: the exemption of a `forperm` leak row is `false` or a disjunction of terms, each a conjunction of guards
     with exactly one `t == loc(block_of(<pointer>), -1)`; `t` appears nowhere else, so an exemption only names the token of a block
-    by its location (a carried token), never `true`, `t != ...` or a negated term."""
+    by its location (a carried token), never `true`, `t != ...` or a negated term.  The loop-carry families of `carried_term_family` (terms
+    without `offset_of(P) == 0`) are accepted only when `carried_ok`: in the row of a loop's back edge (`LOOP_LEAK_ROW_MESSAGE` in its map
+    entry), where the lowering emits them; a function's `ensures` and end rows hold the conjunct, whatever their guard looks like."""
     body = _strip_wrap(body.strip())
     if body == "false":
         return None
     for disjunct in _flatten_or(body):
-        conjuncts = [_strip_wrap(c) for c in _split_top(_strip_wrap(disjunct), "&&")]
+        conjuncts = _and_leaves(disjunct)
         terms = [c for c in conjuncts if (m := re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", c, re.S)) and TOKEN_SLOT_RE.search(m.group("loc"))
                  and _group_end(m.group("loc"), 3) == len(m.group("loc")) - 1]
+        if len(terms) == 1:
+            pointer = token_term_pointer(re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", terms[0], re.S).group("loc"))
+            if (pointer is None or not has_offset_zero(conjuncts, pointer)) and (
+                    pointer is None or not carried_ok or carried_term_family(conjuncts, terms[0], pointer) is None):
+                return ("an exemption term of a `forperm` leak row holds `offset_of(<pointer>) == 0` for the pointer of its `t == loc(block_of(<pointer>), -1)`: "
+                        "a pointer into the middle of a block carries no token, unless the row is a loop's back edge and the term exactly one of "
+                        "the loop-carry families of decisions 0050 and 0056 (decision 0059 item 10)")
         if len(terms) != 1:
             return ("an exemption term of a `forperm` leak row is `<guards> && t == loc(block_of(<pointer>), -1)` with exactly one "
                     "such comparison: it names a carried token by its location (decision 0054 item 8)")
@@ -2748,7 +2852,12 @@ def forperm_exemption_problem(body: str) -> str | None:
     return None
 
 
-def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> set[int]:
+# The map message of the leak row at a loop's back edge (lower.cpp: "an iteration of this loop may end while it still owns an allocation that the
+# loop does not carry to the next iteration"): the one row whose exemption may hold the loop-carry terms.
+LOOP_LEAK_ROW_MESSAGE = "an iteration of this loop may end while it still owns an allocation"
+
+
+def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], None], loop_rows: frozenset[int] = frozenset()) -> set[int]:
     """The rules of the free token (see above).  Returns the lines of the `forperm` assertions, whose map entries the caller
     checks against the category `leak`."""
     forperm_lines: set[int] = set()
@@ -2773,7 +2882,7 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
             if TOK_WORD_RE.search(m.group("body")):
                 add(lineno, "the exemption of a `forperm` leak row does not mention `tok`: it names the places the method "
                             "hands back (decision 0047 item 7)")
-            elif (why := forperm_exemption_problem(m.group("body"))) is not None:
+            elif (why := forperm_exemption_problem(m.group("body"), lineno in loop_rows)) is not None:
                 add(lineno, why)
             forperm_lines.add(lineno)
             continue
@@ -2951,6 +3060,294 @@ def lint_not_invalidating_rows(src: Source, decls: list[Decl], entries: list["Ma
 
 
 
+# ---------------------------------------------------------------------------
+# Arrays (decision 0059): the trusted allocations, the quantified rows, `old[label]`
+# ---------------------------------------------------------------------------
+
+# The trusted allocation of an automatic array of `<t>` (decision 0059 item 3) and its zero fill: bodyless, tagged, and an
+# assumption (invariant 4), so every line is pinned like `alloc_<t>`'s.  The quantifiers are one per field and each over the
+# absolute slot with the trigger `{ loc(block_of(r), k) }`; `zero_arr_<t>` takes and returns the same two `acc`
+# quantifiers over the same range, so it cannot conjure a permission (an `ensures` range wider than the `requires`, or an
+# `ensures acc` with no `requires acc`, would).  The zero literal is the field's: `0` for an Int field, `false` for Bool, `null` for
+# Ref (S43 evidences int only; the other two follow from the field's declared type).
+ARR_ALLOC_PREFIX = "alloc_arr_"
+ARR_ZERO_PREFIX = "zero_arr_"
+ARR_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+ZERO_LITERAL = {"Int": "0", "Bool": "false", "Ref": "null"}
+
+
+def _arr_quantified(body: str, r: str = "r") -> str:
+    return f"forall k: Int :: {{ loc(block_of({r}), k) }} ((0 <= k) && (k < n)) ==> {body}"
+
+
+def array_alloc_clauses(t: str) -> list[tuple[str, str]]:
+    """The (keyword, text) clauses of `alloc_arr_<t>` as S43 pins them (whitespace and grouping are not compared)."""
+    q = _arr_quantified
+    return [
+        ("requires", "1 <= n"),
+        ("ensures", "((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"),
+        ("ensures", "(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"),
+        ("ensures", q(f"acc(loc(block_of(r), k).v_{t})")),
+        ("ensures", q(f"acc(loc(block_of(r), k).d_{t})")),
+        ("ensures", q(f"(!loc(block_of(r), k).d_{t})")),
+    ]
+
+
+def array_zero_clauses(t: str, zero: str) -> list[tuple[str, str]]:
+    q = _arr_quantified
+    return [
+        ("requires", "((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"),
+        ("requires", q(f"acc(loc(block_of(r), k).v_{t})")),
+        ("requires", q(f"acc(loc(block_of(r), k).d_{t})")),
+        ("ensures", q(f"acc(loc(block_of(r), k).v_{t})")),
+        ("ensures", q(f"acc(loc(block_of(r), k).d_{t})")),
+        ("ensures", q(f"(loc(block_of(r), k).v_{t} == {zero})")),
+        ("ensures", q(f"loc(block_of(r), k).d_{t}")),
+    ]
+
+
+def _clause_split(code: str) -> tuple[str, str] | None:
+    m = re.match(r"^\s*(requires|ensures)\s+(.*)$", code)
+    return (m.group(1), norm_viper(m.group(2))) if m else None
+
+
+def array_allocation_problem(src: Source, d: Decl, field_types: dict[str, str]) -> str | None:
+    alloc = d.name.startswith(ARR_ALLOC_PREFIX)
+    t = d.name[len(ARR_ALLOC_PREFIX if alloc else ARR_ZERO_PREFIX):]
+    if not ARR_SUFFIX_RE.match(t):
+        return f"the element suffix `{t}` is not an identifier"
+    if f"v_{t}" not in field_types or f"d_{t}" not in field_types:
+        return f"the field suffix `{t}` is not declared (`field v_{t}` and `field d_{t}`)"
+    lines = [(n, src.code[n - 1]) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
+    if d.has_body:
+        return "it has a body (a trusted method is bodyless)"
+    header = " ".join(lines[0][1].split())
+    want_header = (f"method {d.name}(n: Int) returns (r: Ref)" if alloc else f"method {d.name}(r: Ref, n: Int)")
+    if header != want_header:
+        return f"its header is not `{want_header}`"
+    if " ".join(lines[-1][1].split()) != "decreases _":
+        return "it does not end with `decreases _`"
+    want_clauses = array_alloc_clauses(t) if alloc else array_zero_clauses(t, ZERO_LITERAL.get(field_types[f"v_{t}"], "?"))
+    want = sorted((kw, norm_viper(text)) for kw, text in want_clauses)
+    got = []
+    for _n, code in lines[1:-1]:
+        c = _clause_split(code)
+        if c is None:
+            return f"a line that is not a `requires` or `ensures` clause: `{' '.join(code.split())}`"
+        got.append(c)
+    # `n >= 1` and `1 <= n` are one requirement (the record writes the first, S43's fixtures the second)
+    got = [(kw, "1<=n" if text == "n>=1" else text) for kw, text in got]
+    got.sort()
+    if got != want:
+        extra = [c for c in got if c not in want]
+        missing = [c for c in want if c not in got]
+        return ("its clauses are not the pinned ones"
+                + (f"; unexpected `{extra[0][0]} {extra[0][1]}`" if extra else "")
+                + (f"; missing `{missing[0][0]} {missing[0][1]}`" if missing else ""))
+    return None
+
+
+def lint_array_allocations(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0059 items 3 and 12: `alloc_arr_<t>` and `zero_arr_<t>` are trusted (the tag rule), so each has exactly the
+    contract the record states, beside `alloc_<t>`'s `len == 1` rule (a different postcondition would be an unsound assumption)."""
+    field_types: dict[str, str] = {}
+    for line in src.code:
+        m = re.match(r"^\s*field\s+(?P<name>[vd]_[A-Za-z0-9_$']+)\s*:\s*(?P<type>[A-Za-z]+)\s*$", line)
+        if m:
+            field_types[m.group("name")] = m.group("type")
+    for d in decls:
+        if d.kind != "method" or not (d.name.startswith(ARR_ALLOC_PREFIX) or d.name.startswith(ARR_ZERO_PREFIX)):
+            continue
+        why = array_allocation_problem(src, d, field_types)
+        if why is not None:
+            what = "trusted array allocation" if d.name.startswith(ARR_ALLOC_PREFIX) else "trusted zero fill"
+            add(d.line, f"`method {d.name}` is not the {what} of decision 0059 item 3: {why}")
+
+
+# The quantified rows (decision 0059 items 7 and 8).  Viper refuses `perm` under a quantifier, so a permission check over a
+# range is an `assert forall k :: { loc(B, k) } lo <= k && k < hi ==> acc(loc(B, k).f)` row with exactly one field, whose
+# `insufficient.permission` is the row's own failure (the map's `assert.failed[insufficient.permission]`); B, lo and hi read no
+# heap, so nothing else on the line can produce that reason.  `forall` appears nowhere else but the two trusted contracts
+# above, the `exhale` of the same shape, `domain Block`'s axioms and item 8's four loop conjuncts; `old[label]` only in two of those.
+FORALL_RE = re.compile(r"(?<![\w$'])forall(?![\w$'])")
+OLD_LABEL_RE = re.compile(r"(?<![\w$'])old\s*\[")
+QUANT_STMT_RE = re.compile(r"^\s*(?P<kw>assert|exhale|invariant|requires|ensures)\s+(?P<rest>.*)$")
+QUANT_HEAD_RE = re.compile(r"^forall\s+(?P<k>[A-Za-z_$][\w$']*)\s*:\s*Int\s*::\s*\{\s*(?P<trigger>[^{}]*?)\s*\}\s*(?P<body>.*)$", re.S)
+HEAP_READ_RE = re.compile(r"\.\s*[A-Za-z_$]|(?<![\w$'])(?:perm|acc|old|forperm|forall)(?![\w$'])")
+INT_BOUND_RE = re.compile(r"^\(*\s*-?\s*\d+\s*\)*$")
+
+
+def _squash(text: str) -> str:
+    return "".join(text.split())
+
+
+def _heap_free(text: str) -> bool:
+    return HEAP_READ_RE.search(text) is None
+
+
+def parse_range_quantifier(text: str):
+    """`forall k: Int :: { loc(B, k) } lo <= k && k < hi ==> CONSEQUENT` (what follows `assert`, `exhale` or `invariant`):
+    (k, B, antecedent extras, consequent), the extras being the conjuncts after the two range conjuncts; None if it is
+    not that shape (B, lo and hi must read no heap).  The antecedent's `lo <= k && k < hi` are its first two conjuncts."""
+    head = QUANT_HEAD_RE.match(text.strip())
+    if head is None:
+        return None
+    k = head.group("k")
+    trig = re.match(r"^loc\((?P<b>.+),\s*" + re.escape(k) + r"\s*\)$", head.group("trigger").strip(), re.S)
+    if trig is None:
+        return None
+    b = trig.group("b").strip()
+    parts = _split_top(head.group("body"), "==>")
+    if len(parts) != 2:
+        return None
+    try:
+        ante = [_squash(x) for x in _flatten_and(parts[0])]
+    except ValueError:
+        return None
+    if len(ante) < 2:
+        return None
+    lo = re.match(r"^(?P<lo>.+)<=" + re.escape(k) + r"$", ante[0])
+    hi = re.match(r"^" + re.escape(k) + r"<(?P<hi>.+)$", ante[1])
+    if lo is None or hi is None or not (_heap_free(b) and _heap_free(lo.group("lo")) and _heap_free(hi.group("hi"))):
+        return None
+    return k, b, ante[2:], _strip_wrap(parts[1])
+
+
+def _range_acc(consequent: str, k: str, b: str) -> tuple[str, str | None] | None:
+    """(field, amount) of `acc(loc(B, k).f[, amount])`, or None."""
+    m = re.match(r"^acc\(\s*loc\(\s*" + re.escape(b) + r"\s*,\s*" + re.escape(k) + r"\s*\)\s*\.(?P<f>[vd]_[\w$']+)\s*(?:,(?P<amt>.*))?\)$",
+                 consequent.strip(), re.S)
+    if m is None:
+        return None
+    amount = m.group("amt")
+    return m.group("f"), (amount.strip() if amount is not None else None)
+
+
+def marked_row_shape(code: str) -> bool:
+    """Whether `code` is an `assert` of decision 0059 item 7's shape (one field, a heap-free amount if any)."""
+    m = QUANT_STMT_RE.match(code)
+    if m is None or m.group("kw") != "assert":
+        return False
+    q = parse_range_quantifier(m.group("rest"))
+    if q is None or q[2]:
+        return False
+    acc = _range_acc(q[3], q[0], q[1])
+    return acc is not None and (acc[1] is None or _heap_free(acc[1]))
+
+
+def _loop_conjunct(q) -> tuple[str, list[str]] | None:
+    """(kind, labels read by old[...]) of item 8's four quantified loop conjuncts, or None.  The kinds: `acc` (full permission over
+    the range), `flags` (`... && old[L](E.d_t) ==> E.d_t`), `range` (`... && E.d_t ==> lo_T <= E.v_t && E.v_t <= hi_T`) and
+    `values` (`... ==> E.v_t == old[L](E.v_t)`).  The `range` of a pointer element `ptr_<t>` is `WF` of its value (S43 `s43_c_ptr_elem`); a pointer to a structure's extra `WF_S` conjunct is not accepted yet."""
+    k, b, extra, cons = q
+    cell = rf"loc\({re.escape(_squash(b))},{re.escape(k)}\)"
+    cons = _squash(cons)
+    if not extra:
+        acc = _range_acc(cons, k, b)
+        if acc is not None and acc[1] is None:
+            return "acc", []
+        m = re.match(rf"^({cell}\.v_[\w$']+)==old\[([\w$']+)\]\(?({cell}\.v_[\w$']+)\)?$", cons)
+        if m and m.group(1) == m.group(3):
+            return "values", [m.group(2)]
+        return None
+    if len(extra) != 1:
+        return None
+    m = re.match(rf"^old\[([\w$']+)\]\(?({cell}\.d_[\w$']+)\)?$", extra[0])
+    if m and cons == m.group(2):
+        return "flags", [m.group(1)]
+    m = re.match(rf"^({cell})\.d_([\w$']+)$", extra[0])
+    if m:
+        try:
+            lows = [_squash(x) for x in _flatten_and(cons)]
+        except ValueError:
+            return None
+        v = rf"{cell}\.v_{re.escape(m.group(2))}"
+        if len(lows) == 2 and re.match(rf"^\(*-?\d+\)*<={v}$", lows[0]) and re.match(rf"^{v}<=\(*-?\d+\)*$", lows[1]):
+            return "range", []
+        # a pointer element: the range of its value is `WF` (null, or the pointer's own block with 0 <= offset <= len), the same
+        # text as a view's, over the element read under the quantifier (S43 `s43_c_ptr_elem`); a pointer to a structure adds
+        # the guarded `WF_S` conjunct (decision 0043 item 8), which is not accepted here yet
+        element = f"loc({_squash(b)},{k}).v_{m.group(2)}"
+        if len(lows) == 1 and m.group(2).startswith("ptr_") and norm_viper(lows[0]) == norm_viper(_view_wf(element)):
+            return "range", []
+    return None
+
+
+def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry] | None, add: Callable[[int, str], None],
+                         map_name: str = "") -> None:
+    """Decision 0059 items 7, 8 and 12: where `forall` and `old[label]` may stand, the shape of a marked row, and the marks."""
+    skip: set[int] = set()
+    for d in decls:
+        if d.kind == "domain" or (d.kind == "method" and d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX))):
+            skip.update(range(d.line, d.end_line + 1))
+    labels_before: dict[int, set[str]] = {}
+    for d in decls:
+        if d.kind != "method":
+            continue
+        seen: set[str] = set()
+        for n in range(d.line, d.end_line + 1):
+            labels_before[n] = set(seen)
+            lm = re.match(r"^\s*label\s+([\w$']+)\s*$", src.code[n - 1])
+            if lm:
+                seen.add(lm.group(1))
+    marked_lines: set[int] = set()
+    for lineno, code in enumerate(src.code, start=1):
+        has_q, has_old = FORALL_RE.search(code), OLD_LABEL_RE.search(code)
+        if not (has_q or has_old) or lineno in skip:
+            continue
+        m = QUANT_STMT_RE.match(code)
+        starts_q = bool(m and FORALL_RE.match(m.group("rest").strip()))
+        q = parse_range_quantifier(m.group("rest")) if starts_q else None
+        kind = m.group("kw") if m else ""
+        old_labels: list[str] = []
+        ok = False
+        if starts_q and kind in ("assert", "exhale"):
+            acc = _range_acc(q[3], q[0], q[1]) if q is not None else None
+            shaped = (q is not None and not q[2] and acc is not None and (acc[1] is None or _heap_free(acc[1]))
+                      and (kind == "assert" or acc[1] is None))
+            if shaped and kind == "assert":
+                marked_lines.add(lineno)
+            if not shaped:
+                add(lineno, f"a quantified `{kind}` that is not a marked range row of decision 0059 item 7: "
+                            f"`{kind} forall k: Int :: {{ loc(B, k) }} lo <= k && k < hi ==> acc(loc(B, k).f)` with one field "
+                            "(an `assert` row may carry an amount) and B, lo, hi and the amount reading no heap")
+            ok = True  # reported above
+        elif q is not None and kind == "invariant":
+            c = _loop_conjunct(q)
+            ok = c is not None
+            if c is None:
+                add(lineno, "a quantified loop `invariant` that is not one of decision 0059 item 8's four conjuncts "
+                            "(permission over the range, the flags kept, the type's range, the values kept)")
+            else:
+                old_labels = c[1]
+        if not ok:
+            if has_q:
+                add(lineno, "`forall` outside the shapes of decision 0059: the `alloc_arr_<t>` and `zero_arr_<t>` contracts, "
+                            "a marked range row (`assert`), the range `exhale` and item 8's loop conjuncts (and `domain Block`'s axioms)")
+        if has_old:
+            found = re.findall(r"(?<![\w$'])old\s*\[\s*([^\]]*?)\s*\]", code)
+            if not (ok and q is not None and kind == "invariant" and old_labels and len(found) == len(old_labels)):
+                add(lineno, "`old[label]` outside item 8's loop conjuncts of decision 0059 (the flags kept, the values kept)")
+            else:
+                for lab in found:
+                    if lab not in labels_before.get(lineno, set()):
+                        add(lineno, f"`old[{lab}]` names a label that no earlier `label {lab}` of the method defines (decision 0059 item 8)")
+    if entries is None:
+        return
+    mname = map_name
+    for e in entries:
+        if not e.expected_reason:
+            if e.vpr_line in marked_lines:
+                add(e.vpr_line, f"a marked range row (decision 0059 item 7) whose map entry (`{mname}:{e.map_line}`) has no "
+                                f"expected reason: it must be `{MAP_MARKED_ID}[insufficient.permission]`, or the driver treats "
+                                "its `insufficient.permission` as an internal error")
+            continue
+        if e.vpr_line > len(src.code) or not marked_row_shape(src.code[e.vpr_line - 1]):
+            add(e.vpr_line, f"the map entry `{mname}:{e.map_line}` carries the expected reason `{e.expected_reason}` but its line is "
+                            "not an `assert` of decision 0059 item 7's shape (`assert forall k: Int :: { loc(B, k) } lo <= k && "
+                            "k < hi ==> acc(loc(B, k).f)`, one field, B, lo, hi and the amount reading no heap)")
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -3034,6 +3431,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_flags(src, add)
     lint_remainders(src, decls, add)
     lint_allocations(src, decls, add)
+    lint_array_allocations(src, decls, add)
     has_globals, global_facts = lint_globals(src, decls, add)
     lint_ghost_amounts(src, decls, add)
     lint_perm_locals(src, decls, add)
@@ -3042,15 +3440,19 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_carrier_clauses(src, decls, add)
     lint_owning_global_tags(src, decls, add)
     lint_ghost_refs(src, decls, add)
-    forperm_lines = lint_heap_token(src, decls, add)
+    loop_rows = frozenset(e.vpr_line for e in (parse_map(map_text, "")[0] if map_text is not None else [])
+                          if e.message.startswith(LOOP_LEAK_ROW_MESSAGE))
+    forperm_lines = lint_heap_token(src, decls, add, loop_rows)
     lint_views(src, decls, add, has_globals, global_facts)
     lint_marked_kept_rows(src, decls, add)
 
     if map_text is None:
+        lint_quantified_rows(src, decls, None, add)
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
         return problems
     entries, map_problems = parse_map(map_text, map_name or name + MAP_SUFFIX)
     problems += map_problems
+    lint_quantified_rows(src, decls, entries, add, map_name or name + MAP_SUFFIX)
     lint_not_invalidating_rows(src, decls, entries, add)
     by_line: dict[int, list[MapEntry]] = {}
     for e in entries:
@@ -3103,6 +3505,21 @@ def _top_level_items(measure: str) -> list[str]:
     return items
 
 
+def loop_body_line(src: Source, lineno: int, column: int) -> int:
+    """The line of the `{` that opens the body of the `while` at (`lineno`, `column`): a `{` that follows `::` or the `}` of a
+    trigger set belongs to a quantifier of an invariant (`forall k: Int :: { loc(b, k) } ...`, decision 0059 item 8), not to the body."""
+    tail = ""
+    for ln in range(lineno, len(src.code) + 1):
+        code = src.code[ln - 1]
+        for ch in (code[column:] if ln == lineno else code):
+            if ch.isspace():
+                continue
+            if ch == "{" and not (tail.endswith("::") or tail.endswith("}")):
+                return ln
+            tail = (tail + ch)[-2:]
+    return len(src.code)
+
+
 def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None],
                              measures: dict[int, str] | None = None) -> None:
     """Decision 0013 item 5: Silicon checks termination only where a `decreases` clause is present, so every
@@ -3139,7 +3556,7 @@ def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int,
                         "unconditional")
     for lineno, code in enumerate(src.code, start=1):
         for _w in WHILE_WORD_RE.finditer(code):
-            body = next((ln for ln in range(lineno, len(src.code) + 1) if "{" in src.code[ln - 1]), len(src.code))
+            body = loop_body_line(src, lineno, _w.end())
             if not any(DECREASES_LINE_RE.match(src.code[ln - 1]) for ln in range(lineno, body)):
                 add(lineno, "`while` loop without a `decreases` clause: Silicon checks termination only "
                             "where one is present (decision 0013 item 5)")
@@ -3195,6 +3612,7 @@ DUMMY_VALUE_RE = re.compile(r"^\s*(?:-?\s*\d+|\(\s*-\s*\d+\s*\)|true|false|null)
 # The flag of an address-taken cell is a field of the cell (decision 0032 item 11): `<recv>.d_<t> := <value>`.
 # A global's cell is `loc(GB_<name>(), 0)` (decision 0041 item 4): the same rule, the receiver is that term.
 GLOBAL_CELL_RE = r"loc\(\s*GB_[\w$']+\(\)\s*,\s*0\s*\)"
+ELEMENT_FLAG_RE = re.compile(r"^\s*loc\(.*\)\s*\.\s*d_[A-Za-z_$][\w$']*\s*:=")
 FIELD_FLAG_RE = re.compile(r"^\s*(?P<recv>[A-Za-z_$][\w$']*|" + GLOBAL_CELL_RE + r")\.d_(?P<name>[A-Za-z_$][\w$']*)\s*:=(?P<value>.*)$")
 
 
@@ -3213,6 +3631,12 @@ def lint_flags(src: Source, add: Callable[[int, str], None]) -> None:
     comment (the emitter writes one statement per line)."""
     lines = [(ln, code) for ln, code in enumerate(src.code, start=1) if code.strip()]
     for k, (lineno, code) in enumerate(lines):
+        if FIELD_FLAG_RE.match(code) is None and ELEMENT_FLAG_RE.match(code):
+            add(lineno, "the flag of an array element is written through a `Ref` temporary (`t := loc(block_of(a), i)`, then "
+                        "`t.v_<t> := ...` and `t.d_<t> := true`), not through `loc(...)` itself: the flag rule reads a "
+                        "`<recv>.d_<t> := true` that directly follows `<recv>.v_<t> := ...` with an identifier receiver "
+                        "(decision 0059 item 12)")
+            continue
         if FLAG_DECL_INIT_RE.search(code):
             add(lineno, "a flag is declared without an initializer (`var d_<name>: Bool`): it holds a value only "
                         "after a reset (decision 0019 item 5)")

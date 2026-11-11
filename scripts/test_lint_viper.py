@@ -12,6 +12,7 @@ command line are covered with temporary trees.
 """
 
 import contextlib
+import re
 import io
 import sys
 import tempfile
@@ -33,6 +34,14 @@ WF = "not.wellformed"
 
 
 TERMINATION_RULES = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+# decision 0059 item 7's rules about where a `forall` may stand: the older tests that use a quantifier only as an example of a trigger
+# set or of an axiom (a loop-header parse, an axiom outside its domain) are about other rules and filter these out; the array rules have
+# their own tests (ArrayQuantifierTests), which call lv.lint_vpr itself.
+QUANTIFIER_RULES = ("`forall` outside the shapes of decision 0059", "not one of decision 0059 item 8's four conjuncts")
+
+
+def without_quantifier_rules(problems):
+    return [p for p in problems if not any(r in p for r in QUANTIFIER_RULES)]
 
 
 def lint_vpr_other(*args, **kwargs):
@@ -40,6 +49,14 @@ def lint_vpr_other(*args, **kwargs):
     about other rules, and the termination rules have their own tests (TerminationClauseTests), which call
     lv.lint_vpr itself."""
     return [p for p in lv.lint_vpr(*args, **kwargs) if not any(t in p for t in TERMINATION_RULES)]
+
+
+def drop_offset_conjuncts(text):
+    """`text` without decision 0059 item 10's `offset_of(P) == 0` conjuncts: the wrapped exemption comparison
+    `((offset_of(P) == 0) && (t == loc(block_of(P), (-1))))` becomes `(t == loc(block_of(P), (-1)))`, and the token-reading update
+    `((P != null) && (offset_of(P) == 0)) && (perm(...) > none)` becomes `(P != null) && (perm(...) > none)`: the shapes before Part D."""
+    text = re.sub(r"\(\(offset_of\((.+?)\) == 0\) && \((t == loc\(block_of\(\1\), \(-1\)\))\)\)", r"(\2)", text)
+    return re.sub(r"\(\((.+?) != null\) && \(offset_of\(\1\) == 0\)\)", r"(\1 != null)", text)
 
 
 class Check:
@@ -1196,7 +1213,7 @@ class JumpTests(unittest.TestCase):
 
     @staticmethod
     def strict(lines):
-        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+        return without_quantifier_rules(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"))
 
     @staticmethod
     def index_of_last(lines, fragment):
@@ -2348,7 +2365,7 @@ class MemoryModelTests(unittest.TestCase):
     def test_a_tagged_axiom_outside_a_domain_is_a_problem(self):
         lines = self.fixture()
         lines += ["// cerastes:axiom-ok 0033", self.axiom_line("loc_inv").strip()]
-        probs = self.strict(lines)
+        probs = without_quantifier_rules(self.strict(lines))
         self.assertEqual(len(probs), 1, probs)
         self.assertIn("`axiom`", probs[0])
 
@@ -3102,7 +3119,7 @@ class LoopAmountTests(unittest.TestCase):
         # (the older `while`-without-`decreases` rule reads the body's `{` as the first one on a line: a trigger set
         # in an invariant is a false positive there, so it is filtered out here)
         lines = self.fixture(invariants=[inv], body=["    kv := none", "    i := i + 1"])
-        probs = [p for p in self.strict(lines) if "without a `decreases`" not in p]
+        probs = [p for p in without_quantifier_rules(self.strict(lines)) if "without a `decreases`" not in p]
         self.assertEqual(len(probs), 1, probs)
         self.assertIn("is assigned inside the loop", probs[0])
 
@@ -4118,7 +4135,7 @@ class HeapTokenTests(unittest.TestCase):
                     "  assert forperm t: Ref [u.tok] :: false",
                     "  assert forperm t: Int [t.tok] :: false",
                     "  assert forperm t: Ref [t.tok] ::",
-                    f"  assert forperm t: Ref [t.tok] :: t == loc(block_of(p), (-1)) || {self.SLOT}",
+                    f"  assert forperm t: Ref [t.tok] :: ((offset_of(p) == 0) && (t == loc(block_of(p), (-1)))) || {self.SLOT}",
                     "  exhale forperm t: Ref [t.tok] :: false",
                     "  assert (forperm t: Ref [t.tok] :: false)",
                     "  var b: Bool := forperm t: Ref [t.tok] :: false"):
@@ -4127,8 +4144,23 @@ class HeapTokenTests(unittest.TestCase):
                 self.assertTrue(probs, row)
 
     def test_forperm_with_an_exemption_is_clean(self):
-        row = "  assert forperm t: Ref [t.tok] :: t == loc(block_of(res), (-1)) || (p != null && t == loc(block_of(p), (-1)))"
+        row = "  assert forperm t: Ref [t.tok] :: ((offset_of(res) == 0) && (t == loc(block_of(res), (-1)))) || (p != null && ((offset_of(p) == 0) && (t == loc(block_of(p), (-1)))))"
         self.assertEqual(self.strict(self.fixture(body=[Check(row, A, "leak")])), [])
+
+    def test_an_exemption_term_without_offset_of_zero_is_a_problem(self):
+        # decision 0059 item 10: a pointer into the middle of a block carries no token, so each term holds offset_of(<its pointer>) == 0
+        prefix = "  assert forperm t: Ref [t.tok] :: "
+        for body in ("t == loc(block_of(res), (-1))", "(p != null) && (t == loc(block_of(q), (-1)))",
+                     "(offset_of(q) == 0) && (t == loc(block_of(p), (-1)))", "(offset_of(p) == 1) && (t == loc(block_of(p), (-1)))",
+                     "((offset_of(res) == 0) && (t == loc(block_of(res), (-1)))) || ((p != null) && (t == loc(block_of(q), (-1))))"):
+            with self.subTest(body=body):
+                probs = self.strict(self.fixture(body=[Check(prefix + body, A, "leak")]))
+                self.assertTrue(any("holds `offset_of(<pointer>) == 0`" in p for p in probs), probs)
+        # twins: the conjunct at any grouping is read
+        for body in ("(offset_of(p) == 0) && (t == loc(block_of(p), (-1)))", "((p != null) && (offset_of(p) == 0)) && (t == loc(block_of(p), (-1)))",
+                     "(p != null) && ((offset_of(p) == 0) && (t == loc(block_of(p), (-1))))"):
+            with self.subTest(clean=body):
+                self.assertEqual(self.strict(self.fixture(body=[Check(prefix + body, A, "leak")])), [])
 
     def test_forperm_must_be_a_leak_row(self):
         for category in ("overflow", "permission", "invalid-free", "internal"):
@@ -4217,7 +4249,7 @@ class OwnerGhostTests(unittest.TestCase):
 
     SLOT = HeapTokenTests.SLOT
     TV = f"  tv_v := (t != null) ? loc(block_of(t), (-1)).tok : tv_v"
-    HELD = f"  held_v := held_v && ((v != null) && (perm(loc(block_of(v), (-1)).tok) > none))"
+    HELD = f"  held_v := held_v && (((v != null) && (offset_of(v) == 0)) && (perm(loc(block_of(v), (-1)).tok) > none))"
 
     @staticmethod
     def strict(lines):
@@ -4247,6 +4279,16 @@ class OwnerGhostTests(unittest.TestCase):
 
     def test_the_emitters_shape_is_clean(self):
         self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_an_owner_update_without_offset_of_zero_is_a_problem(self):
+        # decision 0059 item 10: holds_token(v) is v != null && offset_of(v) == 0 && perm(tok) > none
+        for rhs in (drop_offset_conjuncts(self.HELD), self.HELD.replace("offset_of(v) == 0", "offset_of(t) == 0"),
+                    self.HELD.replace("offset_of(v) == 0", "offset_of(v) == 1")):
+            with self.subTest(rhs=rhs[:70]):
+                lines = self.fixture()
+                lines[lines.index(self.HELD)] = rhs
+                probs = self.strict(lines)
+                self.assertTrue(any("an owner's ghost is assigned" in p for p in probs), probs)
 
     def test_the_token_value_of_another_pointer_is_a_problem(self):
         probs = self.strict(self.fixture(tv="  tv_v := (t != null) ? loc(block_of(v), (-1)).tok : tv_v"))
@@ -4328,7 +4370,7 @@ class OwnerLoopTests(unittest.TestCase):
             *(body if body is not None else ["    i := i + 1"]),
             *self.row("(p != null) ==> held_v"),
             "  }",
-            Check(f"  assert forperm t: Ref [t.tok] :: {exempt or '(p != null) && (t == loc(block_of(p), (-1)))'}", A, "leak"),
+            Check(f"  assert forperm t: Ref [t.tok] :: {exempt or '(p != null) && ((offset_of(p) == 0) && (t == loc(block_of(p), (-1))))'}", A, "leak"),
         ])
 
     def test_the_emitters_shape_is_clean(self):
@@ -4964,34 +5006,34 @@ class LoopCarrierGhostTests(unittest.TestCase):
         return self.strict(lines)
 
     def test_exemption_terms_that_name_a_carried_block_are_clean(self):
-        for e in ("false", "t == loc(block_of(res), (-1))", "(v != null) && (t == loc(block_of(v), (-1)))",
-                  "(held_v && (t == loc(block_of(v), (-1)))) || ((w != null) && (t == loc(block_of(w), (-1))))",
-                  "((((loc(member(s, 0), 0) == q) && (k > none)) ? q.v_ptr_int : null) != null) && (t == loc(block_of(q.v_ptr_int), (-1)))",
-                  "(held_v && (t == loc(block_of(v), -1)))"):
+        for e in ("false", "((offset_of(res) == 0) && (t == loc(block_of(res), (-1))))", "(v != null) && ((offset_of(v) == 0) && (t == loc(block_of(v), (-1))))",
+                  "(held_v && ((offset_of(v) == 0) && (t == loc(block_of(v), (-1))))) || ((w != null) && ((offset_of(w) == 0) && (t == loc(block_of(w), (-1)))))",
+                  "((((loc(member(s, 0), 0) == q) && (k > none)) ? q.v_ptr_int : null) != null) && ((offset_of(q.v_ptr_int) == 0) && (t == loc(block_of(q.v_ptr_int), (-1))))",
+                  "(held_v && ((offset_of(v) == 0) && (t == loc(block_of(v), -1))))"):
             with self.subTest(e=e):
                 self.assertEqual(self.leak(e), [])
 
     def test_nested_disjunctions_of_exemption_terms_are_flattened(self):
-        a, b, c = ("(held_%s && (t == loc(block_of(%s), (-1))))" % (n, n) for n in ("u", "v", "w"))
-        d = "(w != null) && (t == loc(block_of(w), (-1)))"
+        a, b, c = ("(held_%s && ((offset_of(%s) == 0) && (t == loc(block_of(%s), (-1)))))" % (n, n, n) for n in ("u", "v", "w"))
+        d = "(w != null) && ((offset_of(w) == 0) && (t == loc(block_of(w), (-1))))"
         for e in (f"(({a} || {b}) || {c})", f"({a} || ({b} || {c}))", f"((({a} || {b}) || {c}) || ({d}))", f"{a} || {b} || {c}"):
             with self.subTest(e=e):
                 self.assertEqual(self.leak(e), [])
 
     def test_a_nested_disjunct_without_a_token_term_is_still_a_problem(self):
-        a, b = ("(held_%s && (t == loc(block_of(%s), (-1))))" % (n, n) for n in ("u", "v"))
+        a, b = ("(held_%s && ((offset_of(%s) == 0) && (t == loc(block_of(%s), (-1)))))" % (n, n, n) for n in ("u", "v"))
         for e in (f"(({a} || {b}) || true)", f"(({a} || (v != null)) || {b})", f"(({a} || {b}) || (t == t))",
-                  f"(({a} || {b}) || (t != loc(block_of(v), (-1))))", f"(({a} || {b}) || !(t == loc(block_of(v), (-1))))"):
+                  f"(({a} || {b}) || (t != loc(block_of(v), (-1))))", f"(({a} || {b}) || !((offset_of(v) == 0) && (t == loc(block_of(v), (-1)))))"):
             with self.subTest(e=e):
                 probs = self.leak(e)
                 self.assertEqual(len(probs), 1, probs)
                 self.assertTrue("a `forperm` leak row is" in probs[0] or "in a `forperm` exemption" in probs[0], probs)
 
     def test_an_exemption_that_could_exempt_more_than_a_carried_block_is_a_problem(self):
-        for e in ("true", "v != null", "t == loc(block_of(v), (-1)) || true", "(v != null) || (t == loc(block_of(v), (-1)))",
-                  "!(t == loc(block_of(v), (-1)))", "t != loc(block_of(v), (-1))", "t == v", "t == loc(block_of(v), 0)",
-                  "t == loc(block_of(v), (-2))", "(t == loc(block_of(v), (-1))) && (t == loc(block_of(w), (-1)))",
-                  "(t == t) && (t == loc(block_of(v), (-1)))", "(t == null) && (t == loc(block_of(v), (-1)))"):
+        for e in ("true", "v != null", "((offset_of(v) == 0) && (t == loc(block_of(v), (-1)))) || true", "(v != null) || ((offset_of(v) == 0) && (t == loc(block_of(v), (-1))))",
+                  "!((offset_of(v) == 0) && (t == loc(block_of(v), (-1))))", "t != loc(block_of(v), (-1))", "t == v", "t == loc(block_of(v), 0)",
+                  "t == loc(block_of(v), (-2))", "((offset_of(v) == 0) && (t == loc(block_of(v), (-1)))) && ((offset_of(w) == 0) && (t == loc(block_of(w), (-1))))",
+                  "(t == t) && ((offset_of(v) == 0) && (t == loc(block_of(v), (-1))))", "(t == null) && ((offset_of(v) == 0) && (t == loc(block_of(v), (-1))))"):
             with self.subTest(e=e):
                 probs = self.leak(e)
                 self.assertEqual(len(probs), 1, probs)
@@ -5019,15 +5061,15 @@ class OwningGlobalTagTests(unittest.TestCase):
     GB_x` (right after its head, before its first clause, once, for a declared block); `held_GB_x` exists only for a tagged
     block; an owner's `held_` is assigned only `false`, `x != null`, the two updates that read the token's permission, or the
     address-taken owner's `held || ...`; `tv_` only `true` or the conditional read of the token; an exemption term with a `held_GB_x`
-    guard names exactly `t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)`; `held_GB_x == ...` only compares with the cell's
+    guard names exactly `((offset_of(loc(GB_x(), 0).v_ptr_T) == 0) && (t == loc(block_of(loc(GB_x(), 0).v_ptr_T), -1)))`; `held_GB_x == ...` only compares with the cell's
     nullness.  Each rule has a twin that breaks exactly it (only the messages of these rules are read)."""
 
     CELL = "loc(GB_g__0(), 0).v_ptr_int"
-    TERM = f"held_GB_g__0 && (t == loc(block_of({CELL}), (-1)))"
-    UPD_LOCAL = "  held_v := held_v && ((v != null) && (perm(loc(block_of(v), (-1)).tok) > none))"
-    UPD_GLOBAL = (f"  held_GB_g__0 := (held_GB_g__0 && (perm({CELL}) > none)) && (({CELL} != null) && "
+    TERM = f"held_GB_g__0 && ((offset_of({CELL}) == 0) && (t == loc(block_of({CELL}), (-1))))"
+    UPD_LOCAL = "  held_v := held_v && (((v != null) && (offset_of(v) == 0)) && (perm(loc(block_of(v), (-1)).tok) > none))"
+    UPD_GLOBAL = (f"  held_GB_g__0 := (held_GB_g__0 && (perm({CELL}) > none)) && ((({CELL} != null) && (offset_of({CELL}) == 0)) && "
                   f"(perm(loc(block_of({CELL}), (-1)).tok) > none))")
-    UPD_CELL = ("  held_v := (held_v && (perm(v.v_ptr_int) > none)) && ((v.v_ptr_int != null) && "
+    UPD_CELL = ("  held_v := (held_v && (perm(v.v_ptr_int) > none)) && (((v.v_ptr_int != null) && (offset_of(v.v_ptr_int) == 0)) && "
                 "(perm(loc(block_of(v.v_ptr_int), (-1)).tok) > none))")
     RECEIVE = "  held_v := held_v || (((t != null) && (offset_of(t) == 0)) && (perm(loc(block_of(t), (-1)).tok) == write))"
     TV = "  tv_v := (t != null) ? loc(block_of(t), (-1)).tok : tv_v"
@@ -5125,6 +5167,21 @@ class OwningGlobalTagTests(unittest.TestCase):
         other_global = self.UPD_GLOBAL.replace("held_GB_g__0 :=", "held_GB_h__0 :=").replace("(held_GB_g__0 &&", "(held_GB_h__0 &&")
         self.assertTrue(any("`held_GB_h__0` is assigned" in p for p in self.probs(body=[other_global], extra_gb=True)))
 
+    def test_an_update_or_a_term_without_offset_of_zero_is_a_problem(self):
+        # decision 0059 item 10: the token-reading updates and the exemption term of a held owner name a pointer that starts its block
+        for what, upd in (("local", self.UPD_LOCAL), ("global", self.UPD_GLOBAL), ("cell", self.UPD_CELL)):
+            with self.subTest(update=what):
+                old = drop_offset_conjuncts(upd)
+                self.assertNotEqual(old, upd)
+                probs = self.probs(body=[old])
+                self.assertTrue(any("is assigned" in p and "an owner's ghost" in p for p in probs), probs)
+        every = lambda **kw: self.strict(self.fixture(**kw))  # the new rule's message is decision 0059's, which `probs` filters out
+        probs = every(term=drop_offset_conjuncts(self.TERM))
+        self.assertTrue(any("holds `offset_of(" in p and "decision 0059 item 10" in p for p in probs), probs)
+        # another pointer's offset does not do
+        probs = every(term=f"held_GB_g__0 && ((offset_of(v) == 0) && (t == loc(block_of({self.CELL}), (-1))))")
+        self.assertTrue(any("holds `offset_of(" in p for p in probs), probs)
+
     def test_a_flag_assigned_inside_a_one_line_statement_is_read_too(self):
         probs = self.probs(body=["  if (t != null) { held_v := true }"])
         self.assertTrue(any("`held_v` is assigned `true`" in p for p in probs), probs)
@@ -5143,17 +5200,17 @@ class OwningGlobalTagTests(unittest.TestCase):
 
     # exemption terms ------------------------------------------------------------------------------------------------------------------
     def test_an_exemption_term_of_a_held_owning_global_names_its_own_block(self):
-        other = "held_GB_g__0 && (t == loc(block_of(loc(GB_h__0(), 0).v_ptr_int), (-1)))"
+        other = "held_GB_g__0 && ((offset_of(loc(GB_h__0(), 0).v_ptr_int) == 0) && (t == loc(block_of(loc(GB_h__0(), 0).v_ptr_int), (-1))))"
         probs = self.probs(term=other, extra_gb=True)
         self.assertTrue(any("guarded by `held_GB_g__0`" in p for p in probs), probs)
-        probs = self.probs(term="held_GB_g__0 && (t == loc(block_of(v), (-1)))")
+        probs = self.probs(term="held_GB_g__0 && ((offset_of(v) == 0) && (t == loc(block_of(v), (-1))))")
         self.assertTrue(any("guarded by `held_GB_g__0`" in p for p in probs), probs)
-        probs = self.probs(term="held_GB_g__0 && (t == loc(block_of(loc(GB_g__0(), 0).v_int), (-1)))")
+        probs = self.probs(term="held_GB_g__0 && ((offset_of(loc(GB_g__0(), 0).v_int) == 0) && (t == loc(block_of(loc(GB_g__0(), 0).v_int), (-1))))")
         self.assertTrue(any("guarded by `held_GB_g__0`" in p for p in probs), probs)
 
     def test_the_terms_of_a_nested_disjunction_are_each_read(self):
         def term(n):
-            return f"(held_GB_{n}__0 && (t == loc(block_of(loc(GB_{n}__0(), 0).v_ptr_int), (-1))))"
+            return f"(held_GB_{n}__0 && ((offset_of(loc(GB_{n}__0(), 0).v_ptr_int) == 0) && (t == loc(block_of(loc(GB_{n}__0(), 0).v_ptr_int), (-1)))))"
         lines = self.fixture(extra_gb=True, term=f"(({term('g')} || {term('h')}) || {term('g')})")
         probs = [p for p in self.strict(lines) if "decision 0054" in p]
         self.assertTrue(any("`GB_h__0`, which `program_start` does not tag" in p for p in probs), probs)
@@ -5165,7 +5222,7 @@ class OwningGlobalTagTests(unittest.TestCase):
         self.assertTrue(any("exemption term" in p and "does not tag" in p for p in probs), probs)
 
     def test_a_term_without_a_held_guard_is_an_ordinary_block_exemption(self):
-        probs = self.probs(tag=None, term=f"(t == loc(block_of({self.CELL}), (-1)))", body=["  held_v := false"])
+        probs = self.probs(tag=None, term=f"((offset_of({self.CELL}) == 0) && (t == loc(block_of({self.CELL}), (-1))))", body=["  held_v := false"])
         self.assertEqual([p for p in probs if "exemption term" in p], [])
 
     def test_the_flag_of_a_global_is_compared_only_with_its_cells_nullness(self):
@@ -5194,12 +5251,12 @@ class OwningLeafTests(unittest.TestCase):
     CELL = L0 + ".v_ptr_int"
     ROW = (f"  ensures acc({L0}.v_ptr_int) && acc({L0}.d_ptr_int) && {L0}.d_ptr_int && ({L0}.v_ptr_int == null) && "
            f"acc({L1}.v_int) && acc({L1}.d_int) && {L1}.d_int && ({L1}.v_int == 0) && acc(lvloc(GB_g__0()).lv)")
-    TERM = f"held_GB_g__0_0 && (t == loc(block_of({CELL}), (-1)))"
+    TERM = f"held_GB_g__0_0 && ((offset_of({CELL}) == 0) && (t == loc(block_of({CELL}), (-1))))"
     TAG = "  // cerastes:owning-global GB_g__0/0"
 
     @staticmethod
     def upd(ghost, cell):
-        return (f"  {ghost} := ({ghost} && (perm({cell}) > none)) && (({cell} != null) && "
+        return (f"  {ghost} := ({ghost} && (perm({cell}) > none)) && ((({cell} != null) && (offset_of({cell}) == 0)) && "
                 f"(perm(loc(block_of({cell}), (-1)).tok) > none))")
 
     LEGAL = ["  held_GB_g__0_0 := false", "  held_GB_g__0_0 := t != null", f"  held_GB_g__0_0 := {CELL} != null",
@@ -5251,7 +5308,7 @@ class OwningLeafTests(unittest.TestCase):
                "acc(lvloc(GB_g__0()).lv)")
         ghost = "held_GB_g__0_0_2"
         body = [f"  {ghost} := false", self.upd(ghost, leaf + ".v_ptr_int")]
-        term = f"{ghost} && (t == loc(block_of({leaf}.v_ptr_int), (-1)))"
+        term = f"{ghost} && ((offset_of({leaf}.v_ptr_int) == 0) && (t == loc(block_of({leaf}.v_ptr_int), (-1))))"
         lines = self.fixture(tags=("  // cerastes:owning-global GB_g__0/0/2",), row=row, body=body, term=term)
         lines[lines.index("  var held_GB_g__0_0: Bool")] = f"  var {ghost}: Bool"
         probs = [p for p in self.strict(lines) if "decision 0054" in p or "decision 0055" in p]
@@ -5455,7 +5512,7 @@ class OwningLeafTests(unittest.TestCase):
         for cell in (l1, "loc(GB_g__0(), 0).v_ptr_int", "loc(member(loc(GB_h__0(), 0), 0), 0).v_ptr_int",
                      "loc(member(loc(member(loc(GB_g__0(), 0), 0), 0), 0), 0).v_ptr_int", "v_s__0"):
             with self.subTest(cell=cell):
-                term = f"held_GB_g__0_0 && (t == loc(block_of({cell}), (-1)))"
+                term = f"held_GB_g__0_0 && ((offset_of({cell}) == 0) && (t == loc(block_of({cell}), (-1))))"
                 probs = self.probs(term=term)
                 self.assertTrue(any("guarded by `held_GB_g__0_0`" in p for p in probs), probs)
         probs = self.probs(term=f"held_GB_g__0_0 && (t == loc(block_of({self.CELL}), 0))")
@@ -5468,7 +5525,7 @@ class OwningLeafTests(unittest.TestCase):
     def test_a_pointer_globals_term_still_names_the_globals_own_cell(self):
         # the pointer-global rule is not widened to the leaf's cell: the ghost `held_GB_g__0` spells the whole global
         lines = self.fixture(tags=("  // cerastes:owning-global GB_h__0",), body=["  held_GB_g__0 := false"],
-                             term=f"held_GB_g__0 && (t == loc(block_of({self.CELL}), (-1)))")
+                             term=f"held_GB_g__0 && ((offset_of({self.CELL}) == 0) && (t == loc(block_of({self.CELL}), (-1))))")
         lines.insert(lines.index("unique function GB_g__0(): Block"), "unique function GB_h__0(): Block")
         probs = [p for p in self.strict(lines) if "decision 0054" in p or "decision 0055" in p]
         self.assertTrue(any("`held_GB_g__0`" in p for p in probs), probs)
@@ -5503,8 +5560,8 @@ class OwningLeafEntryAndExemptionTests(OwningLeafTests):
     NEXT1 = f"loc(member({NEXT0}, 1), 0).v_ptr_int"
     EXM0 = f"  exm_0 := (held_GB_g__0_0 && ({OwningLeafTests.CELL} != null)) && (perm({NEXT0}) > none)"
     EXM1 = f"  exm_1 := (exm_0 && ({NEXT0} != null)) && (perm({NEXT1}) > none)"
-    EXM_TERM = (f"(held_GB_g__0_0 && (t == loc(block_of({L0CELL}), (-1)))) || (exm_0 && (t == loc(block_of({NEXT0}), (-1)))) || "
-                f"(exm_1 && (t == loc(block_of({NEXT1}), (-1))))")
+    EXM_TERM = (f"(held_GB_g__0_0 && ((offset_of({L0CELL}) == 0) && (t == loc(block_of({L0CELL}), (-1))))) || (exm_0 && ((offset_of({NEXT0}) == 0) && (t == loc(block_of({NEXT0}), (-1))))) || "
+                f"(exm_1 && ((offset_of({NEXT1}) == 0) && (t == loc(block_of({NEXT1}), (-1)))))")
     EXM_VARS = ["  var exm_0: Bool", "  var exm_1: Bool"]
 
     def body(self, *lines):
@@ -5601,13 +5658,22 @@ class OwningLeafEntryAndExemptionTests(OwningLeafTests):
 
     def test_a_disjunct_names_the_cell_its_exm_read(self):
         n0, n1 = self.NEXT0, self.NEXT1
-        for term in (self.EXM_TERM.replace(f"exm_0 && (t == loc(block_of({n0})", f"exm_0 && (t == loc(block_of({n1})"),
-                     self.EXM_TERM.replace(f"exm_1 && (t == loc(block_of({n1})", f"exm_1 && (t == loc(block_of({n0})"),
-                     self.EXM_TERM.replace(f"exm_0 && (t == loc(block_of({n0})", f"exm_0 && (t == loc(block_of({self.L0CELL})"),
-                     self.EXM_TERM.replace(f"exm_0 && (t == loc(block_of({n0}), (-1)))", f"exm_0 && (t == loc(block_of({n0}), 0))")):
+        for term in (self.EXM_TERM.replace(f"exm_0 && ((offset_of({n0}) == 0) && (t == loc(block_of({n0})", f"exm_0 && ((offset_of({n1}) == 0) && (t == loc(block_of({n1})"),
+                     self.EXM_TERM.replace(f"exm_1 && ((offset_of({n1}) == 0) && (t == loc(block_of({n1})", f"exm_1 && ((offset_of({n0}) == 0) && (t == loc(block_of({n0})"),
+                     self.EXM_TERM.replace(f"exm_0 && ((offset_of({n0}) == 0) && (t == loc(block_of({n0})", f"exm_0 && ((offset_of({self.L0CELL}) == 0) && (t == loc(block_of({self.L0CELL})"),
+                     self.EXM_TERM.replace(f"exm_0 && ((offset_of({n0}) == 0) && (t == loc(block_of({n0}), (-1))))", f"exm_0 && (t == loc(block_of({n0}), 0))")):
             with self.subTest(term=term):
                 probs = self.exm_probs([self.EXM0, self.EXM1], term=term)
                 self.assertTrue(any("the exemption term guarded by `exm_" in p for p in probs), probs)
+
+    def test_an_exm_term_without_offset_of_zero_is_a_problem(self):
+        # decision 0059 item 10: the exemption of an exm_<n> names the block of the cell it read only when that cell starts its block
+        term = drop_offset_conjuncts(self.EXM_TERM)
+        self.assertNotEqual(term, self.EXM_TERM)
+        every = lambda t: self.strict(self.fixture(body=self.body(self.EXM0, self.EXM1), term=t))  # `probs` keeps only decisions 0054 and 0055
+        probs = every(term)
+        self.assertTrue(any("holds `offset_of(" in p and "decision 0059 item 10" in p for p in probs), probs)
+        self.assertEqual([p for p in every(self.EXM_TERM) if "decision 0059" in p], [])
 
     def test_a_disjunct_of_an_exm_never_assigned_is_a_problem(self):
         probs = self.exm_probs([self.EXM0])
@@ -5632,7 +5698,7 @@ class OwningLeafEntryAndExemptionTests(OwningLeafTests):
         cell = base.CELL
         nxt = f"loc(member({cell}, 0), 0).v_ptr_int"
         exm0 = f"  exm_0 := (held_GB_g__0 && ({cell} != null)) && (perm({nxt}) > none)"
-        term = f"(held_GB_g__0 && (t == loc(block_of({cell}), (-1)))) || (exm_0 && (t == loc(block_of({nxt}), (-1))))"
+        term = f"(held_GB_g__0 && ((offset_of({cell}) == 0) && (t == loc(block_of({cell}), (-1))))) || (exm_0 && ((offset_of({nxt}) == 0) && (t == loc(block_of({nxt}), (-1)))))"
 
         def probs(line, t=term):
             lines = base.fixture(body=["  var exm_0: Bool", *base.LEGAL, line], term=t)
@@ -5640,7 +5706,7 @@ class OwningLeafEntryAndExemptionTests(OwningLeafTests):
         self.assertEqual(probs(exm0), [])
         self.assertTrue(any("guards the cell of its own owner" in p for p in probs(exm0.replace(f"({cell} != null)", "(loc(GB_h__0(), 0).v_ptr_int != null)"))))
         self.assertTrue(any("not the ghost of an owner tagged" in p for p in probs(exm0.replace("held_GB_g__0 &&", "held_v &&"))))
-        self.assertTrue(any("the exemption term guarded by `exm_0`" in p for p in probs(exm0, term.replace(f"exm_0 && (t == loc(block_of({nxt})", f"exm_0 && (t == loc(block_of({cell})"))))
+        self.assertTrue(any("the exemption term guarded by `exm_0`" in p for p in probs(exm0, term.replace(f"exm_0 && ((offset_of({nxt}) == 0) && (t == loc(block_of({nxt})", f"exm_0 && ((offset_of({cell}) == 0) && (t == loc(block_of({cell})"))))
 
 
 
@@ -5838,7 +5904,7 @@ class OwningLeafAgreesAndOwnBlockTests(OwningLeafEntryAndExemptionTests):
     `hp_<held>__<n> := perm(<cell>) > none` assigned once before the loop, the invariant `(hp ==> (held == (<cell> != null))) && ((!hp) ==>
     (!held))` and the rows `if (!(((perm(<cell>) > none) ==> (held == (<cell> != null))) && ((!(perm(<cell>) > none)) ==> (!held)))) {`, all over
     the leaf's own cell, the one the ghost's name spells; the snapshot is read only there.  (2) `main`'s term for a leaf's own block,
-    `exm_0 := held_<tagged leaf> && (perm(<that leaf's cell>) > none)` with the disjunct `exm_0 && t == loc(block_of(<that cell>), -1)`, deeper
+    `exm_0 := held_<tagged leaf> && (perm(<that leaf's cell>) > none)` with the disjunct `exm_0 && ((offset_of(<that cell>) == 0) && (t == loc(block_of(<that cell>), -1)))`, deeper
     `exm_` rooted at it.  Each rule has twins that break exactly it; the older forms keep their rules (the classes this one inherits from)."""
 
     GCELL = OwningLeafTests.CELL
@@ -5938,10 +6004,10 @@ class OwningLeafAgreesAndOwnBlockTests(OwningLeafEntryAndExemptionTests):
 
     # a leaf's own block in main's exemption ---------------------------------------------------------------------------------------
     OWN0 = f"  exm_0 := held_GB_g__0_0 && (perm({GCELL}) > none)"
-    OWN_TERM = f"exm_0 && (t == loc(block_of({GCELL}), (-1)))"
+    OWN_TERM = f"exm_0 && ((offset_of({GCELL}) == 0) && (t == loc(block_of({GCELL}), (-1))))"
     OWN1 = f"  exm_1 := (exm_0 && ({GCELL} != null)) && (perm(loc(member({GCELL}, 0), 0).v_ptr_int) > none)"
     OWN1_CELL = f"loc(member({GCELL}, 0), 0).v_ptr_int"
-    OWN_CHAIN_TERM = f"(exm_0 && (t == loc(block_of({GCELL}), (-1)))) || (exm_1 && (t == loc(block_of({OWN1_CELL}), (-1))))"
+    OWN_CHAIN_TERM = f"(exm_0 && ((offset_of({GCELL}) == 0) && (t == loc(block_of({GCELL}), (-1))))) || (exm_1 && ((offset_of({OWN1_CELL}) == 0) && (t == loc(block_of({OWN1_CELL}), (-1)))))"
 
     def test_a_leafs_own_block_and_a_chain_rooted_at_it_are_clean(self):
         self.assertEqual(self.exm_probs([self.OWN0], term=self.OWN_TERM), [])
@@ -5964,7 +6030,7 @@ class OwningLeafAgreesAndOwnBlockTests(OwningLeafEntryAndExemptionTests):
     def test_the_leaf_forms_disjunct_names_that_very_cell(self):
         for cell in (self.OWN1_CELL, self.L1 + ".v_ptr_int", "loc(GB_g__0(), 0).v_ptr_int"):
             with self.subTest(cell=cell):
-                probs = self.exm_probs([self.OWN0], term=f"exm_0 && (t == loc(block_of({cell}), (-1)))")
+                probs = self.exm_probs([self.OWN0], term=f"exm_0 && ((offset_of({cell}) == 0) && (t == loc(block_of({cell}), (-1))))")
                 self.assertTrue(any("the exemption term guarded by `exm_0`" in p for p in probs), probs)
 
     def test_a_chain_rooted_at_a_leafs_own_block_guards_that_cell(self):
@@ -6148,6 +6214,561 @@ class NotInvalidatingRowTests(unittest.TestCase):
         lines = ["method f_f__0__wf(p_c__0: Int, p_p__1: Ref)", "  decreases", "{",
                  Check("  assert (a) ==> (b ==> c)", A, "permission", self.OLD_MSG), "}"]
         self.assertEqual([p for p in lint(lines) if "not_invalidating" in p], [])
+
+
+MARKED = "assert.failed[insufficient.permission]"
+R0059 = "decision 0059"
+
+
+class ArrayMapReasonTests(unittest.TestCase):
+    """Decision 0059 item 7: the second column of a map line is `<id>`, or `<id>[<reason>]` on a marked range row; the id is read bare
+    (the kind rules and the duplicate-id rule read it) and the only reason is `insufficient.permission`, only on `assert.failed`."""
+
+    @staticmethod
+    def line(ident, vpr_line=3):
+        return "\t".join([str(vpr_line), ident, "permission", "t.c", "9", "5", "message"])
+
+    def parse(self, ident):
+        return lv.parse_map(self.line(ident) + "\n", "t.vpr.map")
+
+    def test_a_marked_row_is_read_as_its_id_and_its_reason(self):
+        entries, problems = self.parse(MARKED)
+        self.assertEqual(problems, [])
+        self.assertEqual((entries[0].error_id, entries[0].expected_reason), ("assert.failed", "insufficient.permission"))
+
+    def test_an_unmarked_row_has_no_reason(self):
+        entries, problems = self.parse("assert.failed")
+        self.assertEqual(problems, [])
+        self.assertEqual((entries[0].error_id, entries[0].expected_reason), ("assert.failed", ""))
+
+    def test_any_other_reason_is_a_problem(self):
+        for ident in ("assert.failed[assertion.false]", "assert.failed[]", "assert.failed[qp.not.injective]",
+                      "assert.failed[Insufficient.permission]"):
+            with self.subTest(ident=ident):
+                entries, problems = self.parse(ident)
+                self.assertEqual(entries, [])
+                self.assertTrue(any("unknown expected reason" in p for p in problems), problems)
+
+    def test_a_reason_is_only_on_assert_failed(self):
+        for ident in ("call.precondition[insufficient.permission]", "postcondition.violated[insufficient.permission]",
+                      "invariant.not.preserved[insufficient.permission]"):
+            with self.subTest(ident=ident):
+                entries, problems = self.parse(ident)
+                self.assertEqual(entries, [])
+                self.assertTrue(any("only on `assert.failed`" in p for p in problems), problems)
+
+    def test_a_malformed_id_is_unknown(self):
+        for ident in ("assert.failed[insufficient.permission", "assert.failed insufficient.permission", "assert.failed[a][b]",
+                      "assert.failed[insufficient.permission]x", "[insufficient.permission]", "assert.failed(insufficient.permission)"):
+            with self.subTest(ident=ident):
+                entries, problems = self.parse(ident)
+                self.assertEqual(entries, [])
+                self.assertTrue(any("unknown Viper error id" in p for p in problems), problems)
+
+    def test_the_bare_id_still_counts_for_the_duplicate_id_rule(self):
+        # two entries with one id on one line are refused whether or not one is marked
+        lines = [Check("  assert true", A, "overflow")]
+        text, _ = build(["method f__1()", "  decreases", "{", *lines, "}"])
+        map_text = self.line(MARKED, 4) + "\n" + self.line("assert.failed", 4) + "\n"
+        probs = [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if "two entries" in p]
+        self.assertEqual(len(probs), 1, probs)
+
+
+class ArrayAllocationTests(unittest.TestCase):
+    """Decision 0059 items 3 and 12: `alloc_arr_<t>` and `zero_arr_<t>` are trusted, so each is pinned clause by clause beside
+    `alloc_<t>`'s `len == 1` rule: S43's text for the allocation and the zero fill (the zero literal follows the field's type).
+    Each mutant breaks one clause and must be refused; the permission-conjuring ones are the dangerous ones."""
+
+    def fields(self, t="int", ty="Int"):
+        return [f"field v_{t}: {ty}", f"field d_{t}: Bool", "field lv: Bool"]
+
+    @staticmethod
+    def q(body, hi="n", lo="0"):
+        return f"forall k: Int :: {{ loc(block_of(r), k) }} (({lo} <= k) && (k < {hi})) ==> {body}"
+
+    def alloc_clauses(self, t="int"):
+        return [("requires", "1 <= n"),
+                ("ensures", "((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"),
+                ("ensures", "(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).v_{t})")),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).d_{t})")),
+                ("ensures", self.q(f"(!loc(block_of(r), k).d_{t})"))]
+
+    def zero_clauses(self, t="int", zero="0"):
+        return [("requires", "((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"),
+                ("requires", self.q(f"acc(loc(block_of(r), k).v_{t})")),
+                ("requires", self.q(f"acc(loc(block_of(r), k).d_{t})")),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).v_{t})")),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).d_{t})")),
+                ("ensures", self.q(f"(loc(block_of(r), k).v_{t} == {zero})")),
+                ("ensures", self.q(f"loc(block_of(r), k).d_{t}"))]
+
+    def method(self, name, clauses, header=None, tail="  decreases _", t="int", ty="Int", fields=True):
+        head = header or (f"method {name}(n: Int) returns (r: Ref)" if name.startswith("alloc_arr_") else f"method {name}(r: Ref, n: Int)")
+        body = [Check(f"  {kw} {text}", WF if kw == "requires" else P, "internal") for kw, text in clauses]
+        return [*(self.fields(t, ty) if fields else []), "// cerastes:trusted-contract array allocation", head, *body, tail]
+
+    def probs(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0059 item 3" in p]
+
+    def good(self, t="int", ty="Int", zero="0"):
+        return (self.method(f"alloc_arr_{t}", self.alloc_clauses(t), t=t, ty=ty)
+                + self.method(f"zero_arr_{t}", self.zero_clauses(t, zero), t=t, ty=ty, fields=False))
+
+    def test_the_two_contracts_are_clean_for_each_field_type(self):
+        for t, ty, zero in (("int", "Int", "0"), ("bool", "Bool", "false"), ("ptr_int", "Ref", "null")):
+            with self.subTest(t=t):
+                self.assertEqual(self.probs(self.good(t, ty, zero)), [])
+
+    def test_the_allocation_is_not_judged_by_the_scalar_rule(self):
+        probs = lv.lint_vpr(*build(self.good()), "t.vpr", "t.vpr.map")
+        self.assertEqual([p for p in probs if "decision 0032 item 4" in p], [], probs)
+        # twin: a scalar allocation named like an array's still gets the scalar rule's judgement
+        bad = self.method("alloc_arr", self.alloc_clauses(), header="method alloc_arr() returns (r: Ref)")
+        self.assertTrue(any("decision 0032 item 4" in p for p in lv.lint_vpr(*build(bad), "t.vpr", "t.vpr.map")))
+
+    def test_n_ge_1_is_the_same_requirement_as_1_le_n(self):
+        clauses = self.alloc_clauses()
+        clauses[0] = ("requires", "n >= 1")
+        self.assertEqual(self.probs(self.method("alloc_arr_int", clauses)), [])
+
+    def mutants(self, base, name, header=None, **kw):
+        out = {}
+        for i, (kw_, text) in enumerate(base):
+            out[f"drop clause {i}: {text[:40]}"] = base[:i] + base[i + 1:]
+        out["extra ensures false"] = base + [("ensures", "false")]
+        out["extra ensures a fact"] = base + [("ensures", "len(block_of(r)) == 1")]
+        out["extra requires"] = base + [("requires", "n < 100")]
+        for i, (kw_, text) in enumerate(base):
+            if "k < n" in text:
+                out[f"range k <= n in clause {i}"] = base[:i] + [(kw_, text.replace("(k < n)", "(k <= n)"))] + base[i + 1:]
+            if "0 <= k" in text:
+                out[f"range -1 <= k in clause {i}"] = base[:i] + [(kw_, text.replace("(0 <= k)", "(-1 <= k)"))] + base[i + 1:]
+            if "{ loc(block_of(r), k) }" in text:
+                out[f"no trigger in clause {i}"] = base[:i] + [(kw_, text.replace("{ loc(block_of(r), k) } ", ""))] + base[i + 1:]
+        return out
+
+    def test_every_clause_of_the_allocation_is_pinned(self):
+        for label, clauses in self.mutants(self.alloc_clauses(), "alloc_arr_int").items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("alloc_arr_int", clauses)), label)
+
+    def test_every_clause_of_the_zero_fill_is_pinned(self):
+        # the dangerous ones: an `ensures acc` wider than the `requires acc` (or with none) conjures permission
+        for label, clauses in self.mutants(self.zero_clauses(), "zero_arr_int").items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("zero_arr_int", clauses)), label)
+
+    def test_the_zero_literal_follows_the_fields_type(self):
+        for t, ty, zero, wrong in (("int", "Int", "0", "1"), ("bool", "Bool", "false", "true"), ("ptr_int", "Ref", "null", "r")):
+            with self.subTest(t=t):
+                self.assertTrue(self.probs(self.method(f"zero_arr_{t}", self.zero_clauses(t, wrong), t=t, ty=ty)))
+        # a Bool field with the Int literal is wrong too
+        self.assertTrue(self.probs(self.method("zero_arr_bool", self.zero_clauses("bool", "0"), t="bool", ty="Bool")))
+
+    def test_the_wrapper_is_pinned(self):
+        base = self.alloc_clauses()
+        for label, kw in (("a body", {"tail": "  decreases _\n{\n}"}),
+                          ("no decreases _", {"tail": "  decreases"}),
+                          ("a wider header", {"header": "method alloc_arr_int(n: Int, m: Int) returns (r: Ref)"}),
+                          ("no result", {"header": "method alloc_arr_int(n: Int)"}),
+                          ("an Int result", {"header": "method alloc_arr_int(n: Int) returns (r: Int)"})):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("alloc_arr_int", base, **kw)), label)
+        zero = self.zero_clauses()
+        for label, kw in (("a result", {"header": "method zero_arr_int(r: Ref, n: Int) returns (s: Ref)"}),
+                          ("swapped formals", {"header": "method zero_arr_int(n: Int, r: Ref)"})):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("zero_arr_int", zero, **kw)), label)
+
+    def test_a_non_clause_line_is_refused(self):
+        lines = self.method("alloc_arr_int", self.alloc_clauses())
+        lines.insert(len(lines) - 1, "  assert true")
+        self.assertTrue(any("not a `requires` or `ensures` clause" in p for p in self.probs(lines)))
+
+    def test_the_fields_must_be_declared(self):
+        lines = self.method("alloc_arr_long", self.alloc_clauses("long"), t="int")  # fields declared for int only
+        self.assertTrue(any("is not declared" in p for p in self.probs(lines)))
+        self.assertEqual(self.probs(self.method("alloc_arr_long", self.alloc_clauses("long"), t="long")), [])
+
+    def test_a_name_that_only_starts_like_the_prefix_is_judged_as_an_allocation(self):
+        # `zero_arr_` and `alloc_arr_` followed by anything are the emitter's names: no escape by an odd suffix
+        for name in ("zero_arr_int_2", "alloc_arr_in_t"):
+            with self.subTest(name=name):
+                self.assertTrue(self.probs(self.method(name, [("ensures", "false")])))
+
+
+class ArrayQuantifierTests(unittest.TestCase):
+    """Decision 0059 items 7, 8 and 12: a permission check over a range is a marked row (`assert forall k :: { loc(B, k) } lo <= k &&
+    k < hi ==> acc(loc(B, k).f)`, one field, B, lo, hi and any amount reading no heap) whose map entry carries
+    `assert.failed[insufficient.permission]`; `forall` stands only in the rows, the range `exhale`, the two trusted contracts and
+    item 8's four loop conjuncts; `old[label]` only in two of those, and only for a label defined earlier in the method."""
+
+    B = "block_of(v_a)"
+
+    @staticmethod
+    def quant(body, k="k", b="block_of(v_a)", lo="0", hi="3", extra=None):
+        ante = f"(({lo} <= {k}) && ({k} < {hi}))"
+        if extra:
+            ante = f"({ante} && {extra})"
+        return f"forall {k}: Int :: {{ loc({b}, {k}) }} {ante} ==> {body}"
+
+    def acc(self, f="v_int", k="k", b="block_of(v_a)", amount=""):
+        return f"acc(loc({b}, {k}).{f}{amount})"
+
+    def row(self, text=None, ident=MARKED, kind="assert"):
+        return Check(f"  {kind} {text or self.quant(self.acc())}", ident, "permission")
+
+    def method(self, body, loop=None):
+        lines = ["method m__1()", "  decreases", "{", "  var v_a: Ref", *body]
+        if loop is not None:
+            lines += ["  label lh_0", "  while (true)", *loop, "  {", "  }"]
+        return lines + ["}"]
+
+    def probs(self, lines, keep=R0059):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if keep in p]
+
+    def test_marked_rows_the_range_exhale_and_a_plain_assert_are_clean(self):
+        d = self.quant(self.acc("d_int"))
+        lines = self.method([self.row(), self.row(d),
+                             Check("  assert !(perm(lvloc(block_of(v_a)).lv) != write)", A, "lifetime"),
+                             f"  exhale {self.quant(self.acc())}", f"  exhale {d}", "  exhale acc(lvloc(block_of(v_a)).lv)"])
+        self.assertEqual(self.probs(lines), [])
+
+    def test_a_row_may_carry_an_amount_that_reads_no_heap(self):
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(amount=", write")))])), [])
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(amount=", 1 / 2")))])), [])
+        # twin: an amount that reads the heap is not a marked row
+        for amount in (", perm(x.v_int)", ", loc(v_a, 0).v_int", ", old(kv)"):
+            with self.subTest(amount=amount):
+                probs = self.probs(self.method([self.row(self.quant(self.acc(amount=amount)))]))
+                self.assertTrue(any("not a marked range row" in p for p in probs), probs)
+
+    def test_a_marked_entry_on_a_row_is_needed_and_enough(self):
+        probs = self.probs(self.method([self.row(ident="assert.failed")]))
+        self.assertTrue(any("has no expected reason" in p for p in probs), probs)
+        self.assertEqual(self.probs(self.method([self.row()])), [])
+
+    def test_a_marked_entry_on_anything_else_is_a_problem(self):
+        for text in ("!(perm(lvloc(block_of(v_a)).lv) != write)", "true", "perm(loc(block_of(v_a), 0).v_int) > none"):
+            with self.subTest(text=text):
+                probs = self.probs(self.method([Check(f"  assert {text}", MARKED, "permission")]))
+                self.assertTrue(any("carries the expected reason" in p for p in probs), probs)
+        # an `exhale` of the row's shape is not an assert either
+        probs = self.probs(self.method([Check(f"  exhale {self.quant(self.acc())}", MARKED, "permission")]))
+        self.assertTrue(any("carries the expected reason" in p for p in probs), probs)
+
+    def test_a_marked_entry_on_a_requires_is_refused_by_the_map(self):
+        lines = ["method m__2(v_a: Ref)", Check("  requires true", "not.wellformed[insufficient.permission]", "internal"), "  decreases", "{", "}"]
+        text, map_text = build(lines)
+        probs = lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map")
+        self.assertTrue(any("only on `assert.failed`" in p for p in probs), probs)
+
+    def test_a_row_must_have_exactly_the_shape(self):
+        two = self.quant(self.acc() + " && " + self.acc("d_int"))
+        other_k = self.quant(self.acc(k="j"))
+        other_b = self.quant(self.acc(b="block_of(v_b)"))
+        no_trigger = self.quant(self.acc()).replace("{ loc(block_of(v_a), k) } ", "")
+        other_trigger = self.quant(self.acc()).replace("{ loc(block_of(v_a), k) }", "{ offset_of(loc(block_of(v_a), k)) }")
+        not_acc = self.quant("loc(block_of(v_a), k).d_int")
+        reversed_range = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "((k < 3) && (0 <= k))")
+        implication_lost = f"forall k: Int :: {{ loc(block_of(v_a), k) }} {self.acc()}"
+        one_conjunct = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "(k < 3)")
+        for label, text in (("two fields", two), ("another k", other_k), ("another block", other_b), ("no trigger", no_trigger),
+                            ("another trigger", other_trigger), ("not an acc", not_acc), ("range reversed", reversed_range),
+                            ("no implication", implication_lost), ("one range conjunct", one_conjunct)):
+            with self.subTest(mutant=label):
+                probs = self.probs(self.method([self.row(text)]))
+                self.assertTrue(probs, label)
+
+    def test_the_block_the_bounds_and_the_trigger_read_no_heap(self):
+        for label, kw in (("a heap read in B", {"b": "block_of(v_a.v_ptr_int)"}), ("perm in the low bound", {"lo": "perm(x.v_int)"}),
+                          ("a field in the high bound", {"hi": "loc(v_a, 0).v_int"}), ("old in the high bound", {"hi": "old(n)"})):
+            with self.subTest(mutant=label):
+                kw2 = dict(kw)
+                body = self.acc(b=kw.get("b", "block_of(v_a)"))
+                probs = self.probs(self.method([self.row(self.quant(body, **kw2))]))
+                self.assertTrue(any("not a marked range row" in p for p in probs), probs)
+        # twin: variables and arithmetic are fine
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(), lo="n - n", hi="v_n + 1"))])), [])
+
+    def test_the_range_exhale_has_the_shape_too(self):
+        for label, text in (("two fields", self.quant(self.acc() + " && " + self.acc("d_int"))),
+                            ("an amount", self.quant(self.acc(amount=", write"))),
+                            ("no trigger", self.quant(self.acc()).replace("{ loc(block_of(v_a), k) } ", ""))):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method([f"  exhale {text}"])), label)
+
+    def test_forall_stands_nowhere_else(self):
+        q = self.quant(self.acc())
+        cases = {
+            "a requires": ["method m__2(v_a: Ref)", Check(f"  requires {q}", WF, "internal"), "  decreases", "{", "}"],
+            "an ensures": ["method m__2(v_a: Ref)", Check(f"  ensures {q}", P, "postcondition"), "  decreases", "{", "}"],
+            "an assume-free assert in a conjunction": self.method([Check(f"  assert true && ({q})", A, "check")]),
+            "an inhale": self.method([f"  inhale {q} // cerastes:inhale-ok test"]),
+            "a function body": ["function f_f(a: Int): Bool", "{", f"  {q}", "}"],
+            "a Bool variable": self.method([f"  var b: Bool := {q}"]),
+            "a while condition": self.method([], loop=None)[:-1] + [f"  while ({q})", "  {", "  }", "}"],
+        }
+        for label, lines in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(any("`forall` outside the shapes" in p for p in self.probs(lines)), label)
+
+    def test_a_forall_in_domain_block_is_the_axioms_business(self):
+        lines = ["// cerastes:domain-ok 0028", "domain Block {", "  function loc(b: Block, i: Int): Ref",
+                 "  // cerastes:axiom-ok 0033", "  " + lv.BLOCK_AXIOMS["loc_inv"][1], "}"]
+        self.assertEqual(self.probs(lines), [])
+
+    # --- item 8's loop conjuncts and old[label]
+    def conjuncts(self):
+        cell = "loc(block_of(v_a), k)"
+        rng = "((0 <= k) && (k < 3))"
+        return {
+            "acc": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> acc({cell}.v_int)",
+            "flags": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && old[lh_0]({cell}.d_int)) ==> {cell}.d_int",
+            "range": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && {cell}.d_int) ==> "
+                     f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))",
+            "values": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> ({cell}.v_int == old[lh_0]({cell}.v_int))",
+        }
+
+    def loop(self, *invariants):
+        return [Check(i, INV, "internal") for i in invariants]
+
+    def loop_lines(self, *invariants, label=True):
+        lines = ["method m__1()", "  decreases", "{", "  var v_a: Ref"]
+        if label:
+            lines.append("  label lh_0")
+        lines += ["  while (true)", *self.loop(*invariants), "  {", "  }", "}"]
+        return lines
+
+    def test_the_four_loop_conjuncts_are_clean(self):
+        for name, inv in self.conjuncts().items():
+            with self.subTest(conjunct=name):
+                self.assertEqual(self.probs(self.loop_lines(inv)), [])
+
+    def test_a_loop_conjunct_must_keep_its_shape(self):
+        c = self.conjuncts()
+        cell, other = "loc(block_of(v_a), k)", "loc(block_of(v_a), 0)"
+        mutants = {
+            "acc with an amount": c["acc"].replace(".v_int)", ".v_int, kl)"),
+            "flags of another cell": c["flags"].replace(f"old[lh_0]({cell}.d_int)", f"old[lh_0]({other}.d_int)"),
+            "flags with another consequent": c["flags"].replace(f"==> {cell}.d_int", f"==> {cell}.d_bool"),
+            "flags without old": c["flags"].replace("old[lh_0](", "(").replace(".d_int)) ==>", ".d_int)) ==>"),
+            "range with a non-literal bound": c["range"].replace("2147483647", "n"),
+            "range with one bound": c["range"].replace(f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))",
+                                                       f"({cell}.v_int <= 2147483647)"),
+            "values of another field": c["values"].replace("== old[lh_0](loc(block_of(v_a), k).v_int)",
+                                                           "== old[lh_0](loc(block_of(v_a), k).v_bool)"),
+            "values against the current state": c["values"].replace("old[lh_0](loc(block_of(v_a), k).v_int)", "loc(block_of(v_a), k).v_int"),
+            "an implication to anything": f"    invariant forall k: Int :: {{ {cell} }} ((0 <= k) && (k < 3)) ==> {cell}.v_int > 0",
+            "two extra conjuncts": c["flags"].replace(f"&& old[lh_0]({cell}.d_int))", f"&& old[lh_0]({cell}.d_int) && true)"),
+        }
+        for label, inv in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.loop_lines(inv)), label)
+
+    def ptr_range(self, consequent=None, field="ptr_int", antecedent_flag=True, cell="loc(block_of(v_a), k)"):
+        e = f"{cell}.v_{field}"
+        cons = consequent if consequent is not None else lv._view_wf(e)
+        flag = f" && {cell}.d_{field}" if antecedent_flag else ""
+        return (f"    invariant forall k: Int :: {{ loc(block_of(v_a), k) }} (((0 <= k) && (k < 3)){flag}) ==> ({cons})")
+
+    def test_a_pointer_elements_range_conjunct_is_wf_of_its_value(self):
+        # S43 `s43_c_ptr_elem`: ((0 <= k < 3) && E.d_ptr_int) ==> WF(E) with E = loc(B, k).v_ptr_int
+        self.assertEqual(self.probs(self.loop_lines(self.ptr_range())), [])
+        e = "loc(block_of(v_a), k).v_ptr_int"
+        mutants = {
+            "no null alternative": f"(({e} == loc(block_of({e}), offset_of({e}))) && ((0 <= offset_of({e})) && (offset_of({e}) <= len(block_of({e})))))",
+            "not a WF": f"{e} != null",
+            "true": "true",
+            "WF of another cell": lv._view_wf("loc(block_of(v_a), 0).v_ptr_int"),
+            "a strict upper bound": lv._view_wf(e).replace(f"offset_of({e}) <= len", f"offset_of({e}) < len"),
+            "no lower bound": lv._view_wf(e).replace(f" && (0 <= offset_of({e}))", ""),
+        }
+        for label, cons in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.loop_lines(self.ptr_range(cons))), label)
+        # the antecedent must hold the flag, and WF is only the range of a pointer element
+        self.assertTrue(self.probs(self.loop_lines(self.ptr_range(antecedent_flag=False))))
+        self.assertTrue(self.probs(self.loop_lines(self.ptr_range(field="int"))))
+
+    def test_old_label_stands_only_in_two_conjuncts(self):
+        c = self.conjuncts()
+        cell = "loc(block_of(v_a), k)"
+        # not in the permission or the range conjunct
+        for name in ("acc", "range"):
+            inv = c[name].replace(".v_int)", ".v_int)", 1) + " && old[lh_0](true)"
+            with self.subTest(conjunct=name):
+                self.assertTrue(any("`old[label]` outside" in p for p in self.probs(self.loop_lines(inv))))
+        # not in an assert, an ensures or a plain statement
+        for lines in (self.method([Check(f"  assert old[lh_0]({cell.replace('k', '0')}.v_int) == 1", A, "check")]),
+                      ["method m__2()", Check("  ensures old[lh_0](x) == 1", P, "postcondition"), "  decreases", "{", "}"],
+                      self.method(["  v_a := old[lh_0](v_a)"])):
+            self.assertTrue(any("`old[label]` outside" in p for p in self.probs(lines)), lines)
+        # twin: the plain `old(e)` of a postcondition is not this rule's
+        self.assertEqual(self.probs(["method m__2(x: Int)", Check("  ensures x == old(x)", P, "postcondition"), "  decreases", "{", "}"]), [])
+
+    def test_the_label_must_be_defined_earlier_in_the_method(self):
+        c = self.conjuncts()
+        probs = self.probs(self.loop_lines(c["flags"], label=False))
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in probs), probs)
+        # a label of another method does not count
+        lines = ["method m__0()", "  decreases", "{", "  label lh_0", "}"] + self.loop_lines(c["flags"], label=False)
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in self.probs(lines)))
+        # twin: with the label before the loop it is clean
+        self.assertEqual(self.probs(self.loop_lines(c["flags"])), [])
+        # a label after the loop does not count either
+        lines = self.loop_lines(c["flags"], label=False)
+        lines.insert(len(lines) - 1, "  label lh_0")
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in self.probs(lines)))
+
+
+class QuantifiedLoopHeaderTests(unittest.TestCase):
+    """A loop over an array has quantified invariants whose trigger sets `{ loc(b, k) }` stand in the loop header: the rule that every
+    `while` has a `decreases` clause (decision 0013 item 5) must not take a trigger's `{` for the body's (it did, as a false positive
+    on every array loop of Part C), and must still see a missing clause."""
+
+    TRIGGERED = ["    invariant forall k: Int :: { loc(b, k) } ((0 <= k) && (k < 3)) ==> acc(loc(b, k).v_int)",
+                 "    invariant forall k: Int :: { loc(b, k) } { loc(b, k + 1) } ((0 <= k) && (k < 3)) ==> acc(loc(b, k).d_int)"]
+
+    def lines(self, with_decreases):
+        out = ["method m__1(b: Block)", "  decreases", "{", "  var i: Int := 0", "  while (i < 3)"]
+        out += [Check(t, INV, "internal") for t in self.TRIGGERED]
+        if with_decreases:
+            out.append(Check("    decreases 3 - i", "termination.failed", "termination"))
+        return out + ["  {", "    i := i + 1", "  }", "}"]
+
+    def probs(self, with_decreases):
+        return [p for p in lv.lint_vpr(*build(self.lines(with_decreases)), "t.vpr", "t.vpr.map") if "`while` loop without a `decreases`" in p]
+
+    def test_trigger_sets_in_the_header_do_not_hide_the_decreases_clause(self):
+        self.assertEqual(self.probs(True), [])
+
+    def test_a_missing_decreases_is_still_found_behind_trigger_sets(self):
+        probs = self.probs(False)
+        self.assertEqual(len(probs), 1, probs)
+
+
+class CarriedTermFamilyTests(unittest.TestCase):
+    """Decision 0059 item 10 restates the exemption terms of the heap's owners with `offset_of(P) == 0`, and leaves the loop-carried terms of
+    decisions 0050 and 0056 as they were (reached only through owners, whose updates hold it).  A term without the conjunct is accepted only as
+    exactly one of three families over a pointer variable (`temp`, `kt`, `replaced`); a carried shape that is none of them is refused."""
+
+    LOOP_ROW = "an iteration of this loop may end while it still owns an allocation that the loop does not carry to the next iteration"
+    END_ROW = "`p` may return while it still owns an allocation that its caller does not hand back"
+
+    def probs(self, body, message=None):
+        """The `forperm` problems of a leak row with this exemption: by default the row of a loop's back edge (where the lowering emits
+        the carried terms), or the row with `message` (a function's end)."""
+        lines = HeapTokenTests("test_the_emitters_shape_is_clean").fixture(
+            body=[Check("  assert forperm t: Ref [t.tok] :: " + body, A, "leak", message or self.LOOP_ROW)])
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "forperm" in p and "offset_of" in p]
+
+    T = "(t == loc(block_of({p}), (-1)))"
+
+    def term(self, p="v"):
+        return self.T.format(p=p)
+
+    def test_each_family_is_clean(self):
+        t = self.term
+        for label, body in (
+                ("temp", f"t__9 && (t == loc(block_of(t__8), (-1)))"),
+                ("kt", f"((v != null) && (kt_h0__0 > none)) && {t()}"),
+                ("kt with an alias guard", f"(((v != null) && (block_of(v) != block_of(w))) && (kt_h0__0 > none)) && {t()}"),
+                ("kt with two alias guards", f"((((v != null) && (block_of(v) != block_of(w))) && (block_of(v) != block_of(u))) && (kt_h0__0 > none)) && {t()}"),
+                ("kt with a loop alias flag", f"(((v != null) && ((!ad_h1_w__0) && (!(((v != null) && (w != null)) && (block_of(v) == block_of(w)))))) && (kt_h1__0 > none)) && {t()}"),
+                ("replaced", f"(v != null) && {t()}"),
+                ("replaced with a nullness guard", f"((!(v == null)) && (v != null)) && {t()}"),
+                ("replaced with the ternary guard", f"((!(((v == null) ? 1 : 0) != 0)) && (v != null)) && {t()}"),
+                ("a disjunction of two families", f"(t__9 && (t == loc(block_of(t__8), (-1)))) || (((v != null) && (kt_h0__0 > none)) && {t()})")):
+            with self.subTest(family=label):
+                self.assertEqual(self.probs(body), [], label)
+
+    def test_a_carry_shape_that_is_not_a_family_is_refused(self):
+        t = self.term
+        for label, body in (
+                ("a temp guard on a non-temp pointer", "t__9 && (t == loc(block_of(res), (-1)))"),
+                ("a non-temp guard on a temp pointer", "w && (t == loc(block_of(t__8), (-1)))"),
+                ("a held ghost as the guard", f"held_v && {t()}"),
+                ("a temp guard with a second guard", f"(t__9 && (v != null)) && {t()}"),
+                ("kt without the nullness of its pointer", f"((w != null) && (kt_h0__0 > none)) && {t()}"),
+                ("kt with no nullness at all", f"(kt_h0__0 > none) && {t()}"),
+                ("two kt compares", f"(((v != null) && (kt_h0__0 > none)) && (kt_h0__1 > none)) && {t()}"),
+                ("kt compared with something else", f"((v != null) && (kt_h0__0 >= none)) && {t()}"),
+                ("kt with an alias guard on another pointer", f"(((v != null) && (block_of(w) != block_of(u))) && (kt_h0__0 > none)) && {t()}"),
+                ("kt with an unknown guard", f"(((v != null) && (n > 0)) && (kt_h0__0 > none)) && {t()}"),
+                ("kt with an alias flag of another shape", f"(((v != null) && (!ad_h1)) && (kt_h0__0 > none)) && {t()}".replace("!ad_h1", "ad_h1")),
+                ("replaced with an unknown guard", f"((v != null) && (n > 0)) && {t()}"),
+                ("replaced with the nullness of another pointer", f"((!(w == null)) && (v != null)) && {t()}"),
+                ("a carry shape over a chain pointer", "((loc(member(s, 0), 0).v_ptr_int != null) && (kt_h0__0 > none)) && (t == loc(block_of(loc(member(s, 0), 0).v_ptr_int), (-1)))"),
+                ("a bare term", t()),
+                ("a guard that is not about the pointer", f"(w != null) && {t()}")):
+            with self.subTest(shape=label):
+                probs = self.probs(body)
+                self.assertTrue(any("loop-carry families" in p for p in probs), (label, probs))
+
+    def test_a_family_is_accepted_only_in_the_row_of_a_loops_back_edge(self):
+        # the exact shape of a restated ensures-site term with its offset_of conjunct dropped by a regression: `[g &&] P != null && t == loc(block_of(P), -1)`
+        # for an identifier pointer is text-identical to the `replaced` family, so only the row's origin tells them apart (the map message)
+        t = self.term
+        shapes = (f"(res != null) && {t('res')}", f"(p_x__0 != null) && {t('p_x__0')}",
+                  f"((!(res == null)) && (res != null)) && {t('res')}",
+                  f"((!(((res == null) ? 1 : 0) != 0)) && (res != null)) && {t('res')}",
+                  f"(held_v && (res != null)) && {t('res')}",
+                  "t__9 && (t == loc(block_of(t__8), (-1)))",
+                  f"((v != null) && (kt_h0__0 > none)) && {t()}")
+        for body in shapes:
+            with self.subTest(shape=body):
+                self.assertTrue(any("loop's back edge" in p or "loop-carry families" in p for p in self.probs(body, self.END_ROW)), body)
+        # twins: the family shapes are clean in the loop row (the rest of the family tests), and a restated term is clean in the end row
+        for body in (f"(res != null) && {t('res')}", f"((v != null) && (kt_h0__0 > none)) && {t()}"):
+            self.assertEqual(self.probs(body, None), [], body)
+        self.assertEqual(self.probs(f"((res != null) && (offset_of(res) == 0)) && {t('res')}", self.END_ROW), [])
+        # a map entry that is not the loop row's, or no map entry, keeps the term refused
+        text, _ = build(HeapTokenTests("test_the_emitters_shape_is_clean").fixture(
+            body=[Check("  assert forperm t: Ref [t.tok] :: " + f"(res != null) && {t('res')}", A, "leak")]))
+        probs = [p for p in lv.lint_vpr(text, None, "t.vpr", "t.vpr.map") if "offset_of" in p]
+        self.assertTrue(probs, probs)
+
+    def test_a_family_is_not_a_way_around_the_restated_terms(self):
+        # the restated families keep their conjunct: a term over an expression pointer or with a ghost guard needs it even next to a carry term
+        t = self.term
+        body = f"(held_v && {t()}) || ((v != null) && {t()})"
+        self.assertEqual(len(self.probs(body)), 1, self.probs(body))
+
+
+class ElementFlagTests(unittest.TestCase):
+    """Decision 0059 item 12: the flag of an array element is set through a `Ref` temporary, `t.v_<t> := ...` then `t.d_<t> := true`;
+    the old flag rule (decision 0019 item 5, 0032 item 11) already reads that shape.  Writing it through `loc(block_of(a), i)` gets its
+    own message (S43's hand-written fixtures do, so they are not lint-clean by design)."""
+
+    def lines(self, body):
+        return ["method m__1()", "  decreases", "{", "  var v_a: Ref", "  var t__1: Ref", *body, "}"]
+
+    def probs(self, body):
+        return [p for p in lv.lint_vpr(*build(self.lines(body)), "t.vpr", "t.vpr.map") if "flag" in p]
+
+    CELL = "loc(block_of(v_a), offset_of(v_a) + 1)"
+
+    def test_a_flag_through_a_temporary_is_clean(self):
+        body = [f"  t__1 := {self.CELL}", "  t__1.v_int := 2", "  t__1.d_int := true"]
+        self.assertEqual(self.probs(body), [])
+
+    def test_a_flag_through_the_element_address_has_its_own_message(self):
+        for body in ([f"  {self.CELL}.v_int := 2", f"  {self.CELL}.d_int := true"],
+                     [f"  t__1 := {self.CELL}", "  t__1.v_int := 2", f"  {self.CELL}.d_int := true"]):
+            probs = self.probs(body)
+            self.assertTrue(any("through a `Ref` temporary" in p and "decision 0059 item 12" in p for p in probs), probs)
+
+    def test_a_flag_through_a_temporary_still_needs_the_write_before_it(self):
+        probs = self.probs([f"  t__1 := {self.CELL}", "  t__1.d_int := true"])
+        self.assertTrue(any("does not directly follow a write" in p for p in probs), probs)
+        probs = self.probs([f"  t__1 := {self.CELL}", "  t__1.v_int := 2", "  t__1.d_int := false"])
+        self.assertTrue(any("is assigned `false`" in p for p in probs), probs)
+
+    def test_a_flag_of_a_global_cell_keeps_its_own_receiver(self):
+        body = ["  loc(GB_g(), 0).v_int := 2", "  loc(GB_g(), 0).d_int := true"]
+        self.assertEqual([p for p in self.probs(body) if "through a `Ref` temporary" in p], [])
 
 
 if __name__ == "__main__":

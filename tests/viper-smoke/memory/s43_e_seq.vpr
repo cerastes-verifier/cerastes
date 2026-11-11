@@ -1,0 +1,82 @@
+// expect: verified
+// S43 (e): the unsequenced row of two element accesses: loc(b, i) != loc(b, j) holds exactly when i != j (record 0028 item 12, 0059 item 9). Verifies (the axioms loc_inv and loc_nonnull are enough).
+// S43 hand-written fixture of the target shapes of record 0059 (draft; plan .claude/plans/m4-5e1-arrays.md 3.5), written from the emitted shapes in build/m4.5e1a/baseline/vpr. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1): a fresh block of n slots, every element uninitialized, the block's liveness token; full permission to both fields of every slot in [0, n), each its own quantifier over the absolute slot (record 0059 item 3, draft)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+// cerastes:trusted-contract the static-object part of an array initializer: it takes and returns the same permissions and ensures every element zero and initialized (record 0059 item 3, draft)
+method zero_arr_int(r: Ref, n: Int)
+  requires (1 <= n) && (r == loc(block_of(r), 0)) && (len(block_of(r)) == n)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(r), k).v_int == 0)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> loc(block_of(r), k).d_int
+  decreases _
+
+
+method seq_distinct(b: Block, i: Int, j: Int)
+  requires i != j
+{
+  assert loc(b, i) != loc(b, j) // the unsequenced row of two element accesses, when the indices differ
+}
+method seq_injective(b: Block, i: Int, j: Int)
+  requires loc(b, i) != loc(b, j)
+{
+  assert i != j // and only then
+}
+method seq_same(b: Block, i: Int, j: Int)
+  requires i == j
+{
+  assert loc(b, i) == loc(b, j)
+}
+method seq_array(i: Int, j: Int)
+  requires (0 <= i) && (i < 3) && (0 <= j) && (j < 3) && (i != j)
+{
+  var v_a: Ref
+  v_a := alloc_arr_int(3)
+  assert loc(block_of(v_a), offset_of(v_a) + i) != loc(block_of(v_a), offset_of(v_a) + j) // a[i] and a[j] of one array, i != j
+  assert loc(block_of(v_a), offset_of(v_a) + i) != loc(block_of(v_a), offset_of(v_a) + i + 1) // a[i] and a[i + 1]
+}

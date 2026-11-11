@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_declaration @ L9
 // c-only: a flexible array member is not C++
 // twin: tests/memory/struct_local.c
-// Pins: 0043 item 2: a flexible array member is rejected (M4.5e1)
+// Pins: 0043 item 2: a flexible array member is rejected (M8: flexible array members, record 0059 item 1)
 #include <cerastes.h>
 
 struct F {

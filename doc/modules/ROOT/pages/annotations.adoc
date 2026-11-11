@@ -316,8 +316,9 @@ Three attributes from the pass:[C++] initialization profile (P4222), in the
 
 | `cerastes::uninit`
 | `CERASTES_UNINIT`
-| On a local without an initializer: it starts without a value. Every read is
-  checked as for any such local; with an initializer the attribute is
+| On a local without an initializer, a local array included: it starts without
+  a value. Every read is checked as for any such local; with an initializer the
+  attribute is
   `cerastes-uninit_initialized` (xref:verifying.adoc#uninitialized[Locals without an
   initializer]).
 
@@ -499,7 +500,7 @@ Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
   it to `T *` first);
 * `owning` on a pointer to a `const` or `volatile` object (nothing may be written
   through an owner);
-* `owning(n)`, an owned range, which comes with arrays;
+* `owning(n)`, an owned range, which comes with contracts over ranges of elements;
 * either attribute twice on one variable;
 * either attribute on a global or a `static` local whose initializer is not a null
   pointer (an owner owns only what it is given).

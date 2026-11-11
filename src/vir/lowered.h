@@ -54,6 +54,9 @@ struct LExpr
     // Ite, PermOf, Write, NoPerm and PermDiv are the Perm-valued expressions (`LType::Perm` variables hold them).  ForPerm (decision 0047 item 7) is
     // `forperm t: Ref [t.tok] :: a`, the one assertion that every free token the method holds satisfies `a` (a leak row's); `a` is in `a` and mentions the
     // binder `t`, never `tok`; it appears only in a heap program (`LProgram::heap`), as the whole condition of an `Assert`.
+    // Forall (decision 0059 items 3, 7 and 8; appended, M4.5e1a part A, nothing builds one yet): `forall <text>: Int :: { t1 } { t2 } ... a`, one Int binder named
+    // `text`, one trigger set per element of `args` (each a single term over the binder), the body in `a`.  Old may carry a label in `text` (`old[lbl](a)`; empty:
+    // `old(a)`).
     enum class Kind
     {
         IntLit,
@@ -73,10 +76,11 @@ struct LExpr
         Acc,
         Dom,
         Old,
-        ForPerm
+        ForPerm,
+        Forall
     } kind {Kind::IntLit};
     // IntLit: a decimal (possibly negative); Var: the name; Fn: the prelude function; ModPow2, DivPow2: the divisor,
-    // 2^k, a decimal;
+    // 2^k, a decimal; Old: the label (empty: none); Forall: the binder's name;
     std::string text;
     // Field, PermOf, Acc: the Viper field (`v_int`, `d_int`, `lv`); Dom: the domain function (`loc`, `len`, ...)
     bool bool_value {false}; // BoolLit
@@ -86,7 +90,7 @@ struct LExpr
     E a;
     E b;
     E c;
-    std::vector<E> args; // Fn, Dom
+    std::vector<E> args; // Fn, Dom; Forall: the triggers, one `{ t }` each
 };
 
 E int_lit(std::string decimal);
@@ -105,7 +109,14 @@ E write_perm();                            // `write`
 E no_perm();                               // `none`
 E acc(E recv, std::string field_name);     // `acc(recv.field)`, in an `exhale` or a contract
 E acc(E recv, std::string field_name, E amount); // `acc(recv.field, amount)`, a contract clause (decision 0037 item 6)
-E old_(E a);        // `old(a)`: the value in the state at entry (an `ensures`, or the body of a method)
+E old_(E a); // `old(a)`: the value in the state at entry (an `ensures`, or the body of a method)
+E old_(
+    E a,
+    std::string
+        label); // `old[label](a)`: the value in the state at the statement labeled `label` (decision 0059 item 8); an empty label is `old(a)`
+// `forall binder: Int :: { t1 } { t2 } body` (decision 0059 items 3, 7 and 8): `triggers` are the terms of the trigger sets, one set each, over `binder`
+// (`var(binder)`); at least one is required, and `binder` must be a valid Viper identifier (std::logic_error otherwise).
+E forall_(std::string binder, std::vector<E> triggers, E body);
 E for_perm(E body); // `forperm t: Ref [t.tok] :: body` (decision 0047 item 7), body over the binder `t` (`var("t")`)
 E perm_div(E a, int divisor); // `a / divisor`, a Perm over a positive Int literal (decision 0037 item 6)
 // An application of one of the Block domain's functions (`loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`,
@@ -146,8 +157,14 @@ struct Meta
 // message maps to (the table of scripts/run_tests.py) and the meaning of a failure.
 struct Check
 {
+    Check() = default;
+    // the ordinary check: no expected reason (a constructor, so that the aggregate initializations `Check {id, meta}` stay as they are)
+    Check(std::string id, Meta m) : viper_id(std::move(id)), meta(std::move(m)) {}
     std::string viper_id; // "assert.failed", "call.precondition", "invariant.not.established", ...
     Meta meta;
+    // A marked range row (decision 0059 item 7): the one Silicon reason (`insufficient.permission`) the driver accepts as this row's failure, besides the
+    // id's own.  The position map writes the row's id as `<viper_id>[<expected_reason>]`.  Empty: none, as every check before decision 0059.
+    std::string expected_reason;
 };
 
 // ---- statements ---------------------------------------------------------------------------------------------------

@@ -81,14 +81,16 @@ does not own. Today that covers, in C23 and in pass:[C++]20:
   (xref:verifying.adoc#one-unit[the single-unit assumption]).
 * *Memory:* pointers to local and global variables, pointer parameters and
   results with ownership contracts (`owns`, `reads`, `old`), pointers to
-  pointers, C structures, and single objects allocated with `malloc` and
+  pointers, C structures, local arrays (indexing checked against their bounds,
+  pointers to their elements), and single objects allocated with `malloc` and
   `calloc` and released with `free`, with leaks reported
   (xref:memory.adoc[Memory and ownership]).
 
 Every message the tool prints is on xref:error-messages.adoc[Error messages].
 
 Anything else is rejected with a diagnostic at its line, never approximated:
-among it arrays, pointer arithmetic, floating point, references, classes and
+among it arrays outside a function's locals, contracts over ranges of elements,
+pointer arithmetic, floating point, references, classes and
 templates. The lists are on xref:verifying.adoc#not-supported[Verifying a
 program] and xref:memory.adoc#not-yet[Memory and ownership]. Results are for
 one translation unit.

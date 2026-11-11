@@ -147,6 +147,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.5d2b2b Owning fields | 2026-11-09/10 | 0055 | `owning` on members: the closure of every atom over owning fields (acyclic, any depth), the value rule at stores, named leaves as owners in memory, copies, loops; P4417R0's `[[owner]]` mapped |
 | M4.5d2b2c Loop limits, long-running tests | 2026-11-10 | 0056, 0057 | six of d2b2b's loop false alarms lifted (flags a loop cannot fill, the value set, a leaf's ghost through an alias, `main`'s global leaf, a site's cells as places, chains at any depth), the escape scan, two exit 3s fixed; five pins under the written-invariant rule; `tests/long/` opt-in by `CERASTES_LONG=1` |
 | M4.5d2b2d `not_invalidating`, `--strict-owner`, marked fields | 2026-11-10 | 0058 (0029, 0042, 0052, 0054, 0055 amended) | `cerastes::not_invalidating` checked at the definition (taken implies returned; `p->q == old(p->q)` spliced, a bodiless borrow's tie implied); `--strict-owner` (P4417R0's p4 and p6, two tags); `ref_to_uninit` on fields (marked closures keep flags only where tied) and on pointers to structures with owning fields (closing nothing); N1; two older exit 3s fixed, a third to M4.8 |
+| M4.5e1a Arrays inside one function | 2026-11-11 | 0059 (0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043, 0054 amended) | automatic local arrays as blocks (`alloc_arr`/`zero_arr`), `a[i]`, `&a[i]`, `p[i]` on any pointer, the decay, braced initializers with C's zero fill, `out-of-bounds`, marked range rows in the driver, loops carrying arrays, sequencing between elements, `sizeof(a)`, `uninit` on arrays; EDG's #175, #1162 and #138 as errors; array designators rejected (question 234); the `offset_of == 0` backstops (question 235) |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above. `internal/status.md` has a
 row per session with its outcome, each record has the detail, and the approved session plans from M4.5b1a on are in
@@ -184,15 +185,14 @@ session by session, as each planning's survey measured the work (b1c, c, c2, d2,
 2026-11-11; plan `.claude/plans/m4-5e1-arrays.md`): M4.5e1 is five sub-sessions, e1a–e1e, each a session of its own.
 The owner decided there (questions 226–228) that `forall` in C names a `pure` function whose body is inlined, that
 the exact array sum is in M4.5e1 (so e1d takes `pure` bodies and their recursion from M4.5f1/f2), and that
-`cerastes_reads_range` is added beside `owns_range`. e1a is ready; e1b–e1e each run their probes and spikes, then
-plan again.
+`cerastes_reads_range` is added beside `owns_range`. e1a is done (2026-11-11, record 0059); e1b–e1e each run their
+probes and spikes, then plan again.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5e1a Arrays inside one function** | next: local arrays as blocks, `a[i]`, `&a[i]`, braced initializers (P38), scope exits, the marked range rows in the driver, `out-of-bounds`, loops over arrays, sequencing between elements, pointers into arrays (`p[i]`, decay) | M4.5c1 |
-| **M4.5e1b Ranges in contracts** | `owns_range` and `reads_range` as quantified permissions, array parameters, calls and returns over ranges, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter; the `carrays.c` port | M4.5e1a |
+| **M4.5e1b Ranges in contracts** | next: `owns_range` and `reads_range` as quantified permissions, array parameters, calls and returns over ranges, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter; the `carrays.c` port | M4.5e1a |
 | **M4.5e1c Quantifiers** | `forall` in C (0029 item 4; question 226: a `pure` function's body inlined), max, the tutorial chapter | M4.5e1b |
 | **M4.5e1d Pure functions and the exact sum** | `pure` bodies as Viper functions, calls of `pure` functions in annotations, recursion with `decreases`; the exact array sum (question 227) | M4.5e1c |
 | **M4.5e1e Arrays in aggregates and storage** | inner arrays and arrays of structs on M4.5c1's member blocks, 2-D arrays, global and `static` arrays, array compound literals; M4.4b2's types computed from constants, for array types | M4.5e1b |
@@ -371,6 +371,11 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
     0025 item 6's "still accepted" shapes and handoff §3's M4.4c notes first, and EDG's #550 on a global that only
     contracts read (M4.5b2a; the compilers are silent); its old plan is
     `git show 9017105:internal/handoff.md` §4.2. Its record takes the next free number when it runs.
+  - **From M4.5e1a** (record 0059): `int a[static N]` parameters (question 230: C makes a shorter argument undefined,
+    and no contract states it); array designators (`{[2] = 5}`, question 234: EDG keeps only the folded index outside
+    templates, so lifting them needs an EDG change that keeps the designator's expression); `_Alignof`/`alignof` of an
+    expression, accepted for scalars since before e1a although clang warns by default (`-Wgnu-alignof-expression`),
+    and rejected for arrays; VLAs, zero-length arrays, flexible array members, pointers to arrays.
   - **`ubuntu-24.04-clang18`** (owner, 2026-11-09, handoff question 169): EDG emulating clang 18 differs on eight
     tests (record 0053 item 11). The CI profile stays at `dispatch` as the record of what that emulation changes, and is
     revisited here.

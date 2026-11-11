@@ -364,7 +364,7 @@ DRIVER_CATEGORIES = frozenset({
     "precondition", "postcondition", "check", "invariant-entry", "invariant-preserved",
     "overflow", "division-by-zero", "shift", "conversion", "missing-return", "termination",
     "noreturn", "uninitialized", "null-dereference", "permission", "lifetime",
-    "pointer-comparison", "unsequenced", "invalid-free", "leak"})
+    "pointer-comparison", "unsequenced", "invalid-free", "leak", "out-of-bounds"})
 # The outcomes whose test runs `cerastes verify` (when it is a C or C++ file).
 VERIFY_KINDS = ("verified", "error", "rejected")
 # The outcomes of a long-running test (decision 0057): a run that reaches Silicon.  A `rejected` test stops in the

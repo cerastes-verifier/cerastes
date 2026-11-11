@@ -1496,6 +1496,8 @@ void define_loop_limits_l2();
 void define_not_invalidating();
 void define_not_invalidating_rejections();
 void define_marked_fields();
+void define_arrays_rejected_until_part_b();
+void define_arrays_lowering();
 } // namespace
 
 #include "selftest_cases2.inc"
@@ -1524,6 +1526,8 @@ void define_marked_fields();
 #include "selftest_cases25.inc"
 #include "selftest_cases26.inc"
 #include "selftest_cases27.inc"
+#include "selftest_cases28.inc"
+#include "selftest_cases29.inc"
 
 namespace {
 
@@ -1593,7 +1597,8 @@ const char* harness_category(const std::string& viper_id)
                                                        {"invariant.not.preserved", "invariant-preserved"},
                                                        {"not.wellformed", "wellformedness"},
                                                        {"termination.failed", "termination"}};
-    auto it {t.find(viper_id)};
+    // a marked range row's id is written `<id>[<reason>]` (decision 0059 item 7): the harness category is the id's
+    auto it {t.find(viper_id.substr(0U, viper_id.find('[')))};
     return it == t.end() ? nullptr : it->second;
 }
 
@@ -1622,7 +1627,8 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
         std::ofstream(dir + "/" + c.name + ".dump.map", std::ios::binary | std::ios::trunc) << first.map;
     }
     // Which Viper lines must fail.
-    std::vector<std::pair<int, std::string>> fails; // (relative vpr line, harness category)
+    // (relative vpr line, the expectation text `<harness category>:<Silicon reason>`)
+    std::vector<std::pair<int, std::string>> fails;
     for (const Expect& e : k.expects)
     {
         std::vector<const MapRow*> hits;
@@ -1659,7 +1665,18 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
                 problem = "no harness category for Viper error id " + r->id;
                 return false;
             }
-            fails.emplace_back(r->vpr_line, hc);
+            // The reason Silicon gives: a marked range row's own (decision 0059 item 7, written in its id as `<id>[<reason>]`), else the failed assertion's.
+            const size_t open {r->id.find('[')};
+            std::string reason {"assertion.false"};
+            if (open != std::string::npos && r->id.back() == ']')
+            {
+                reason = r->id.substr(open + 1U, r->id.size() - open - 2U);
+            }
+            else if (std::string(hc) == "termination")
+            {
+                reason = "tuple.false";
+            }
+            fails.emplace_back(r->vpr_line, std::string(hc) + ":" + reason);
         }
     }
     for (const Kit::RowCount& want : k.row_counts)
@@ -1794,6 +1811,8 @@ int main(int argc, char** argv)
     define_not_invalidating();
     define_not_invalidating_rejections();
     define_marked_fields();
+    define_arrays_rejected_until_part_b();
+    define_arrays_lowering();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

@@ -436,6 +436,7 @@ and the harness self-test compares this table with the decision record.
 | `unsequenced` | two accesses to one object, at least one a write, that C does not order, or an access and a call that may change the object (decisions 0028, 0039) | the later access, or the later call |
 | `invalid-free` | `free` is given what is not the start of an allocation the function owns entirely: a double free, a local, a global, a member, a block a callee still holds (decision 0047 item 6) | the `free` call |
 | `leak` | a function returns while it still owns an allocation it does not hand back (decision 0047 item 7; `main`'s return included, question 123), or a loop iteration ends owning an allocation the loop does not carry | the function's closing brace; for an iteration, the loop body's closing brace |
+| `out-of-bounds` | an index or a formed address may be outside the object it is taken from: `a[i]` read or written with `i` outside `[0, N)`, `&a[i]` with `i` outside `[0, N]` (one past the end is formed, never accessed; decision 0059 item 4, decision 0028 item 10); a constant index outside a named array is not this category but is rejected (EDG's `subscript_out_of_range`) | the subscript |
 
 ## Every back-end diagnostic has a test
 

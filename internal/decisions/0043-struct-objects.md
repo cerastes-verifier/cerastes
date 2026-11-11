@@ -346,3 +346,5 @@ under the attribute); a C23 compatible
   changes its Viper.
 - Struct values across calls, struct globals and contracts that read through a heap pointer wait for M4.5c2; owning
   fields for M4.5d2.
+
+*2026-11-11, amended by 0059 (M4.5e1a): item 6 — EDG's #1162 (excess initializers) is an error in C verify mode, structure initializers included (0059 item 3).*

@@ -1,0 +1,131 @@
+// expect: verified
+// S43 (d): a callee with two reads(*p) atoms (peek_two) given &a[i] and &a[j] with symbolic indices 0 <= i, j < 3 (record 0037 item 8's single amount, the aliasing disjunct a == b, the fractions) over a quantified chunk: the call's rows, the call, the callee's postcondition, and the write that the regained permission allows. Verifies; no qp.not.injective.
+// S43 hand-written fixture of the target shapes of record 0059 (draft; plan .claude/plans/m4-5e1-arrays.md 3.5), written from the emitted shapes in build/m4.5e1a/baseline/vpr. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1): a fresh block of n slots, every element uninitialized, the block's liveness token; full permission to both fields of every slot in [0, n), each its own quantifier over the absolute slot (record 0059 item 3, draft)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+// cerastes:trusted-contract the static-object part of an array initializer: it takes and returns the same permissions and ensures every element zero and initialized (record 0059 item 3, draft)
+method zero_arr_int(r: Ref, n: Int)
+  requires (1 <= n) && (r == loc(block_of(r), 0)) && (len(block_of(r)) == n)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(r), k).v_int == 0)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> loc(block_of(r), k).d_int
+  decreases _
+
+// reads(*a), reads(*b): one amount rd for the method (e2/s25's peek_two, record 0037 item 8)
+method peek_two(a: Ref, b: Ref, rd: Perm) returns (v: Int)
+  requires none < rd && rd < write
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires (b == null) || (((b == loc(block_of(b), offset_of(b))) && (0 <= offset_of(b))) && (offset_of(b) <= len(block_of(b))))
+  requires (a != null) && (b != null) && (offset_of(a) < len(block_of(a))) && (offset_of(b) < len(block_of(b)))
+  requires acc(a.v_int, rd) && acc(a.d_int, rd) && a.d_int && acc(b.v_int, rd) && acc(b.d_int, rd) && b.d_int
+  requires acc(lvloc(block_of(a)).lv, rd) && acc(lvloc(block_of(b)).lv, rd)
+  ensures (offset_of(a) < len(block_of(a))) && (offset_of(b) < len(block_of(b)))
+  ensures acc(a.v_int, rd) && acc(a.d_int, rd) && a.d_int && acc(b.v_int, rd) && acc(b.d_int, rd) && b.d_int
+  ensures acc(lvloc(block_of(a)).lv, rd) && acc(lvloc(block_of(b)).lv, rd) && v == a.v_int + b.v_int
+{
+  assert a != null
+  assert perm(a.v_int) > none
+  assert perm(a.d_int) > none && a.d_int
+  assert b != null
+  assert perm(b.v_int) > none
+  assert perm(b.d_int) > none && b.d_int
+  v := a.v_int + b.v_int
+  assert perm(a.v_int) >= rd + (a == b ? rd : none) && perm(a.d_int) >= rd + (a == b ? rd : none)
+  assert a.d_int
+  assert perm(b.v_int) >= rd + (b == a ? rd : none) && perm(b.d_int) >= rd + (b == a ? rd : none)
+  assert b.d_int
+  assert perm(lvloc(block_of(a)).lv) >= rd + (lvloc(block_of(a)) == lvloc(block_of(b)) ? rd : none)
+  assert perm(lvloc(block_of(b)).lv) >= rd + (lvloc(block_of(b)) == lvloc(block_of(a)) ? rd : none)
+}
+
+
+method reads_two_sym(i: Int, j: Int)
+  requires (0 <= i) && (i < 3) && (0 <= j) && (j < 3)
+{
+  var v_a: Ref
+  var v: Int
+  var rd1: Perm
+  v_a := alloc_arr_int(3)
+  assert !((offset_of(v_a) + 0 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 0)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 0).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 0).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 0).v_int := 1
+  loc(block_of(v_a), offset_of(v_a) + 0).d_int := true
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 1).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 1).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 1).v_int := 2
+  loc(block_of(v_a), offset_of(v_a) + 1).d_int := true
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 2).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 2).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 2).v_int := 3
+  loc(block_of(v_a), offset_of(v_a) + 2).d_int := true
+  assert !((offset_of(v_a) + i < 0) || (len(block_of(v_a)) <= offset_of(v_a) + i))
+  assert !((offset_of(v_a) + j < 0) || (len(block_of(v_a)) <= offset_of(v_a) + j))
+  assert offset_of(loc(block_of(v_a), offset_of(v_a) + i)) < len(block_of(loc(block_of(v_a), offset_of(v_a) + i)))
+  assert offset_of(loc(block_of(v_a), offset_of(v_a) + j)) < len(block_of(loc(block_of(v_a), offset_of(v_a) + j)))
+  assert loc(block_of(v_a), offset_of(v_a) + i) != null
+  assert perm(loc(block_of(v_a), offset_of(v_a) + i).v_int) > none && perm(loc(block_of(v_a), offset_of(v_a) + i).d_int) > none && loc(block_of(v_a), offset_of(v_a) + i).d_int
+  assert loc(block_of(v_a), offset_of(v_a) + j) != null
+  assert perm(loc(block_of(v_a), offset_of(v_a) + j).v_int) > none && perm(loc(block_of(v_a), offset_of(v_a) + j).d_int) > none && loc(block_of(v_a), offset_of(v_a) + j).d_int
+  assert perm(lvloc(block_of(v_a)).lv) > none
+  rd1 := (perm(loc(block_of(v_a), offset_of(v_a) + i).v_int) < perm(lvloc(block_of(v_a)).lv) ? perm(loc(block_of(v_a), offset_of(v_a) + i).v_int) : perm(lvloc(block_of(v_a)).lv)) / 3
+  assert perm(loc(block_of(v_a), offset_of(v_a) + i).v_int) >= rd1 + (loc(block_of(v_a), offset_of(v_a) + i) == loc(block_of(v_a), offset_of(v_a) + j) ? rd1 : none) && perm(loc(block_of(v_a), offset_of(v_a) + i).d_int) >= rd1 + (loc(block_of(v_a), offset_of(v_a) + i) == loc(block_of(v_a), offset_of(v_a) + j) ? rd1 : none)
+  assert perm(loc(block_of(v_a), offset_of(v_a) + j).v_int) >= rd1 + (loc(block_of(v_a), offset_of(v_a) + j) == loc(block_of(v_a), offset_of(v_a) + i) ? rd1 : none) && perm(loc(block_of(v_a), offset_of(v_a) + j).d_int) >= rd1 + (loc(block_of(v_a), offset_of(v_a) + j) == loc(block_of(v_a), offset_of(v_a) + i) ? rd1 : none)
+  assert perm(lvloc(block_of(v_a)).lv) >= rd1 + rd1
+  v := peek_two(loc(block_of(v_a), offset_of(v_a) + i), loc(block_of(v_a), offset_of(v_a) + j), rd1)
+  assert v == loc(block_of(v_a), offset_of(v_a) + i).v_int + loc(block_of(v_a), offset_of(v_a) + j).v_int // the callee's postcondition, with symbolic i and j
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + i).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + i).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + i).v_int := 9
+  loc(block_of(v_a), offset_of(v_a) + i).d_int := true
+  assert loc(block_of(v_a), offset_of(v_a) + i).v_int == 9
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  assert !(perm(lvloc(block_of(v_a)).lv) != write) //LIVE
+  exhale forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int)
+  exhale forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).d_int)
+  exhale acc(lvloc(block_of(v_a)).lv)
+}

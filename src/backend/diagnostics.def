@@ -254,3 +254,13 @@ CERASTES_DIAG(empty_body, error,
 CERASTES_DIAG(return_local_address, error,
               "this `return` gives back the address of \"%s\", whose lifetime ends when the function returns "
               "(-Wreturn-stack-address, -Wreturn-local-addr): return a value, or a pointer the caller gave (decision 0039)")
+// An array local (decision 0059 items 4 and 10): the shapes clang and GCC warn about by default or at -Wall are rejected like errors.
+CERASTES_DIAG(c99_designator, error,
+              "an array designator \"[%s]\" in a C++ initializer is a C99 feature that clang warns about by default "
+              "(-Wc99-designator) and GCC rejects: write the elements in order (decision 0059)")
+CERASTES_DIAG(array_address_null_test, error,
+              "the address of the array \"%s\" is never null, so %s is always true or always false (-Wpointer-bool-conversion, "
+              "-Wtautological-pointer-compare, -Waddress): test something else (decision 0059)")
+CERASTES_DIAG(char_subscripts, error,
+              "the index of \"%s\" has type \"char\" (-Wchar-subscripts): where plain char is signed a negative value indexes before the array; "
+              "use \"unsigned char\" or \"signed char\", or cast the index (decision 0059)")

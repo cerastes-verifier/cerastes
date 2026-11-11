@@ -258,3 +258,5 @@ session's re-run on the real registration) and S32, in `internal/il-inventory.md
 - `--strict-init` gives P4222's profile in its static form; the default stays 0019's path-precise check.
 - Existing programs change only in the call flag rows of their `.map` and, where a loop holds a place it does not
   write, one invariant line per such place (question 89); no verdict changes.
+
+*2026-11-11, amended by 0059 (M4.5e1a): items 3 and 5 — `cerastes::uninit` applies to an array local without an initializer, and `--strict-init` asks for it (0059 item 11); a loop's flag and range rows hold over every element of every array it carries (0059 item 8).*

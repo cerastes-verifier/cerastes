@@ -261,6 +261,7 @@ bool pointer_node(const Expr& e)
         case Expr::Kind::AddrOf:
         case Expr::Kind::GlobalAddr:
         case Expr::Kind::MemberAddr:
+        case Expr::Kind::ElemAddr:
         case Expr::Kind::Deref:
         case Expr::Kind::Atom:
         case Expr::Kind::StoreE:
@@ -492,6 +493,31 @@ private:
         }
         return "a pointer to " + (in->is_ptr() ? std::string("an unknown type") : in->str()) +
                " (decisions 0032 item 2, 0040 item 2, 0043 item 2)";
+    }
+
+    // Decision 0059 items 1 and 2: the type of an automatic array local, one dimension of at least one element of a bool, an integer, an enumeration or an
+    // accepted pointer (a pointer to an object type; an array of arrays, of structures, of `void *` and every other element type is refused).
+    bool array_local_type(const Type& t) const
+    {
+        if (!t.is_array() || t.element == nullptr || t.count == 0U)
+        {
+            return false;
+        }
+        const Type& e {*t.element};
+        return e.is_ptr() ? accepted_pointer(e) : scalar_type(e);
+    }
+    std::string array_reason(const Type& t) const
+    {
+        if (!t.is_array() || t.element == nullptr)
+        {
+            return "an array without an element type";
+        }
+        if (t.count == 0U)
+        {
+            return "an array of no elements (decision 0059 item 2: the bound is at least 1)";
+        }
+        return "an array of " + t.element->str() +
+               " (decision 0059 items 1 and 2: the element is a bool, an integer, an enumeration or a pointer to an object type)";
     }
 
     // `allow_ptr`: a pointer type counts (locals and expressions); parameters, results, named constants and the like pass false.
@@ -728,6 +754,7 @@ private:
         old_depth_ = 0;
         ok_globals_.clear();
         ok_members_.clear();
+        array_addr_ok_.clear();
         struct_pos_.clear();
         field_base_.clear();
         literal_stores_.clear();
@@ -1725,6 +1752,25 @@ private:
                 err(loc, "variable '" + v.name + "' is " + pointer_reason(v.type));
             }
         }
+        else if (v.type.is_array())
+        {
+            // Decision 0059 item 2: an automatic array local is a block of `count` slots of a scalar or accepted-pointer element, always a cell.
+            if (!array_local_type(v.type))
+            {
+                err(loc, "variable '" + v.name + "' is " + array_reason(v.type));
+            }
+            if (!v.address_taken)
+            {
+                err(loc,
+                    "internal: the array local '" + v.name + "' is not marked address-taken (decision 0059 item 2)");
+            }
+            if (v.owning || v.ref_to_uninit || v.is_param_copy || v.compound_literal)
+            {
+                err(loc,
+                    "the array local '" + v.name +
+                        "' is marked owning, ref_to_uninit, a parameter copy or a compound literal (decision 0059 item 2)");
+            }
+        }
         else if (v.type.is_struct())
         {
             // Decision 0043 item 4: a struct local is always a cell of a block of its struct type.
@@ -1741,6 +1787,10 @@ private:
         else if (!value_type(v.type))
         {
             err(loc, "variable '" + v.name + "' is not a bool or an integer");
+        }
+        if (v.zero_filled && !v.type.is_array())
+        {
+            err(loc, "variable '" + v.name + "' is marked zero-filled but is not an array (decision 0059 item 3)");
         }
         if (!declared_.insert(v.id).second)
         {
@@ -1781,6 +1831,12 @@ private:
                 {
                     err(s.loc, "a declaration without a variable");
                     return;
+                }
+                if (s.var->type.is_array() && s.expr != nullptr)
+                {
+                    err(s.loc,
+                        "an array local '" + s.var->name +
+                            "' declared with an initializer value (decision 0059 item 3: initializers are element stores)");
                 }
                 if (s.var->type.is_struct() && s.expr != nullptr)
                 {
@@ -2266,7 +2322,8 @@ private:
         }
         else if (e.type.is_ptr())
         {
-            if (!accepted_pointer(e.type))
+            // the address of an array local, the base of an element address, is a pointer to an array (checked by its own case)
+            if (!accepted_pointer(e.type) && array_addr_ok_.count(&e) == 0U)
             {
                 err(e.loc, "an expression of type " + e.type.str() + ", " + pointer_reason(e.type));
             }
@@ -2274,6 +2331,11 @@ private:
         else if (e.type.is_struct())
         {
             struct_value(e, ctx);
+        }
+        else if (e.type.is_array())
+        {
+            err(e.loc,
+                "an expression of the array type " + e.type.str() + " (decision 0059 item 2: an array has no value)");
         }
         else if (!value_type(e.type))
         {
@@ -2484,6 +2546,25 @@ private:
                 {
                     err(e.loc, "internal: the address of '" + e.var->name +
                                    "', which is not marked address-taken (decision 0032 item 4)");
+                }
+                if (e.var->type.is_array())
+                {
+                    // Decision 0059 item 4: the address of an array local is the base of an element address, nothing else (the decay as a value is part D's).
+                    if (array_addr_ok_.count(&e) == 0U)
+                    {
+                        err(e.loc,
+                            "the address of the array '" + e.var->name +
+                                "' outside an element address (decision 0059 item 10: the decay of an array is Part D)");
+                    }
+                    else if (!array_local_type(e.var->type))
+                    {
+                        err(e.loc, "the address of '" + e.var->name + "', which is " + array_reason(e.var->type));
+                    }
+                    else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type)
+                    {
+                        err(e.loc, "the address of '" + e.var->name + "' has the wrong type");
+                    }
+                    break;
                 }
                 if (!scalar_type(e.var->type) && !accepted_pointer(e.var->type) &&
                     !(e.var->type.is_struct() && structs_.count(e.var->type.struct_type) != 0U))
@@ -2827,6 +2908,60 @@ private:
             case Expr::Kind::Comma:
                 comma(e, ctx);
                 break;
+            case Expr::Kind::ElemAddr:
+            {
+                // Decision 0059 item 4: the address of element `b` of the array local whose address is `a`; a pointer base is part D's, a contract's is e1b's.
+                if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
+                {
+                    err(e.loc,
+                        "the address of an array element in a contract (decision 0059 item 1: ranges in contracts are M4.5e1b)");
+                    break;
+                }
+                const bool array_base {e.a != nullptr && e.a->kind == Expr::Kind::AddrOf && e.a->var != nullptr &&
+                                       e.a->var->type.is_array()};
+                if (array_base)
+                {
+                    array_addr_ok_.insert(e.a);
+                }
+                const bool base_ok {sub(e.a)};
+                const bool index_ok {sub(e.b)};
+                if (!base_ok || !index_ok)
+                {
+                    break;
+                }
+                if (!array_base)
+                {
+                    // Decision 0059 item 10: any accepted pointer is a base (`p[i]`, `&p[i]`); a pointer to a structure is e1e's, and the type is the pointer's own.
+                    if (!e.a->type.is_ptr() || !accepted_pointer(e.a->type) || e.a->type.pointee == nullptr ||
+                        e.a->type.pointee->is_struct())
+                    {
+                        err(e.loc,
+                            "the address of an element of anything but a local array or a pointer to a bool, an integer, an enumeration or a pointer (decision 0059 item 10; structures: M4.5e1e)");
+                        break;
+                    }
+                    if (!e.b->type.is_int() || is_enum(e.b->type))
+                    {
+                        err(e.b->loc,
+                            "an array index of type " + e.b->type.str() + ", not an integer (decision 0059 item 4)");
+                    }
+                    if (e.type != e.a->type)
+                    {
+                        err(e.loc, "the address of an element of a pointer does not have the pointer's type");
+                    }
+                    break;
+                }
+                if (!e.b->type.is_int() || is_enum(e.b->type))
+                {
+                    err(e.b->loc,
+                        "an array index of type " + e.b->type.str() + ", not an integer (decision 0059 item 4)");
+                }
+                if (!e.type.is_ptr() || e.type.pointee == nullptr || e.a->type.pointee == nullptr ||
+                    e.a->type.pointee->element == nullptr || *e.type.pointee != *e.a->type.pointee->element)
+                {
+                    err(e.loc, "the address of an element does not have a pointer to the array's element type");
+                }
+                break;
+            }
         }
     }
 
@@ -3514,6 +3649,8 @@ private:
     std::set<const Expr*> ok_globals_;
     // the MemberAddr nodes that stand in the place of a Deref or an Atom of a contract (decision 0043 item 9)
     std::set<const Expr*> ok_members_;
+    // the `AddrOf` nodes of array locals that stand as the base of an ElemAddr (decision 0059 item 4)
+    std::set<const Expr*> array_addr_ok_;
     std::unordered_set<const StructType*> structs_; // the program's struct types
     // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field
     // operand; decision 0044 item 2)
@@ -3778,6 +3915,44 @@ private:
     // lowering covers it).
     bool object_of(const Expr* addr, int* key)
     {
+        // An element `a[i]` of an array local whose index is a constant or a local read, named as written (decision 0059 item 9): the array's id and the index.  Two
+        // accesses with the same key name one element; any other index has no key (lowering's path-precise row decides).
+        {
+            const Expr* x {addr};
+            while (x != nullptr && x->kind == Expr::Kind::ReportAt)
+            {
+                x = x->a;
+            }
+            if (x != nullptr && x->kind == Expr::Kind::ElemAddr)
+            {
+                const Expr* base {x->a};
+                const Expr* index {x->b};
+                while (index != nullptr && index->kind == Expr::Kind::ReportAt)
+                {
+                    index = index->a;
+                }
+                if (base == nullptr || index == nullptr || base->kind != Expr::Kind::AddrOf || base->var == nullptr)
+                {
+                    return false;
+                }
+                std::vector<int> path;
+                if (index->kind == Expr::Kind::Const && index->type.is_int() && dec::valid(index->value) &&
+                    index->value.size() < 9U)
+                {
+                    path = {-2, std::stoi(index->value)};
+                }
+                else if (index->kind == Expr::Kind::Local && index->var != nullptr)
+                {
+                    path = {-3, index->var->id};
+                }
+                else
+                {
+                    return false;
+                }
+                *key = member_key(base->var->id, path, place_text(*x));
+                return true;
+            }
+        }
         // A member place `&s.x`, `&p->x`, `&s.t.x`: the base object of the root (as below, for the address the MemberAddrs stand on) and the member path.
         std::vector<int> path;
         const Expr* root {member_root(addr, &path)};
@@ -3902,6 +4077,17 @@ private:
             case Expr::Kind::MemberAddr:
                 absorb(out, expr(e->a), false);
                 break;
+            // Decision 0059 item 9, M4.5e1a part A: the operands are unsequenced siblings.  check_program (Checker::expr) refuses the node itself, so no
+            // program that reaches the encoder's walk holds one; part B adds the element keys.
+            case Expr::Kind::ElemAddr:
+            {
+                const Wr base {expr(e->a)};
+                const Wr index {expr(e->b)};
+                pair(base, index);
+                absorb(out, base, false);
+                absorb(out, index, false);
+                break;
+            }
             case Expr::Kind::GlobalAddr:
                 if (e->global != nullptr)
                 {
