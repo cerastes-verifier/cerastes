@@ -1,0 +1,187 @@
+// expect: verified
+// S43 (d), gate G4: one method with a scalar cell x (alloc_int), an array a (alloc_arr_int) and a pointer parameter p with owns(*p); a loop that reads *p, writes a[i], and stores through a pointer to x. The scalar snapshots of record 0038 (the baseline's own shape, from mix_base.c) sit beside the array's range conjuncts. Verifies; no qp.not.injective.
+// S43 hand-written fixture of the target shapes of record 0059 (draft; plan .claude/plans/m4-5e1-arrays.md 3.5), written from the emitted shapes in build/m4.5e1a/baseline/vpr. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1): a fresh block of n slots, every element uninitialized, the block's liveness token; full permission to both fields of every slot in [0, n), each its own quantifier over the absolute slot (record 0059 item 3, draft)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+// cerastes:trusted-contract the static-object part of an array initializer: it takes and returns the same permissions and ensures every element zero and initialized (record 0059 item 3, draft)
+method zero_arr_int(r: Ref, n: Int)
+  requires (1 <= n) && (r == loc(block_of(r), 0)) && (len(block_of(r)) == n)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(r), k).v_int == 0)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> loc(block_of(r), k).d_int
+  decreases _
+
+// a callee that takes the permission to one element and keeps it (owns(*p) in the requires, nothing returned of the cell; the liveness fraction comes back)
+method keep_cell(p: Ref, amt: Perm)
+  requires (none < amt) && (amt < write)
+  requires (p != null) && (p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))
+  requires (offset_of(p) < len(block_of(p))) && acc(p.v_int) && acc(p.d_int) && p.d_int && acc(lvloc(block_of(p)).lv, amt)
+  ensures acc(lvloc(block_of(p)).lv, amt)
+  decreases _
+
+
+method f_mix(p_p__0: Ref, p_n__1: Int, amt_0: Perm)
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  requires (0 <= p_n__1) && (p_n__1 <= 3)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))) && (offset_of(p_p__0) < len(block_of(p_p__0))) && acc(p_p__0.v_int) && acc(p_p__0.d_int) && p_p__0.d_int && ((-2147483648 <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647)) && acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  ensures (p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))) && (offset_of(p_p__0) < len(block_of(p_p__0))) && acc(p_p__0.v_int) && acc(p_p__0.d_int) && p_p__0.d_int && ((-2147483648 <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647)) && acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  decreases
+{
+  var v_n__1: Int
+  var v_x__2: Ref
+  var v_a: Ref
+  var v_i__3: Int
+  var v_q__4: Ref
+  var s: Int
+  var kl_p_p__0__0: Perm
+  var kv_p_p__0__0: Perm
+  var kd_p_p__0__0: Perm
+  var vs_p_p__0__0: Int
+  var ds_p_p__0__0: Bool
+  var kl_v_x__2__0: Perm
+  var kv_v_x__2__0: Perm
+  var kd_v_x__2__0: Perm
+  var vs_v_x__2__0: Int
+  var ds_v_x__2__0: Bool
+  var kl_a: Perm
+  v_n__1 := p_n__1
+  v_x__2 := alloc_int()
+  v_a := alloc_arr_int(3)
+  zero_arr_int(v_a, 3) // int a[3] = {0}
+  assert !((perm(v_x__2.v_int) != write) || (perm(v_x__2.d_int) != write))
+  v_x__2.v_int := 0
+  v_x__2.d_int := true
+  v_i__3 := 0
+  v_q__4 := v_x__2
+  if (p_p__0 == v_x__2) { }
+  if (lvloc(block_of(p_p__0)) == lvloc(block_of(v_x__2))) { }
+  kl_p_p__0__0 := perm(lvloc(block_of(p_p__0)).lv)
+  kv_p_p__0__0 := perm(p_p__0.v_int)
+  kd_p_p__0__0 := perm(p_p__0.d_int)
+  ds_p_p__0__0 := false
+  if (kd_p_p__0__0 > none) {
+    ds_p_p__0__0 := p_p__0.d_int
+  }
+  if (kv_p_p__0__0 > none) {
+    vs_p_p__0__0 := p_p__0.v_int
+  }
+  kl_v_x__2__0 := perm(lvloc(block_of(v_x__2)).lv)
+  kv_v_x__2__0 := perm(v_x__2.v_int)
+  kd_v_x__2__0 := perm(v_x__2.d_int)
+  ds_v_x__2__0 := false
+  if (kd_v_x__2__0 > none) {
+    ds_v_x__2__0 := v_x__2.d_int
+  }
+  if (kv_v_x__2__0 > none) {
+    vs_v_x__2__0 := v_x__2.v_int
+  }
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  kl_a := perm(lvloc(block_of(v_a)).lv)
+  label lh_0
+  while (v_i__3 < v_n__1)
+    invariant (0 <= v_i__3) && (v_i__3 <= v_n__1)
+    invariant ((p_p__0 != null) && (p_p__0 != v_x__2)) ==> (acc(p_p__0.v_int, kv_p_p__0__0) && acc(p_p__0.d_int, kd_p_p__0__0))
+    invariant ((p_p__0 != null) && (lvloc(block_of(p_p__0)) != lvloc(block_of(v_x__2)))) ==> acc(lvloc(block_of(p_p__0)).lv, kl_p_p__0__0)
+    invariant acc(v_x__2.v_int, kv_v_x__2__0) && acc(v_x__2.d_int, kd_v_x__2__0)
+    invariant acc(lvloc(block_of(v_x__2)).lv, kl_v_x__2__0)
+    invariant (((p_p__0 != null) && (p_p__0 != v_x__2)) && ((none < kv_p_p__0__0) && (kv_p_p__0__0 < write))) ==> (p_p__0.v_int == vs_p_p__0__0)
+    invariant (((p_p__0 != null) && (p_p__0 != v_x__2)) && (((kv_p_p__0__0 > none) && (kd_p_p__0__0 > none)) && p_p__0.d_int)) ==> (((-2147483648) <= p_p__0.v_int) && (p_p__0.v_int <= 2147483647))
+    invariant (((p_p__0 != null) && (p_p__0 != v_x__2)) && ((kd_p_p__0__0 > none) && ds_p_p__0__0)) ==> p_p__0.d_int
+    invariant ((none < kv_v_x__2__0) && (kv_v_x__2__0 < write)) ==> (v_x__2.v_int == vs_v_x__2__0)
+    invariant (((kv_v_x__2__0 > none) && (kd_v_x__2__0 > none)) && v_x__2.d_int) ==> (((-2147483648) <= v_x__2.v_int) && (v_x__2.v_int <= 2147483647))
+    invariant ((kd_v_x__2__0 > none) && ds_v_x__2__0) ==> v_x__2.d_int
+    invariant acc(lvloc(block_of(v_a)).lv, kl_a)
+    invariant forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int)
+    invariant forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).d_int)
+    invariant forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 3)) && old[lh_0](loc(block_of(v_a), k).d_int)) ==> loc(block_of(v_a), k).d_int
+    invariant forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 3)) && loc(block_of(v_a), k).d_int) ==> (((-2147483648) <= loc(block_of(v_a), k).v_int) && (loc(block_of(v_a), k).v_int <= 2147483647))
+    decreases v_n__1 - v_i__3
+  {
+    assert p_p__0 != null
+    assert perm(p_p__0.v_int) > none
+    assert p_p__0.d_int
+    assert !((offset_of(v_a) + v_i__3 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + v_i__3)) //BOUND
+    assert !((perm(loc(block_of(v_a), offset_of(v_a) + v_i__3).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + v_i__3).d_int) != write)) //WPERM
+    loc(block_of(v_a), offset_of(v_a) + v_i__3).v_int := p_p__0.v_int
+    loc(block_of(v_a), offset_of(v_a) + v_i__3).d_int := true
+    assert !((offset_of(v_a) + v_i__3 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + v_i__3)) //BOUND
+    assert perm(loc(block_of(v_a), offset_of(v_a) + v_i__3).v_int) > none //PERM
+    assert loc(block_of(v_a), offset_of(v_a) + v_i__3).d_int //INIT
+    assert v_q__4 != null
+    assert !((perm(v_q__4.v_int) != write) || (perm(v_q__4.d_int) != write))
+    v_q__4.v_int := loc(block_of(v_a), offset_of(v_a) + v_i__3).v_int
+    v_q__4.d_int := true
+    v_i__3 := v_i__3 + 1
+    assert ((p_p__0 != null) && (p_p__0 != v_x__2)) ==> (!((perm(p_p__0.v_int) < kv_p_p__0__0) || (perm(p_p__0.d_int) < kd_p_p__0__0)))
+    assert ((p_p__0 != null) && (lvloc(block_of(p_p__0)) != lvloc(block_of(v_x__2)))) ==> (!(perm(lvloc(block_of(p_p__0)).lv) < kl_p_p__0__0))
+    assert !(((perm(v_x__2.v_int) < kv_v_x__2__0) || (perm(v_x__2.d_int) < kd_v_x__2__0)) || (perm(lvloc(block_of(v_x__2)).lv) < kl_v_x__2__0))
+    assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+    assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  }
+  assert v_q__4 != null
+  assert perm(v_q__4.v_int) > none
+  assert v_q__4.d_int
+  s := v_q__4.v_int
+  assert !(((perm(v_x__2.v_int) != write) || (perm(v_x__2.d_int) != write)) || (perm(lvloc(block_of(v_x__2)).lv) != write))
+  exhale (acc(v_x__2.v_int) && acc(v_x__2.d_int)) && acc(lvloc(block_of(v_x__2)).lv)
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  assert !(perm(lvloc(block_of(v_a)).lv) != write) //LIVE
+  exhale forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int)
+  exhale forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).d_int)
+  exhale acc(lvloc(block_of(v_a)).lv)
+  assert p_p__0 != null
+  assert offset_of(p_p__0) < len(block_of(p_p__0))
+  assert perm(p_p__0.v_int) == write
+  assert perm(p_p__0.d_int) == write
+  assert p_p__0.d_int
+  assert !((p_p__0.v_int < (-2147483648)) || (2147483647 < p_p__0.v_int))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+}

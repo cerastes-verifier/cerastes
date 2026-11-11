@@ -1,0 +1,91 @@
+// expect: verified
+// S43 (f), today's term: the owner holds q = &p[1], one past the end of a one-slot heap block; the leak row's exemption (held && t == tok_slot(owner value), no offset condition) names the block, and the row VERIFIES: the leak of the block is missed (the owner's pointer cannot be passed to free). Verifies = the hole record 0059 item 10 closes.
+// S43 hand-written fixture of the target shapes of record 0059 (draft; plan .claude/plans/m4-5e1-arrays.md 3.5), written from the emitted shapes in build/m4.5e1a/baseline/vpr. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1): a fresh block of n slots, every element uninitialized, the block's liveness token; full permission to both fields of every slot in [0, n), each its own quantifier over the absolute slot (record 0059 item 3, draft)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+// cerastes:trusted-contract the static-object part of an array initializer: it takes and returns the same permissions and ensures every element zero and initialized (record 0059 item 3, draft)
+method zero_arr_int(r: Ref, n: Int)
+  requires (1 <= n) && (r == loc(block_of(r), 0)) && (len(block_of(r)) == n)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(r), k).v_int == 0)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> loc(block_of(r), k).d_int
+  decreases _
+
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate; typed view: one int (decision 0047; the emitted shape of f_malloc)
+method malloc_int() returns (res: Ref)
+  ensures (res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))
+  ensures (!(res == null)) ==> ((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (offset_of(res) == 0) && acc(loc(block_of(res), (-1)).tok) && loc(block_of(res), (-1)).tok && (lvloc(block_of(res)) == loc(block_of(res), (-2))) && acc(lvloc(block_of(res)).lv) && (len(block_of(res)) == 1) && acc(res.v_int) && acc(res.d_int) && (res.d_int ==> (((-2147483648) <= res.v_int) && (res.v_int <= 2147483647))))
+  decreases _
+
+// cerastes:trusted-contract allocation of an address-taken local of type int*: a fresh one-slot block, the cell uninitialized, the liveness token (decision 0032 item 4)
+method alloc_ptr_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_ptr_int)) && acc(r.d_ptr_int)) && (!r.d_ptr_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+
+method one_past_today()
+{
+  var p: Ref
+  var g: Ref
+  var q: Ref
+  var held: Bool
+  p := malloc_int()
+  g := alloc_ptr_int() // the owner: an owning local/global of type int *
+  g.v_ptr_int := null
+  g.d_ptr_int := true
+  if (p != null) {
+    q := loc(block_of(p), offset_of(p) + 1) // &p[1]: one past the end of the one-slot block
+    g.v_ptr_int := q
+  }
+  held := true // main holds the owner's cell (the term's own framing)
+  goto l_end
+  assert false
+  label l_end
+  assert forperm t: Ref [t.tok] :: held && (t == loc(block_of(g.v_ptr_int), (-1)))
+}
