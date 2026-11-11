@@ -17,9 +17,10 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 
 ## M4.5e1a — Arrays inside one function (2026-11-11): done on branch `m4.5e1a-arrays-in-functions`
 
-Plan: `.claude/plans/m4-5e1-arrays.md` section 3 (there is no `m4-5e1a-*.md`). Record 0059 (amends 0011, 0012, 0024,
-0028, 0032, 0038, 0039, 0042, 0043, 0054). Read `internal/handoff.md` next: §1, §2, §3 "M4.5e1b", §4.2, §8 (questions
-234 on).
+Plan: section 3 of `git show dc40377:.claude/plans/m4-5e1-arrays.md` (there is no `m4-5e1a-*.md`; the file in the
+tree was trimmed at M4.5e1b's planning). Record 0059 (amends 0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043,
+0054). Read `internal/handoff.md` next: §1, §2, the rules of §4, §6, §8 (questions 238 on). Merged as PR #34
+(`dc40377`).
 
 **Owner decisions:** 229–233 answered inline before the session ("Follow recommendation" each), committed to local
 `main` as `1c5f9bd`; the branch is from it (not from `origin/main` = `d88a457`, which lacks only that commit). Open,
@@ -117,8 +118,9 @@ handoff §3 has the rest.
   overview, the tutorial's index), the record's items 1, 8 and 10, `plan.md`'s M8 entries and the handoff corrected;
   `build_docs.sh` and the doc-tree self-tests (30) green. No code changed after `3ceb13c`.
 
-**First step for the next session:** merge and push (handoff §2), then M4.5e1b: its Step 0 and the probes and spikes of
-plan section 4 (P79, S44), then plan again.
+**First step for the next session** (as of M4.5e1b's planning, 2026-11-11, which planned it in full): M4.5e1b from
+`.claude/plans/m4-5e1b-ranges-in-contracts.md`: its Step 0 (section 4), then P79 and S44 with their decision tables
+(section 5); it does not plan again.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 

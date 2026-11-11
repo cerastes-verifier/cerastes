@@ -1,46 +1,48 @@
-# Handoff after M4.5e1a (2026-11-11) — M4.5e1b (ranges in contracts) next
+# Handoff after M4.5e1a and M4.5e1b's planning (2026-11-11) — M4.5e1b (ranges in contracts) next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
-`internal/decisions/`, then its plan: `.claude/plans/m4-5e1-arrays.md`, whose section 4 is M4.5e1b's (its probes and
-spikes, then plan again). `status.md` has the formal entry of the last finished session (M4.5e1a). This file adds what a cold
-start would otherwise have to rediscover, and holds only what is live (owner, 2026-10-26).
+`internal/decisions/`, then its plan: **`.claude/plans/m4-5e1b-ranges-in-contracts.md`**, which is complete (M4.5e1b
+does not plan again: its probes and spikes have decision tables). `status.md` has the formal entry of the last
+finished session (M4.5e1a). This file adds what a cold start would otherwise have to rediscover, and holds only
+what is live (owner, 2026-10-26).
 
-It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10) and at M4.5e1's
-(2026-11-11), each at the owner's request. The history of finished sessions, the notes that had moved into session
-plans and the digests of answered questions were cut, and the open notes were re-filed under the session that
-consumes each. **The text before this consolidation is `git show f57ee43:internal/handoff.md`** (the owner then
-answered questions 224 and 225 inline; §8 keeps the answers); the one before it is
-`git show 262edb3:internal/handoff.md`, and the first is `git show 2430529:internal/handoff.md`, whose header
-names every earlier version. Each note below keeps its origin in brackets, so its full wording can be found there.
-Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan's
-"Inputs".
+**What M4.5e1b's orchestrator needs here:** §1, §2, the rules of §4, §6 and §8. §3's notes belong to later
+sessions (e1b's own inputs moved into its plan, section 12), and §4.1, §4.3, §4.4 and §5 are other sessions'.
+
+It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
+M4.5e1b's (both 2026-11-11), each at the owner's request. The history of finished sessions, the notes that had
+moved into session plans and the digests of answered questions were cut, and the open notes were re-filed under
+the session that consumes each. **The text before this consolidation is `git show 825a9ee:internal/handoff.md`**
+(with the owner's answers to 234 and 235 as written inline); the ones before it are
+`git show f57ee43:internal/handoff.md`, `git show 262edb3:internal/handoff.md` and
+`git show 2430529:internal/handoff.md`, whose header names every earlier version. Each note below keeps its
+origin in brackets, so its full wording can be found there. Session plans approved from M4.5b1a on are in
+`.claude/plans/`; the notes a session consumes move into its plan's "Inputs".
 
 ## 1. State
 
-- **M4.5e1a** (2026-11-11; record 0059; plan `.claude/plans/m4-5e1-arrays.md` section 3) is done on branch
-  `m4.5e1a-arrays-in-functions`, **not merged**: `main` = `1c5f9bd` (the owner's answers to 229–233, not pushed),
-  `origin/main` = `d88a457`. Its result is in `internal/status.md`; its commits are `05b4075` (record draft, P78, S43),
-  `d09c3fc` (record after audit round 1), `0209647` (Parts A and B), `ccb5910` (Parts C, D and E), `d507551` (the
-  re-audit's lint fix, record 0059 accepted), then status, this file and docs. The box's full `check.sh` with `CERASTES_LONG=1` on `3ceb13c` was all green (14,208 passed, 0 failed;
-  the long tier ran; 78 minutes at `-j32`).
-- **M4.5e1b** ranges in contracts is next: section 4 of the plan (P79, S44), then plan again; §3 "M4.5e1b" below has
-  e1a's as-built inputs (the plan's 4.5). e1c, e1d, e1e as before.
+- **M4.5e1a** (2026-11-11; record 0059) is done, merged (PR #34) and pushed: `origin/main` = `dc40377`. Local
+  `main` adds two commits, not pushed: `825a9ee` (the owner's answers to 234 and 235) and this planning's. Its
+  result is in `internal/status.md`; the box's full `check.sh` with
+  `CERASTES_LONG=1` on `3ceb13c` was all green (14,208 passed, 0 failed; the long tier ran; 78 minutes at `-j32`).
+- **M4.5e1b** ranges in contracts is next, planned in full on 2026-11-11 (record 0060 is its number). Against the
+  earlier sketch, two things moved to M4.5e2 (questions 236 and 237, §8). e1c, e1d and e1e as before
+  (`.claude/plans/m4-5e1-arrays.md`, trimmed to what they need).
 - **CI:** unchanged (record 0053; question 176 the owner's). No `profiles=all` dispatch has run (question 172).
 - **The Linux host** `matt@clang4.cpp.al`: container `cerastes-s8-ubuntu-26.04`, checkout `/work/cerastes`
   (`~/cerastes-s8/p-ubuntu-26.04`), detached at `3ceb13c` with `e1a-check.log`; the bundles `/tmp/e1a.bundle` and
-  `/tmp/e1a-final.bundle` on the host (and in the container's `/tmp`) can go after the merge.
+  `/tmp/e1a-final.bundle` on the host (and in the container's `/tmp`) can go.
+- **The main checkout** has no session worktree and no side branch left (e1a's were removed).
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Merge and push:** `git merge --ff-only m4.5e1a-arrays-in-functions` on `main` (the branch is `main` plus this
-   session's commits), then push. The main checkout's working tree is clean.
-2. **Questions 234 and 235** (§8): both built as recommended; answer inline if either should differ.
+1. **Push** `main` (two commits: `825a9ee`, and this planning's with the plan, the trimmed umbrella plan and this
+   file), so that M4.5e1b branches from `origin/main`.
+2. **Questions 238–240** (§8): each is built as its recommendation unless answered inline.
 3. **CI** (question 176): unchanged from the last handoff (the nightly does not fit 360 minutes; the `profiles=all`
    dispatch is pending, question 172).
-4. **Optional.** `git worktree remove .claude/worktrees/m4.5e1a-audit` (the audit snapshots) and
-   `.claude/worktrees/m4.5d2b2d-aux`; the side refs `snap/m4.5e1a-*` (`git branch -D`); on the box the bundles in
-   `~`.
+4. **Optional.** On the box, e1a's bundles in `/tmp` and `~`.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -118,28 +120,9 @@ Notes that a session consumes move into its plan's "Inputs".
   - A loop that frames a struct local out still loses an `int` member's value when the loop reaches it otherwise (the
     re-audit's r3 and r5 had to return `s.data == NULL ? 1 : 0` instead of `s.n`): the same on the base. [d2b2c]
 
-**M4.5e1b Ranges in contracts** (next; plan section 4). **e1a's as-built inputs** (the plan's 4.5; lines at `ccb5910`;
-Part D was not cut):
-- VIR: `Type::Kind::Array` (`vir.h:94`), `Program::array_of` (`vir.cpp:297`), `Expr::Kind::ElemAddr` (`vir.h:421`),
-  `Builder::elem_addr` (`vir.cpp:828`: an array base `Ptr(Array(T,N))` gives `Ptr(T)`), `elem_place` and
-  `postfix_operand_text` (spelling), `Var::zero_filled`, `Stmt::keyword_loc`; lowered `Forall`, `old_(e, label)`,
-  `Check::expected_reason`.
-- Encoder (`encode.cpp`): `array_vtype`, `written_as_array_declarator`, `check_array_bound`, `subscript_address`
-  (array or any pointer base), `subscript_read`, `array_decay` (`ElemAddr(AddrOf(a), 0)`), `collect_array_elems`,
-  `array_initializer`, the `sizeof` lift in `reject_computed_sizeof_operand`. **What e1b lifts:** the `[static N]`
-  parameter rejection, an element in a contract, `p[i]` in a loop invariant or measure, atoms on elements (`spec_atom`,
-  `place_pointer`'s "an element: M4.5e1b"), `owning(n)` on a parameter, `owns_range`/`reads_range`.
-- `check.cpp`: an array local in `declare`; `AddrOf` of an array only as an `ElemAddr` base; `ElemAddr`'s case (a
-  contract refused; struct pointees refused).
-- Lowering (`lower.cpp`): `ArrayAlloc`/`array_alloc_method` (`alloc_arr_<t>`, `zero_arr_<t>`, emitted on use),
-  `zero_fill`, `elem_addr` (rows: null, lifetime, bound with `offset_of`, then the consumer's permission and flag),
-  `array_scope_exit`, `range_perm` and `emit_marked_row` (the only producer of `expected_reason`), `ArrayPlace` built in
-  `loop`, the reach rule (`LoopWrites::cells`), `inv_elem`, the array-place alias guards, `split_candidates` (an array
-  cell: its first element only), the `offset_of == 0` backstops in `holds_token`, `leak_exemption`, `flag_follows`.
-- S43 (h)'s costs: three arrays and two loops 3.4 s; S26's scale program at K = 16 4.9 s, 13.3 s with one array (the
-  swaps' `perm` queries). Limits e1b inherits: `p[1]` under `owns(*p)` fails twice (bound, permission; S43 N1).
-- From e1a's audits, for e1b: `sizeof` of an array parameter is accepted today although clang warns by default
-  (`-Wsizeof-array-argument`), as before e1a; e1b's array parameters should reject it like the compilers. [round 3]
+**M4.5e1b Ranges in contracts** (next): its inputs (e1a's as-built names, S43's costs, N1, the `sizeof` note of
+e1a's audit round 3) are section 12 of its plan, and the survey of the tree at `dc40377` is its section 3. One
+correction to the earlier note: `int a[static N]` is **not** lifted by e1b; it stays rejected (M8, question 230).
 
 **From M4.5e1a, for later sessions:**
 - e1c: a fill loop over an array declared without an initializer, then a read, is `uninitialized`
@@ -168,6 +151,14 @@ Part D was not cut):
   adds to `flag_follows`' user `permission` row and to the ending leak rows is redundant; with `malloc(n * sizeof(T))`
   and `p + i` an owner may hold `&p[1]`, and those rows (and the lint's loop-carry exemption, which accepts carried
   terms without the conjunct) must be re-argued, with tests, before M4.5e2 lands. [e1a rounds 3, 4]
+- **From M4.5e1b's planning** (questions 236 and 237; e1b pins each, naming M4.5e2): an atom on one element in a
+  contract (`owns(p[i])`, with `owns(*(p + i))`; `place_root` has no step for `ElemAddr`, and place keys, partners
+  and loop places need one); a range atom written in a loop invariant, for a pointer the function assigns or a
+  heap array held through a local (0040 item 5's written atoms over quantified permissions: no `perm` snapshot
+  under a quantifier), with the pinned false alarm of a loop in a function that assigns its range parameter; a
+  range whose base is `result`, a global, a member or a loaded pointer; a count that reads memory; a partnerless
+  `ensures` range and one with another count than its `requires` partner; `&p[e]` and `p + i` in a contract.
+  [e1b planning]
 - From M4.5e1's plan: whether `*p` gains a bounds row (question 229: e1a reports a `*p` one past the end as
   `permission`); `owning(n)` on results, locals, fields and globals (e1b gives it to parameters only); the pins
   `reject_malloc_size_*.c`, `reject_calloc_size_count.c`, `reject_realloc.c`, `reject_struct_member_arith.c`,
@@ -435,10 +426,12 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   probes, IL evidence, Silicon spikes, `src/vir` + `src/viper`; test-mutator: tests, harness, compiler matrices,
   `mutate.py`, `lint_viper.py`) and the Opus soundness-auditor (one round per diff plus a re-audit of blocking
   fixes; should-fix items not taken go to §3). The orchestrator is Opus and may consult a Fable advisor (owner,
-  2026-11-10). One exception to disjoint files, as in M4.5d2b2c: two agents may edit `lower.cpp` one after the
-  other, never at once, with a commit or a snapshot between; an agent that needs the file while another holds it
-  works on copies (`lower.work.cpp`) and its own build. Agents are resumed between tasks (SendMessage) rather than
-  replaced; each report also goes to `build/<session>/<role>-report-<n>.md`.
+  2026-11-10). **A session's plan assigns the work** (owner, 2026-11-11: the orchestrator does not decide the
+  ensemble): M4.5e1b's plan, section 2, is the model. At most three Sonnet agents are alive at once. edg-backend
+  and the test-mutator are resumed between tasks (SendMessage); the il-analyst is replaced by a fresh one after
+  the spikes and wherever the plan says (`lower.cpp` is 19,293 lines), so a session may spawn five. `lower.cpp`
+  and the VIR files have one holder at a time, with a commit or a snapshot between; an agent that needs the file
+  while another holds it asks the orchestrator. Each report also goes to `build/<session>/<role>-report-<n>.md`.
 - **While working:** single-file runs (`build/cerastes verify` directly: `run_tests.py` locks `build/vpr`); builds
   serialized (`lockf build/<session>/build.lock cmake --build build/cmake`).
 - **`check.sh` once, at the end, after the last code change** (owner, 2026-11-09: "Since each run of check.sh now
@@ -521,14 +514,15 @@ each a session of its own with its record, twins, docs, audits and one box `chec
 | Sub-session | Scope | Plan |
 |---|---|---|
 | **e1a** (done 2026-11-11, record 0059) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers, scope exits, the marked range rows, `out-of-bounds`, loops over arrays, sequencing, the `offset_of == 0` backstops, `sizeof(a)` | section 3; `internal/status.md` |
-| **e1b** (next) | `owns_range`, `reads_range`, array parameters, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, the `carrays.c` port | section 4: P79 and S44, then plan again |
+| **e1b** (next; record 0060) | `owns_range`, `reads_range`, element reads in contracts, array parameters, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, the `carrays.c` port | `.claude/plans/m4-5e1b-ranges-in-contracts.md`, complete: P79 and S44 with decision tables, no second planning |
 | **e1c** | `cerastes_forall` with the `pure` function's body inlined, max, the fill loop, the tutorial chapter | section 5: P80 and S45, then plan again |
 | **e1d** | `pure` bodies as Viper functions, recursion, the exact sum | section 6: P81 and S46, then plan again |
 | **e1e** | array members, arrays of structures, 2-D arrays, global and `static` arrays, array compound literals, 0024 item 6 lifted for array types | section 7: P82 and S47, then plan again |
 
 A sub-session marked "plan again" starts outside plan mode with its Step 0, Step 1, probes and spikes as its section
 gives them (they change no `src/`), commits their results to `internal/il-inventory.md`, then plans the encoding
-steps from them and from the as-built facts of the sub-sessions before it.
+steps from them and from the as-built facts of the sub-sessions before it. e1b is not one of them: the owner had it
+planned in full before its spikes (2026-11-11), each probe and spike with a table of what is built per outcome.
 
 **M4.5e2 Pointer arithmetic** (needs e1a and e1b; may run before e1c–e1e). `p + i`, `p - i`, `p - q`, relational
 comparisons within one object, `malloc(n * sizeof(T))`, `calloc(n, …)`, `realloc`; relational comparisons and
@@ -886,27 +880,34 @@ M4.5e2 decides its bounds row), 230 (`int a[static N]` rejected, an M8 entry: e1
 `owns_range(p, n)` and `reads_range(p, n)` imply `p != NULL`), 232 (e1c: `cerastes_old(p[i])` in a `pure` body that
 only an `ensures` names), 233 (e1e: its planning may split it).
 
-**For confirmation** (decided in M4.5e1a without a question; say if any should have been asked): the deviations listed
-in `internal/status.md`'s M4.5e1a entry (edg-backend took all of Part A and Part B's `check.cpp`; Part B's encoder
-before audit round 1 returned; Parts A+B and C–E committed in two commits, C–E audited in one round; the constant-index
-twins became #175 rejections, also inside `if (0)`; `Stmt::keyword_loc`; the VIR self-test's reasons; the lint's
-exempt loop-carry shapes; audit round 1 item 15's pin replaced).
+**Answered after M4.5e1a (2026-11-11), each "Follow recommendation."** (the owner's inline answers; the questions as
+asked, with the answers, are in `git show 825a9ee:internal/handoff.md` §8): 234 (array designators stay rejected in C and C++, an M8
+entry needing an EDG change; a bound naming a local constant stays rejected), 235 (the 1,080 `.vpr` files of the
+`offset_of == 0` restatements are accepted as e1a's Flips D). M4.5e1a's deviations (its status entry) were listed
+there for confirmation, and nothing was objected to.
 
-**Open** (each with a recommendation; answer inline; the next handoff's questions start at 236):
-- **234** (from M4.5e1a, audit round 1 B1) Array designators (`int a[4] = {[2] = 5};`) are rejected in C as well as
-  C++: outside templates EDG keeps only the folded index, and verify mode suppresses #61–63 on the strength of every
-  constant being checked as written, so `{[65536u * 65536u + 1] = 7}` would write element 1 unchecked (0022). Built:
-  rejected in both modes (C `unsupported_declaration`, an M8 entry needing an EDG change; C++ `c99_designator`, as the
-  compilers warn), with duplicate indexes and GNU range designators. Beside it, P78 F1's pre-agreed rejection of a bound
-  naming a local constant also refuses `constexpr int N = 4; int a[N];` in C++ (a namespace-scope constant works).
-  **Recommended:** keep both as built; no answer makes accepting designators sound without EDG work.
+**Answered at M4.5e1b's planning (2026-11-11), each the recommendation:**
+- **236** An atom on one element in a contract (`cerastes_owns(p[i])`): **deferred to M4.5e2**, with
+  `owns(*(p + i))`. Nothing in e1b needs it (`owns_range` covers it, and a caller passes `&a[i]` to an `owns(*p)`
+  callee already); `array_reject_element_atom.c` stays, re-pointed.
+- **237** A range atom written in a loop invariant (`CERASTES_INVARIANT(cerastes_owns_range(q, m))`): **deferred to
+  M4.5e2**. Until pointer arithmetic and heap arrays every range a loop can reach is an automatic place (a local
+  array, or the range of a parameter the function never assigns).
+- The umbrella plan `.claude/plans/m4-5e1-arrays.md` was trimmed: its sections 3 (e1a's approved plan) and 4 (e1b's
+  sketch) are pointers to `git show dc40377:`.
+- The owner set the ensemble for M4.5e1b: an Opus orchestrator that executes the plan without re-planning, three
+  Sonnet implementers and the Opus reviewer from `.claude/agents/`, and a Fable advisor.
 
-Follow recommendation.
-
-- **235** (from M4.5e1a, Part D) The `offset_of == 0` restatements (record 0059 item 10, defensive backstops no
-  encoder path reaches) changed 1,080 existing `.vpr` files (no `.map`); the allow-list computed before the build
-  predicted 849 (its search missed the `.tok` spelling). Every changed line was classified (2,630 held-ghost updates,
-  902 leak-row exemption terms, 52 flag clauses), the 1,080 programs re-run (status "Checks"), the six slowest timed
-  before and after on the box. **Recommended:** accept the 1,080 as the plan's Flips D.
-
-Follow recommendation.
+**Open** (from M4.5e1b's planning; each is built as its recommendation unless answered inline; the next handoff's
+questions start at 241):
+- **238** `cerastes_reads_range`'s ghost amount at a call is taken from the range's first cell (`perm` cannot stand
+  under a quantifier), and marked rows then check the whole range at that amount. A caller that holds unequal
+  fractions over the range gets a false `permission`. **Recommended:** accept it as a pinned, listed limit (record
+  0060 item 6).
+- **239** A `cerastes::must_init` filler over a range that fills with a loop cannot state its invariant before
+  e1c's quantified invariants, so it is a pinned false alarm in e1b (a straight-line filler verifies).
+  **Recommended:** accept; e1c gives the pin its verifying twin.
+- **240** Array parameters (`T a[]`, `T a[N]`) are pointer parameters, accepted since before e1a with no test. e1b
+  measures their shapes in clang and GCC (the `sizeof` of one, two declarations with different bounds, a shorter
+  array argument) and rejects, with a tag and a pin each, what warns without a flag or at `-Wall` in either
+  compiler. **Recommended:** follow the matrix, as 0020 item 5's rule does.
