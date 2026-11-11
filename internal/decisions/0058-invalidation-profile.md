@@ -1,7 +1,9 @@
 # 0058 — `not_invalidating`, `--strict-owner`, marked fields (M4.5d2b2d)
 
-- **Status:** draft (2026-11-10, M4.5d2b2d), written before code (invariant 6); to be revised after P77 and S42
-  (`internal/il-inventory.md`, chapter M4.5d2b2d) and audit round 1. Owner decisions from M4.5d2b2c's planning,
+- **Status:** accepted (2026-11-10, M4.5d2b2d), written before code (invariant 6), revised after the encoder survey,
+  P77 and S42 (`internal/il-inventory.md`, chapter M4.5d2b2d, with S42's addendum), audit round 1 (B1, S1–S9), audit
+  round 2 on Part N (no blocking item; S1, N1–N4), audit round 2 on Parts S and F (B1, S1, S2, N1–N5) and the re-audit
+  of their fixes (no blocking item; S1 to M4.8, question 222); each item says what was built. Owner decisions from M4.5d2b2c's planning,
   2026-11-10 (plan `.claude/plans/m4-5d2b2d-invalidation-profile.md`), each the recommendation:
   - **202:** `ref_to_uninit` on a pointer (parameter, result, variable) to a structure with an owning field is accepted,
     the marked site closing nothing (item 4). If the audit finds a hole, the rejections stay.
@@ -298,4 +300,21 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
 
 ## Consequences
 
-To be written when the record is accepted.
+- P4418R0's invalidation profile is spelled in C as far as C has it: `cerastes::not_invalidating` is checked at the
+  definition and gives callers the pointers it keeps; `--strict-owner` asks P4417R0's p4 and p6 statically, beside the
+  path-precise `leak` and `invalid-free` every mode already checks; `ref_to_uninit` reaches fields, so a structure whose
+  buffer is not yet written can be handed to a filler. C++'s parts (references, member functions, `std::no_dangling`)
+  are M7's.
+- A bodiless borrow of a structure with an owning field no longer writes its tie by hand when its parameter is marked;
+  callers keep pointers into what a marked parameter reaches.
+- A marked site keeps flags across a call only where it is tied (item 4), for fields and for 0054's owning and marked
+  globals alike; untied, a replacement is possible and nothing about the buffer's values survives the call.
+- Question 202's rule (a marked pointer to a structure with an owning field closes nothing) costs callers a false
+  `leak` when a `ref_to_uninit` callee nulls the field; `must_init` is the way out.
+- Two exit 3s that predated the session are fixed on the way (0054 item 5's kept row; the return rows' order); a third
+  (a permission atom read through a block site's cell before the block's own rows) is M4.8's (question 222).
+- `lint_viper.py` pins the new `f__wf` row and the marked Kept rows; three of the plan's lint shapes (a marked
+  `requires` site without a bare flag conjunct, no flag asserts in the Uninit modes, a given site without flags) need the
+  site's mode, which the Viper does not name, and are listed for later.
+- Pinned limits for M4.8: the loop false alarms of item 4 ("Limits"); the written `owns_block` loop invariant on a marked
+  field (closes below it).

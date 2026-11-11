@@ -822,8 +822,13 @@ and amount, as the encoder's `check_not_invalidating` does). An internal error o
 `owning_leaf_of`), and the deep atom of an owning and `ref_to_uninit` global (0054 item 2) is the other
 `marked_through_load` site; every marker of a formal's site is as before. `block_mode` then gives, for such a site: a
 `requires` site `Uninit` (no flag claimed); a given `ensures` site (no `requires` partner, audit S2) `Uninit`; a borrowed
-one `Kept` only where it is **tied** (`site_tied`: an `E == old(E)` conjunct of an `ensures` clause, found by tree, written or
-spliced) and `Uninit` otherwise. *Why tied only (audit B1; the table is in the addendum of S42 in `il-inventory.md`):* a
+one `Kept` only where it is **tied** (`site_tied`, by position, audit round 2 S1: an `E == old(E)` conjunct that is
+unconditional at the top of any `ensures` clause (`conjunct_ties`), or a conjunct of an `&&` chain on the path from the root
+of the site's own clause down to its atom, the other operand of each `&&` above it (`tie_on_path`, which descends `&&`
+operands, the right operand of `||` and the arms of `?:`, as `contract_atoms` finds sites): so the equality
+`not_invalidating` splices under an `owning` guard counts, and so does a guarded written tie under the site's own guards; a tie under
+another guard, or in another `||` arm or `?:` arm, is never an operand of an `&&` on that path and does not count) and
+`Uninit` otherwise. *Why tied only (audit B1; the table is in the addendum of S42 in `il-inventory.md`):* a
 body that frees and replaces the block compares the old block's flag with the new block's, and the model does not prove
 a fresh block differs from the freed one (`free` consumes the token and the liveness cell, `malloc` inhales another's, and
 Silicon's distinctness assumption covers only locations it still holds), so no sound row verifies an untied replacing
@@ -832,12 +837,23 @@ given one does. *The row and one error:* a `Kept` site's row, `(old(L != null) &
 factored out of `block_conj`), is the site's part of the method's `ensures` (Silicon's own check) AND, in `Ret` mode,
 `block_atom` returns it instead of `true`, so `postconditions()` asserts the whole clause (the tie, the closure's row)
 as one atomic `!(!(CLAUSE))` (`ret_kept_row_`; Silicon reports each conjunct of an asserted `&&` as its own error). A body
-that replaces a tied block gets ONE user `postcondition`, and Silicon's own check of the contract passes after it (no exit 3).
+that replaces a tied block gets ONE user `postcondition` when the tie is in the site's own clause, and Silicon's own check of
+the contract passes after it (no exit 3); a tie that counts by the top-level rule in ANOTHER `ensures` clause is a separate
+return assertion, so a replacing body gets two (the site's clause and the tie's), still no exit 3 (re-audit N2).
 An unmarked owning field keeps the plain closure, byte-identical; a marked field that does not own changes no Viper.
 The caller side (the partner-guard rows at calls and returns) is not touched: an untied callee that replaces an
 initialized buffer leaves the caller `uninitialized` at its read (`mf_untied_replaces_caller_reads`,
 `s42_4b_untied_replaces_caller_reads_fail`). Pinned by `mf_*` (the filler, the read first, the plain controls, the kept
 flag, the replacing bodies) and the fixtures `s42_4b_*` (tied, untied, replacing; the two globals).
+
+*Return rows in order (item 4, audit round 2 B1, question 220).* `block_returns` emits each `ensures` block site's OWN rows
+(`block_rows`, per site in `fb.sites` order) before the separation rows (the pairwise `live_cell` distinctness of two block
+sites, and of a block site and each `ensures` atom site: "... may be the same object"), as the call rows already did and as
+a written loop invariant's back-edge rows did: a separation row reads the pointers of nested sites (`a->b->x` through
+`a->b`'s block), which are readable only where the function still holds that block, and the site's own row is the one that
+ends the path where it does not (Silicon goes on after a failed assert as if it held). A correct program exited 3 on the
+base through a separation row's read (`q7_alias.c`). The separation rows themselves are unchanged. The order changes the Viper of 227 existing programs (row order alone) and drops one duplicate `permission` at the
+same line in three pinned tests (the failed own row is assumed, which proves the blocks distinct).
 
 *A marked owner closes nothing (item 4, question 202).* `owner_marked(OwnerRef)`: a local or global with an empty path is its
 own `ref_to_uninit` (`Var::ref_to_uninit`, `Global::ref_to_uninit`); with a path, the last member's (`StructLeaf::
@@ -1301,7 +1317,14 @@ address constant rejected (`read_struct_global_init`); the same store to an unma
 `owning_leaves` carries each leaf's mark (`leaf_is_marked`); `close_leaf(…, marked)` **stops at a marked leaf**: nothing
 below a marked block is closed (audit S3: its cells have no known value, so its own owning fields own nothing yet), and
 `closure_marked` makes a marked parameter's, a result's and an owning and marked global's block site close nothing
-(`deep_expr` builds no `inner` for such a global). *Question 202:* the three rejections (`reject_marked_owning_pointees` for a
+(`deep_expr` builds no `inner` for such a global), and, since audit round 2 S2, a WRITTEN block site on an owning and
+`ref_to_uninit` member (`owns_block(p->q)`, a `Deref` of a `marked_member_addr` whose member is `owning`) too: `close_source`
+treats every block site as a source, and without this case the written spelling closed below the field (`p->q->x`, plain) while
+the automatic closure of the same field stops at the marked leaf, so the two spellings of one contract meant different things
+(`permission: the contract of fill reads p->q->x without owning it` for the written one). The two now lower to the same contract
+(the tie conjunct differs in position only). It is consulted for contracts, not for loop invariants (a written invariant
+site over a marked field still closes below the field: a pinned false alarm, M4.8); a marked field that does not own is
+unaffected (it changes no Viper). *Question 202:* the three rejections (`reject_marked_owning_pointees` for a
 parameter and a result, the owning-field rejection of `read_variable_markers`) are gone, so `ref_to_uninit` on a pointer
 (parameter, result, variable) to a structure with an owning field is accepted and the marked site closes nothing, on
 either side; `Var::ref_to_uninit` is set from an owning and marked local. A callee that leaves a block in the field is

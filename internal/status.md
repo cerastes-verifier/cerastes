@@ -12,154 +12,104 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 7f11706:internal/status.md`, M4.5c2b's `git show d26a87c:internal/status.md`, and M4.5d1's
 `git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, S6's `git show 9255b93:internal/status.md`, M4.5d2v's `git show c2bc48d:internal/status.md`, S7's `git show a660abc:internal/status.md`, M4.5d2b1's
 `git show c1b691d:internal/status.md`, S8's `git show 15bcdc6:internal/status.md`, M4.5d2b2a's
-`git show 19d977a:internal/status.md`, and M4.5d2b2b's `git show e3f4b9f:internal/status.md`.
+`git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, and M4.5d2b2c's
+`git show 023ea50:internal/status.md`.
 
-## M4.5d2b2c — loop limits of owning fields, long-running tests (2026-11-10): done on branch `m4.5d2b2c-loop-limits`
+## M4.5d2b2d — `not_invalidating`, `--strict-owner`, marked fields (2026-11-10): done on branch `m4.5d2b2d-invalidation-profile`
 
-Plan: `.claude/plans/m4-5d2b2c-loop-limits.md`. Records 0056 (amends 0055 item 7, 0054 items 3 and 5) and 0057 (amends
-0016 item 9 and `tests/README.md`'s grammar). Read `internal/handoff.md` next: §1, §2, §3 "M4.5d2b2d" and "M4.8", §8
-(questions 215 on).
+Plan: `.claude/plans/m4-5d2b2d-invalidation-profile.md`. Record 0058 (amends 0029 items 1–2, 0042 items 4 and 8, 0052
+item 4, 0054 item 2, 0055 items 3 and 11). Read `internal/handoff.md` next: §1, §2, §3 "M4.8", §8 (questions 224 on).
 
-**Owner decisions.** At planning: 195, 198–201 (the plan's "Owner decisions"). In the session (2026-11-10), each asked
-when an agent's finding or a stop rule required it, all the recommendation except 209 and 212:
-- **204** item 2 applies to every synthetic site (eleven programs' Viper changes by `wef_` literals only);
-- **205** the VIR self-test case `owning_leaf_call_alias_leak` follows Flip B;
-- **206** (audit round 1, S1) build the pre-read move after all;
-- **207** (audit round 1, S6) a positive outside `tests/long/` needs a twin outside it;
-- **208** (audit round 2 on L-1, S1) `loop_may_fill`'s call route counts only non-plain `ensures` sites;
-- **209** (S2) **build the escape scan now** (the recommendation was M4.8);
-- **210** (S3) fix the call-row exit 3 now, bounded;
-- **211** (audit round 2 on L-2, B1) fix the loop-entry exit 3 now;
-- **212** (B2) **keep the broad places test as built** (the recommendation was to narrow it): two programs are pinned
-  false alarms, M4.8;
-- **213** (S2) add the two struct-global replace routes now;
-- **214** (re-audit, B1) narrow the escape scan's framing now (only structures with an owning leaf, only loops with no
-  exit from their scope);
-- **217** (before the box run) the six tests slow on the box move to `tests/long/` (record 0057 item 5);
-- and, while 214 was queued (a standing instruction since; memory `verify-delta-not-full-check`): "For all of these fix
-  now items you should discontinue the testing runs since we know that things are going to change."
+**Owner decisions in the session** (2026-11-10), each the recommendation, each recorded in record 0058:
+- **218** N1's swap may change the Viper of the other programs whose bodiless contracts hold both asserts;
+- **219** a third N1 flip, `owning_global_call_dangling_closure.c` (it corrected 218's premise);
+- **220** fix the return-row order now, with three flips (audit round 2 on Parts S and F, B1);
+- **221** keep the tied-only Kept row, and its amendment of 0054 item 2;
+- **222** the re-audit's older exit 3 goes to M4.8;
+- **223** three VIR cases' `fail_only` index follows 220's reorder (it corrected 220);
+- and 215, 216 (M4.8), answered in the handoff before the session.
+
+**Told to the owner and corrected later** (each in §8 of the handoff): 219 said no VIR case was affected by N1, one was
+(its asserts swapped, still verified; the orchestrator's grep was misread); 220 said `@ L58` went x2→x1, the file held
+three (x3→x2); 220 said `q7_alias.c` would give one user error, it gives two (its `leak`, printed before, and the
+`permission`); 223 says the existing VIR cases had not been through Silicon before 220 was asked.
 
 **Step 0 and Step 1.**
-- `origin/main` held the planning commit (`e3f4b9f`); the branch is from `origin/main`.
-- CI: no `profiles=all` dispatch has run, so `macos-26` stays at `dispatch` (question 172). The three nightlies listed
-  (2026-11-07 to 11-09) were cancelled at 3 h 40 min (220 min) and all started before the 360-minute limit (`99b587e`);
-  no nightly has run under it yet. No CI commit.
-- The baseline (5,028 `.vpr`/`.map`, the VIR self-test's 1,707 cases) was taken in the session worktree from bootstrap's
-  build before any change to `src/`; the frozen base build `build/m4.5d2b2c/cerastes-base` served S41.
+- `main` and `origin/main` held M4.5d2b2c (`023ea50`, merged and pushed; handoff §1's "not merged" was stale); the
+  branch is from it. The survey refresh held: `encode.cpp`, `vir.h` and `vir.cpp` unchanged since `262edb3`, `lower.cpp`'s
+  functions moved uniformly.
+- CI: the 2026-11-10 nightly, the first under the 360-minute limit, was cancelled at 6 h 01 min; no `profiles=all`
+  dispatch has run (`macos-26` stays at `dispatch`, question 172). No CI commit.
+- Baseline: 5,144 `.vpr`/`.map` and the VIR self-test's 1,732 cases from bootstrap's build, with frozen base binaries.
 
-**Done** (the three Sonnet roles from `.claude/agents/` and the Opus reviewer, each kept for the whole session and
-resumed between tasks; the orchestrator consulted the Fable advisor):
-- **S41** (`75caf32`, revised in `3e86985`): (0) seven runs of the base on the pins with one change each, every one
-  agreeing with the survey (limits 1, 2(ii) and 7 confirmed); (a)–(c) hand-edited Viper for limits 3, 6 and 4, each
-  verified with a failing twin (nine fixtures `tests/viper-smoke/memory/s41_*`); limit 6 at 12.1–16.6 s, under the
-  60 s rule, so no cut; (d) the programs items 5–7 change.
-- **Part T** (`4103504`, record 0057): the long-running tier `tests/long/<area>/` with `// timeout:` (301–3600 s),
-  `--long`, `CERASTES_LONG=1 scripts/check.sh`, counted skips, the PR tier refusing it, `mutate.py` skipping it, the
-  twin rule of question 207; self-tests that bite (42 + 7 weakenings, then 4 more).
-- **Part L-1** (`49ea34c`, record 0056 items 2–4, edg-backend): limits 5 and 2 lifted; Flips A (three pins), Flip B and
-  its self-test mirror (205); the lint rule for the guarded update.
-- **Part L-2** (`006e742`, items 5–7, il-analyst): limits 4, 3 and 6 lifted; Flips A (three pins); the lint rule for the
-  `hsl_` ghost; `chain3` at 21–22 s built (the pair splits between a dependent closure site and its earlier site are
-  left out, no-op splits).
-- **Flips C** (`68ba68e`, item 8, question 201): four pins renamed (`_no_invariant` ×3 with verifying `_written` twins,
-  `owner_renewed_consumed`, an ordinary must-fail by S41 (0) run 7).
-- **The audits' fixes** (`738971c`, edg-backend): 208, the escape scan (209, then 214), the call-row order (210), the
-  loop-entry order (211), the replace routes (213).
-- **Tests.** 69 new test and fixture files and one documentation example, seven renamed (both modes; the final run on
-  the last build: 408 passed, the only failures the two retired pins and two positives fixed under question 160); VIR
-  self-test 1,732 cases (was 1,707; the session's 25 through Silicon); `test_lint_viper.py` 717 (was 660), each new
-  rule mutation-checked; `test_run_tests.py` 1,216.
-- **Docs** (commit 8): Memory and ownership ("When a loop needs its invariant written" with a tested example, the
-  not-yet list), Error messages (the value rule's two `permission` rows), the developer guide's Testing page and
-  `CLAUDE.md` (the long tier), `tests/README.md` (Part T), `internal/encoding.md`, record 0016 item 9; both records
-  accepted.
-- **Audits** (read-only Opus, one agent resumed per round): round 1 on both drafts with S41 and Part T's harness (no
-  blocking item; S1–S6); round 2 on Part L-1 (B1: the route twins did not pin their routes; S1–S3 became 208–210); round
-  2 on Part L-2 (B1 an exit 3 at the loop entry, B2 the places test; S1–S3); the re-audit of the fixes (B1, the escape
-  scan's framing too broad: 214); a focused review of 214 (no blocking item: the exit test complete, the three users on
-  one predicate). No wrong verdict was found in any round.
+**Done** (the three Sonnet roles and the Opus reviewer from `.claude/agents/`; edg-backend and the il-analyst were each
+replaced by a fresh agent when their context ran low; the orchestrator consulted the Fable advisor before the record,
+each owner question, the box run and the close):
+- **Behaviour-neutral preparation** (`55bd461`, `bfa0537`): the marker plumbing names each kind (an unknown one is an
+  internal error); `gives_result_block`, `param_consumes_block`. vprdiff: all identical.
+- **Record, P77, S42** (`0c06e56`): P77 (`not_invalidating` on parameters, `ref_to_uninit` on fields, `no_dangling`'s
+  #1097; a registered name missing from `kNames` is silently ignored); S42's 33 fixtures (the draft's implicit clause,
+  tied under the site's own null test, let a free-and-null body verify; the framing atom's guards hold in every shape).
+- **N1** (`09d75e6`): the bodiless tie above the partner-guard row; three flips.
+- **Part N** (`14a4cd3`, `8bc0960`): `cerastes::not_invalidating`, its partner check, the spliced `p->q == old(p->q)`,
+  the `f__wf` row taken-implies-returned, the postcondition message; the library-header pin.
+- **Part S** (`28bf393`): `--strict-owner`, p4 and p6 (`owner_result_unowned`, `owner_release_unowned`); with the
+  option on, the 4,555 programs it accepts have byte-identical Viper.
+- **Docs N and S** (`3d03e46`).
+- **Part F with audit rounds 1 and 2's fixes** (`9d41e43`): `ref_to_uninit` on fields, the strict-init rule per leaf, the
+  marked closure Kept only where tied (round 1's B1: 0054 item 5's internal row exited 3 when a body replaced the block),
+  S2, S3, S5 (marked variables close nothing), F2 (question 202's three rejections gone, four pins retired for
+  positives), S1's no-framer rejection (an exit 3), N2–N4.
+- **Round 2 on Parts S and F** (`714796f` the return-row order, B1, question 220; `f0fd5b9` S2, N2, N3, N4 and 0054's
+  docs; `5293eb1` S1, a tie counted by position), the re-audit's notes and question 222 (`133665f`), a lint false
+  positive in the session's own rule (`67d901a`), question 223 and the member-function pins (`3a2a042`).
+- **Tests.** 171 new tests in `tests/memory` (four retired pins deleted, seven expectations flipped: N1's three, B1's three
+  of which two in `tests/long`, and question 223's three VIR indexes), 40 S42 fixtures, 34 doc examples; VIR self-test
+  1,765 cases (was 1,732); `test_lint_viper.py` 736 (was 717; two rules); `test_run_tests.py` 1,221 (was 1,216).
+  `src/` and `include/`: +1,962, −173 (the plan's 740–1,170 without self-tests).
+- **Docs:** Annotations (`not_invalidating`, marked members), Verifying (`--strict-owner`, strict-init's marked fields),
+  Memory and ownership (the P4417R0 table, marked owning fields and pointees, marked owning globals, the not-yet list),
+  Error messages, the tutorial's heap chapter, the developer guide's architecture page, `tests/README.md`,
+  `include/cerastes.h`, `internal/encoding.md`, `internal/il-inventory.md`.
+- **Audits** (one Opus reviewer, resumed per round): round 1 on the draft (B1, S1–S9), round 2 on Part N (no blocking
+  item), round 2 on Parts S and F (B1, S1, S2), the re-audit (no blocking item; its S1 is question 222). No wrong verdict
+  was found in any round; every blocking item was an exit 3.
 
-**Flips and pins** (the plan's, plus the owner's in-session answers):
-- **A:** six pins retired for positives with twins (`pointer_arg`, `owning_local_maybe_null`, `alias_call`,
-  `global_pointer`, `main_holds`, `chain3`). **B:** `owning_field_alias_fill_leak.c` L27→L26 and its VIR mirror (205).
-  **C:** four renamed; `owning_field_loop_owner_replaced_alias_false_alarm.c` kept as it is (its owner is address-taken,
-  so the guarded site cannot be written: rejected, or `permission` through `(*pv)->data`; handoff question).
-  **D:** the allow-listed Viper changes, every outcome unchanged.
-- **Pins added this session and retired by it:** `owning_field_loop_site_{call,store}_written_false_alarm.c` (L-1's
-  route tests; 208 and 209 lift them).
-- **New pinned false alarms** (each a correct program, its actual errors recorded, for M4.8): item 5's entry snapshot
-  (`owning_field_loop_main_alias_false_alarm.c`), the owning global's replace routes
-  (`owning_global_loop_replace_{name,expr,ptrptr,call_type}_false_alarm.c`) and the struct-global leaf's
-  (`owning_global_leaf_replace_{member,struct}_false_alarm.c`), question 212's places test
-  (`owning_field_loop_chain_{cell_write,null_owner}_false_alarm.c`), and the older `stores_type` heuristic
-  (`owning_field_loop_struct_copy_int_false_alarm.c`, the same on the base).
+**Corrections of new tests after their first run** (question 160): `marked_pointee_loop_call_false_alarm.c`'s two
+back-edge errors at the loop body's closing brace (L31, not L28); eight new tests used a set-but-unused `y` (EDG's #550
+in C++20), fixed in their source, outcomes and lines unchanged.
 
-**Corrections of new tests after their first run** (question 160; each listed, none audited separately):
-- `negative/owning_field_loop_owning_local_maybe_null_leak.c` L32→L33 (the closing brace, not the return).
-- `negative/owning_field_loop_chain_free_mid.c` and `…_chain3_free_mid.c`: a `leak` at the return added (the one mistake
-  also leaves the middle block owned on the other paths); `negative/owning_field_loop_main_alias_false_alarm.c` records
-  the encoder's actual errors (two `permission` at the call, an `invalid-free`).
-- `negative/owning_field_loop_{chain3,chain,global_pointer}_freed_before.c` and `…_escape_call_unwritten.c`: the loop's
-  attribute lines joined to its `while` line (C++20 reports a loop's entry row at its first attribute, P59), every
-  later line moved up two.
-- `negative/owning_field_loop_site_call_entry_unwritten.c` L41→L47: the same `uninitialized` at the return, not at the
-  loop's entry row.
-- `owning_field_loop_return_noname.c` and `…_return_nested.c` (the re-audit's r3 and r5): `return s.data == NULL ? 1 :
-  0;` in place of `return 1;` (EDG's #550 and GCC's `-Werror` on a struct local set but never used; reading `s.n`
-  instead was `overflow`, since the loop does not keep that member's value, as on the base).
-
-**Not done.**
-- Question 196's two programs: `cover_twice.c` (base encoder) and `two_fields.c` with its twin (Part L-2) each ran past
-  1800 s in both modes on the quiet box (exit 3 at 1801 s); all three programs' Viper is byte-identical from the final
-  build, so the tries stand. Neither became a long test; both go to M4.8 (question 199).
-- **The long tier's first tests** are this session's own (question 217): timed on the box before `check.sh` (all 115
-  new or changed programs, both modes, twelve at a time, load 2–10), six took 120–641 s there against 20–84 s on the
-  Mac: the struct-global replace pins (628–641 s, 516–519 s), `owning_field_loop_chain3.c` and its twin `_chain3_drop.c`
-  (177 s, 247 s), `_chain_cell_write_false_alarm.c` (170 s) and `_chain3_free_mid.c` (120 s). They moved to
-  `tests/long/memory/` with limits of 1320, 1080, 360, 540, 360 and 360 s (each `// timeout:` line takes the slot of
-  a joined comment line, so no `@ L` line moved); `tests/long` and the re-pointed twin `_chain3_freed_before.c`: 22
-  passed on the Mac. Every other session test took at most 95 s on the box.
-- The pins above; the call route of item 2 has no pin (only a marked global's deep atom reaches it, and VIR cannot
-  express it alone); the whole-structure route is pinned only in the VIR self-test.
-- No cut was taken.
+**Not done.** The older exit 3 of question 222 (M4.8); the pinned loop false alarms of record 0058 item 4 ("Limits");
+three marked-closure lint shapes the Viper cannot show (question 225). No cut was taken.
 
 **Surprises.**
-- **The box is slower than the Mac on these shapes**, four to six times on the chain and closure loops, not
-  uniformly (`pointer_arg` 1.3 times): a session times its new tests on the box before `check.sh` (record 0057 item 5).
-- **The spike's description.** The il-analyst reported that S41 (b) left the deeper pre-read beside the others; the
-  auditor found the spike had moved it, and that the order turns a base exit 3 into mapped rows (206).
-- **Twins that pin nothing.** L-1's first route twins entered the loop with a block, so `wef` came from the entry flag
-  and no route was tested; a twin pins a route only on the path that enters null (the auditor's models).
-- **A benign verified twin.** A VIR escaping twin verified because the carrier invariant `hp ==> held == (s.q != null)`
-  with `held` never assigned in a body without calls or frees fixes `s.q`; with a call in the body it fails as designed.
-- **Cost.** The built `chain3` first took 38–72 s against the spike's 12–16 s: the third site's no-op case splits.
-- **Scope.** `lower.cpp` grew by 901 lines (−102) against the plan's 295–495: the owner's in-session answers 206–214
-  added the escape scan, two orderings and the routes.
+- **Exit 3s, not wrong verdicts.** Every blocking audit item was an exit 3, and two predated the session (0054 item 5's
+  kept row; the return rows' order), made reachable by what the session accepted.
+- **A registered attribute name is silently ignored** until `kNames` has it (P77), so the registration and the reader
+  land together.
+- **The model does not prove a fresh block differs from a freed one**, so no row can keep flags across a possible
+  replacement (round 1's B1): only a tied site keeps them.
+- **Scope.** `src/` grew by about 1,960 lines with the self-tests (the plan's 740–1,170 without): the audits' fixes and
+  S5 (about 45 lines) added to it.
 
-**Checks**
-- vprdiff against the baseline: 114 entries differ (47 programs in both modes, and the ten retired or renamed pins only
-  in the base), every one allow-listed or explained (the parts' allow-lists, question 204's `wef_` literals, item 12's
-  row reorders, item 11's five, 211's eleven).
-- The VIR self-test (1,732 lowering cases, 274 rejection cases, 0 problems; the session's cases through Silicon),
-  `lint_viper.py` over the final regeneration and the VIR output, `test_lint_viper.py`, `test_run_tests.py`,
-  `test_mutate.py`, `format.sh --check`, `build_docs.sh` with `check_doc_examples.py --html`.
-- `CERASTES_LONG=1 scripts/check.sh` (full, `CERASTES_JOBS=32`, clean `build/cmake`) on the x86-64 box in S8's
-  `ubuntu-26.04` container, on `ee2ae5c` (the last change; the commit after it only records this result): **all
-  green**, 12,745 passed, 0 failed, 10 skipped (the nine macOS-only tests of record 0031 and the VeriFast originals),
-  `native-ok` runs clang 2,445 and GCC 2,445; `lint_viper` 5,148 files clean; the VIR self-test 1,732 lowering cases
-  and 274 rejection cases, 0 problems, and its 1,732 cases through Silicon passed and lint-clean; the walker oracle 136
-  goldens, 1,924 facts, 0 failed; the last line `check.sh: long tier: ran (CERASTES_LONG=1)`, the six long tests'
-  16 runs (both modes and `chain3`'s `native-ok`) all passed. It took 73 minutes (20:49–22:02 UTC); the box's load
-  was 0.4 at the start and its 15-minute average about 100 a minute after the end (the cause not determined).
+**Checks** (all on the final source tree, `3a2a042`):
+- vprdiff of the final regeneration against the session's baseline: 384 entries differ, all allowed (N1's eleven
+  programs, the 227 the reorder permuted), 0 unexpected; 31 existing VIR cases permuted, 28 unchanged in outcome and three
+  re-indexed (223).
+- The Mac (`5293eb1`, then the last commits' files singly): 733 runs of the session's 255 tests and doc examples passed
+  with the N1 neighbours, `--long` 4, check-headers 4,884, `test_run_tests.py` 1,221, regeneration 5,412 files and the VIR
+  self-test 1,765 cases lint clean, the session's 33 VIR cases through Silicon, format, docs.
+- The box, before `check.sh`: the session's 391 new, changed or permuted programs timed in both modes (774 runs, the
+  slowest 84 s, exit codes 0–2 only), so none moved to `tests/long/`.
+- `CERASTES_LONG=1 scripts/check.sh` on the box: BOX_RESULT.
 
-**First step for the next session:** M4.5d2b2d (`.claude/plans/m4-5d2b2d-invalidation-profile.md`): its Step 0 checks
-that `origin/main` holds this branch's merge, and its survey refresh re-reads `lower.cpp`'s line numbers (this session
-moved them).
+**First step for the next session:** merge and push (handoff §2), then M4.5e1's planning session (question 224).
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5d2b2d `not_invalidating`, `--strict-owner`, marked fields | 2026-11-10 | `m4.5d2b2d-invalidation-profile` | 0058 (0029, 0042, 0052, 0054, 0055 amended) | `cerastes::not_invalidating` checked at the definition (taken implies returned; `p->q == old(p->q)` spliced, a bodiless borrow's tie implied); `--strict-owner` (P4417R0's p4 and p6); `ref_to_uninit` on fields (marked closures keep flags only where tied) and on pointers to structures with owning fields (closing nothing); N1; two older exit 3s fixed (0054's kept row, the return rows' order), a third to M4.8 |
 | M4.5d2b2c Loop limits, long-running tests | 2026-11-10 | `m4.5d2b2c-loop-limits` | 0056, 0057 (0016 amended) | six of d2b2b's loop false alarms lifted (a site the loop cannot fill keeps its flags, the value set of a lone owner, a leaf's ghost through an alias, `main`'s global leaf under an entry snapshot, a site's cells as places, chains at any depth), the escape scan, two exit 3s fixed; five pins kept under the written-invariant rule; the long-running tier (`tests/long/`, `CERASTES_LONG=1`); question 196's two programs past 1800 s, to M4.8 |
 | M4.5d2b2b Owning fields | 2026-11-09/10 | `m4.5d2b2b-owning-fields` | 0055 | `owning` on members: the closure of every atom over owning fields (acyclic, any depth), the value rule at stores, named leaves (struct locals, globals, `static` locals, by-value copies) as owners in memory, copies, loops; P4417R0's `[[owner]]` mapped; the session tools `regen_vpr.py` and `vprdiff.py`; seven loop limits pinned for d2b2c |
 | M4.5d2b2a Owners in memory | 2026-11-09 | `m4.5d2b2a-owners-in-memory` | 0054 | block sites through loads and on globals; owning and marked globals, `static` locals and address-taken locals (the deep atom; static owners exempt at `main`'s end); written `owns_block` invariants; loop carriers by current state lifting d2b1's four false alarms; the static struct leaf cover; d2b2 split (owning fields and P4418R0 to d2b2b) |

@@ -157,6 +157,7 @@ include::example$tutorial/heap_global_owner_error.c[tag=source]
 [source,console]
 ----
 heap_global_owner_error.c:16: error: permission: returns while owning global `g` does not hold its block: set it to `NULL` after freeing it
+heap_global_owner_error.c:13: note: this is the postcondition
 ----
 
 == A structure that owns its buffer
