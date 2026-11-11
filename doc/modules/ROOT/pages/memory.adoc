@@ -1137,6 +1137,26 @@ block and returns while `g` still points to it is `permission` at the return: se
 include::example$memory/owning_global_return_after_free.c[tag=source]
 ----
 
+*A marked owning global.* An owning global that is also `cerastes::ref_to_uninit`
+holds a block that may have no value. A function whose contract takes the global
+(`cerastes_owns(g)`) is given the block without a value, and a function that
+returns it claims a value for it only when its `ensures` ties the global
+(`g == cerastes_old(g)`, the same pointer): the caller's value then survives the
+call. Without the tie the callee may have replaced the block with a fresh one, which
+has no value, so the caller cannot read what it wrote before the call
+(xref:error-messages.adoc#_uninitialized[`uninitialized`], at the read). The same
+rule holds for an owning, marked member (<<marked-owning-fields>>).
+
+[source,c]
+----
+include::example$memory/owning_global_marked_tied.c[tag=source]
+----
+
+[source,c]
+----
+include::example$memory/owning_global_marked_untied_error.c[tag=source]
+----
+
 *The end of `main`.* `main` may return while an owning global or `static` local
 still holds its block. An owner with static storage keeps its object for the
 whole program, as P4417R0 allows. A block that only a global without
@@ -1349,6 +1369,14 @@ value for the buffer, and an `ensures` that gives a structure the caller did not
 no further: if the buffer is a structure with owning members of its own, theirs are not
 part of it, since the buffer may hold no value. A marked member that is not
 `owning` changes nothing in the default mode.
+
+A function cannot promise to have filled the buffer: a caller that passes a marked
+member's buffer to a function that writes it, and reads it after the call, is reported
+(`uninitialized`) even when the function's `ensures` ties the buffer. The tie says
+that the buffer is the same one and keeps a value that the caller already had; it does
+not say that the function wrote one. A function that gives a structure a value for
+everything it owns is `cerastes::must_init` where that applies
+(<<marked-pointees>>).
 
 [#marked-pointees]
 === A marked pointer to a structure with an owning member

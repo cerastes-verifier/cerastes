@@ -19,7 +19,7 @@ int use(void)
   reset(&s);
   if (s.data != NULL) {
     int y = *s.data;  // <- here
-    (void)y;
+    s.n = y;
   }
   free(s.data);
   return 0;

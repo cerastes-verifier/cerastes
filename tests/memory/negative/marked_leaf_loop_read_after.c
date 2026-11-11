@@ -26,7 +26,7 @@ int main(void)
   }
   if (s.data != NULL) {
     int y = *s.data;  // <- here
-    (void)y;
+    s.n = y;
   }
   free(s.data);
   return 0;

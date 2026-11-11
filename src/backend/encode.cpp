@@ -3066,6 +3066,14 @@ private:
         {
             return true;
         }
+        // the block site of an owning and `ref_to_uninit` member, `owns_block(p->q)` written (decision 0058 item 4, audit round 2 S2): the field's own
+        // closure clause is a marked site, which closes nothing below the field, so a written one does not either
+        if (const Expr* a {st.atom->atom == vir::AtomKind::OwnsBlock ? st.atom->a : nullptr};
+            a != nullptr && a->kind == Expr::Kind::Deref && marked_member_addr(a->a))
+        {
+            const Expr* m {a->a};
+            return m->a->type.pointee->struct_type->members[static_cast<size_t>(m->index)].owning;
+        }
         const vir::PlaceKey pk {vir::atom_place(*st.atom)};
         if (!pk.valid() || !pk.via.empty() || !pk.path.empty())
         {
@@ -5385,8 +5393,15 @@ private:
     }
     static std::string leaf_text(const vir::StructType& st, const std::vector<int>& path)
     {
-        const vir::StructMember* m {member_at(st, path)};
-        return st.c_name + "::" + (m != nullptr ? m->name : std::string("?"));
+        // the whole member path (`outer::t.q`), as a nested leaf is reached (audit round 2 N2)
+        std::string text;
+        for (size_t i {0U}; i < path.size(); ++i)
+        {
+            const vir::StructMember* m {
+                member_at(st, std::vector<int>(path.begin(), path.begin() + static_cast<std::ptrdiff_t>(i) + 1))};
+            text += (i == 0U ? "" : ".") + (m != nullptr ? m->name : std::string("?"));
+        }
+        return st.c_name + "::" + (text.empty() ? std::string("?") : text);
     }
     static bool leaf_is_marked(const vir::StructType& st, const std::vector<int>& path)
     {

@@ -486,6 +486,12 @@ points to may have no value yet; as on a local, it documents that unless
 include::example$annotations/locals/marked_global.c[tag=source]
 ----
 
+Beside `cerastes::owning`, the marker has a meaning in the contracts of a function
+that takes the global: the block may have no value, and a caller's value survives a
+call only if the callee's `ensures` says the global is unchanged
+(`g == cerastes_old(g)`; xref:memory.adoc#owning-globals[Owning globals and `static`
+locals]).
+
 Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
 
 * either attribute on a variable that is not a pointer, on a `void *` and on a

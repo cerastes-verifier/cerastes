@@ -10,7 +10,9 @@
     programs whose bodiless contracts hold both asserts, outcomes unchanged (item 2, N1). **219** "Third flip" (it
     corrects 218's premise: the test-mutator's swap run found one outcome change outside the two flips):
     `owning_global_call_dangling_closure.c`, an untied bodiless contract with two sites, keeps one message per site
-    (four `permission @ L27` become two, two expect lines turned into comments).
+    (four `permission @ L27` become two, two expect lines turned into comments). **220** "Fix now, 3 flips" (audit
+    round 2 on Parts S and F, B1; item 4, "Return rows in order"). **221** "Keep": the tied-only Kept row of item 4
+    and its amendment of 0054 item 2.
   - Standing: 175 (`owning` on a parameter stays a borrow), 177 (`--strict-owner`, an opt-in), 178
     (`cerastes::not_invalidating`, checked), 179 (no `no_dangling` in C), 192 (`ref_to_uninit` on a field here), 197 (the
     collision pins stay until this session revisits them), 198 (the split), 160 (a new test's expect line corrected
@@ -226,6 +228,28 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      accepts (a sentence and a test). **What it cannot see** (audit round 1, S4; as 0042 item 8): a store through an
      alias of the field (`int **pp = &s.q; *pp = &x;`, or a callee given `&s.q`) is accepted although the object may
      be initialized; the default mode's flags stay path-precise. One test each, listed on the Verifying page.
+   - **Limits, pinned as false alarms (sound; M4.8 with the loop work):** a loop that calls a `ref_to_uninit` callee on
+     a struct local with an owning field (the current-value loop limit of 0056; audit round 2 on Parts S and F, N3:
+     `marked_pointee_loop_call_false_alarm.c`); a user-written invariant site over a marked field's block holding an
+     unwritten buffer is `uninitialized` at the loop's entry, as for an unmarked field, since a written site is plain
+     (`marked_field_loop_written_invariant.c`; the way out is to write the buffer before the loop). A filler cannot
+     promise the buffer is written (a tie says it is the same block, not that it holds values): `must_init` is that
+     promise where it applies (audit N4; the Memory page says so).
+   - **What counts as tied** (audit round 2 on Parts S and F, S1): an `E == old(E)` conjunct that is unconditional at
+     the top of an `ensures` clause, or in an `&&` chain on the path from the clause's root to the site's atom (so it
+     stands under the site's own guards: the equality `not_invalidating` splices under an `owning` guard, a guarded
+     written tie). A tie under another guard or in another `||` arm does not count (twins pin both).
+   - **Return rows in order** (audit round 2 on Parts S and F, B1; question 220). `block_returns` asserted the
+     separation rows between `ensures` block sites before each site's own rows, so a separation row could read
+     `a->b->x` through a block the function no longer held: a correct program exited 3 (`q7_alias.c` on the base;
+     reachable through a marked callee once question 202 accepted it). Each site's own rows now come first, as the
+     call rows already did (0056 items 12 and the loop-entry order); the separation rows are unchanged. 227 existing
+     programs' Viper changes by row order alone (no slower); three pinned tests lose one duplicate `permission` at the
+     same line, since Silicon assumes the failed own row, which proves the blocks distinct (the flips of question
+     220). Written-invariant back-edge rows already had this order.
+   - **A written closure on a marked field** (audit round 2 on Parts S and F, S2) is merged as the automatic one is:
+     `closure_marked` recognizes a written `owns_block(p->q)` on an owning and marked member, so `close_source`
+     closes nothing below it.
    - **Below a marked field** (audit round 1, S3): a marked owning field's closure clause (`L == NULL ||
      owns_block(L)`, marked) closes nothing further into `L`'s pointee's owning fields. The marked block's cells may
      hold no value, so such a closure could never be satisfied by a caller; this is question 202's "a marked site
