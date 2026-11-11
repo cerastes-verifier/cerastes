@@ -4581,9 +4581,98 @@ private:
         {
             return InitMarker::RefToUninit;
         }
+        // decision 0058 item 4: the closure of an owning field that is also `ref_to_uninit` is marked like the deep atom of such a global: the cells of its block have
+        // no flag on entry (a `requires` site claims none), a borrowed `ensures` site keeps a set one, a given site claims none.  An unmarked owning field's stays plain.
+        if (marked_field_site(s))
+        {
+            return InitMarker::RefToUninit;
+        }
         const int k {block_formal(s)};
         return k >= 0 && static_cast<size_t>(k) < f.params.size() ? f.params[static_cast<size_t>(k)].init
                                                                   : InitMarker::None;
+    }
+    // A block site that is the closure of an owning and `ref_to_uninit` field (`owns_block(p->q)`: `Deref(MemberAddr(base, k))` with that member).
+    static bool marked_field_site(const AtomSite& s)
+    {
+        const Expr* a {s.atom->a};
+        if (a == nullptr || a->kind != Expr::Kind::Deref)
+        {
+            return false;
+        }
+        const StructMember* m {owning_leaf_of(a->a)};
+        return m != nullptr && m->ref_to_uninit;
+    }
+    // A marked site read through a load: the closure of an owning and `ref_to_uninit` field, or the deep atom of an owning and `ref_to_uninit` global.
+    static bool marked_through_load(const AtomSite& s)
+    {
+        if (marked_field_site(s))
+        {
+            return true;
+        }
+        const Expr* a {s.atom->a};
+        return a != nullptr && a->kind == Expr::Kind::Deref && a->a != nullptr &&
+               a->a->kind == Expr::Kind::GlobalAddr && a->a->global != nullptr && a->a->global->owning &&
+               a->a->global->ref_to_uninit;
+    }
+    // Two place expressions of a contract (`Deref`, `MemberAddr`, `Formal`, `GlobalAddr`) that are the same tree.
+    static bool same_place_tree(const Expr* a, const Expr* b)
+    {
+        if (a == nullptr || b == nullptr)
+        {
+            return a == b;
+        }
+        if (a->kind != b->kind)
+        {
+            return false;
+        }
+        switch (a->kind)
+        {
+            case Expr::Kind::Formal:
+                return a->index == b->index;
+            case Expr::Kind::GlobalAddr:
+                return a->global == b->global;
+            case Expr::Kind::Deref:
+                return same_place_tree(a->a, b->a);
+            case Expr::Kind::MemberAddr:
+                return a->index == b->index && same_place_tree(a->a, b->a);
+            default:
+                return false;
+        }
+    }
+    // A conjunct `E == old(E)` of an `ensures` clause of `f` (at the top level of its `&&` chain) for the pointer `E` the site names.
+    static bool conjunct_ties(const Expr* e, const Expr* pointer)
+    {
+        if (e == nullptr || e->kind != Expr::Kind::Binary)
+        {
+            return false;
+        }
+        if (e->bop == BinaryOp::LAnd)
+        {
+            return conjunct_ties(e->a, pointer) || conjunct_ties(e->b, pointer);
+        }
+        if (e->bop != BinaryOp::Eq || e->a == nullptr || e->b == nullptr)
+        {
+            return false;
+        }
+        for (const auto& [x, y] : {std::pair {e->a, e->b}, std::pair {e->b, e->a}})
+        {
+            if (y->kind == Expr::Kind::Old && same_place_tree(x, pointer) && same_place_tree(y->a, pointer))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool site_tied(const Function& f, const AtomSite& s)
+    {
+        for (const Clause& c : f.ensures_)
+        {
+            if (conjunct_ties(c.expr, s.atom->a))
+            {
+                return true;
+            }
+        }
+        return false;
     }
     // The `requires` block site on the same formal as the `ensures` site `s` (its partner: the block is borrowed), or null.
     const AtomSite* block_partner(const Function& f, const AtomSite& s)
@@ -4679,6 +4768,18 @@ private:
         Uninit,
         Kept
     };
+    // The "keeps the flag" row of one cell of a borrowed marked site (0042 item 5's `internal` row): a flag that was set on entry (under the partner's guard) is still set.
+    E kept_row(const Cell& c, const E& kept_guard)
+    {
+        E kept {low::old_(cell_flag(c.recv, c.type))};
+        if (kept_guard)
+        {
+            kept = low::and_(old_entry(kept_guard), kept);
+        }
+        return low::implies(kept, cell_flag(c.recv, c.type));
+    }
+    // set by block_atom when it returned such a row in a clause being lowered for the return
+    bool ret_kept_row_ {false};
     // `vlibc`: a view of vlibc's allocator (decision 0050 item 3): its token's value is `false`; every other `owns_block` states `true`, the platform's allocator.
     E block_conj(const E& p, const Type& pt, const std::string& text, BlockMode mode, const E& kept_guard, bool vlibc)
     {
@@ -4698,12 +4799,7 @@ private:
             r = low::and_(r, low::acc(c.recv, "d_" + sfx));
             if (mode == BlockMode::Kept)
             {
-                E kept {low::old_(cell_flag(c.recv, c.type))};
-                if (kept_guard)
-                {
-                    kept = low::and_(old_entry(kept_guard), kept);
-                }
-                r = low::and_(r, low::implies(kept, cell_flag(c.recv, c.type)));
+                r = low::and_(r, kept_row(c, kept_guard));
             }
             if (const E range = leaf_range(c))
             {
@@ -4734,6 +4830,13 @@ private:
             {
                 return BlockMode::Uninit;
             }
+            if (marked_through_load(s))
+            {
+                // decision 0058 item 4 (audit B1, S2): a given site (no `requires` partner) claims no flag, and a borrowed one keeps a set flag only where its pointer is
+                // tied (`E == old(E)` in the `ensures`): a body that replaces the block compares two blocks, which the model cannot prove one (a freed block's address
+                // may come back, and nothing says a fresh block differs), so an untied site claims none, exactly as a given one does
+                return block_partner(f, s) != nullptr && site_tied(f, s) ? BlockMode::Kept : BlockMode::Uninit;
+            }
             return mk == InitMarker::MustInit ? BlockMode::Plain : BlockMode::Kept;
         }
         return BlockMode::Uninit;
@@ -4753,6 +4856,25 @@ private:
         cbseen_ = std::max(cbseen_, it->second + 1U);
         if (cmode_ == CMode::Call || cmode_ == CMode::Ret)
         {
+            if (cmode_ == CMode::Ret)
+            {
+                // decision 0058 item 4 (audit B1): the "keeps the flags" row of a tied marked site through a load is part of the clause's own return assertion (with the tie),
+                // so that a body that replaces the block gets one `postcondition` and Silicon's own check of the contract never fails first
+                const AtomSite& rs {fb.sites[it->second]};
+                if (marked_through_load(rs) && block_mode(*cf_, rs) == BlockMode::Kept)
+                {
+                    const AtomSite* partner {block_partner(*cf_, rs)};
+                    const E kept_guard {site_guard(*partner, env)};
+                    const E p {block_ptr(rs, env, guard, gdep, full)};
+                    E row;
+                    for (const Cell& c : block_cells(p, block_ptr_type(rs), e.a->c_text))
+                    {
+                        row = low::and_(row, kept_row(c, kept_guard));
+                    }
+                    ret_kept_row_ = true;
+                    return {row ? row : low::bool_lit(true), {}};
+                }
+            }
             return {low::bool_lit(true), {}};
         }
         const AtomSite& site {fb.sites[it->second]};
@@ -11846,6 +11968,7 @@ private:
             const Clause& c {f.ensures_[ci]};
             Full scratch;
             LV v;
+            ret_kept_row_ = false;
             {
                 CtxSave save(*this);
                 set_ctx(f, CMode::Ret, true, static_cast<int>(ci));
@@ -11856,15 +11979,29 @@ private:
             {
                 continue; // nothing but atoms: asserted above
             }
+            if (ret_kept_row_)
+            {
+                // one assertion for the whole clause (Silicon reports each conjunct of an asserted `&&` as its own error)
+                v.e = low::not_(low::not_(v.e));
+                ret_kept_row_ = false;
+            }
             std::string what {"the postcondition of `" + f.c_name + "` may not hold"};
             if (!c.added.empty())
             {
-                // decision 0058 item 2: the equalities the encoder spliced into the clause for a `cerastes::not_invalidating` parameter; the one the
-                // text starts with names the parameter (else the first marked one)
+                // decision 0058 item 2: the equalities the encoder spliced into the clause for a `cerastes::not_invalidating` parameter; the parameters it recorded
+                // (else the first marked one) are named
                 std::string owner;
+                for (const int k : c.added_params)
+                {
+                    if (k >= 0 && static_cast<size_t>(k) < f.params.size() &&
+                        !f.params[static_cast<size_t>(k)].name.empty())
+                    {
+                        owner += (owner.empty() ? "" : "` and `") + f.params[static_cast<size_t>(k)].name;
+                    }
+                }
                 for (const Param& pr : f.params)
                 {
-                    if (pr.not_invalidating && !pr.name.empty() && (owner.empty() || c.added.rfind(pr.name, 0U) == 0U))
+                    if (owner.empty() && pr.not_invalidating && !pr.name.empty())
                     {
                         owner = pr.name;
                     }
@@ -15704,7 +15841,7 @@ private:
             }
             // final audit S1: not for an owner the loop can replace with a structure whose fields have no known value (s1_realloc_v2.c): its closure would ask for a block
             // where the flag of an arbitrary cell happens to be true
-            if (may_replace_local(&s, o->id, {}, o->type, o->address_taken, o->address_taken))
+            if (may_replace_local(&s, o->id, {}, o->type, o->address_taken, o->address_taken) || owner_marked(o_ref))
             {
                 continue;
             }
@@ -15775,6 +15912,10 @@ private:
             {
                 continue;
             }
+            if (owner_marked(l))
+            {
+                continue;
+            }
             const OwnerRef lcopy {l};
             make_closure(
                 [&b, &leaf_addr, lcopy, loc = s.loc]()
@@ -15799,7 +15940,8 @@ private:
             {
                 own_site = own_site || site_global(w) == g;
             }
-            if (!own_site || may_replace_global(&s, g, {}, g->type) || global_callee_may_replace(s, g, g->type))
+            if (!own_site || may_replace_global(&s, g, {}, g->type) || global_callee_may_replace(s, g, g->type) ||
+                owner_marked(g_ref))
             {
                 continue;
             }
@@ -15813,6 +15955,45 @@ private:
     }
     // Whether a statement may replace the pointer of the global `g` (or its member at `path`): a store of a value that is not the null constant by name or through a pointer of the
     // owner's type, the address of the global passed to a call, or a callee that names the global in its contract or a cell of the owner's type.
+    // decision 0058 item 4 (question 202): a `ref_to_uninit` owner (an owning pointer local, an owning pointer global, or the owning leaf of a struct local or global the
+    // member of which is marked) closes over nothing: its pointee's cells may hold no value, so no synthetic closure site is carried for it
+    static bool owner_marked(const OwnerRef& o)
+    {
+        const Type* t {nullptr};
+        if (o.var != nullptr)
+        {
+            if (o.path.empty())
+            {
+                return o.var->ref_to_uninit;
+            }
+            t = &o.var->type;
+        }
+        else if (o.global != nullptr)
+        {
+            if (o.path.empty())
+            {
+                return o.global->ref_to_uninit;
+            }
+            t = &o.global->type;
+        }
+        else
+        {
+            return false;
+        }
+        const StructType* st {t->is_struct() ? t->struct_type : nullptr};
+        bool marked {false};
+        for (const int k : o.path)
+        {
+            if (st == nullptr || k < 0 || static_cast<size_t>(k) >= st->members.size())
+            {
+                return false;
+            }
+            const StructMember& m {st->members[static_cast<size_t>(k)]};
+            marked = m.ref_to_uninit;
+            st = m.type.is_struct() ? m.type.struct_type : nullptr;
+        }
+        return marked;
+    }
     bool may_replace_global(const Stmt* st, const Global* g, const std::vector<int>& path, const Type& t)
     {
         if (st == nullptr)

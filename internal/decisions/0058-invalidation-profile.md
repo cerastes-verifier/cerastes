@@ -93,8 +93,9 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      - otherwise `unsupported_annotation` at the parameter: "`p` is `cerastes::not_invalidating`, but the contract of
        `f` takes `owns_block(p->q)` without returning it";
      - **taken implies returned on every path.** The encoder checks only that a partner exists; lowering decides the
-       rows. For each such pair whose guards are both absent, or the same null check (`atom_guard_shape`) over no heap
-       read, the rule is syntactic. Any other pair gets a new `f__wf` row `prior ==> (g_req ==> g_ens)` (`permission`:
+       rows. For each such pair whose `ensures` side is unguarded, or whose two guards lower to one expression (a guard
+       that reads the heap lowers to different entry and return ghosts, so this holds only for guards over no heap
+       read), nothing is asserted (audit round 2, N1: the built rule). Any other pair gets a new `f__wf` row `prior ==> (g_req ==> g_ens)` (`permission`:
        "the contract of `f` takes `*p` on a path where it does not return it, but `p` is
        `cerastes::not_invalidating`"), asserted where the implicit clause below holds, so that a guard reading a loaded
        pointer sees it (two guards that read the heap are read in different states, so "the same expression" proves
@@ -112,12 +113,21 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      fail at the tie (`s42_2_B_*`), and for a borrowed pair the two guard rows already force the same nullness on entry
      and return, so the unguarded tie asks nothing more (`s42_B_rows_force_nullness_ok`). **Placed as the closure is** (0055 item 3's
      `close_source`, which splices `atom && closure` into the atom's own clause, so the closure inherits the atom's
-     guards by position and no guard is copied): each equality is spliced right after the `ensures` atom that frames
-     `E`'s load (the permission atom with `E`'s cell's root and `via` whose path is a prefix of it), `atom && E ==
-     old(E)`, built from `clone_place` and `old`, before that atom's closure. It is framed in the return state by that
-     atom and in the entry state by its `requires` partner. S42: placed so, `f__wf`'s rows verify unchanged
-     (`s42_3a_B_tie_ok`, `s42_3b_B_chain_ok`); as a later separate clause the tie fails (`s42_3a_later_clause_fail`);
-     after the closure, a marked closure's `old(flag)` is ill-formed (`s42_4_tie_after_closure_wf_fail`).
+     guards by position and no guard is copied): each equality is spliced right after the `ensures` atom or block site
+     that frames `E`'s load, `framer && E == old(E)`, built from `clone_place` and `old`, before the framer's closure.
+     The framer is the permission atom with `E`'s cell's root and `via` whose path is a prefix of it, or a block site
+     whose block holds `E`'s cell: a closure site at a nested level (`a->b->x` is framed by the closure
+     `owns_block(a->b)`, there being no `owns(*a->b)`), or `owns_block(p)` as a closure source (audit round 1, S1). It
+     is framed in the return state by the framer and in the entry state by its `requires` partner. Where no `ensures`
+     atom or site rooted at `p` frames the load (`requires(p == p2 && owns(*p2) && owns_block(p->q))`, a clean contract
+     without the marker, framed through `p2`), the first build exited 3; it is rejected (`unsupported_annotation` at the
+     parameter, its own message; pinned by `reject_not_invalidating_no_framer.c`, whose unmarked twin verifies). S42: placed so, `f__wf`'s rows verify
+     unchanged (`s42_3a_B_tie_ok`, and `s42_3b_B_chain_ok` redone with the ties spliced, audit S9); as a later separate
+     clause the tie fails (`s42_3a_later_clause_fail`).
+     - **A contradiction hidden** (audit round 1, a note): in a bodiless contract a written `ensures` that contradicts a
+       spliced equality (`p->q != old(p->q)`) makes every call vacuous, as `ensures(false)` already does in a bodiless
+       contract; without the marker `f__wf`'s tie would have reported it. A bodiless contract is trusted (0011, 0052
+       item 2a), so this is the existing trust, documented on the Annotations page.
      - **With a body** it is checked at each return with its clause as a `postcondition`. The clause that received an
        equality carries its own message: "the postcondition of `f` may not hold (with `p->q == old(p->q)`, which
        `cerastes::not_invalidating` on `p` adds)".
@@ -141,6 +151,9 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
 3. **`--strict-owner`** (question 177; P4417R0 [profiles.inval.owner] p4 and p6). The pattern is `--strict-init`'s,
    end to end: a driver option through `VerifyConfig`, a rule applied by the encoder to verified bodies, a diagnostic
    tag per rule, and the option table and its own section on the Verifying page.
+   - **Words** (audit round 1, S7): a parameter **consumes** its block when its contract has a `requires` block site
+     with no `ensures` partner (`param_consumes_block`, the encoder's twin of lowering's `block_consumes`); p4 and p6
+     below say "consumes" where P4417 says "takes".
    - **p4.** A call whose contract gives its result's block (an `owning` function, `malloc`, `calloc`, vlibc's
      allocations, a user function whose `ensures` has a block site at the result) must be: the initializer of, or the
      value assigned to, an owner (an `owning` local, global, `static` local or field, `p->q = make()` included, and an
@@ -162,8 +175,11 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
    - **What the static rule cannot see** (as 0042 item 8 lists its own). **Accepted although wrong**, each still
      reported by the default mode's path-precise rows: an owner by name that is already empty or dangling
      (`invalid-free`); a release on some paths only (`if (c) free(v);`, `leak`); an assignment to an owner that still
-     holds a block (`leak`); a member released through two aliases of its structure (`invalid-free`). **Rejected although
-     harmless:** `t = v; free(t);`; `free(c ? a : a)` (with two owners, `free(c ? a : b)` leaks the other, which the
+     holds a block (`leak`); a member released through two aliases of its structure (`invalid-free`); an owner parameter
+     reassigned before it is released (`invalid-free` or `leak`); a callee that consumes on some paths only (its own
+     rows); a discarded by-value struct result with owning leaves (`leak`); a partnerless `owns(*r)` result whose closure
+     gives `r->q`'s block, dropped (`leak`). **Rejected although harmless:** `p = c ? make() : NULL;` into an owner; a
+     call under the comma operator; `*pp = make()` with `pp == &v`; `free(NULL)`; `t = v; free(t);`; `free(c ? a : a)` (with two owners, `free(c ? a : b)` leaks the other, which the
      default mode reports); `free(*pp)`, `pp == &v` included; a result stored in a non-owning local and released in the
      same function; a call under `?:` or a comma as the receiver's value (only casts are peeled); the owning leaf of a
      call's struct result (`free(mk().data)`). A by-value struct parameter is a named owner (`free(s.data)` is
@@ -180,8 +196,22 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      marker twice, a bit-field, a union member.
    - **Default mode, non-owning field:** the marker documents intent and changes no Viper (as 0052 item 4 for a local).
    - **Owning and marked field:** its closure clause is a marked block (0047 item 8's mode, as an owning and marked
-     global's deep atom in 0054 item 2): a `requires` site claims no flags, a borrowed `ensures` site keeps them
-     (`old(flag) ==> flag`, 0042 item 5's `internal` row), a given site claims none. This lifts 0055 item 3's "the
+     global's deep atom in 0054 item 2): a `requires` site claims no flags; a borrowed `ensures` site keeps them
+     (`(old(L != null) && old(flag)) ==> flag`) **only where it is tied** (an `E == old(E)` conjunct of its `ensures`
+     clause: the bodiless tie written, or spliced by `not_invalidating`), and then the row and the tie are one atomic
+     assertion at the return (`assert !(!(clause))`), so a body that replaces the block gets one `postcondition`; an
+     untied or given site claims none (audit round 1, B1 and S2).
+   - **Why not more** (B1). The draft took 0047 item 8's internal row unchanged. For a site through a load it compares
+     the old block's flag with the new block's, so a body that replaces the block failed an internal row (exit 3, a
+     bug since 0054 item 5's owning `ref_to_uninit` global: the auditor's `g_kept2.c`, `g_kept4.c`). Adding `E ==
+     old(E)` to the antecedent does not help: the model does not prove that a freshly allocated block's pointer
+     differs from a freed one's (Silicon's distinctness covers only locations it still holds), so a freed address may
+     come back unwritten, and no sound row can claim flags across a possible replacement. S42's addendum
+     (`s42_4b_*`) pins the five cases: tied and untouched (the caller reads after), untied and replacing (verifies),
+     tied and replacing (one `postcondition`), a given site (no flags), and an untied replacing callee whose caller
+     reads after (`uninitialized` at the caller). **0054 item 2 amended:** an owning and marked global's deep atom
+     follows the same rule, so an untied callee that ensures its block no longer keeps a flag the caller set (no
+     existing test has that shape; every existing program's Viper is unchanged). This lifts 0055 item 3's "the
      closure is plain" for marked fields: a structure whose buffer is allocated and not yet written can be passed to a
      borrower, which cannot read the buffer before writing it (`uninitialized`). An unmarked owning field keeps the
      plain closure.
@@ -193,14 +223,24 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
      before its element is evaluated (`init_element_value`'s callers); a global's static initializer gives a marked field
      a null pointer (accepted) or the address of an object of static storage, which always holds a value (rejected). A
      struct copy or a by-value pass moves a marked field into the same marked field of the same type, which the rule
-     accepts (a sentence and a test).
+     accepts (a sentence and a test). **What it cannot see** (audit round 1, S4; as 0042 item 8): a store through an
+     alias of the field (`int **pp = &s.q; *pp = &x;`, or a callee given `&s.q`) is accepted although the object may
+     be initialized; the default mode's flags stay path-precise. One test each, listed on the Verifying page.
+   - **Below a marked field** (audit round 1, S3): a marked owning field's closure clause (`L == NULL ||
+     owns_block(L)`, marked) closes nothing further into `L`'s pointee's owning fields. The marked block's cells may
+     hold no value, so such a closure could never be satisfied by a caller; this is question 202's "a marked site
+     closes nothing", one level down.
    - **A marked pointer to a structure with an owning field** (question 202): accepted, and the marked site closes
      nothing on either side, as 0055 item 3 already says of `malloc`'s view. A callee that leaves a block in the field is
      reported by its own end row (`leak`); a caller whose structure held a block in the field before the call keeps it
      and its end row reports it if the callee overwrote the field; an initializer is `must_init`. The price (the sound
      direction): after such a call the caller does not know the field's value, so a field that may be non-null is
-     reported at the caller's end even when the callee set it to `NULL` (`leak`), unless the contract says so (an
-     `ensures` naming the field's value) or the callee is `must_init`. The three rejections
+     reported at the caller's end even when the callee set it to `NULL` (`leak`). A `ref_to_uninit` parameter's contract
+     cannot say otherwise: it may not read the pointee's members (0042 item 6, `unsupported_annotation`). The way out is
+     `must_init`, whose `ensures` side is a given site (0055 item 3), for a caller whose structure holds no value yet. **Variables too** (audit round 1, S5): a marked
+     global, `static` local or automatic local pointing to such a structure closes nothing either, in its deep atom
+     (`deep_expr`, `global_closure`) and in the loop closures of owning variables and struct leaves (`make_closure`),
+     through `vir::Var::ref_to_uninit` and `StructLeaf::ref_to_uninit`. The three rejections
      (`reject_marked_owning_pointees` for a parameter and a result, `read_variable_markers` for a variable) go, after
      S42 and the audit. If the audit finds a hole, they stay and their pins are re-filed under this record.
 

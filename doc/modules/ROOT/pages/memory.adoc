@@ -407,7 +407,10 @@ members are initialized in order.
 
 The markers of <<initialization>> work on structures: `cerastes::uninit` on a
 structure local, and `cerastes::ref_to_uninit` and `cerastes::must_init` on a
-pointer to a structure, where `must_init` promises every member.
+pointer to a structure, where `must_init` promises every member. `cerastes::ref_to_uninit`
+also applies to a pointer member (xref:annotations.adoc#marked-members[Marked
+members]); with `owning` it lets a buffer that has no value be handed to a function
+(<<marked-owning-fields>>).
 
 *Passing and returning structures.* A structure can be passed and returned by
 value. In a contract a parameter's members (`p.x`) are their values on entry,
@@ -1284,7 +1287,114 @@ inside a loop or not: a second call, or a free of what `+*pp+` points to, is rep
 *The buffer must hold values.* Where a contract owns the structure, the member's
 block must hold values, as every block a contract owns must: a structure whose
 buffer was allocated but not yet written cannot be passed to `buf_put` (an
-`uninitialized` error at the call). Write the buffer first.
+`uninitialized` error at the call). Write the buffer first, or mark the member
+(<<marked-owning-fields>>).
+
+[#marked-owning-fields]
+=== Marked owning members
+
+A member that is `cerastes::owning` and also `cerastes::ref_to_uninit`
+(xref:annotations.adoc#marked-members[Marked members]) owns a block that may hold no
+value. Its closure is not plain: a structure whose buffer was allocated and not yet
+written can be passed to a function that borrows it with `cerastes_owns(*b)`, which
+is the use P4222's `ref_to_uninit` is for. Without the marker the call is reported,
+as <<owning-fields>> says:
+
+[source,c]
+----
+include::example$memory/owning_field_unmarked_error.c[tag=source]
+----
+
+With the marker on the member, the same program verifies; the function receives the
+block without a value, and writes it:
+
+[source,c]
+----
+include::example$memory/owning_field_marked.c[tag=source]
+----
+
+The marker moves the checks to where the buffer is read:
+
+* A function that borrows the structure may write through the member but not read
+  the buffer before it is written; the read is reported as
+  xref:error-messages.adoc#_uninitialized[`uninitialized`], at the read:
++
+[source,c]
+----
+include::example$memory/owning_field_marked_read_error.c[tag=source]
+----
+* After the call, the caller still has a value in the buffer only if the function says
+  it returns the same buffer: an equality `+b->data == cerastes_old(b->data)+` in its
+  `ensures` (the tie; `cerastes::not_invalidating` on the parameter writes it for
+  you, xref:annotations.adoc#not-invalidating[The not_invalidating marker]):
++
+[source,c]
+----
+include::example$memory/owning_field_marked_tied.c[tag=source]
+----
++
+Without the equality the function may have replaced the buffer, and a freshly
+allocated block has no value, so the caller's read is reported, at the read:
++
+[source,c]
+----
+include::example$memory/owning_field_marked_untied_error.c[tag=source]
+----
+
+A function whose `ensures` has the tie and whose body replaces the buffer is reported
+as xref:error-messages.adoc#_postcondition[`postcondition`], since the equality is
+then false. A `requires` that gives the structure claims no
+value for the buffer, and an `ensures` that gives a structure the caller did not give
+(a result, for instance) claims none either. The closure of a marked member is closed
+no further: if the buffer is a structure with owning members of its own, theirs are not
+part of it, since the buffer may hold no value. A marked member that is not
+`owning` changes nothing in the default mode.
+
+[#marked-pointees]
+=== A marked pointer to a structure with an owning member
+
+A pointer parameter, a result or a variable marked `cerastes::ref_to_uninit` may
+point to a structure that has an owning member, and the marked site closes nothing on
+either side of a call: cerastes does not add the clause `+b->data == NULL ||
+cerastes_owns_block(b->data)+` that a plain `cerastes_owns(*b)` adds
+(<<owning-fields>>), because the structure may hold no value. The same holds for a
+marked global, `static` local or local that points to such a structure, in its own
+closure and in the closures of its loops. What it costs is on the caller's side. The
+callee gives nothing back about the member, so after the call the caller does not know
+what it holds:
+
+* a block that the member held before the call stays the caller's, and is reported
+  at the caller's end if the callee overwrote the member;
+* a local structure's end is reported as xref:error-messages.adoc#_leak[`leak`]
+  ("owning field `s.data` still holds its block"), even when the callee sets the
+  member to `NULL`, and `free(s.data)` after the call is reported as
+  xref:error-messages.adoc#_invalid_free[`invalid-free`];
+* a callee that leaves a block in the member is reported by its own end row (`leak`).
+
+A structure with static storage may end holding blocks, so a global is not reported:
+
+[source,c]
+----
+include::example$memory/marked_pointee.c[tag=source]
+----
+
+A local structure is:
+
+[source,c]
+----
+include::example$memory/marked_pointee_local_error.c[tag=source]
+----
+
+An initializer should be `cerastes::must_init` instead: its `ensures` closes the
+structure, so a caller that gave a structure without a value knows what the member
+holds afterwards. (An `ensures` that names the member of a `ref_to_uninit` parameter
+is rejected, as <<initialization>> says, so a marked parameter's callee cannot
+say it.)
+
+[source,c]
+----
+include::example$memory/marked_pointee_must_init.c[tag=source]
+----
 
 [#p4417-owners]
 === P4417R0's owners in cerastes
@@ -1396,9 +1506,7 @@ These are rejected with a diagnostic, never approximated
   already);
 * a structure that owns itself through its owning members (`struct node { struct
   node *next CERASTES_OWNING; }`, or two structures that own each other: a list,
-  planned with recursive predicates), `cerastes::ref_to_uninit` on a member and on
-  a pointer to a structure with an owning member (planned for the next version),
-  an owning member that is not a pointer to an object, and a function without a
+  planned with recursive predicates), an owning member that is not a pointer to an object, and a function without a
   body in the file that hands over a new structure whose owning members hold
   blocks, other than a pointer with `cerastes_owns(*r)` whose structure owns one
   block (<<owning-fields>>);

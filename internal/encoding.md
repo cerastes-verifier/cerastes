@@ -779,6 +779,73 @@ or a guarded update; the VIR self-test cases are `define_loop_limits_l1` and `de
   question 206); `wblock_splits` leaves out the pair splits between such a site and that earlier site (no-op case
   splits, for Silicon's paths only).
 
+**The invalidation profile (M4.5d2b2d, decision 0058): lowering.** Every change below is lowering's half of an encoder rule (§8, "The invalidation
+profile in the encoder"); the VIR self-test cases are `define_not_invalidating`, `define_not_invalidating_rejections`
+(`src/viper/selftest_cases26.inc`) and `define_marked_fields` (`src/viper/selftest_cases27.inc`); the Viper spikes are
+`tests/viper-smoke/memory/s42_*` (spike S42, with its addendum in `internal/il-inventory.md`).
+
+*`not_invalidating`: the new `f__wf` row (item 2).* `vir::Param::not_invalidating` marks a pointer parameter. In
+`wf_method`, in `go`'s `if (ens)` part after the existing partner rows and the bodiless tie rows, each `ensures` atom
+site (partner `fa.sites[atom->amount]`) and each `ensures` block site (partner `block_partner`) of the clause whose root
+(`atom_place(*atom).root`) is a marked parameter gets `ANT ==> (GP ==> GE)`, `permission`, at the `ensures` atom:
+"the contract of `f` takes `<text>` on a path where it does not return it, but `p` is `cerastes::not_invalidating`".
+`ANT` is `prior && v.e`, the clauses before **and the whole clause** of the site, so the equalities the encoder spliced
+into it are in the antecedent (a guard that reads a loaded pointer needs them); `GP` is the partner's guard over the entry
+ghosts (`hv_<k>_m<j>_pre`, or the formals), `GE` the site's over the return ghosts (`hv_<k>_m<j>_post`). Nothing is
+asserted when the `ensures` site has no guard, or when both guards lower to one expression (`same_expr`: a guard that
+reads the heap never does, its two states are two ghosts); with no `requires` guard the consequent is `GE` alone. It is the
+converse of the partner row `ANT ==> (GE ==> GP)` (the same two guards swapped; a lint can pair them), it is in `f__wf`
+with or without a body (a body may drop a cell or a block the contract names on a path the guard excludes, which no return
+row sees), and it is only for marked parameters (an unmarked pair keeps today's rows). Pinned by `ni_row_cells_*`,
+`ni_row_blocks_*` and the fixtures `s42_1a_*`, `s42_1b_*`, `s42_3a_B_tie_ok`, `s42_3b_B_chain_ok`, `s42_3d_N_chain_spliced_ok`
+(the last is the tool's own output for a spliced chain).
+
+*N1: the bodiless tie above the partner row.* In the bodiless block-site loop the tie assert ("... without saying it is the
+one its `requires` took ...") now precedes the partner-guard assert ("... on a path where its `requires` did not take
+it") for the same site: Silicon goes on after a failed assert as if it held, so an untied borrow gets one error, the
+tie's, which names the fix. Eleven existing programs (22 maps) swapped two adjacent lines and nothing else changed; the VIR
+case `owning_global_leaf_guarded_ensures` swapped too (`s42_3c_B_unmarked_second_n1_fail` pins the one-error result).
+
+*The postcondition message (item 2).* `Clause::added` holds the text of the equalities the encoder spliced into a clause
+(`p->q == old(p->q)`, joined by " and "), `Clause::added_params` the indexes of the marked parameters they are for.
+`postconditions()` words a failing clause "the postcondition of `f` may not hold (with `<added>`, which
+`cerastes::not_invalidating` on `p` adds)" (several parameters joined by "` and `"; the first marked one when the list is
+empty). Cases `ni_added_holds`, `ni_added_message`, `ni_added_message_two`.
+
+*The backstop (`check.cpp`, `not_invalidating_markers`).* A marked parameter is a pointer, not beside an initialization
+marker, and on a function that does not return no atom or site is rooted at it; every `requires` atom or block site rooted at
+it has an `ensures` partner and every `ensures` one a `requires` partner (a block site by place, a permission atom by kind
+and amount, as the encoder's `check_not_invalidating` does). An internal error otherwise (`ni_backstop_*`).
+
+*Marked closures (item 4).* The closure of an owning field is a block site on a load (`Deref(MemberAddr(base, k))`).
+`block_marker` reads `StructMember::ref_to_uninit` of the last member step (`marked_field_site`, through
+`owning_leaf_of`), and the deep atom of an owning and `ref_to_uninit` global (0054 item 2) is the other
+`marked_through_load` site; every marker of a formal's site is as before. `block_mode` then gives, for such a site: a
+`requires` site `Uninit` (no flag claimed); a given `ensures` site (no `requires` partner, audit S2) `Uninit`; a borrowed
+one `Kept` only where it is **tied** (`site_tied`: an `E == old(E)` conjunct of an `ensures` clause, found by tree, written or
+spliced) and `Uninit` otherwise. *Why tied only (audit B1; the table is in the addendum of S42 in `il-inventory.md`):* a
+body that frees and replaces the block compares the old block's flag with the new block's, and the model does not prove
+a fresh block differs from the freed one (`free` consumes the token and the liveness cell, `malloc` inhales another's, and
+Silicon's distinctness assumption covers only locations it still holds), so no sound row verifies an untied replacing
+body (it exited 3 before, on the owning and `ref_to_uninit` global too); an untied site claims no flag, which is what a
+given one does. *The row and one error:* a `Kept` site's row, `(old(L != null) && old(E.d)) ==> E.d` per cell (`kept_row`,
+factored out of `block_conj`), is the site's part of the method's `ensures` (Silicon's own check) AND, in `Ret` mode,
+`block_atom` returns it instead of `true`, so `postconditions()` asserts the whole clause (the tie, the closure's row)
+as one atomic `!(!(CLAUSE))` (`ret_kept_row_`; Silicon reports each conjunct of an asserted `&&` as its own error). A body
+that replaces a tied block gets ONE user `postcondition`, and Silicon's own check of the contract passes after it (no exit 3).
+An unmarked owning field keeps the plain closure, byte-identical; a marked field that does not own changes no Viper.
+The caller side (the partner-guard rows at calls and returns) is not touched: an untied callee that replaces an
+initialized buffer leaves the caller `uninitialized` at its read (`mf_untied_replaces_caller_reads`,
+`s42_4b_untied_replaces_caller_reads_fail`). Pinned by `mf_*` (the filler, the read first, the plain controls, the kept
+flag, the replacing bodies) and the fixtures `s42_4b_*` (tied, untied, replacing; the two globals).
+
+*A marked owner closes nothing (item 4, question 202).* `owner_marked(OwnerRef)`: a local or global with an empty path is its
+own `ref_to_uninit` (`Var::ref_to_uninit`, `Global::ref_to_uninit`); with a path, the last member's (`StructLeaf::
+ref_to_uninit`, filled by `struct_leaves`). The three `make_closure` sites of the loops (owning locals, struct leaves,
+owning globals) skip a marked owner; its own block site is still carried. A WRITTEN invariant site over a marked field's block
+is a plain site and claims the flags: an unwritten buffer is `uninitialized` at the loop entry (a false alarm, as for an
+unmarked field; the way out is to write the buffer first). Cases `mv_*`.
+
 ## 4. Viper shape
 
 ```
@@ -1177,3 +1244,67 @@ class instance with a non-type argument (`typeref_chain_reason`).
 **Known over-rejection.** A call written inside an annotation's own `sizeof` operand (`CERASTES_REQUIRES(sizeof(int[p(2)]) > 0)`)
 is rejected as a call in an annotation, although the operand is never evaluated: the encoder reads the folded constant's
 original expression, which contains the call. This is the safe direction (M8 inventory).
+
+**The invalidation profile in the encoder (M4.5d2b2d, decision 0058).** The lowering's half is in §3; the fixtures
+and cases are named there.
+
+*`cerastes::not_invalidating` (item 2).* Registration `{"not_invalidating", "", "p", RAF_NO_FLAGS}` (as `must_init`:
+EDG's #1835 on a function, a field, a trailing marker after an array or a function pointer; P77); `Annot::not_invalidating`
+must be in `classify`'s `kNames` in the commit that registers it (a registered name the reader does not list is
+`Annot::none` and is silently ignored). `read_marker` files it in its own map, `not_invalidating_`, with `vir::Param::
+not_invalidating` set in `function_of` before the contract is read; `marker_name`, `is_param_attribute` (the function-marker
+rejection, `first_param_marker`, `reject_markers_in_spec_function`, `carries_marker`; `is_param_marker` is unchanged),
+`reject_library_not_invalidating` (a marker in a library file) and the `check_signature` call make it never ignored. The
+`const` branch of `read_marker` does not apply (question 203); `annotation_mismatch` is the existing machinery;
+`check_not_invalidating_pairs` rejects it beside `ref_to_uninit` or `must_init`. *The check on the contract*
+(`check_not_invalidating`, after `finish_atoms`, with or without a body): every `requires` atom or block site rooted at
+the parameter has an `ensures` partner (a permission atom by kind and amount: an `ensures` atom with no partner carries an
+output amount no `requires` atom has; a block site by place), an `ensures` one a `requires` partner, and a `noreturn`
+function takes nothing through it. *The implicit `ensures`* (`tie_not_invalidating`, after that check): for each
+`ensures` atom or block site rooted at a marked parameter whose place goes through loads, each loaded pointer `E` on the
+way (root first, deduplicated by cell) gets `E == old(E)`, **spliced right after the `ensures` permission atom or block
+site that frames the load of `E`**, a closure's block site included (`a->b->x` of a two-level chain is framed by the block
+site of `a->b`, there is no `owns(*a->b)`), as `close_source` places a closure: it stands under that atom's guards by
+position, never under the site's own null test (variant A, which a free-and-null body satisfies vacuously, is wrong:
+S42), and no guard is copied. Each clause that receives one records its text in `Clause::added` and the marked parameter's
+index in `Clause::added_params`. The lowering reads both (§3).
+
+*`--strict-owner` (item 3).* The pattern is `--strict-init`'s: `Args::strict_owner`, `VerifyConfig::strict_owner`, two
+tags in `diagnostics.def` (`owner_result_unowned` for p4, `owner_release_unowned` for p6, each "... (--strict-owner,
+decision 0058 item 3)"), and nothing is computed without the option. Two function-level facts: `gives_result_block(f)`
+(the `result_sites` test as a function: the `ensures` has a block site on the result) and `param_consumes_block(f, k)`
+(the encoder's twin of lowering's `block_consumes`: the `requires` has a block site on parameter `k` with no `ensures` partner).
+*p4:* `Ctx::owner_result_ok` (AST nodes, filled by the receiving context before the value is encoded, peeled through casts
+and lvalue adjustments like `allow_strict_result`) is set by `initializer` (an `owning` local), `assignment_parts`
+(an owning local, global or `static` local; an owning member through `owner_target`), `return_statement` (when
+`gives_result_block`), the argument of a consuming parameter (`call()`'s argument loop, `heap_call`'s `free(make())`) and an
+owning leaf in a struct initializer or compound literal (`init_element_value`); it is checked in `call()` (after the
+callee is known, before `b_.call`) and in `allocation_view` (the view's result: `malloc`, `calloc`, vlibc's allocations;
+heap routines leave `call()` early), by `reject_owner_result`. *p6:* `call()` (`strict_owner_arguments` over
+`param_consumes_block`) and `heap_call` (the `free` operand), by `reject_release`; an owner by name (`owner_by_name`,
+VIR-based so C and C++ read alike) is an owning local (an address-taken one as `Deref(AddrOf v)`), an owning global or `static`
+local, an owning member by `.` or `->` at any depth (`owning_member_addr`, `owning_leaf_at`), a parameter of the enclosing
+function that consumes its block, or a call whose callee `gives_result_block`; an `owning` parameter (a borrow, question
+175) is not an owner. Verified bodies only; both strict options may be given together. What the static rule cannot see is
+listed in the record and on the Verifying page.
+
+*Marked fields (item 4).* Registration `ref_to_uninit` `"r|v|p|d"`; `vir::StructMember::ref_to_uninit`, read in
+`struct_info` beside `owning` (`marker_nodes(..., Annot::ref_to_uninit)`), the union loop of `declaration_level_checks`
+reports it too. Rejected, one `unsupported_annotation` each, at the attribute: a non-pointer, a reference, `void *`, a
+pointer to a function, a pointer to `const` or `volatile` (nothing could initialize it), twice, a bit-field, a union
+member; `must_init` on a field stays EDG's #1835. *`--strict-init`:* a store to a marked field (`assignment_parts`:
+`marked_member_addr`) takes 0052 item 4's rule (`check_marked_field_source`: a null pointer, a `ref_to_uninit` call's
+result, `&x` of an `uninit` local, another marked local, parameter or field); a marked field is a source for a marked local
+(`strict_value_uninit_ok`) and an argument of a marked parameter (`strict_init_arguments`); per leaf of an initializer list
+and compound literal (`check_marked_element`, in `init_element_value`); a global's static initializer: null accepted, an
+address constant rejected (`read_struct_global_init`); the same store to an unmarked field stays rejected. *The closure:*
+`owning_leaves` carries each leaf's mark (`leaf_is_marked`); `close_leaf(…, marked)` **stops at a marked leaf**: nothing
+below a marked block is closed (audit S3: its cells have no known value, so its own owning fields own nothing yet), and
+`closure_marked` makes a marked parameter's, a result's and an owning and marked global's block site close nothing
+(`deep_expr` builds no `inner` for such a global). *Question 202:* the three rejections (`reject_marked_owning_pointees` for a
+parameter and a result, the owning-field rejection of `read_variable_markers`) are gone, so `ref_to_uninit` on a pointer
+(parameter, result, variable) to a structure with an owning field is accepted and the marked site closes nothing, on
+either side; `Var::ref_to_uninit` is set from an owning and marked local. A callee that leaves a block in the field is
+reported by its own end row, a caller whose structure held a block keeps it and reports it at its end if the callee
+overwrote the field (`leak`: S42's `s42_5*`, which emulate an unmarked parameter, a stronger callee), and an initializer
+is `must_init`. The marked closure's flag modes are lowering's (§3).

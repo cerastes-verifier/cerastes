@@ -469,6 +469,12 @@ private:
                                    " makes the struct own itself (decision 0055 item 2)");
                 }
             }
+            if (m.ref_to_uninit && (!m.type.is_ptr() || m.type.pointee == nullptr || m.type.pointee->is_void()))
+            {
+                // decision 0058 item 4 (a backstop of the encoder): a pointer to an object type
+                err(m.loc, "the `ref_to_uninit` member '" + m.name + "' of " + name +
+                               " is not a pointer to an object (decision 0058 item 4)");
+            }
         }
     }
 
@@ -1500,19 +1506,44 @@ private:
                     who + " is marked `not_invalidating` beside an initialization marker (decision 0058 item 2)");
                 continue;
             }
+            if (f.noreturn)
+            {
+                // a function that does not return has no `ensures` to return anything (as `must_init`, decision 0042 item 4)
+                for (const std::vector<AtomSite>* list : {&sites, &block_sites})
+                {
+                    for (const AtomSite& s : *list)
+                    {
+                        if (atom_place(*s.atom).root == k)
+                        {
+                            err(s.atom->loc.known() ? s.atom->loc : pr.loc,
+                                who +
+                                    " is marked `not_invalidating` on a function declared not to return, whose contract takes an object through it (decision 0058 item 2)");
+                        }
+                    }
+                }
+                continue;
+            }
             for (const std::vector<AtomSite>* list : {&sites, &block_sites})
             {
+                const bool blocks {list == &block_sites};
                 for (const AtomSite& s : *list)
                 {
                     if (atom_place(*s.atom).root != k)
                     {
                         continue;
                     }
+                    // the partner of an atom: a block site by place; a permission atom by kind and amount (an `ensures` atom with no partner has an output amount
+                    // that no `requires` atom carries, decision 0052 item 2)
                     bool partner {false};
                     for (const AtomSite& o : *list)
                     {
-                        partner =
-                            partner || (o.in_ensures != s.in_ensures && atom_place(*o.atom) == atom_place(*s.atom));
+                        if (o.in_ensures == s.in_ensures)
+                        {
+                            continue;
+                        }
+                        partner = partner || (blocks ? atom_place(*o.atom) == atom_place(*s.atom)
+                                                     : (o.atom->atom == s.atom->atom && s.atom->amount >= 0 &&
+                                                        o.atom->amount == s.atom->amount));
                     }
                     if (!partner)
                     {

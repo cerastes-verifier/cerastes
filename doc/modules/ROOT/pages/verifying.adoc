@@ -467,8 +467,8 @@ include::example$verifying/strict_init_marked_local.c[tag=source]
 A call whose result has no value is accepted where the result goes to a marked
 local (its initializer or an assignment), is returned by a function marked
 `ref_to_uninit`, or is the argument of a `ref_to_uninit` parameter. Anywhere else,
-including a local without the marker, a member, a store through a pointer and a
-parameter that is not marked, it is `cerastes-unsupported_annotation`. The
+including a local without the marker, a member that is not marked, a store through a
+pointer and a parameter that is not marked, it is `cerastes-unsupported_annotation`. The
 result of `calloc` has a value, so its local needs no marker.
 
 [source,c]
@@ -531,6 +531,88 @@ include::example$verifying/strict_init_null_argument.c[tag=source]
 Without `--strict-init` the marker on a local documents the intent and changes
 nothing: the checks of the default mode, on every path, already report a read of
 an object that has no value.
+
+[#strict-init-marked-fields]
+==== Marked members under `--strict-init`
+
+A pointer member marked `cerastes::ref_to_uninit`
+(xref:annotations.adoc#marked-members[Marked members]) is a receiver like a marked
+local, and a store into it follows the same rule: `s.q = v;`, `+p->q = v;+`. It may receive a null pointer,
+the result of a `ref_to_uninit` call (`malloc` too), the address `&x` of a local
+marked `uninit`, or another marked pointer: a marked local, a marked parameter or a
+marked member. Anything else may point to an object that has a value, and is
+`cerastes-uninit_ref_initialized`. A marked member is also accepted as the argument
+of a `ref_to_uninit` parameter, as a marked local is.
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field.c[tag=source]
+----
+
+A member that is not marked cannot receive the result of `malloc`
+(`cerastes-unsupported_annotation`: mark the member):
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_unmarked_error.c[tag=source]
+----
+
+and a marked member rejects a pointer that may point to an object with a value:
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_address_error.c[tag=source]
+----
+
+*Initializers.* Each marked member of a structure initializer, in a declaration or
+a compound literal, is checked on its own, as a store is: a null pointer or an
+allocation is accepted (and a structure initialized with `{ 0 }` has null pointers),
+and the address of an object that has a value is rejected.
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_initializer.c[tag=source]
+----
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_initializer_error.c[tag=source]
+----
+
+*Global structures.* A global's static initializer may give a marked member a null
+pointer, but not the address of an object: an object with static storage always has a
+value.
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_global.c[tag=source]
+----
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_global_error.c[tag=source]
+----
+
+*Copies and by-value passes.* Copying a structure (`t = s;`), passing it by value and
+returning it move a marked member into the same marked member of the same type, which
+the rule accepts: nothing new receives a pointer that may point to an object with a
+value.
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_copy.c[tag=source]
+----
+
+*What the option cannot see.* The rule reads stores to the member by name. A store
+through a pointer to the member (`int **pp = &s.q; *pp = &x;`), or through a callee
+given `&s.q`, is accepted although the object `x` may have a value; as for a marked
+local (above), the checks of the default mode stay path-precise and report a read
+that may find no value.
+
+[source,c]
+----
+include::example$verifying/strict_init_marked_field_alias.c[tag=source]
+----
 
 [#strict-owner]
 === The strict ownership mode

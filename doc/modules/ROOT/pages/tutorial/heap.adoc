@@ -203,6 +203,30 @@ not_invalidating marker] has the rules, and what the verifier checks about the b
 include::example$tutorial/heap_not_invalidating.c[tag=source]
 ----
 
+A buffer is often allocated first and filled later, and then the function that fills
+it is handed a buffer that has no value yet. By default that is reported, since a
+contract that owns the structure also owns a buffer with a value:
+
+[source,c]
+----
+include::example$tutorial/heap_marked_buffer_error.c[tag=source]
+----
+
+[source,console]
+----
+heap_marked_buffer_error.c:26: error: uninitialized: calls `buf_load`, which needs `*b->data` to have a value; it may not have one here
+----
+
+`CERASTES_REF_TO_UNINIT` on the member, beside `CERASTES_OWNING`, says that its buffer
+may hold no value. `buf_load` may now be given the buffer as it is; it writes it, and
+a function that read it first would be reported at the read
+(xref:memory.adoc#marked-owning-fields[Marked owning members] has the rules):
+
+[source,c]
+----
+include::example$tutorial/heap_marked_buffer.c[tag=source]
+----
+
 == What you have learned
 
 * The result of `malloc` must be tested against `NULL` before it is used.
@@ -216,6 +240,8 @@ include::example$tutorial/heap_not_invalidating.c[tag=source]
   `cerastes_owns(g)` carries the block with it, and `main` may end while it holds one.
 * A member marked `CERASTES_OWNING` owns its allocation for its structure: whoever
   owns the structure owns the buffer, and a destructor frees both.
+* A member marked `CERASTES_OWNING` and `CERASTES_REF_TO_UNINIT` owns a buffer that
+  may hold no value yet, so it can be handed to the function that writes it.
 * A parameter marked `CERASTES_NOT_INVALIDATING` leaves the buffers it borrows in
   place, so a caller's pointer into one stays valid across the call.
 

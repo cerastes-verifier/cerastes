@@ -83,7 +83,9 @@ const an_attr_registration kAttributes[] {
     // redeclarations and registration accepts a non-pointer parameter, a duplicate and both markers on one parameter,
     // so the encoder checks each declaration.
     {"uninit", "", "v:+a!", RAF_NO_FLAGS},
-    {"ref_to_uninit", "", "r|v|p", RAF_ENTITY_ATTACHED},
+    // From M4.5d2b2d (decision 0058 item 4; P77) also a field (target `d`, as `owning`'s): it lands on the field's own `source_corresp.attributes`;
+    // registration accepts a non-pointer field, a duplicate, a bit-field and a union member, and `struct_info` rejects each of them.
+    {"ref_to_uninit", "", "r|v|p|d", RAF_ENTITY_ATTACHED},
     {"must_init", "", "p", RAF_NO_FLAGS},
     // not_invalidating (decision 0058 item 2; P4418R0, P77): a marker on a pointer parameter, target `p` as `must_init` is (it is no initialization
     // marker and has no argument list); EDG refuses it on a function and after the `*` (#1835).  The encoder reads it like the other parameter markers.

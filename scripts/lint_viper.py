@@ -49,6 +49,11 @@ status 1) on:
   `while` body, an `if` or `else` branch) that also encloses the `goto`, so a jump goes outward or
   stays in its block, never into a loop (which would skip the invariant check on entry) or a branch
   (which would skip its condition);
+* the marked closure's flag rows and the row of `cerastes::not_invalidating` (decision 0058 items 2 and 4): a kept-flag row
+  `((old(L != null) && old(E.d_T)) ==> E.d_T)` for a pointer `E` read through a load stands in a clause that also holds
+  `E == old(E)`, and in a return assertion that is one atomic `assert !(!(CLAUSE))`; and the row that a map message says is
+  the `not_invalidating` one (`... does not return it, but ... is cerastes::not_invalidating`) is an `assert ANT ==> (GP ==> GE)`
+  of a `__wf` method, the converse of an earlier row `ANT' ==> (GE ==> GP)` whose antecedent it holds;
 * the flags of locals without an initializer (decision 0019 item 5; `held_<v> := ...` and `tv_<v> := ...` lines of an owning local, decision 0052 item 3, may stand between a write and its flag: only a write sets a flag, and a
   declaration, a block entry or a switch dispatch resets it): in a method, every `d_<name> := true` must
   directly follow (the previous line that is neither blank nor a comment) an assignment `<name> := ...` of
@@ -2822,6 +2827,125 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
 
 
 
+# The flag rows of a marked closure site and the row of `cerastes::not_invalidating` (decision 0058 items 2 and 4).
+# A marked (`ref_to_uninit`) closure site read through a load keeps the flags of the entry cells only when its pointer is
+# tied (`E == old(E)`): the row `(old(L != null) && old(E.d)) ==> E.d` compares the entry block's flag with the return
+# block's, so without the equality (B1 of audit round 1) it compares two different blocks and cannot be proved.  A site
+# through a load that is not tied claims no flags and has no such row.
+KEPT_ROW_RE = re.compile(r"\(\(old\((?P<guard>.+?)\) && old\((?P<cell>[^&]+?\.d_\w+)\)\) ==> (?P=cell)\)")
+FLAG_FIELD_RE = re.compile(r"\.d_\w+$")
+NOT_INVALIDATING_ROW_MARK = "does not return it, but"
+
+
+def _double_negation(body: str) -> bool:
+    """Whether `body` is exactly one `!(!(CLAUSE))`: the outer negation's group ends at the end of the text, and so
+    does the inner one's (a text that merely starts with `!(!(` is not)."""
+    body = body.strip()
+    if not body.startswith("!(") or _group_end(body, 1) != len(body) - 1:
+        return False
+    inner = body[2:-1].strip()
+    return inner.startswith("!(") and _group_end(inner, 1) == len(inner) - 1
+
+
+def lint_marked_kept_rows(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """A Kept row for a pointer read through a load (the text `.v_` in it: a formal, a result or a global's own cell
+    cannot change, and their rows stand as in decision 0042 item 5) stands in a clause that also holds the equality
+    `E == old(E)` (a written tie lands after the closure, a spliced one beside its framing atom: its place in the clause
+    does not matter, its presence does: an untied site is never emitted as Kept); and where the row stands in an `assert`
+    (the return assertion of the clause) that assertion is the one atomic `assert !(!(CLAUSE))`, so that Silicon's check
+    of the contract passes after the one user error (decision 0058 item 4, B1)."""
+    for lineno, code in enumerate(src.code, start=1):
+        text = code.strip()
+        in_ensures = text.startswith("ensures ")
+        in_assert = text.startswith("assert ")
+        if not (in_ensures or in_assert):
+            continue
+        for m in KEPT_ROW_RE.finditer(code):
+            pointer = FLAG_FIELD_RE.sub("", m.group("cell"))
+            if ".v_" not in pointer:
+                continue
+            tie = f"{pointer} == old({pointer})"
+            if tie not in code:
+                add(lineno, f"a marked closure site's kept-flag row for `{pointer}` (a pointer read through a load) is in a "
+                            f"clause without `{tie}`: without the tie the row compares the flag of two "
+                            "different blocks and cannot be proved; an untied site claims no flags (decision 0058 item 4, "
+                            "audit B1)")
+            if in_assert and not _double_negation(text[len("assert "):]):
+                add(lineno, f"the return assertion that holds a marked closure site's kept-flag row for `{pointer}` is not the "
+                            "one atomic `assert !(!(CLAUSE))` (decision 0058 item 4, audit B1): the tie and the row would "
+                            "be two checks, and a failed tie would leave the row to Silicon's own check of the contract")
+
+
+def _guard_parts(consequent: str) -> list[str]:
+    """The guards of a consequent: `(GP) ==> (GE)` as [GP, GE], a lone `GE` as [GE]."""
+    inner = _strip_wrap(consequent)
+    parts = _split_top(inner, "==>")
+    return [_strip_wrap(x) for x in parts]
+
+
+def _assert_row(code: str) -> tuple[str, list[str]] | None:
+    """(antecedent, guards) of an `assert ANT ==> CONSEQUENT` line, or None."""
+    text = code.strip()
+    if not text.startswith("assert "):
+        return None
+    parts = _split_top(text[len("assert "):], "==>")
+    if len(parts) != 2:
+        return None
+    return _strip_wrap(parts[0]), _guard_parts(parts[1])
+
+
+def lint_not_invalidating_rows(src: Source, decls: list[Decl], entries: list["MapEntry"],
+                               add: Callable[[int, str], None]) -> None:
+    """The `f__wf` row of `cerastes::not_invalidating` (decision 0058 item 2, "taken implies returned on every path"),
+    found by its map message: an `assert` of a `__wf` method of the form `ANT ==> (GP ==> GE)` (or `ANT ==> GE` for an
+    unguarded requires site), whose guards are the converse of an earlier row of the same method, the partner row
+    `ANT' ==> (GE ==> GP)` (so a mutant that restates the existing row, or drops the swap, is refused), and whose
+    antecedent holds the antecedent of that row.  The partner row exists for a bodiless contract (its base method has no
+    body) and is required there; for a function with a body only the form and the place are checked."""
+    for e in entries:
+        if NOT_INVALIDATING_ROW_MARK not in e.message or "cerastes::not_invalidating" not in e.message:
+            continue
+        line = e.vpr_line
+        if line > len(src.code):
+            continue
+        owner = next((d for d in decls if d.kind == "method" and d.line <= line <= d.end_line), None)
+        if owner is None or not owner.name.endswith("__wf"):
+            add(line, "the row of `cerastes::not_invalidating` (taken implies returned) is not in a `__wf` method "
+                      "(decision 0058 item 2)")
+            continue
+        row = _assert_row(src.code[line - 1])
+        if row is None:
+            add(line, "the row of `cerastes::not_invalidating` is not an `assert ANT ==> CONSEQUENT` line (decision 0058 item 2)")
+            continue
+        antecedent, guards = row
+        if len(guards) == 1:
+            continue
+        if len(guards) != 2:
+            add(line, "the row of `cerastes::not_invalidating` has the consequent `GP ==> GE` or `GE`, not "
+                      "a longer chain (decision 0058 item 2)")
+            continue
+        gp, ge = guards
+        partner = None
+        for earlier in range(owner.line, line):
+            other = _assert_row(src.code[earlier - 1])
+            if other is not None and len(other[1]) == 2 and other[1] == [ge, gp]:
+                partner = other
+                break
+        base = next((d for d in decls if d.kind == "method" and d.name == owner.name[:-len("__wf")]), None)
+        if partner is None and base is not None and base.has_body:
+            # a function with a body has no partner row (the existing row and the tie are asserted for a bodiless
+            # contract, decision 0054 item 2): the converse is checked against it only where it exists
+            continue
+        if partner is None:
+            add(line, "the row of `cerastes::not_invalidating` (`GP ==> GE`) has no earlier row in its `__wf` method "
+                      "with the two guards swapped (the partner row `GE ==> GP`): the new row is the converse of "
+                      "the existing one (decision 0058 item 2)")
+        elif partner[0] not in antecedent:
+            add(line, "the antecedent of the row of `cerastes::not_invalidating` does not hold the antecedent of its "
+                      "partner row: it is the contract up to and including the site's clause (decision 0058 item 2)")
+
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -2915,12 +3039,14 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_ghost_refs(src, decls, add)
     forperm_lines = lint_heap_token(src, decls, add)
     lint_views(src, decls, add, has_globals, global_facts)
+    lint_marked_kept_rows(src, decls, add)
 
     if map_text is None:
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
         return problems
     entries, map_problems = parse_map(map_text, map_name or name + MAP_SUFFIX)
     problems += map_problems
+    lint_not_invalidating_rows(src, decls, entries, add)
     by_line: dict[int, list[MapEntry]] = {}
     for e in entries:
         by_line.setdefault(e.vpr_line, []).append(e)

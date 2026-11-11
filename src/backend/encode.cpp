@@ -1853,8 +1853,7 @@ private:
                 continue;
             }
             const std::string pname {f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name};
-            const std::string head {"`" + pname + "` is `cerastes::not_invalidating`, but the contract of `" +
-                                    f->c_name + "` "};
+            const std::string head {"\"cerastes::not_invalidating\" on `" + pname + "`, "};
             auto rooted = [&](const vir::AtomSite& st)
             {
                 return vir::atom_place(*st.atom).root == static_cast<int>(k);
@@ -1883,8 +1882,8 @@ private:
                 if (any != nullptr)
                 {
                     reject(Diag::unsupported_annotation, m.pos,
-                           head + "is declared not to return and takes `" + text_of(*any, block) +
-                               "`: it has no `ensures` to return it (decision 0058 item 2)");
+                           head + "of a function declared not to return, whose contract takes `" +
+                               text_of(*any, block) + "` (it has no `ensures` to return it, decision 0058 item 2)");
                 }
                 continue;
             }
@@ -1922,17 +1921,17 @@ private:
                     {
                         reject(
                             Diag::unsupported_annotation, m.pos,
-                            head + "gives `" + text_of(st, block) +
-                                "` in its `ensures` without taking it in its `requires`: the marker returns what it takes and gives nothing "
+                            head + "whose contract of `" + f->c_name + "` gives `" + text_of(st, block) +
+                                "` in its `ensures` without taking it in its `requires` (the marker returns what it takes and gives nothing "
                                 "new through `" +
-                                pname + "` (decision 0058 item 2)");
+                                pname + "`, decision 0058 item 2)");
                     }
                     else
                     {
                         reject(Diag::unsupported_annotation, m.pos,
-                               head + "takes `" + text_of(st, block) +
-                                   "` without returning it: a callee that keeps or frees what `" + pname +
-                                   "` reaches invalidates the caller's pointers (decision 0058 item 2)");
+                               head + "whose contract of `" + f->c_name + "` takes `" + text_of(st, block) +
+                                   "` without returning it (a callee that keeps or frees what `" + pname +
+                                   "` reaches invalidates the caller's pointers, decision 0058 item 2)");
                     }
                 }
             }
@@ -1943,7 +1942,8 @@ private:
 
     // Decision 0058 item 2, the implicit `ensures`: for each `ensures` atom or block site rooted at a `not_invalidating` parameter whose place goes through
     // loads, every loaded pointer `E` on the way (root first) is `E == old(E)`.  Placed as the closure of 0055 item 3 is (`close_source`): spliced right
-    // after the `ensures` permission atom that frames the load of `E` (the atom with the cell's root and steps whose member path is a prefix of the cell's),
+    // after the `ensures` permission atom or block site (a closure's included) that frames the load of `E` (the one with the cell's root and steps whose
+    // member path is a prefix of the cell's); none rooted at the parameter is a rejection,
     // so it inherits that atom's guards by position, never the site's own null test, and no guard is copied.  Each clause that receives one records its
     // text in `Clause::added`, for the postcondition's message.  After check_not_invalidating (the sites it sees are all partnered).
     void tie_not_invalidating(a_routine_ptr r, vir::Function* f)
@@ -1992,11 +1992,10 @@ private:
                         const SrcLoc l {m.pos.seq != 0U ? loc_of(m.pos) : f->loc};
                         if (e->kind != Expr::Kind::Deref)
                         {
-                            reject(
-                                Diag::unsupported_annotation, m.pos,
-                                "`" + f->params[k].name + "` is `cerastes::not_invalidating`, but the pointer `" +
-                                    val_text(*e) +
-                                    "` on the way to a place its contract names is read from a member of a struct value (decision 0058 item 2)");
+                            reject(Diag::unsupported_annotation, m.pos,
+                                   "\"cerastes::not_invalidating\" on `" + f->params[k].name +
+                                       "`, whose contract names a place reached through the pointer `" + val_text(*e) +
+                                       "`, which is read from a member of a struct value (decision 0058 item 2)");
                             return;
                         }
                         const Expr* cell_atom {b_.atom(vir::AtomKind::Owns, clone_place(e->a, *f, l), -1, l)};
@@ -2023,8 +2022,13 @@ private:
                         }
                         if (frame == nullptr)
                         {
-                            lib_internal_error(m.pos, "no `ensures` atom frames the load of `" + val_text(*e) +
-                                                          "` for the implicit clause of `cerastes::not_invalidating`");
+                            // not an `f__wf` row either (a framer rooted at another parameter that `p` equals passes it), so it is rejected here
+                            reject(
+                                Diag::unsupported_annotation, m.pos,
+                                "\"cerastes::not_invalidating\" on `" + f->params[k].name +
+                                    "`, whose contract names a place reached through the pointer `" + val_text(*e) +
+                                    "`, which no `ensures` atom or block site on `" + f->params[k].name +
+                                    "` frames, so the marker cannot say that it is unchanged (decision 0058 item 2)");
                             return;
                         }
                         const Expr* now {clone_place(e, *f, l)};
@@ -2051,6 +2055,12 @@ private:
                         tied.push_back(cell);
                         const std::string text {val_text(*e) + " == old(" + val_text(*e) + ")"};
                         clause.added += (clause.added.empty() ? "" : " and ") + text;
+                        if (std::find(clause.added_params.begin(), clause.added_params.end(), m.index) ==
+                            clause.added_params.end())
+                        {
+                            clause.added_params.push_back(
+                                m.index); // the parameter whose marker added it, for the message
+                        }
                     }
                 }
             }
@@ -2463,8 +2473,10 @@ private:
             atom_pos_[atom] = *where;
             deep_atoms_.insert(atom);
         }
-        // decision 0055 item 3: the block of a `struct S *` global closes over the owning fields of `S`
-        const Expr* inner {g->type.is_ptr() && g->type.pointee != nullptr && g->type.pointee->is_struct()
+        // decision 0055 item 3: the block of a `struct S *` global closes over the owning fields of `S`; not for a marked one (decision 0058 item 4,
+        // question 202: its cells hold no promised value, so its site closes nothing)
+        const Expr* inner {!g->ref_to_uninit && g->type.is_ptr() && g->type.pointee != nullptr &&
+                                   g->type.pointee->is_struct()
                                ? close_struct(
                                      [this, g, l]()
                                      {
@@ -2789,6 +2801,8 @@ private:
     {
         std::vector<int> path;
         vir::Type type;
+        // the leaf is also `ref_to_uninit` (decision 0058 item 4): its closure is its own clause and closes nothing below it
+        bool marked {false};
     };
     // The owning leaves of a structure, in struct_leaves order (depth first), nested by-value members included.
     static std::vector<OwnLeaf> owning_leaves(const vir::StructType& st)
@@ -2798,7 +2812,7 @@ private:
         {
             if (leaf_is_owning(st, lf.path))
             {
-                out.push_back(OwnLeaf {lf.path, lf.type});
+                out.push_back(OwnLeaf {lf.path, lf.type, leaf_is_marked(st, lf.path)});
             }
         }
         return out;
@@ -2887,7 +2901,7 @@ private:
 
     // `L == NULL || owns_block(L) [&& the closure of L's own owning fields]`, `make` building `L` (a pointer to an object) afresh; `*atom` is the block site.
     const Expr* close_leaf(const Maker& make, const vir::Type& ptype, const a_source_position& pos, const SrcLoc& l,
-                           const Expr** atom)
+                           const Expr** atom, bool marked = false)
     {
         const Expr* eq {b_.binary(vir::BinaryOp::Eq, make(), b_.null_const(ptype, l), l)};
         const Expr* site {b_.atom(vir::AtomKind::OwnsBlock, make(), -1, l)};
@@ -2896,7 +2910,8 @@ private:
         {
             *atom = site;
         }
-        const Expr* inner {ptype.pointee != nullptr && ptype.pointee->is_struct()
+        // a marked leaf's block has cells of unknown value: nothing below it is closed (decision 0058 item 4)
+        const Expr* inner {!marked && ptype.pointee != nullptr && ptype.pointee->is_struct()
                                ? close_struct(make, *ptype.pointee->struct_type, pos, l)
                                : nullptr};
         return b_.binary(vir::BinaryOp::LOr, eq,
@@ -2914,7 +2929,7 @@ private:
                               {
                                   return leaf_read(base(), path, l);
                               }};
-            const Expr* c {close_leaf(make, lf.type, pos, l, nullptr)};
+            const Expr* c {close_leaf(make, lf.type, pos, l, nullptr, lf.marked)};
             r = r != nullptr ? b_.binary(vir::BinaryOp::LAnd, r, c, l) : c;
         }
         return r;
@@ -3044,6 +3059,13 @@ private:
     // `ref_to_uninit` parameter or result.  A marker applies to a site on the parameter itself (no steps, no member path), as site_marker and block_marker read it.
     bool closure_marked(const vir::Function& f, const vir::AtomSite& st) const
     {
+        // the block site of an owning and `ref_to_uninit` global (decision 0058 item 4, question 202): `Deref(GlobalAddr g)`
+        if (const Expr* a {st.atom->atom == vir::AtomKind::OwnsBlock ? st.atom->a : nullptr};
+            a != nullptr && a->kind == Expr::Kind::Deref && a->a != nullptr && a->a->kind == Expr::Kind::GlobalAddr &&
+            a->a->global != nullptr && a->a->global->owning && a->a->global->ref_to_uninit)
+        {
+            return true;
+        }
         const vir::PlaceKey pk {vir::atom_place(*st.atom)};
         if (!pk.valid() || !pk.via.empty() || !pk.path.empty())
         {
@@ -3059,55 +3081,6 @@ private:
             return init == vir::InitMarker::RefToUninit || (init == vir::InitMarker::MustInit && !st.in_ensures);
         }
         return false;
-    }
-
-    // `ref_to_uninit` on a parameter or a result whose pointee structure has an owning field (decision 0055 item 3: pinned; M4.5d2b2c's strict rules decide it).
-    void reject_marked_owning_pointees(a_routine_ptr r, vir::Function* f)
-    {
-        auto pointee_struct = [](const vir::Type& t) -> const vir::StructType*
-        {
-            return t.is_ptr() && t.pointee != nullptr && t.pointee->is_struct() ? t.pointee->struct_type : nullptr;
-        };
-        const auto at {markers_.find(r)};
-        if (at != markers_.end())
-        {
-            for (const MarkerParam& m : at->second)
-            {
-                const auto k {static_cast<size_t>(m.index)};
-                if (m.kind != vir::InitMarker::RefToUninit || k >= f->params.size())
-                {
-                    continue;
-                }
-                const vir::StructType* st {pointee_struct(f->params[k].type)};
-                if (st == nullptr || owning_leaves(*st).empty())
-                {
-                    continue;
-                }
-                const std::string first {leaf_name(*st, owning_leaves(*st).front().path)};
-                reject(
-                    Diag::unsupported_annotation, m.pos,
-                    "\"cerastes::ref_to_uninit\" on `" +
-                        (f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name) +
-                        "`, a pointer to " + st->c_name + ", which has the owning field `" + first +
-                        "` (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 11)");
-            }
-        }
-        const vir::StructType* rs {pointee_struct(f->ret)};
-        if (rs == nullptr || f->result_init != vir::InitMarker::RefToUninit || owning_leaves(*rs).empty())
-        {
-            return;
-        }
-        for (an_attribute_ptr a {r->source_corresp.attributes}; a != nullptr; a = a->next)
-        {
-            if (is_registered_cerastes(a) && written_by_program(a->position) && classify(a) == Annot::ref_to_uninit)
-            {
-                reject(
-                    Diag::unsupported_annotation, a->position,
-                    "\"cerastes::ref_to_uninit\" on `" + f->c_name + "`, which returns a pointer to " + rs->c_name +
-                        ", which has an owning field (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 11)");
-                return;
-            }
-        }
     }
 
     // What the closure of one source atom needs (decision 0055 items 3 and 7): the lists of the function's or the loop's atoms, and where the source stands.
@@ -3169,7 +3142,8 @@ private:
         {
             Maker make;
             vir::Type ptype;
-            std::string member; // the member's name
+            std::string member;  // the member's name
+            bool marked {false}; // the leaf is `ref_to_uninit` too: its closure stops at its own clause
         };
         std::vector<Cover> covers;
         const vir::Type& pointee {*a->type.pointee};
@@ -3182,7 +3156,7 @@ private:
                                         {
                                             return leaf_read(clone_place(a, *f, l), path, l);
                                         },
-                                        lf.type, leaf_name(*pointee.struct_type, lf.path)});
+                                        lf.type, leaf_name(*pointee.struct_type, lf.path), lf.marked});
             }
         }
         else if (!block && a->kind == Expr::Kind::MemberAddr && a->a != nullptr && a->a->type.is_ptr() &&
@@ -3191,24 +3165,25 @@ private:
                  a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].owning)
         {
             // the leaf's own cell: `owns(p->q)`
-            covers.push_back(Cover {[this, a, f, l]()
-                                    {
-                                        return b_.deref(clone_place(a, *f, l), l);
-                                    },
-                                    pointee,
-                                    a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].name});
+            covers.push_back(
+                Cover {[this, a, f, l]()
+                       {
+                           return b_.deref(clone_place(a, *f, l), l);
+                       },
+                       pointee, a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].name,
+                       a->a->type.pointee->struct_type->members[static_cast<size_t>(a->index)].ref_to_uninit});
         }
         // the number of blocks the closure of this atom gives (a clause's own block and those of its nested leaves), for the rule of a bodiless fresh result
         size_t given_blocks {0U};
         for (const Cover& cv : covers)
         {
-            given_blocks += block_sites_in(close_leaf(cv.make, cv.ptype, pos, l, nullptr));
+            given_blocks += block_sites_in(close_leaf(cv.make, cv.ptype, pos, l, nullptr, cv.marked));
         }
         std::vector<const Expr*> add;
         for (const Cover& cv : covers)
         {
             const Expr* site {nullptr};
-            const Expr* clause {close_leaf(cv.make, cv.ptype, pos, l, &site)};
+            const Expr* clause {close_leaf(cv.make, cv.ptype, pos, l, &site, cv.marked)};
             const vir::PlaceKey pk {vir::atom_place(*site)};
             // the leaf's and the atom's spelling for messages; a place without one (the result of an `owning` function) is named by its member
             const std::string field {cv.make()->c_text.empty() ? cv.member : cv.make()->c_text};
@@ -3317,7 +3292,6 @@ private:
 
     void apply_owning_closure(a_routine_ptr r, vir::Function* f)
     {
-        reject_marked_owning_pointees(r, f);
         const std::vector<vir::AtomSite> perms {vir::contract_atoms(*f)};
         const std::vector<vir::AtomSite> blocks {vir::contract_block_atoms(*f)};
         const bool bodiless {verified_body(r) == nullptr};
@@ -5393,6 +5367,46 @@ private:
         return false;
     }
 
+    // Decision 0058 item 4: the member of `st` along `path` (nested by-value structs), or null.
+    static const vir::StructMember* member_at(const vir::StructType& st, const std::vector<int>& path)
+    {
+        const vir::StructType* cur {&st};
+        const vir::StructMember* m {nullptr};
+        for (int i : path)
+        {
+            if (cur == nullptr || i < 0 || static_cast<size_t>(i) >= cur->members.size())
+            {
+                return nullptr;
+            }
+            m = &cur->members[static_cast<size_t>(i)];
+            cur = m->type.is_struct() ? m->type.struct_type : nullptr;
+        }
+        return m;
+    }
+    static std::string leaf_text(const vir::StructType& st, const std::vector<int>& path)
+    {
+        const vir::StructMember* m {member_at(st, path)};
+        return st.c_name + "::" + (m != nullptr ? m->name : std::string("?"));
+    }
+    static bool leaf_is_marked(const vir::StructType& st, const std::vector<int>& path)
+    {
+        const vir::StructMember* m {member_at(st, path)};
+        return m != nullptr && m->ref_to_uninit;
+    }
+    // Whether `m` (a member address `&base->member`, any depth) names a `ref_to_uninit` member.
+    static bool marked_member_addr(const Expr* m)
+    {
+        if (m == nullptr || m->kind != Expr::Kind::MemberAddr || m->a == nullptr || !m->a->type.is_ptr() ||
+            m->a->type.pointee == nullptr || !m->a->type.pointee->is_struct() ||
+            m->a->type.pointee->struct_type == nullptr)
+        {
+            return false;
+        }
+        const auto& members {m->a->type.pointee->struct_type->members};
+        return m->index >= 0 && static_cast<size_t>(m->index) < members.size() &&
+               members[static_cast<size_t>(m->index)].ref_to_uninit;
+    }
+
     // The initial value of a struct global or `static` struct local, per leaf (decision 0044 item 8): the elements of a braced list of constants (0043 item 6's
     // element rules), zero or null for a leaf it does not name; a pointer leaf is null or `&h`.  Linkage decides, as for a scalar (question 84), whether the
     // values are known.  False after a rejection at its declaration.
@@ -5488,6 +5502,17 @@ private:
                 }
                 else if (ec->kind == ck_address)
                 {
+                    // decision 0058 item 4, `--strict-init`: a marked field receives a null pointer, not the address of an object that may hold a value
+                    if (verify_config().strict_init && leaf_is_marked(st, el.path))
+                    {
+                        reject(
+                            Diag::uninit_ref_initialized, el.at,
+                            "the field `" + leaf_text(st, el.path) +
+                                "` is marked `ref_to_uninit` but its initializer is the address of an object, which may hold a value: only a null "
+                                "pointer may initialize it");
+                        rejected_globals_.insert(v);
+                        return false;
+                    }
                     vir::Global* target {address_target(ec, el.at, true)};
                     if (target == nullptr)
                     {
@@ -8544,9 +8569,10 @@ private:
                 continue;
             }
             // Decision 0052 item 4: a marked local, or the result of a `ref_to_uninit` call (admitted by
-            // strict_result_allowed), holds no value to read.
+            // strict_result_allowed), holds no value to read; decision 0058 item 4: so does a marked field.
             if (a != nullptr &&
                 ((a->kind == Expr::Kind::Local && a->var != nullptr && cx_.ref_marked.count(a->var) != 0U) ||
+                 (a->kind == Expr::Kind::Deref && marked_member_addr(a->a)) ||
                  (a->kind == Expr::Kind::Call && a->callee != nullptr &&
                   a->callee->result_init == vir::InitMarker::RefToUninit)))
             {
@@ -8871,23 +8897,6 @@ private:
                     continue;
                 }
             }
-            if (k == Annot::ref_to_uninit && is_struct_kind(pe))
-            {
-                // decision 0055 item 11: an object with an owning field may not be marked as holding no value (M4.5d2b2c's strict rules decide it)
-                const StructInfo& si {struct_info(pe)};
-                const std::vector<OwnLeaf> leaves {si.ok && si.type.is_struct() ? owning_leaves(*si.type.struct_type)
-                                                                                : std::vector<OwnLeaf> {}};
-                if (!leaves.empty())
-                {
-                    reject(
-                        Diag::unsupported_annotation, at,
-                        "\"" + an + "\" on `" + name + "`, a pointer to " + si.type.struct_type->c_name +
-                            ", which has the owning field `" + leaf_name(*si.type.struct_type, leaves.front().path) +
-                            "` (an object with an owning field may not be marked as holding no value: M4.5d2b2c, decision 0055 item 11)");
-                    r.skip = r.bad = true;
-                    continue;
-                }
-            }
             if (k == Annot::ref_to_uninit)
             {
                 r.ref = true;
@@ -9142,6 +9151,36 @@ private:
                    ", which may point to an initialized object: only a null pointer, the result of a `ref_to_uninit` "
                    "call, `&x` of an `uninit` local or another marked pointer may be stored in it");
     }
+    // `--strict-init`, a store to a field marked `ref_to_uninit` (decision 0058 item 4): the rule of a marked local.
+    void check_marked_field_source(const Expr* addr, const Expr* x, const a_source_position& at)
+    {
+        if (!verify_config().strict_init || !marked_member_addr(addr) || strict_value_uninit_ok(x))
+        {
+            return;
+        }
+        const vir::StructType& st {*addr->a->type.pointee->struct_type};
+        reject(
+            Diag::uninit_ref_initialized, at,
+            "the field `" + leaf_text(st, {addr->index}) + "` is marked `ref_to_uninit` but receives " +
+                (x != nullptr && !x->c_text.empty() ? "`" + x->c_text + "`" : std::string("a value")) +
+                ", which may point to an initialized object: only a null pointer, the result of a `ref_to_uninit` call, `&x` of an `uninit` "
+                "local or another marked pointer may be stored in it");
+    }
+    // The same for the element `x` of an initializer list that initializes the leaf of `st` along `path`.
+    void check_marked_element(const vir::StructType& st, const std::vector<int>& path, const Expr* x,
+                              const a_source_position& at)
+    {
+        if (!verify_config().strict_init || !leaf_is_marked(st, path) || strict_value_uninit_ok(x))
+        {
+            return;
+        }
+        reject(
+            Diag::uninit_ref_initialized, at,
+            "the field `" + leaf_text(st, path) + "` is marked `ref_to_uninit` but its initializer is " +
+                (x != nullptr && !x->c_text.empty() ? "`" + x->c_text + "`" : std::string("a value")) +
+                ", which may point to an initialized object: only a null pointer, the result of a `ref_to_uninit` call, `&x` of an `uninit` "
+                "local or another marked pointer may initialize it");
+    }
     // `--strict-init`, a `ref_to_uninit` function's returns (question 154, decision 0052 item 4): a marked local, a
     // call to a `ref_to_uninit` function or a null pointer constant.  P4416R0 [profiles.init.ref] p6 counts null as
     // initialized, which would reject every allocation wrapper's `return NULL;`.
@@ -9186,8 +9225,8 @@ private:
             case Expr::Kind::AddrOf:
                 return x->var != nullptr && cx_.uninit_marked.count(x->var) != 0U;
             case Expr::Kind::Deref:
-                // another marked global or `static` local, read by name (decision 0054 item 5)
-                return marked_global_target(x->a) != nullptr;
+                // another marked global or `static` local, read by name (decision 0054 item 5), or a marked field (decision 0058 item 4)
+                return marked_global_target(x->a) != nullptr || marked_member_addr(x->a);
             case Expr::Kind::Local:
                 if (x->var == nullptr)
                 {
@@ -12198,7 +12237,7 @@ private:
             Diag::unsupported_annotation, at,
             "under `--strict-init` the result of `" + f->c_name +
                 "` holds no value (`ref_to_uninit`): P4222R3 requires the pointer that receives it to be marked "
-                "`ref_to_uninit` (write `CERASTES_REF_TO_UNINIT` on the local that holds it, or on the function that "
+                "`ref_to_uninit` (write `CERASTES_REF_TO_UNINIT` on the local or field that holds it, or on the function that "
                 "returns it, decisions 0047 item 8 and 0052 item 4)");
     }
 
@@ -12900,6 +12939,9 @@ private:
                 cx_.uninit_marked.insert(var);
             }
             var->owning = marks.owning;
+            var->ref_to_uninit =
+                marks.owning &&
+                marks.ref; // decision 0058 item 4 (question 202): the closure over its pointee closes nothing
             if (marks.ref)
             {
                 cx_.ref_marked.insert(var);
@@ -13437,6 +13479,10 @@ private:
             {
                 allow_owner_result(el.e); // decision 0058 item 3, p4: an owning field's leaf in an initializer list
             }
+            if (leaf_is_marked(st, el.path))
+            {
+                allow_strict_result(el.e); // decision 0058 item 4: a `ref_to_uninit` call may initialize a marked field
+            }
             x = expr(el.e);
         }
         else
@@ -13452,6 +13498,7 @@ private:
             reject(Diag::unsupported_expression, el.at, "an initializer element whose type is not its member's type");
             return nullptr;
         }
+        check_marked_element(st, el.path, x, el.at); // decision 0058 item 4, `--strict-init`
         return x;
     }
 
@@ -13926,8 +13973,8 @@ private:
             check_self_assignment(e, ops);
             const bool target_ok {assign_target(ops[0U], p)};
             allow_enum_conversion(ops[1U]); // decision 0018 item 6 (iii)
-            if (target_ok &&
-                ((p->v != nullptr && cx_.ref_marked.count(p->v) != 0U) || marked_global_target(p->addr) != nullptr))
+            if (target_ok && ((p->v != nullptr && cx_.ref_marked.count(p->v) != 0U) ||
+                              marked_global_target(p->addr) != nullptr || marked_member_addr(p->addr)))
             {
                 allow_strict_result(ops[1U]); // decision 0052 item 4, 0054 item 5
             }
@@ -13947,6 +13994,7 @@ private:
             else
             {
                 check_marked_global_source(marked_global_target(p->addr), p->x, e->position);
+                check_marked_field_source(p->addr, p->x, e->position); // decision 0058 item 4
             }
             if ((p->addr != nullptr || p->target.is_ptr()) && p->x->type != p->target)
             {
@@ -18919,11 +18967,23 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
             reject(Diag::unsupported_annotation, at, "\"cerastes::owning\" on " + who + " (" + why + ")");
             ok = false;
         };
+        // decision 0058 item 4: `cerastes::ref_to_uninit` on the field, read like `owning`
+        const std::vector<an_attribute_ptr> ref {marker_nodes(f->source_corresp.attributes, Annot::ref_to_uninit)};
+        auto refuse_ref = [&](const a_source_position& at, const std::string& why)
+        {
+            reject(Diag::unsupported_annotation, at, "\"cerastes::ref_to_uninit\" on " + who + " (" + why + ")");
+            ok = false;
+        };
         if (f->is_bit_field)
         {
             if (!own.empty())
             {
                 refuse_owning(own[0U]->position, "a bit-field is not a pointer; decision 0055 item 2");
+                continue;
+            }
+            if (!ref.empty())
+            {
+                refuse_ref(ref[0U]->position, "a bit-field is not a pointer; decision 0058 item 4");
                 continue;
             }
             refuse(fp, "a bit-field (" + who + "; M8, decision 0043 item 2)");
@@ -19037,6 +19097,45 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                 continue;
             }
         }
+        bool ref_member {false};
+        if (!ref.empty())
+        {
+            a_type_ptr pe {u->kind == tk_pointer && u->variant.pointer.type != nullptr
+                               ? skip_typerefs(u->variant.pointer.type)
+                               : nullptr};
+            if (ref.size() > 1U)
+            {
+                refuse_ref(ref[1U]->position, "twice on one member; decision 0058 item 4");
+            }
+            else if (u->kind != tk_pointer || u->variant.pointer.is_reference)
+            {
+                refuse_ref(ref[0U]->position,
+                           std::string(u->kind == tk_pointer ? "a reference" : "it is not a pointer") +
+                               "; decision 0058 item 4");
+            }
+            else if (pe != nullptr && pe->kind == tk_routine)
+            {
+                refuse_ref(ref[0U]->position, "a pointer to a function: M4.7; decision 0058 item 4");
+            }
+            else if (pe != nullptr && pe->kind == tk_void)
+            {
+                refuse_ref(ref[0U]->position, "a `void *`: a pointer to an untyped object; decision 0058 item 4");
+            }
+            else if (pointee_qualified(f->type))
+            {
+                refuse_ref(
+                    ref[0U]->position,
+                    "a pointer to a `const` or `volatile` object: nothing could initialize it; decision 0058 item 4");
+            }
+            else
+            {
+                ref_member = true;
+            }
+            if (!ref_member)
+            {
+                continue;
+            }
+        }
         VType mt;
         switch (u->kind)
         {
@@ -19136,6 +19235,10 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
         if (owning_member)
         {
             st->members.back().owning = true;
+        }
+        if (ref_member)
+        {
+            st->members.back().ref_to_uninit = true;
         }
     }
     if (members == 0U && ok)
@@ -19237,16 +19340,20 @@ void Encoder::declaration_level_checks(const IlEntities& ents)
             bool owning_reported {false};
             for (a_field_ptr uf {u->variant.class_struct_union.field_list}; uf != nullptr; uf = uf->next)
             {
-                const std::vector<an_attribute_ptr> own {marker_nodes(uf->source_corresp.attributes, Annot::owning)};
-                if (!own.empty() && in_verified_file(own[0U]->position))
+                for (Annot marker : {Annot::owning, Annot::ref_to_uninit})
                 {
-                    reject(Diag::unsupported_annotation, own[0U]->position,
-                           std::string("\"cerastes::owning\" on ") +
-                               (uf->source_corresp.name != nullptr
-                                    ? "the member `" + std::string(uf->source_corresp.name) + "`"
-                                    : std::string("a member")) +
-                               " of a union (a union: effective types, M8; decision 0055 item 2)");
-                    owning_reported = true;
+                    const std::vector<an_attribute_ptr> own {marker_nodes(uf->source_corresp.attributes, marker)};
+                    if (!own.empty() && in_verified_file(own[0U]->position))
+                    {
+                        reject(Diag::unsupported_annotation, own[0U]->position,
+                               std::string("\"cerastes::") + marker_name(marker) + "\" on " +
+                                   (uf->source_corresp.name != nullptr
+                                        ? "the member `" + std::string(uf->source_corresp.name) + "`"
+                                        : std::string("a member")) +
+                                   " of a union (a union: effective types, M8; decision " +
+                                   (marker == Annot::owning ? "0055 item 2)" : "0058 item 4)"));
+                        owning_reported = true;
+                    }
                 }
             }
             if (!owning_reported)

@@ -176,6 +176,9 @@ struct StructMember
     // `[[cerastes::owning]]` on the field (decision 0055 item 2): a pointer to an object type that owns the block it points to.  The encoder sets it after
     // add_member; no consumer reads it before the closure (item 3).  The owning-field graph is acyclic (check_program).
     bool owning {false};
+    // `[[cerastes::ref_to_uninit]]` on the field (decision 0058 item 4): a pointer to an object type whose pointee may hold no value.  The encoder sets it
+    // after add_member.
+    bool ref_to_uninit {false};
 };
 
 // A C structure type (decision 0043 items 2 and 3), interned in the Program by Program::add_struct (one object per C type: two structs are
@@ -206,6 +209,9 @@ struct StructLeaf
     std::string text;
     // the member is `[[cerastes::owning]]` (decision 0055 item 2): a store to this leaf takes item 4's value rule
     bool owning {false};
+    // the member is `[[cerastes::ref_to_uninit]]` (decision 0058 item 4): with `owning`, the closure of this leaf's block is the marked mode, and a marked owner's own
+    // closure closes over nothing (question 202)
+    bool ref_to_uninit {false};
 };
 // The leaves of `s` in declaration order, depth first (a nested struct's leaves in place).  `text` is `root_text` followed by `.name` for each
 // member on the way (`->name` for the first when `arrow`): struct_leaves(s, "t", false) gives "t.x", "t.u.y", struct_leaves(s, "p", true) "p->x", "p->u.y".
@@ -443,6 +449,9 @@ struct Clause
     // The equalities the encoder spliced into this clause (decision 0058 item 2, `cerastes::not_invalidating`), as written (`p->q == old(p->q)`), joined
     // by " and "; empty for a clause that is as written.  A postcondition failure of the clause says it holds them.
     std::string added {};
+    // The parameters (indexes into Function::params) whose `not_invalidating` marker the spliced equalities are for (decision 0058 item 2, audit round 2 N2); the
+    // postcondition message names them.  Empty: the message falls back to the first marked parameter.
+    std::vector<int> added_params {};
 };
 
 // The shape of a loop statement (decision 0014 items 4 and 5).
@@ -550,6 +559,9 @@ struct Var
     // a parameter copy nor a compound literal, of a pointer-to-object type that is not `void *` and not a pointer to a
     // `const` or `volatile` type; check_program refuses any other Var with it.
     bool owning {false};
+    // `[[cerastes::ref_to_uninit]]` on this owning pointer local (decision 0058 item 4, question 202): its pointee may hold no value, so the closure over the pointee's
+    // owning fields closes nothing (flags unknown); set by the encoder beside `owning`
+    bool ref_to_uninit {false};
 };
 
 // A named constant (decision 0017): a file-scope `const` object (global), or a `const` local of a function that a case

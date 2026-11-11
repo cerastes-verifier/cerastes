@@ -45,8 +45,8 @@ def lint_vpr_other(*args, **kwargs):
 class Check:
     """A line of a fixture that needs a position-map entry."""
 
-    def __init__(self, text, error_id="assert.failed", category="overflow"):
-        self.text, self.error_id, self.category = text, error_id, category
+    def __init__(self, text, error_id="assert.failed", category="overflow", message=None):
+        self.text, self.error_id, self.category, self.message = text, error_id, category, message
 
 
 def good_lines():
@@ -105,7 +105,7 @@ def build(lines):
         if isinstance(item, Check):
             text.append(item.text)
             entries.append("\t".join([str(i), item.error_id, item.category, "t.c", str(i + 100),
-                                      "5", f"message of line {i}"]))
+                                      "5", item.message or f"message of line {i}"]))
         else:
             text.append(item)
     return "\n".join(text) + "\n", "\n".join(entries) + "\n"
@@ -5973,6 +5973,161 @@ class OwningLeafAgreesAndOwnBlockTests(OwningLeafEntryAndExemptionTests):
         self.assertTrue(any("that it read, and no other" in p for p in probs), probs)
         probs = self.exm_probs([self.OWN1, self.OWN0], term=self.OWN_CHAIN_TERM)
         self.assertTrue(any("is not assigned before it" in p for p in probs), probs)
+
+
+class MarkedKeptRowTests(unittest.TestCase):
+    """Decision 0058 item 4, audit B1: the kept-flag row of a marked closure site read through a load is only emitted for
+    a tied site, and the return assertion that holds it is one atomic `assert !(!(CLAUSE))`.  Each check has its twin
+    (the mutant that must fail) and a shape that must stay clean."""
+
+    E = "loc(member(p_p__0, 0), 0).v_ptr_int"
+    ROW = "((old(!({e} == null)) && old({e}.d_int)) ==> {e}.d_int)"
+
+    def row(self, e=None):
+        e = e or self.E
+        return self.ROW.format(e=e)
+
+    def method(self, ensures_text, assert_text=None):
+        lines = ["method m__9(p_p__0: Ref)", Check("  requires p_p__0 != null", WF, "internal"),
+                 Check("  ensures " + ensures_text, P, "postcondition"), "  decreases", "{"]
+        if assert_text is not None:
+            lines.append(Check("  assert " + assert_text, A, "postcondition"))
+        lines.append("}")
+        return lines
+
+    def probs(self, ensures_text, assert_text=None):
+        return [p for p in lint(self.method(ensures_text, assert_text)) if "marked closure" in p or "kept-flag" in p]
+
+    def tied(self, e=None):
+        e = e or self.E
+        return f"(true && ({e} == old({e}))) && {self.row(e)}"
+
+    def test_a_tied_kept_row_is_clean_wherever_the_tie_stands(self):
+        e = self.E
+        self.assertEqual(self.probs(self.tied()), [])
+        # the tie after the row (a written tie lands at the end of the clause)
+        self.assertEqual(self.probs(f"({self.row()} && ({e} == old({e})))"), [])
+
+    def test_an_untied_kept_row_through_a_load_is_refused(self):
+        probs = self.probs(f"(true && {self.row()})")
+        self.assertTrue(any("is in a clause without" in p and "== old(" in p for p in probs), probs)
+
+    def test_the_tie_must_be_the_one_of_the_rows_pointer(self):
+        other = "loc(member(p_p__0, 1), 0).v_ptr_int"
+        probs = self.probs(f"(({other} == old({other})) && {self.row()})")
+        self.assertTrue(any("is in a clause without" in p for p in probs), probs)
+        # twin: the equality of the pointer itself
+        self.assertEqual(self.probs(f"(({self.E} == old({self.E})) && {self.row()})"), [])
+
+    def test_a_tie_in_another_clause_does_not_count(self):
+        # the tie belongs to the clause that holds the row: a second ensures line with it, beside an untied row
+        lines = self.method(f"(true && {self.row()})")
+        lines.insert(3, Check(f"  ensures ({self.E} == old({self.E}))", P, "postcondition"))
+        probs = [p for p in lint(lines) if "kept-flag" in p]
+        self.assertTrue(any("is in a clause without" in p for p in probs), probs)
+        # twin: with the tie in the row's own clause the same two lines are clean
+        lines = self.method(self.tied())
+        lines.insert(3, Check(f"  ensures ({self.E} == old({self.E}))", P, "postcondition"))
+        self.assertEqual([p for p in lint(lines) if "kept-flag" in p], [])
+
+    def test_a_formal_or_a_result_needs_no_tie(self):
+        # decision 0042 item 5: a formal's pointer cannot change, so its row stands untied
+        self.assertEqual(self.probs(f"(true && {self.row('p_p__0')})"), [])
+        self.assertEqual(self.probs(f"(true && {self.row('res')})"), [])
+
+    def test_a_row_is_found_in_a_deeper_pointer_too(self):
+        deep = self.E + ".v_ptr_int"
+        probs = self.probs(f"(true && {self.row(deep)})")
+        self.assertTrue(any("is in a clause without" in p for p in probs), probs)
+        self.assertEqual(self.probs(self.tied(deep)), [])
+
+    def test_the_return_assertion_with_a_kept_row_is_atomic(self):
+        clause = self.tied()
+        self.assertEqual(self.probs(clause, f"!(!({clause}))"), [])
+        for mutant in (clause, f"!({clause})", f"({clause})", f"!(!(true)) && ({clause})"):
+            with self.subTest(mutant=mutant[:40]):
+                probs = self.probs(clause, mutant)
+                self.assertTrue(any("one atomic `assert !(!(CLAUSE))`" in p for p in probs), probs)
+
+    def test_an_assert_without_a_kept_row_is_left_alone(self):
+        self.assertEqual(self.probs(self.tied(), "true"), [])
+        self.assertEqual(self.probs(self.tied(), f"{self.E} == old({self.E})"), [])
+
+
+class NotInvalidatingRowTests(unittest.TestCase):
+    """Decision 0058 item 2: the `f__wf` row of `cerastes::not_invalidating`, `ANT ==> (GP ==> GE)`, the converse of the
+    existing partner row `ANT' ==> (GE ==> GP)`, found by its map message."""
+
+    NEW_MSG = ("the contract of `f` takes `*p` on a path where it does not return it, but `p` is "
+               "`cerastes::not_invalidating`")
+    OLD_MSG = "the contract of `f` returns `*p` on a path where its `requires` did not take it"
+    REQ = "(p_c__0 != 0) ? (p_p__1 != null) : true"
+    ENS = "(p_c__0 > 0) ? (p_p__1 != null) : true"
+
+    def old_row(self, ge="(p_c__0 > 0)", gp="(p_c__0 != 0)", ant=None):
+        return Check(f"  assert ({ant or self.REQ}) ==> ({ge} ==> {gp})", A, "permission", self.OLD_MSG)
+
+    def new_row(self, gp="(p_c__0 != 0)", ge="(p_c__0 > 0)", ant=None, name_text=None):
+        a = ant or f"(({self.REQ}) && ({self.ENS}))"
+        return Check(name_text or f"  assert {a} ==> ({gp} ==> {ge})", A, "permission", self.NEW_MSG)
+
+    def probs(self, *rows, name="f_f__0__wf", base="bodiless"):
+        lines = []
+        if base == "bodiless":
+            lines += ["// cerastes:trusted-contract a contract nothing verifies", "method f_f__0(p_c__0: Int, p_p__1: Ref)", "  decreases _"]
+        elif base == "body":
+            lines += ["method f_f__0(p_c__0: Int, p_p__1: Ref)", "  decreases", "{", "}"]
+        lines += [f"method {name}(p_c__0: Int, p_p__1: Ref)", "  decreases", "{", *rows, "}"]
+        return [p for p in lint(lines) if "not_invalidating" in p]
+
+    def test_the_converse_of_the_partner_row_is_clean(self):
+        self.assertEqual(self.probs(self.old_row(), self.new_row()), [])
+
+    def test_an_unguarded_requires_site_has_the_consequent_alone(self):
+        # twin of the swap check: with no requires guard the consequent is the ensures guard alone, and there is no partner row
+        self.assertEqual(self.probs(self.new_row(name_text=f"  assert (({self.REQ}) && ({self.ENS})) ==> (p_c__0 > 0)")), [])
+
+    def test_a_row_that_restates_the_partner_row_is_refused(self):
+        probs = self.probs(self.old_row(), self.new_row(gp="(p_c__0 > 0)", ge="(p_c__0 != 0)"))
+        self.assertTrue(any("two guards swapped" in p for p in probs), probs)
+
+    def test_a_row_with_no_partner_row_is_refused_for_a_bodiless_contract(self):
+        probs = self.probs(self.new_row())
+        self.assertTrue(any("two guards swapped" in p for p in probs), probs)
+
+    def test_a_function_with_a_body_has_no_partner_row(self):
+        # twin of the check above: the partner row and the tie are a bodiless contract's (decision 0054 item 2), so the
+        # row of a function with a body stands alone; its form is still checked
+        self.assertEqual(self.probs(self.new_row(), base="body"), [])
+        probs = self.probs(self.new_row(name_text="  assert true"), base="body")
+        self.assertTrue(any("is not an `assert ANT ==> CONSEQUENT` line" in p for p in probs), probs)
+        probs = self.probs(self.new_row(), name="f_f__0", base="body")
+        self.assertTrue(any("is not in a `__wf` method" in p for p in probs), probs)
+
+    def test_the_partner_row_must_be_earlier(self):
+        probs = self.probs(self.new_row(), self.old_row())
+        self.assertTrue(any("two guards swapped" in p for p in probs), probs)
+
+    def test_the_antecedent_holds_the_partner_rows(self):
+        probs = self.probs(self.old_row(), self.new_row(ant="(p_c__0 != 5)"))
+        self.assertTrue(any("antecedent" in p for p in probs), probs)
+
+    def test_the_row_is_in_a_wf_method(self):
+        probs = self.probs(self.old_row(), self.new_row(), name="f_f__0")
+        self.assertTrue(any("is not in a `__wf` method" in p for p in probs), probs)
+        self.assertEqual(self.probs(self.old_row(), self.new_row(), name="f_g__3__wf"), [])
+
+    def test_the_row_is_an_assert_of_the_form_ant_implies_consequent(self):
+        for text in ("  assert true", "  assert (a ==> b) ==> (c ==> d) ==> e"):
+            with self.subTest(text=text):
+                probs = self.probs(self.old_row(), self.new_row(name_text=text))
+                self.assertTrue(any("is not an `assert ANT ==> CONSEQUENT` line" in p for p in probs), probs)
+
+    def test_only_a_row_with_the_marker_message_is_checked(self):
+        # twin: the same lines under another message are not this rule's business
+        lines = ["method f_f__0__wf(p_c__0: Int, p_p__1: Ref)", "  decreases", "{",
+                 Check("  assert (a) ==> (b ==> c)", A, "permission", self.OLD_MSG), "}"]
+        self.assertEqual([p for p in lint(lines) if "not_invalidating" in p], [])
 
 
 if __name__ == "__main__":

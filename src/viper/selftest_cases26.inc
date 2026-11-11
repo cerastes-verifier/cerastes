@@ -80,8 +80,7 @@ void define_not_invalidating()
        {
            pair(k, false, false, 0, 2);
        });
-    lc("ni_row_cells_same_guard",
-       "the same guard on both sides, with p marked: the row asks nothing (one expression)",
+    lc("ni_row_cells_same_guard", "the same guard on both sides, with p marked: the row asks nothing (one expression)",
        [=](Kit& k)
        {
            pair(k, false, true, 0, 0);
@@ -98,8 +97,7 @@ void define_not_invalidating()
        {
            k.fail("permission", pair(k, true, true, 0, 2), 1U, "", "not_invalidating");
        });
-    lc("ni_row_blocks_unmarked",
-       "the same block contract with p unmarked: no new row",
+    lc("ni_row_blocks_unmarked", "the same block contract with p unmarked: no new row",
        [=](Kit& k)
        {
            pair(k, true, false, 0, 2);
@@ -107,14 +105,26 @@ void define_not_invalidating()
 
     // void f(int n, int *p [not_invalidating]) requires(owns(*p)) ensures(owns(*p)) ensures(n == 0 | n == n) { }      with `added` set on the last clause
     // (what the encoder splices in: `p->q == old(p->q)`): the postcondition of a clause that holds, and the message of one that does not
-    const auto added = [=](Kit& k, bool holds) -> SrcLoc
+    const auto added = [=](Kit& k, bool holds, bool two) -> SrcLoc
     {
-        Function* f {k.fn("f", k.vd, {{"n", k.i32}, {"p", PT(k)}})};
+        std::vector<Kit::P> ps {{"n", k.i32}, {"p", PT(k)}};
+        if (two)
+        {
+            ps.push_back({"q", PT(k)});
+        }
+        Function* f {k.fn("f", k.vd, ps)};
         f->params[1U].not_invalidating = true;
         k.req(f, owns(k, f, 1, 0));
         k.ens(f, owns(k, f, 1, 0));
+        if (two)
+        {
+            f->params[2U].not_invalidating = true;
+            k.req(f, owns(k, f, 2, 1));
+            k.ens(f, owns(k, f, 2, 1));
+        }
         k.ens(f, holds ? k.eq(k.F(f, 0), k.F(f, 0)) : k.eq(k.F(f, 0), N(k, "0")));
-        f->ensures_.back().added = "p->q == old(p->q)";
+        f->ensures_.back().added = two ? "p->q == old(p->q) and q->r == old(q->r)" : "p->q == old(p->q)";
+        f->ensures_.back().added_params = two ? std::vector<int> {1, 2} : std::vector<int> {1};
         f->body = k.blk({});
         k.done(f);
         return f->end_loc;
@@ -122,14 +132,21 @@ void define_not_invalidating()
     lc("ni_added_holds", "a clause with an added equality that holds: no postcondition error",
        [=](Kit& k)
        {
-           added(k, true);
+           added(k, true, false);
        });
     lc("ni_added_message",
        "the postcondition of a clause with an added equality fails: the message names the equality and the marked parameter",
        [=](Kit& k)
        {
-           k.fail("postcondition", added(k, false), 1U, "",
+           k.fail("postcondition", added(k, false, false), 1U, "",
                   "(with `p->q == old(p->q)`, which `cerastes::not_invalidating` on `p` adds)");
+       });
+    lc("ni_added_message_two",
+       "two marked parameters in one spliced clause: the message names both (audit round 2 N2: not by a prefix of the text)",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", added(k, false, true), 1U, "",
+                  "which `cerastes::not_invalidating` on `p` and `q` adds)");
        });
 }
 
@@ -148,7 +165,8 @@ void define_not_invalidating_rejections()
     {
         return k.b.atom(AtomKind::Owns, FP(k, f, i), amount, k.at());
     };
-    // shape 0: a non-pointer, 1: beside ref_to_uninit, 2: a requires atom with no ensures partner, 3: an ensures atom with no requires partner
+    // shape 0: a non-pointer, 1: beside ref_to_uninit, 2: a requires atom with no ensures partner, 3: an ensures atom with no requires partner,
+    // 4: requires(owns(*p)) ensures(reads(*p)) (the partner is by kind), 5: a noreturn function that takes *p
     const auto marked = [=](Kit& k, int shape)
     {
         Function* f {k.fn("f", k.vd, {{"p", shape == 0 ? k.i32 : PT(k)}})};
@@ -165,6 +183,16 @@ void define_not_invalidating_rejections()
         {
             k.req(f, k.yes());
             k.ens(f, owns(k, f, 0, 0));
+        }
+        else if (shape == 4)
+        {
+            k.req(f, owns(k, f, 0, 0));
+            k.ens(f, k.b.atom(AtomKind::Reads, FP(k, f, 0), 0, k.at()));
+        }
+        else if (shape == 5)
+        {
+            f->noreturn = true;
+            k.req(f, owns(k, f, 0, 0));
         }
         else
         {
@@ -187,6 +215,16 @@ void define_not_invalidating_rejections()
        [=](Kit& k)
        {
            marked(k, 2);
+       });
+    rc("ni_backstop_kind_differs", "an object through it without returning it",
+       [=](Kit& k)
+       {
+           marked(k, 4);
+       });
+    rc("ni_backstop_noreturn", "on a function declared not to return",
+       [=](Kit& k)
+       {
+           marked(k, 5);
        });
     rc("ni_backstop_gives_without_taking", "an object through it without taking it",
        [=](Kit& k)

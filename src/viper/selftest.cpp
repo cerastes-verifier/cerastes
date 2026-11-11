@@ -1495,6 +1495,7 @@ void define_loop_limits_f();
 void define_loop_limits_l2();
 void define_not_invalidating();
 void define_not_invalidating_rejections();
+void define_marked_fields();
 } // namespace
 
 #include "selftest_cases2.inc"
@@ -1522,6 +1523,7 @@ void define_not_invalidating_rejections();
 #include "selftest_cases24.inc"
 #include "selftest_cases25.inc"
 #include "selftest_cases26.inc"
+#include "selftest_cases27.inc"
 
 namespace {
 
@@ -1791,6 +1793,7 @@ int main(int argc, char** argv)
     define_loop_limits_l2();
     define_not_invalidating();
     define_not_invalidating_rejections();
+    define_marked_fields();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

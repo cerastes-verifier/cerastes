@@ -340,8 +340,8 @@ as `owning` does, and every declaration of the function carries the same ones
 `--strict-init` asks for them as P4222 does (xref:verifying.adoc#strict-init[The
 strict initialization mode]). Elsewhere (`uninit` on a global, a `static` local or
 a parameter; `must_init` on anything but a parameter) the front end reports that
-they do not apply (`ref_to_uninit` on a function is read as above, and on a pointer
-local as described next).
+they do not apply (`ref_to_uninit` on a function is read as above, on a pointer
+local as described next, and on a member as in <<marked-members>>).
 
 [#not-invalidating]
 === The not_invalidating marker
@@ -520,7 +520,50 @@ declaration or after its name, on each declarator that owns. These are
 * a non-null initializer of an owning member of a global or `static` local
   structure.
 
-`ref_to_uninit` and `must_init` on a member are the front end's own error.
+[#marked-members]
+=== Marked members
+
+`cerastes::ref_to_uninit` on a pointer member says that the object the pointer points
+to may have no value, as it does on a pointer local (<<marked-locals>>). It goes
+before the member's declaration or after its name, on each declarator that carries it, as
+`cerastes::owning` does. On a member that does not own what it points to, it documents the intent
+and changes no verdict, unless `--strict-init` is given: then every store into the
+member is checked like a store into a marked local
+(xref:verifying.adoc#strict-init-marked-fields[Marked members under `--strict-init`]).
+
+[source,c]
+----
+include::example$annotations/marked_field.c[tag=source]
+----
+
+Beside `cerastes::owning`, the marker says more: the buffer the member owns may be
+allocated and not yet written. A function that borrows the structure
+(`cerastes_owns(*b)`) may be given such a structure, which it may write through but
+not read first; and after the call the caller still has a value in the buffer only
+when the function says it is the same buffer, with `+b->data == cerastes_old(b->data)+`
+in its `ensures`, or with `cerastes::not_invalidating` on the parameter
+(xref:memory.adoc#marked-owning-fields[Marked owning members] has the rules, with
+examples).
+
+Each of these is `cerastes-unsupported_annotation`, reported at the attribute, as
+`cerastes::owning` on a member is:
+
+* a member that is not a pointer to an object: a non-pointer, a reference, a `+void *+`
+  and a pointer to a function (an untyped allocation is converted to `T *` first);
+* a pointer to a `const` or `volatile` object (nothing could initialize it);
+* the attribute twice on one member;
+* a bit-field and a union's member.
+
+[source,c]
+----
+include::example$annotations/marked_field_nonpointer_rejected.c[tag=source]
+----
+
+`cerastes::must_init` on a member is the front end's own error ("does not apply
+here"), as on a local below. A parameter marked `cerastes::ref_to_uninit` that points to
+a structure with an owning member is a different thing, and is accepted
+(xref:memory.adoc#marked-pointees[A marked pointer to a structure with an owning
+member]).
 
 `cerastes::must_init` stays a parameter attribute: P4222 defines it for parameters
 only, and the front end reports that it does not apply to a local.
