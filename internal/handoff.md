@@ -22,8 +22,8 @@ origin in brackets, so its full wording can be found there. Session plans approv
 ## 1. State
 
 - **M4.5e1a** (2026-11-11; record 0059) is done, merged (PR #34) and pushed: `origin/main` = `dc40377`. Local
-  `main` adds two commits, not pushed: `825a9ee` (the owner's answers to 234 and 235) and this planning's. Its
-  result is in `internal/status.md`; the box's full `check.sh` with
+  `main` is ahead of it, not pushed: `825a9ee` (the owner's answers to 234 and 235), then this planning's
+  commits. Its result is in `internal/status.md`; the box's full `check.sh` with
   `CERASTES_LONG=1` on `3ceb13c` was all green (14,208 passed, 0 failed; the long tier ran; 78 minutes at `-j32`).
 - **M4.5e1b** ranges in contracts is next, planned in full on 2026-11-11 (record 0060 is its number). Against the
   earlier sketch, two things moved to M4.5e2 (questions 236 and 237, §8). e1c, e1d and e1e as before
@@ -37,8 +37,8 @@ origin in brackets, so its full wording can be found there. Session plans approv
 
 ## 2. Owner steps
 
-1. **Push** `main` (two commits: `825a9ee`, and this planning's with the plan, the trimmed umbrella plan and this
-   file), so that M4.5e1b branches from `origin/main`.
+1. **Push** `main` (the commits after `dc40377`: `825a9ee`, then this planning's with the plan, the trimmed
+   umbrella plan and this file), so that M4.5e1b branches from `origin/main`.
 2. **Questions 238–240** (§8): each is built as its recommendation unless answered inline.
 3. **CI** (question 176): unchanged from the last handoff (the nightly does not fit 360 minutes; the `profiles=all`
    dispatch is pending, question 172).
