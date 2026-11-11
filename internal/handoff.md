@@ -873,12 +873,26 @@ next handoff's questions start at 234):
 - **229** (before e1a) `*p` one past the end of an array is reported as `permission`: `*p` gets no bounds row, so
   that every existing program's Viper stays as it is, and no permission exists at `len`. **Recommended:** as planned;
   M4.5e2 decides the bounds row together with `p + i`.
+
+Follow recommendation.
+
 - **230** (before e1a's Step-0 run R1; otherwise e1b) `int a[static N]` parameters. **Recommended:** rejected, an M8
   entry (C makes a shorter argument undefined, and no contract states it); if R1 shows such a parameter is accepted
   today, e1a rejects it at once.
+
+Follow recommendation.
+
 - **231** (e1b) `owns_range(p, n)` and `reads_range(p, n)` imply `p != NULL`. **Recommended:** yes, as `owns(*p)`
   does; a function that accepts `(NULL, 0)` writes `n == 0 || owns_range(p, n)`.
+
+Follow recommendation.
+
 - **232** (e1c) `cerastes_old(p[i])` in the body of a `pure` function that only an `ensures` names (the `carrays.c`
   port needs `old` under a quantifier). **Recommended:** accept.
+
+Follow recommendation.
+
 - **233** (e1e) its planning may split it in two (aggregates; storage). **Recommended:** decide there, from its
   measured sizes.
+
+Follow recommendation.
