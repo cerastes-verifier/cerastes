@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -422,6 +423,266 @@ void test_report(Checks& c)
     }
 }
 
+// ---- marked range rows (decision 0059 item 7) ---------------------------------------------------------
+
+void test_marked_rows(Checks& c)
+{
+    const std::string map {
+        "10\tassert.failed[insufficient.permission]\tpermission\tt.c\t5\t3\tthe array may lack permission here\n"
+        "11\tassert.failed\tcheck\tt.c\t6\t3\tcheck may not hold\n"
+        "12\tassert.failed[insufficient.permission]\tlifetime\tt.c\t7\t1\tan element may still be in use\tt.c:2:declared here\n"};
+    std::string problem;
+    const std::vector<MapRow> rows {parse_position_map(map, &problem)};
+    c.expect(problem.empty() && rows.size() == 3U, "a map with marked range rows parses");
+    if (rows.size() != 3U)
+    {
+        return;
+    }
+    c.eq(rows[0U].viper_id, std::string("assert.failed"), "a marked row's id is the part before the bracket");
+    c.eq(rows[0U].expected_reason, std::string("insufficient.permission"), "a marked row's expected reason is read");
+    c.expect(rows[1U].expected_reason.empty(), "an unmarked row has no expected reason");
+    c.expect(rows[2U].has_note && rows[2U].note_line == 2 && rows[2U].expected_reason == "insufficient.permission",
+             "a marked row keeps its note");
+
+    auto err = [](int line, const char* reason)
+    {
+        SiliconError e;
+        e.viper_id = "assert.failed";
+        e.reason = reason;
+        e.file = "program.vpr";
+        e.line = line;
+        e.message = std::string("assert.failed at ") + std::to_string(line);
+        return e;
+    };
+    {
+        SiliconVerdict v;
+        v.errors = {err(10, "insufficient.permission")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.failures.empty() && m.errors.size() == 1U, "a marked row that fails with its reason maps");
+        if (m.errors.size() == 1U)
+        {
+            c.eq(render_error(m.errors[0U]),
+                 std::string("t.c:5: error: permission: the array may lack permission here\n"),
+                 "a marked row maps to its category and message");
+        }
+    }
+    {
+        SiliconVerdict v;
+        v.errors = {err(12, "insufficient.permission")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.failures.empty() && m.errors.size() == 1U && m.errors[0U].category == "lifetime" &&
+                     m.errors[0U].has_note,
+                 "a marked row maps with its note");
+    }
+    {
+        SiliconVerdict v;
+        v.errors = {err(10, "assertion.false")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
+                 "a marked row that fails with assertion.false is a tool failure");
+    }
+    {
+        SiliconVerdict v;
+        v.errors = {err(10, "qp.not.injective")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
+                 "a marked row that fails with qp.not.injective is a tool failure");
+    }
+    {
+        SiliconVerdict v;
+        v.errors = {err(10, "division.by.zero")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
+                 "a marked row that fails with another reason is a tool failure");
+    }
+    {
+        SiliconVerdict v;
+        v.errors = {err(11, "insufficient.permission")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
+                 "an unmarked row that fails with insufficient.permission is a tool failure");
+    }
+    {
+        SiliconVerdict v;
+        v.errors = {err(11, "qp.not.injective")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.errors.empty() && m.failures.size() == 1U,
+                 "an unmarked row that fails with qp.not.injective is a tool failure");
+    }
+    {
+        SiliconVerdict v;
+        v.errors = {err(11, "assertion.false")};
+        const MappedVerdict m {map_errors(v, rows, "program.vpr")};
+        c.expect(m.failures.empty() && m.errors.size() == 1U, "an unmarked row still maps its assertion.false");
+    }
+    // a malformed bracket is refused: another reason, another id, an empty bracket, no closing bracket, text after it
+    for (const char* bad :
+         {"assert.failed[assertion.false]", "assert.failed[qp.not.injective]",
+          "call.precondition[insufficient.permission]", "assert.failed[]", "assert.failed[insufficient.permission",
+          "assert.failed[insufficient.permission]x", "assert.failed[insufficient.permission][insufficient.permission]",
+          "[insufficient.permission]"})
+    {
+        std::string why;
+        parse_position_map(std::string("10\t") + bad + "\tpermission\tt.c\t5\t3\tm\n", &why);
+        c.expect(!why.empty(), std::string("a malformed id `") + bad + "` is a problem");
+    }
+}
+
+// ---- the array type and the element address (decision 0059 items 2 and 4) --------------------------------
+
+void test_array_types(Checks& c)
+{
+    using namespace vir;
+    Program p;
+    const Type i {Type::integer(p.int_type("int", 32, true))};
+    const Type l {Type::integer(p.int_type("long", 64, true))};
+    const Type a3 {p.array_of(i, 3U)};
+    c.expect(a3.is_array() && !a3.is_ptr() && a3.count == 3U && a3.element != nullptr && *a3.element == i,
+             "array_of builds an array type");
+    c.expect(a3 == p.array_of(i, 3U), "two array types of one element type and count are equal");
+    c.expect(a3 != p.array_of(i, 4U), "array types of different counts differ");
+    c.expect(a3 != p.array_of(l, 3U), "array types of different element types differ");
+    c.expect(a3 != p.pointer_to(i), "an array type is not a pointer type");
+    c.eq(p.array_of(a3, 2U).str(), std::string("int[3][2]"), "an array of arrays is spelled element first");
+    c.eq(a3.str(), std::string("int[3]"), "an array type is spelled with its count");
+    c.expect(p.pointer_to(a3).pointee != nullptr && *p.pointer_to(a3).pointee == a3,
+             "a pointer to an array type keeps it as its pointee");
+    c.expect(Type::void_type().count == 0U && Type::bool_type().element == nullptr,
+             "no other type has an element or a count");
+
+    Builder b(p);
+    Function* f {p.add_function("f", Type::void_type(), SrcLoc {"t.c", 1, 1}, SrcLoc {})};
+    f->add_param("p", p.pointer_to(i), SrcLoc {"t.c", 1, 1});
+    Var* a {f->new_local("a", a3, SrcLoc {"t.c", 2, 1})};
+    f->mark_address_taken(a);
+    const SrcLoc at {"t.c", 3, 1};
+    const Expr* idx {b.int_const(i, "2", at)};
+    const Expr* on_array {b.elem_addr(b.addr_of(a, at), idx, at)};
+    c.expect(on_array->kind == Expr::Kind::ElemAddr && on_array->type == p.pointer_to(i),
+             "ElemAddr over the address of an array is a pointer to the element type");
+    c.eq(place_text(*on_array), std::string("a[2]"), "the place of an element of a named array");
+    c.eq(on_array->c_text, std::string("&a[2]"), "the address of an element of a named array");
+    c.eq(b.deref(on_array, at)->c_text, std::string("a[2]"), "the read of an element of a named array");
+    const Var* pv {f->param_var(0)};
+    const Expr* pexpr {b.text(b.local(pv, at), "p")};
+    const Expr* i_expr {b.text(b.local(pv, at), "i")};
+    c.eq(place_text(*b.elem_addr(pexpr, i_expr, at)), std::string("p[i]"), "the place of an element through a pointer");
+    c.expect(b.elem_addr(pexpr, i_expr, at)->type == p.pointer_to(i), "ElemAddr over a pointer has the pointer's type");
+    // the shapes check_program accepts (decision 0059 items 2 and 4): an array local declared alone, `a[2] = 7;` and a read of `a[i]`
+    {
+        Program q;
+        const Type qi {Type::integer(q.int_type("int", 32, true))};
+        Builder qb(q);
+        Function* g {q.add_function("g", qi, SrcLoc {"t.c", 1, 1}, SrcLoc {"t.c", 9, 1})};
+        Var* arr {g->new_local("a", q.array_of(qi, 3U), SrcLoc {"t.c", 2, 1})};
+        g->mark_address_taken(arr);
+        Var* i {g->new_local("i", qi, SrcLoc {"t.c", 3, 1})};
+        const SrcLoc l {"t.c", 4, 1};
+        const Expr* two {qb.elem_addr(qb.addr_of(arr, l), qb.int_const(qi, "2", l), l)};
+        const Expr* at_i {qb.elem_addr(qb.addr_of(arr, l), qb.local(i, l), l)};
+        g->body = qb.block({qb.decl(arr, nullptr, l), qb.decl(i, qb.int_const(qi, "1", l), l),
+                            qb.store(two, qb.int_const(qi, "7", l), l), qb.return_stmt(qb.deref(at_i, l), l)},
+                           l, SrcLoc {"t.c", 8, 1});
+        g->end_loc = SrcLoc {"t.c", 9, 1};
+        const std::vector<Diag> d {check_program(q)};
+        c.expect(d.empty(), d.empty()
+                                ? "an array local with element stores and reads passes check_program"
+                                : "an array local with element stores and reads passes check_program: " + d[0U].reason);
+    }
+    // an index without a spelling: the place has none (messages go without the name)
+    const Expr* unspelled {b.elem_addr(pexpr, b.local(pv, at), at)};
+    c.expect(place_text(*unspelled).empty() && unspelled->c_text.empty(),
+             "an element whose index has no spelling has no place text");
+}
+
+// ---- what the emitter writes for decision 0059's plumbing (nothing builds these yet) ---------------------
+
+void test_emit_plumbing(Checks& c)
+{
+    using namespace low;
+    LMethod m;
+    m.name = "m";
+    m.has_body = true;
+    m.formals = {LVar {"x", LType::Int}, LVar {"n", LType::Int}};
+    LClause post;
+    post.expr = bin(BinOp::Eq, var("x"), old_(var("x")));
+    m.ensures_.push_back(post);
+    // `old(x)` is as before; `old[lh](x)` names a label
+    LClause post2;
+    post2.expr = bin(BinOp::Eq, var("x"), old_(var("x"), "lh_1"));
+    m.ensures_.push_back(post2);
+    const E in_range {bin(BinOp::And, bin(BinOp::Le, int_lit("0"), var("k")), bin(BinOp::Lt, var("k"), var("n")))};
+    LStmt marked;
+    marked.kind = LStmt::Kind::Assert;
+    marked.expr = forall_("k", {var("k")}, implies(in_range, bin(BinOp::Ge, var("k"), int_lit("0"))));
+    marked.check.viper_id = "assert.failed";
+    marked.check.expected_reason = "insufficient.permission";
+    marked.check.meta.category = "permission";
+    marked.check.meta.loc = vir::SrcLoc {"t.c", 5, 3};
+    marked.check.meta.message = "marked";
+    LStmt plain;
+    plain.kind = LStmt::Kind::Assert;
+    plain.expr = bin(BinOp::Ge, var("x"), int_lit("0"));
+    plain.check.viper_id = "assert.failed";
+    plain.check.meta.category = "check";
+    plain.check.meta.loc = vir::SrcLoc {"t.c", 6, 3};
+    plain.check.meta.message = "plain";
+    LStmt nested;
+    nested.kind = LStmt::Kind::Assert;
+    nested.expr = bin(BinOp::And, forall_("k", {var("k"), bin(BinOp::Add, var("k"), int_lit("1"))}, bool_lit(true)),
+                      bool_lit(true));
+    nested.check.viper_id = "assert.failed";
+    nested.check.meta.category = "check";
+    nested.check.meta.loc = vir::SrcLoc {"t.c", 7, 3};
+    nested.check.meta.message = "nested";
+    m.body = {marked, plain, nested};
+    LProgram prog;
+    prog.methods.push_back(m);
+    const viper::Emitted e {viper::emit(prog)};
+    const auto has = [&](const std::string& what)
+    {
+        return e.vpr.find(what) != std::string::npos;
+    };
+    c.expect(e.problems.empty(), "the plumbing program has no internal inconsistency");
+    c.expect(has("ensures x == old(x)\n"), "old without a label is as before");
+    c.expect(has("ensures x == old[lh_1](x)\n"), "old with a label is old[label]");
+    c.expect(has("assert forall k: Int :: { k } ((0 <= k) && (k < n)) ==> (k >= 0)\n"),
+             "a quantifier is written with its trigger and its body");
+    c.expect(has("assert (forall k: Int :: { k } { k + 1 } true) && true\n"),
+             "a quantifier that is not the whole condition is parenthesized, one { } per trigger");
+    // the map: the marked row's id is `assert.failed[insufficient.permission]`, every other row is written as before
+    c.expect(e.map.find("\tassert.failed[insufficient.permission]\tpermission\tt.c\t5\t3\tmarked\n") !=
+                 std::string::npos,
+             "a marked row's map line carries the expected reason");
+    c.expect(e.map.find("\tassert.failed\tcheck\tt.c\t6\t3\tplain\n") != std::string::npos,
+             "an unmarked row's map line is as before");
+    std::string problem;
+    const std::vector<MapRow> rows {parse_position_map(e.map, &problem)};
+    c.expect(problem.empty() && rows.size() == 3U && rows[0U].expected_reason == "insufficient.permission" &&
+                 rows[0U].viper_id == "assert.failed" && rows[1U].expected_reason.empty(),
+             "the emitted map is read by the driver");
+    bool refused {false};
+    try
+    {
+        forall_("1k", {var("k")}, bool_lit(true));
+    }
+    catch (const std::logic_error&)
+    {
+        refused = true;
+    }
+    c.expect(refused, "a binder that is no identifier is refused");
+    refused = false;
+    try
+    {
+        forall_("k", {}, bool_lit(true));
+    }
+    catch (const std::logic_error&)
+    {
+        refused = true;
+    }
+    c.expect(refused, "a quantifier without a trigger is refused");
+}
+
 // ---- a whole pipeline: VIR to Viper to Silicon to the verdict ------------------------------------------------
 
 struct Built
@@ -662,6 +923,9 @@ int run_selftest(const SiliconTools& tools)
     test_paths(c);
     test_silicon_output(c);
     test_report(c);
+    test_marked_rows(c);
+    test_emit_plumbing(c);
+    test_array_types(c);
     test_internal_inconsistency(c);
     test_pipeline(c, tools);
     if (c.failed == 0)

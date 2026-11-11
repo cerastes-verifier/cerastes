@@ -14,6 +14,9 @@ struct MapEntry
 {
     int vpr_line {0};
     std::string viper_id; // the id of Silicon's error kind (scripts/run_tests.py table)
+    // A marked range row (decision 0059 item 7): the Silicon reason that is also this row's failure; render_map writes the id as `<viper_id>[<expected_reason>]`.
+    // Empty for every other row, which is written as before.
+    std::string expected_reason;
     std::string category; // a driver category (0011 item 10) or "internal"
     std::string file;
     int line {0};
@@ -25,7 +28,7 @@ struct MapEntry
     std::string note_text;
 };
 
-// One line per entry, tab-separated: vpr line, viper error id, category, file, line, column, message[, note],
+// One line per entry, tab-separated: vpr line, viper error id (`<id>[<reason>]` on a marked range row), category, file, line, column, message[, note],
 // where a note is `<file>:<line>:<text>`.  Tabs and newlines in free text become spaces.
 //
 // An entry whose C/C++ position (or the position of its note) is below line 1 or column 1 is an internal

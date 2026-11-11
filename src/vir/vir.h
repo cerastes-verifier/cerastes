@@ -81,34 +81,40 @@ struct Type
     // struct result, a struct `Store` whose value is a `Call`, an `Aggregate` or a `Field` chain over one of them, an `ExprStmt` of a `Call`,
     // and a `Field`.  A struct local, a copy and an initializer stay expanded by the encoder into leaf stores (decision 0043).
     // Pointers to structs are accepted at any depth like the other pointers (`struct S *`, `struct S **`).
+    // Array (decision 0059 item 2; appended, M4.5e1a part A): `count` elements of type `element`.  The type of an automatic local array, nothing else:
+    // check_program accepts it nowhere yet (a local's, a parameter's, a result's, a member's or a pointee's type is rejected, as is every expression of it);
+    // Program::array_of builds it.
     enum class Kind
     {
         Void,
         Bool,
         Int,
         Ptr,
-        Struct
+        Struct,
+        Array
     };
     Kind kind {Kind::Void};
     const IntType* int_type {nullptr};       // Kind::Int only; owned by the Program
     const Type* pointee {nullptr};           // Kind::Ptr only; interned by Program::pointer_to, owned by the Program
     const StructType* struct_type {nullptr}; // Kind::Struct only; owned by the Program, compared by identity
+    const Type* element {nullptr};           // Kind::Array only; interned by Program::array_of, owned by the Program
+    unsigned long long count {0U}; // Kind::Array only: the number of elements (at least 1 in an accepted type)
 
     static Type void_type()
     {
-        return Type {Kind::Void, nullptr, nullptr, nullptr};
+        return Type {Kind::Void, nullptr, nullptr, nullptr, nullptr, 0U};
     }
     static Type bool_type()
     {
-        return Type {Kind::Bool, nullptr, nullptr, nullptr};
+        return Type {Kind::Bool, nullptr, nullptr, nullptr, nullptr, 0U};
     }
     static Type integer(const IntType* t)
     {
-        return Type {Kind::Int, t, nullptr, nullptr};
+        return Type {Kind::Int, t, nullptr, nullptr, nullptr, 0U};
     }
     static Type structure(const StructType* s)
     {
-        return Type {Kind::Struct, nullptr, nullptr, s};
+        return Type {Kind::Struct, nullptr, nullptr, s, nullptr, 0U};
     }
 
     bool is_void() const
@@ -131,13 +137,21 @@ struct Type
     {
         return kind == Kind::Struct;
     }
+    bool is_array() const
+    {
+        return kind == Kind::Array;
+    }
     // Same VIR type (Int types: same bits and signedness; an enumeration only itself; pointers: same pointee type, so `long*` and
-    // `long long*` are one type, as `long` and `long long` are; structs: the same StructType object).
+    // `long long*` are one type, as `long` and `long long` are; structs: the same StructType object; arrays: the same element type and count).
     bool operator==(const Type& o) const
     {
         if (kind != o.kind)
         {
             return false;
+        }
+        if (kind == Kind::Array)
+        {
+            return element != nullptr && o.element != nullptr && count == o.count && *element == *o.element;
         }
         if (kind == Kind::Ptr)
         {
@@ -161,8 +175,8 @@ struct Type
     {
         return !(*this == o);
     }
-    // "bool", "void", the int type's name, the struct's C name ("struct S"), or the pointee's followed by "*" ("int*",
-    // "bool**")
+    // "bool", "void", the int type's name, the struct's C name ("struct S"), the pointee's followed by "*" ("int*",
+    // "bool**"), or the element's followed by "[count]" ("int[3]")
     std::string str() const;
 };
 
@@ -396,7 +410,15 @@ struct Expr
         // in struct_leaves order (depth first), each exactly the leaf's VIR type (a pointer leaf's Null has that
         // pointer type).  Allowed in code only (never in a contract). The arguments are unsequenced siblings, like the
         // arguments of a call but without a sequence point after them.
-        Aggregate
+        Aggregate,
+        // ---- array elements (decision 0059 item 4; appended, M4.5e1a part A) ----
+        // `&a[b]`: `a` is a pointer (the address of the first element of an array, or any pointer into one), `b` an Int expression of any IntType (the
+        // index, which may be negative or past the end: the bound is an obligation of the lowering, not a type rule); type = Ptr(the element type): `a`'s own type,
+        // or, when `a` is a pointer to an array (`AddrOf` of an array local, the decay), a pointer to its element type.  The address of the element `b` slots after the address `a`; lowered to `loc(block_of(a), offset_of(a) + b)`.  PLACE versus
+        // VALUE as for MemberAddr: the operand of a Deref, the `addr` of a Store or the `c` of a StoreE is a place access (`a[i]`), any other position
+        // an address used as a value (`&a[i]`).  c_text: "&" + the place spelling (`&a[i]`, `&p[i]`); place_text gives `a[i]` / `p[i]`.  check_program
+        // accepts it nowhere yet (part B lifts it for a local array); a node of this kind is a check error in every position.
+        ElemAddr
     };
     Kind kind {Kind::Const};
     Type type; // the type of the value (Void only for a Call of a void function)
@@ -562,6 +584,10 @@ struct Var
     // `[[cerastes::ref_to_uninit]]` on this owning pointer local (decision 0058 item 4, question 202): its pointee may hold no value, so the closure over the pointee's
     // owning fields closes nothing (flags unknown); set by the encoder beside `owning`
     bool ref_to_uninit {false};
+    // An array local (decision 0059 item 3, M4.5e1a part B): its braced initializer does not write all N elements, so its `Decl` fills the block with C's
+    // static-storage zero first (every element zero, `false` or null, and every flag set) and the written elements follow as ordinary Stores to
+    // `ElemAddr(AddrOf(a), k)`.  Only an array Var may have it; check_program refuses any other.  Without it the declaration leaves every flag unset.
+    bool zero_filled {false};
 };
 
 // A named constant (decision 0017): a file-scope `const` object (global), or a `const` local of a function that a case
@@ -801,6 +827,10 @@ public:
     // The pointer type to `pointee`, interned (two pointer types with equal pointees share one `Type` object for the pointee).  The pointee
     // is copied into the Program, so a temporary is fine.
     Type pointer_to(const Type& pointee);
+
+    // The array type of `count` elements of type `element` (decision 0059 item 2), the element interned as pointer_to interns a pointee (the element is
+    // copied into the Program).  An array of arrays is built as is and rejected by check_program.
+    Type array_of(const Type& element, unsigned long long count);
 
     // A new C structure type (decision 0043), never interned by shape: each call makes a distinct type.  `tag` is the C tag (may be empty),
     // `c_name` the spelling for messages ("struct S").  The members are added afterwards with add_member, so that a member may be a pointer to
@@ -1185,6 +1215,10 @@ public:
     // `&a->m` (decision 0043): `a` a pointer to a struct, `index` the member's index; type Ptr(the member's type) (an ill-typed `a` or an index out of range
     // is built with `a`'s type and rejected by check_program).  c_text "&" + the place spelling (see Expr::Kind::MemberAddr); `deref` of it is `p->m`.
     const Expr* member_addr(const Expr* a, int index, SrcLoc loc);
+    // `&base[index]` (decision 0059 item 4): `base` a pointer, `index` an Int; type = `base`'s type, or a pointer to the element type when `base` is
+    // a pointer to an array (`addr_of` of an array local, the decay) (an ill-typed `base` or `index` is built as is and
+    // rejected by check_program).  c_text "&" + the place spelling (see Expr::Kind::ElemAddr); `deref` of it is `a[i]` / `p[i]`.
+    const Expr* elem_addr(const Expr* base, const Expr* index, SrcLoc loc);
     // `a.m` (decision 0044 item 2): member `index` of the struct value `a`; type = the member's type (an ill-typed `a` or an index out of range is built with
     // `a`'s type and rejected by check_program).  c_text: `a`'s followed by `.m` when `a` has one.
     const Expr* field(const Expr* a, int index, SrcLoc loc);

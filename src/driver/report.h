@@ -18,6 +18,10 @@ struct MapRow
 {
     int vpr_line {0};
     std::string viper_id;
+    // A marked range row (decision 0059 item 7): the second column was `<viper_id>[<reason>]`; `viper_id` is the part before the bracket and this the reason
+    // in it, the one Silicon reason that map_errors accepts on this row instead of `assertion.false`.  Empty for every other row.  Only `assert.failed`
+    // with `insufficient.permission` is a valid pair; parse_position_map refuses any other bracket.
+    std::string expected_reason;
     std::string category;
     std::string file;
     int line {0};

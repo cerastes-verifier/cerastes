@@ -33,6 +33,14 @@ WF = "not.wellformed"
 
 
 TERMINATION_RULES = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+# decision 0059 item 7's rules about where a `forall` may stand: the older tests that use a quantifier only as an example of a trigger
+# set or of an axiom (a loop-header parse, an axiom outside its domain) are about other rules and filter these out; the array rules have
+# their own tests (ArrayQuantifierTests), which call lv.lint_vpr itself.
+QUANTIFIER_RULES = ("`forall` outside the shapes of decision 0059", "not one of decision 0059 item 8's four conjuncts")
+
+
+def without_quantifier_rules(problems):
+    return [p for p in problems if not any(r in p for r in QUANTIFIER_RULES)]
 
 
 def lint_vpr_other(*args, **kwargs):
@@ -1196,7 +1204,7 @@ class JumpTests(unittest.TestCase):
 
     @staticmethod
     def strict(lines):
-        return lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+        return without_quantifier_rules(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"))
 
     @staticmethod
     def index_of_last(lines, fragment):
@@ -2348,7 +2356,7 @@ class MemoryModelTests(unittest.TestCase):
     def test_a_tagged_axiom_outside_a_domain_is_a_problem(self):
         lines = self.fixture()
         lines += ["// cerastes:axiom-ok 0033", self.axiom_line("loc_inv").strip()]
-        probs = self.strict(lines)
+        probs = without_quantifier_rules(self.strict(lines))
         self.assertEqual(len(probs), 1, probs)
         self.assertIn("`axiom`", probs[0])
 
@@ -3102,7 +3110,7 @@ class LoopAmountTests(unittest.TestCase):
         # (the older `while`-without-`decreases` rule reads the body's `{` as the first one on a line: a trigger set
         # in an invariant is a false positive there, so it is filtered out here)
         lines = self.fixture(invariants=[inv], body=["    kv := none", "    i := i + 1"])
-        probs = [p for p in self.strict(lines) if "without a `decreases`" not in p]
+        probs = [p for p in without_quantifier_rules(self.strict(lines)) if "without a `decreases`" not in p]
         self.assertEqual(len(probs), 1, probs)
         self.assertIn("is assigned inside the loop", probs[0])
 
@@ -6148,6 +6156,422 @@ class NotInvalidatingRowTests(unittest.TestCase):
         lines = ["method f_f__0__wf(p_c__0: Int, p_p__1: Ref)", "  decreases", "{",
                  Check("  assert (a) ==> (b ==> c)", A, "permission", self.OLD_MSG), "}"]
         self.assertEqual([p for p in lint(lines) if "not_invalidating" in p], [])
+
+
+MARKED = "assert.failed[insufficient.permission]"
+R0059 = "decision 0059"
+
+
+class ArrayMapReasonTests(unittest.TestCase):
+    """Decision 0059 item 7: the second column of a map line is `<id>`, or `<id>[<reason>]` on a marked range row; the id is read bare
+    (the kind rules and the duplicate-id rule read it) and the only reason is `insufficient.permission`, only on `assert.failed`."""
+
+    @staticmethod
+    def line(ident, vpr_line=3):
+        return "\t".join([str(vpr_line), ident, "permission", "t.c", "9", "5", "message"])
+
+    def parse(self, ident):
+        return lv.parse_map(self.line(ident) + "\n", "t.vpr.map")
+
+    def test_a_marked_row_is_read_as_its_id_and_its_reason(self):
+        entries, problems = self.parse(MARKED)
+        self.assertEqual(problems, [])
+        self.assertEqual((entries[0].error_id, entries[0].expected_reason), ("assert.failed", "insufficient.permission"))
+
+    def test_an_unmarked_row_has_no_reason(self):
+        entries, problems = self.parse("assert.failed")
+        self.assertEqual(problems, [])
+        self.assertEqual((entries[0].error_id, entries[0].expected_reason), ("assert.failed", ""))
+
+    def test_any_other_reason_is_a_problem(self):
+        for ident in ("assert.failed[assertion.false]", "assert.failed[]", "assert.failed[qp.not.injective]",
+                      "assert.failed[Insufficient.permission]"):
+            with self.subTest(ident=ident):
+                entries, problems = self.parse(ident)
+                self.assertEqual(entries, [])
+                self.assertTrue(any("unknown expected reason" in p for p in problems), problems)
+
+    def test_a_reason_is_only_on_assert_failed(self):
+        for ident in ("call.precondition[insufficient.permission]", "postcondition.violated[insufficient.permission]",
+                      "invariant.not.preserved[insufficient.permission]"):
+            with self.subTest(ident=ident):
+                entries, problems = self.parse(ident)
+                self.assertEqual(entries, [])
+                self.assertTrue(any("only on `assert.failed`" in p for p in problems), problems)
+
+    def test_a_malformed_id_is_unknown(self):
+        for ident in ("assert.failed[insufficient.permission", "assert.failed insufficient.permission", "assert.failed[a][b]",
+                      "assert.failed[insufficient.permission]x", "[insufficient.permission]", "assert.failed(insufficient.permission)"):
+            with self.subTest(ident=ident):
+                entries, problems = self.parse(ident)
+                self.assertEqual(entries, [])
+                self.assertTrue(any("unknown Viper error id" in p for p in problems), problems)
+
+    def test_the_bare_id_still_counts_for_the_duplicate_id_rule(self):
+        # two entries with one id on one line are refused whether or not one is marked
+        lines = [Check("  assert true", A, "overflow")]
+        text, _ = build(["method f__1()", "  decreases", "{", *lines, "}"])
+        map_text = self.line(MARKED, 4) + "\n" + self.line("assert.failed", 4) + "\n"
+        probs = [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if "two entries" in p]
+        self.assertEqual(len(probs), 1, probs)
+
+
+class ArrayAllocationTests(unittest.TestCase):
+    """Decision 0059 items 3 and 12: `alloc_arr_<t>` and `zero_arr_<t>` are trusted, so each is pinned clause by clause beside
+    `alloc_<t>`'s `len == 1` rule: S43's text for the allocation and the zero fill (the zero literal follows the field's type).
+    Each mutant breaks one clause and must be refused; the permission-conjuring ones are the dangerous ones."""
+
+    def fields(self, t="int", ty="Int"):
+        return [f"field v_{t}: {ty}", f"field d_{t}: Bool", "field lv: Bool"]
+
+    @staticmethod
+    def q(body, hi="n", lo="0"):
+        return f"forall k: Int :: {{ loc(block_of(r), k) }} (({lo} <= k) && (k < {hi})) ==> {body}"
+
+    def alloc_clauses(self, t="int"):
+        return [("requires", "1 <= n"),
+                ("ensures", "((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"),
+                ("ensures", "(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).v_{t})")),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).d_{t})")),
+                ("ensures", self.q(f"(!loc(block_of(r), k).d_{t})"))]
+
+    def zero_clauses(self, t="int", zero="0"):
+        return [("requires", "((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"),
+                ("requires", self.q(f"acc(loc(block_of(r), k).v_{t})")),
+                ("requires", self.q(f"acc(loc(block_of(r), k).d_{t})")),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).v_{t})")),
+                ("ensures", self.q(f"acc(loc(block_of(r), k).d_{t})")),
+                ("ensures", self.q(f"(loc(block_of(r), k).v_{t} == {zero})")),
+                ("ensures", self.q(f"loc(block_of(r), k).d_{t}"))]
+
+    def method(self, name, clauses, header=None, tail="  decreases _", t="int", ty="Int", fields=True):
+        head = header or (f"method {name}(n: Int) returns (r: Ref)" if name.startswith("alloc_arr_") else f"method {name}(r: Ref, n: Int)")
+        body = [Check(f"  {kw} {text}", WF if kw == "requires" else P, "internal") for kw, text in clauses]
+        return [*(self.fields(t, ty) if fields else []), "// cerastes:trusted-contract array allocation", head, *body, tail]
+
+    def probs(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0059 item 3" in p]
+
+    def good(self, t="int", ty="Int", zero="0"):
+        return (self.method(f"alloc_arr_{t}", self.alloc_clauses(t), t=t, ty=ty)
+                + self.method(f"zero_arr_{t}", self.zero_clauses(t, zero), t=t, ty=ty, fields=False))
+
+    def test_the_two_contracts_are_clean_for_each_field_type(self):
+        for t, ty, zero in (("int", "Int", "0"), ("bool", "Bool", "false"), ("ptr_int", "Ref", "null")):
+            with self.subTest(t=t):
+                self.assertEqual(self.probs(self.good(t, ty, zero)), [])
+
+    def test_the_allocation_is_not_judged_by_the_scalar_rule(self):
+        probs = lv.lint_vpr(*build(self.good()), "t.vpr", "t.vpr.map")
+        self.assertEqual([p for p in probs if "decision 0032 item 4" in p], [], probs)
+        # twin: a scalar allocation named like an array's still gets the scalar rule's judgement
+        bad = self.method("alloc_arr", self.alloc_clauses(), header="method alloc_arr() returns (r: Ref)")
+        self.assertTrue(any("decision 0032 item 4" in p for p in lv.lint_vpr(*build(bad), "t.vpr", "t.vpr.map")))
+
+    def test_n_ge_1_is_the_same_requirement_as_1_le_n(self):
+        clauses = self.alloc_clauses()
+        clauses[0] = ("requires", "n >= 1")
+        self.assertEqual(self.probs(self.method("alloc_arr_int", clauses)), [])
+
+    def mutants(self, base, name, header=None, **kw):
+        out = {}
+        for i, (kw_, text) in enumerate(base):
+            out[f"drop clause {i}: {text[:40]}"] = base[:i] + base[i + 1:]
+        out["extra ensures false"] = base + [("ensures", "false")]
+        out["extra ensures a fact"] = base + [("ensures", "len(block_of(r)) == 1")]
+        out["extra requires"] = base + [("requires", "n < 100")]
+        for i, (kw_, text) in enumerate(base):
+            if "k < n" in text:
+                out[f"range k <= n in clause {i}"] = base[:i] + [(kw_, text.replace("(k < n)", "(k <= n)"))] + base[i + 1:]
+            if "0 <= k" in text:
+                out[f"range -1 <= k in clause {i}"] = base[:i] + [(kw_, text.replace("(0 <= k)", "(-1 <= k)"))] + base[i + 1:]
+            if "{ loc(block_of(r), k) }" in text:
+                out[f"no trigger in clause {i}"] = base[:i] + [(kw_, text.replace("{ loc(block_of(r), k) } ", ""))] + base[i + 1:]
+        return out
+
+    def test_every_clause_of_the_allocation_is_pinned(self):
+        for label, clauses in self.mutants(self.alloc_clauses(), "alloc_arr_int").items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("alloc_arr_int", clauses)), label)
+
+    def test_every_clause_of_the_zero_fill_is_pinned(self):
+        # the dangerous ones: an `ensures acc` wider than the `requires acc` (or with none) conjures permission
+        for label, clauses in self.mutants(self.zero_clauses(), "zero_arr_int").items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("zero_arr_int", clauses)), label)
+
+    def test_the_zero_literal_follows_the_fields_type(self):
+        for t, ty, zero, wrong in (("int", "Int", "0", "1"), ("bool", "Bool", "false", "true"), ("ptr_int", "Ref", "null", "r")):
+            with self.subTest(t=t):
+                self.assertTrue(self.probs(self.method(f"zero_arr_{t}", self.zero_clauses(t, wrong), t=t, ty=ty)))
+        # a Bool field with the Int literal is wrong too
+        self.assertTrue(self.probs(self.method("zero_arr_bool", self.zero_clauses("bool", "0"), t="bool", ty="Bool")))
+
+    def test_the_wrapper_is_pinned(self):
+        base = self.alloc_clauses()
+        for label, kw in (("a body", {"tail": "  decreases _\n{\n}"}),
+                          ("no decreases _", {"tail": "  decreases"}),
+                          ("a wider header", {"header": "method alloc_arr_int(n: Int, m: Int) returns (r: Ref)"}),
+                          ("no result", {"header": "method alloc_arr_int(n: Int)"}),
+                          ("an Int result", {"header": "method alloc_arr_int(n: Int) returns (r: Int)"})):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("alloc_arr_int", base, **kw)), label)
+        zero = self.zero_clauses()
+        for label, kw in (("a result", {"header": "method zero_arr_int(r: Ref, n: Int) returns (s: Ref)"}),
+                          ("swapped formals", {"header": "method zero_arr_int(n: Int, r: Ref)"})):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method("zero_arr_int", zero, **kw)), label)
+
+    def test_a_non_clause_line_is_refused(self):
+        lines = self.method("alloc_arr_int", self.alloc_clauses())
+        lines.insert(len(lines) - 1, "  assert true")
+        self.assertTrue(any("not a `requires` or `ensures` clause" in p for p in self.probs(lines)))
+
+    def test_the_fields_must_be_declared(self):
+        lines = self.method("alloc_arr_long", self.alloc_clauses("long"), t="int")  # fields declared for int only
+        self.assertTrue(any("is not declared" in p for p in self.probs(lines)))
+        self.assertEqual(self.probs(self.method("alloc_arr_long", self.alloc_clauses("long"), t="long")), [])
+
+    def test_a_name_that_only_starts_like_the_prefix_is_judged_as_an_allocation(self):
+        # `zero_arr_` and `alloc_arr_` followed by anything are the emitter's names: no escape by an odd suffix
+        for name in ("zero_arr_int_2", "alloc_arr_in_t"):
+            with self.subTest(name=name):
+                self.assertTrue(self.probs(self.method(name, [("ensures", "false")])))
+
+
+class ArrayQuantifierTests(unittest.TestCase):
+    """Decision 0059 items 7, 8 and 12: a permission check over a range is a marked row (`assert forall k :: { loc(B, k) } lo <= k &&
+    k < hi ==> acc(loc(B, k).f)`, one field, B, lo, hi and any amount reading no heap) whose map entry carries
+    `assert.failed[insufficient.permission]`; `forall` stands only in the rows, the range `exhale`, the two trusted contracts and
+    item 8's four loop conjuncts; `old[label]` only in two of those, and only for a label defined earlier in the method."""
+
+    B = "block_of(v_a)"
+
+    @staticmethod
+    def quant(body, k="k", b="block_of(v_a)", lo="0", hi="3", extra=None):
+        ante = f"(({lo} <= {k}) && ({k} < {hi}))"
+        if extra:
+            ante = f"({ante} && {extra})"
+        return f"forall {k}: Int :: {{ loc({b}, {k}) }} {ante} ==> {body}"
+
+    def acc(self, f="v_int", k="k", b="block_of(v_a)", amount=""):
+        return f"acc(loc({b}, {k}).{f}{amount})"
+
+    def row(self, text=None, ident=MARKED, kind="assert"):
+        return Check(f"  {kind} {text or self.quant(self.acc())}", ident, "permission")
+
+    def method(self, body, loop=None):
+        lines = ["method m__1()", "  decreases", "{", "  var v_a: Ref", *body]
+        if loop is not None:
+            lines += ["  label lh_0", "  while (true)", *loop, "  {", "  }"]
+        return lines + ["}"]
+
+    def probs(self, lines, keep=R0059):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if keep in p]
+
+    def test_marked_rows_the_range_exhale_and_a_plain_assert_are_clean(self):
+        d = self.quant(self.acc("d_int"))
+        lines = self.method([self.row(), self.row(d),
+                             Check("  assert !(perm(lvloc(block_of(v_a)).lv) != write)", A, "lifetime"),
+                             f"  exhale {self.quant(self.acc())}", f"  exhale {d}", "  exhale acc(lvloc(block_of(v_a)).lv)"])
+        self.assertEqual(self.probs(lines), [])
+
+    def test_a_row_may_carry_an_amount_that_reads_no_heap(self):
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(amount=", write")))])), [])
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(amount=", 1 / 2")))])), [])
+        # twin: an amount that reads the heap is not a marked row
+        for amount in (", perm(x.v_int)", ", loc(v_a, 0).v_int", ", old(kv)"):
+            with self.subTest(amount=amount):
+                probs = self.probs(self.method([self.row(self.quant(self.acc(amount=amount)))]))
+                self.assertTrue(any("not a marked range row" in p for p in probs), probs)
+
+    def test_a_marked_entry_on_a_row_is_needed_and_enough(self):
+        probs = self.probs(self.method([self.row(ident="assert.failed")]))
+        self.assertTrue(any("has no expected reason" in p for p in probs), probs)
+        self.assertEqual(self.probs(self.method([self.row()])), [])
+
+    def test_a_marked_entry_on_anything_else_is_a_problem(self):
+        for text in ("!(perm(lvloc(block_of(v_a)).lv) != write)", "true", "perm(loc(block_of(v_a), 0).v_int) > none"):
+            with self.subTest(text=text):
+                probs = self.probs(self.method([Check(f"  assert {text}", MARKED, "permission")]))
+                self.assertTrue(any("carries the expected reason" in p for p in probs), probs)
+        # an `exhale` of the row's shape is not an assert either
+        probs = self.probs(self.method([Check(f"  exhale {self.quant(self.acc())}", MARKED, "permission")]))
+        self.assertTrue(any("carries the expected reason" in p for p in probs), probs)
+
+    def test_a_marked_entry_on_a_requires_is_refused_by_the_map(self):
+        lines = ["method m__2(v_a: Ref)", Check("  requires true", "not.wellformed[insufficient.permission]", "internal"), "  decreases", "{", "}"]
+        text, map_text = build(lines)
+        probs = lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map")
+        self.assertTrue(any("only on `assert.failed`" in p for p in probs), probs)
+
+    def test_a_row_must_have_exactly_the_shape(self):
+        two = self.quant(self.acc() + " && " + self.acc("d_int"))
+        other_k = self.quant(self.acc(k="j"))
+        other_b = self.quant(self.acc(b="block_of(v_b)"))
+        no_trigger = self.quant(self.acc()).replace("{ loc(block_of(v_a), k) } ", "")
+        other_trigger = self.quant(self.acc()).replace("{ loc(block_of(v_a), k) }", "{ offset_of(loc(block_of(v_a), k)) }")
+        not_acc = self.quant("loc(block_of(v_a), k).d_int")
+        reversed_range = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "((k < 3) && (0 <= k))")
+        implication_lost = f"forall k: Int :: {{ loc(block_of(v_a), k) }} {self.acc()}"
+        one_conjunct = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "(k < 3)")
+        for label, text in (("two fields", two), ("another k", other_k), ("another block", other_b), ("no trigger", no_trigger),
+                            ("another trigger", other_trigger), ("not an acc", not_acc), ("range reversed", reversed_range),
+                            ("no implication", implication_lost), ("one range conjunct", one_conjunct)):
+            with self.subTest(mutant=label):
+                probs = self.probs(self.method([self.row(text)]))
+                self.assertTrue(probs, label)
+
+    def test_the_block_the_bounds_and_the_trigger_read_no_heap(self):
+        for label, kw in (("a heap read in B", {"b": "block_of(v_a.v_ptr_int)"}), ("perm in the low bound", {"lo": "perm(x.v_int)"}),
+                          ("a field in the high bound", {"hi": "loc(v_a, 0).v_int"}), ("old in the high bound", {"hi": "old(n)"})):
+            with self.subTest(mutant=label):
+                kw2 = dict(kw)
+                body = self.acc(b=kw.get("b", "block_of(v_a)"))
+                probs = self.probs(self.method([self.row(self.quant(body, **kw2))]))
+                self.assertTrue(any("not a marked range row" in p for p in probs), probs)
+        # twin: variables and arithmetic are fine
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(), lo="n - n", hi="v_n + 1"))])), [])
+
+    def test_the_range_exhale_has_the_shape_too(self):
+        for label, text in (("two fields", self.quant(self.acc() + " && " + self.acc("d_int"))),
+                            ("an amount", self.quant(self.acc(amount=", write"))),
+                            ("no trigger", self.quant(self.acc()).replace("{ loc(block_of(v_a), k) } ", ""))):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method([f"  exhale {text}"])), label)
+
+    def test_forall_stands_nowhere_else(self):
+        q = self.quant(self.acc())
+        cases = {
+            "a requires": ["method m__2(v_a: Ref)", Check(f"  requires {q}", WF, "internal"), "  decreases", "{", "}"],
+            "an ensures": ["method m__2(v_a: Ref)", Check(f"  ensures {q}", P, "postcondition"), "  decreases", "{", "}"],
+            "an assume-free assert in a conjunction": self.method([Check(f"  assert true && ({q})", A, "check")]),
+            "an inhale": self.method([f"  inhale {q} // cerastes:inhale-ok test"]),
+            "a function body": ["function f_f(a: Int): Bool", "{", f"  {q}", "}"],
+            "a Bool variable": self.method([f"  var b: Bool := {q}"]),
+            "a while condition": self.method([], loop=None)[:-1] + [f"  while ({q})", "  {", "  }", "}"],
+        }
+        for label, lines in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(any("`forall` outside the shapes" in p for p in self.probs(lines)), label)
+
+    def test_a_forall_in_domain_block_is_the_axioms_business(self):
+        lines = ["// cerastes:domain-ok 0028", "domain Block {", "  function loc(b: Block, i: Int): Ref",
+                 "  // cerastes:axiom-ok 0033", "  " + lv.BLOCK_AXIOMS["loc_inv"][1], "}"]
+        self.assertEqual(self.probs(lines), [])
+
+    # --- item 8's loop conjuncts and old[label]
+    def conjuncts(self):
+        cell = "loc(block_of(v_a), k)"
+        rng = "((0 <= k) && (k < 3))"
+        return {
+            "acc": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> acc({cell}.v_int)",
+            "flags": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && old[lh_0]({cell}.d_int)) ==> {cell}.d_int",
+            "range": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && {cell}.d_int) ==> "
+                     f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))",
+            "values": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> ({cell}.v_int == old[lh_0]({cell}.v_int))",
+        }
+
+    def loop(self, *invariants):
+        return [Check(i, INV, "internal") for i in invariants]
+
+    def loop_lines(self, *invariants, label=True):
+        lines = ["method m__1()", "  decreases", "{", "  var v_a: Ref"]
+        if label:
+            lines.append("  label lh_0")
+        lines += ["  while (true)", *self.loop(*invariants), "  {", "  }", "}"]
+        return lines
+
+    def test_the_four_loop_conjuncts_are_clean(self):
+        for name, inv in self.conjuncts().items():
+            with self.subTest(conjunct=name):
+                self.assertEqual(self.probs(self.loop_lines(inv)), [])
+
+    def test_a_loop_conjunct_must_keep_its_shape(self):
+        c = self.conjuncts()
+        cell, other = "loc(block_of(v_a), k)", "loc(block_of(v_a), 0)"
+        mutants = {
+            "acc with an amount": c["acc"].replace(".v_int)", ".v_int, kl)"),
+            "flags of another cell": c["flags"].replace(f"old[lh_0]({cell}.d_int)", f"old[lh_0]({other}.d_int)"),
+            "flags with another consequent": c["flags"].replace(f"==> {cell}.d_int", f"==> {cell}.d_bool"),
+            "flags without old": c["flags"].replace("old[lh_0](", "(").replace(".d_int)) ==>", ".d_int)) ==>"),
+            "range with a non-literal bound": c["range"].replace("2147483647", "n"),
+            "range with one bound": c["range"].replace(f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))",
+                                                       f"({cell}.v_int <= 2147483647)"),
+            "values of another field": c["values"].replace("== old[lh_0](loc(block_of(v_a), k).v_int)",
+                                                           "== old[lh_0](loc(block_of(v_a), k).v_bool)"),
+            "values against the current state": c["values"].replace("old[lh_0](loc(block_of(v_a), k).v_int)", "loc(block_of(v_a), k).v_int"),
+            "an implication to anything": f"    invariant forall k: Int :: {{ {cell} }} ((0 <= k) && (k < 3)) ==> {cell}.v_int > 0",
+            "two extra conjuncts": c["flags"].replace(f"&& old[lh_0]({cell}.d_int))", f"&& old[lh_0]({cell}.d_int) && true)"),
+        }
+        for label, inv in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.loop_lines(inv)), label)
+
+    def test_old_label_stands_only_in_two_conjuncts(self):
+        c = self.conjuncts()
+        cell = "loc(block_of(v_a), k)"
+        # not in the permission or the range conjunct
+        for name in ("acc", "range"):
+            inv = c[name].replace(".v_int)", ".v_int)", 1) + " && old[lh_0](true)"
+            with self.subTest(conjunct=name):
+                self.assertTrue(any("`old[label]` outside" in p for p in self.probs(self.loop_lines(inv))))
+        # not in an assert, an ensures or a plain statement
+        for lines in (self.method([Check(f"  assert old[lh_0]({cell.replace('k', '0')}.v_int) == 1", A, "check")]),
+                      ["method m__2()", Check("  ensures old[lh_0](x) == 1", P, "postcondition"), "  decreases", "{", "}"],
+                      self.method(["  v_a := old[lh_0](v_a)"])):
+            self.assertTrue(any("`old[label]` outside" in p for p in self.probs(lines)), lines)
+        # twin: the plain `old(e)` of a postcondition is not this rule's
+        self.assertEqual(self.probs(["method m__2(x: Int)", Check("  ensures x == old(x)", P, "postcondition"), "  decreases", "{", "}"]), [])
+
+    def test_the_label_must_be_defined_earlier_in_the_method(self):
+        c = self.conjuncts()
+        probs = self.probs(self.loop_lines(c["flags"], label=False))
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in probs), probs)
+        # a label of another method does not count
+        lines = ["method m__0()", "  decreases", "{", "  label lh_0", "}"] + self.loop_lines(c["flags"], label=False)
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in self.probs(lines)))
+        # twin: with the label before the loop it is clean
+        self.assertEqual(self.probs(self.loop_lines(c["flags"])), [])
+        # a label after the loop does not count either
+        lines = self.loop_lines(c["flags"], label=False)
+        lines.insert(len(lines) - 1, "  label lh_0")
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in self.probs(lines)))
+
+
+class ElementFlagTests(unittest.TestCase):
+    """Decision 0059 item 12: the flag of an array element is set through a `Ref` temporary, `t.v_<t> := ...` then `t.d_<t> := true`;
+    the old flag rule (decision 0019 item 5, 0032 item 11) already reads that shape.  Writing it through `loc(block_of(a), i)` gets its
+    own message (S43's hand-written fixtures do, so they are not lint-clean by design)."""
+
+    def lines(self, body):
+        return ["method m__1()", "  decreases", "{", "  var v_a: Ref", "  var t__1: Ref", *body, "}"]
+
+    def probs(self, body):
+        return [p for p in lv.lint_vpr(*build(self.lines(body)), "t.vpr", "t.vpr.map") if "flag" in p]
+
+    CELL = "loc(block_of(v_a), offset_of(v_a) + 1)"
+
+    def test_a_flag_through_a_temporary_is_clean(self):
+        body = [f"  t__1 := {self.CELL}", "  t__1.v_int := 2", "  t__1.d_int := true"]
+        self.assertEqual(self.probs(body), [])
+
+    def test_a_flag_through_the_element_address_has_its_own_message(self):
+        for body in ([f"  {self.CELL}.v_int := 2", f"  {self.CELL}.d_int := true"],
+                     [f"  t__1 := {self.CELL}", "  t__1.v_int := 2", f"  {self.CELL}.d_int := true"]):
+            probs = self.probs(body)
+            self.assertTrue(any("through a `Ref` temporary" in p and "decision 0059 item 12" in p for p in probs), probs)
+
+    def test_a_flag_through_a_temporary_still_needs_the_write_before_it(self):
+        probs = self.probs([f"  t__1 := {self.CELL}", "  t__1.d_int := true"])
+        self.assertTrue(any("does not directly follow a write" in p for p in probs), probs)
+        probs = self.probs([f"  t__1 := {self.CELL}", "  t__1.v_int := 2", "  t__1.d_int := false"])
+        self.assertTrue(any("is assigned `false`" in p for p in probs), probs)
+
+    def test_a_flag_of_a_global_cell_keeps_its_own_receiver(self):
+        body = ["  loc(GB_g(), 0).v_int := 2", "  loc(GB_g(), 0).d_int := true"]
+        self.assertEqual([p for p in self.probs(body) if "through a `Ref` temporary" in p], [])
 
 
 if __name__ == "__main__":

@@ -34,8 +34,10 @@ std::string render_map(const std::vector<MapEntry>& entries, std::vector<std::st
             problems->push_back("the note of the position map entry for line " + std::to_string(e.vpr_line) +
                                 " of the Viper program has no C/C++ position");
         }
-        out += std::to_string(e.vpr_line) + '\t' + e.viper_id + '\t' + e.category + '\t' + flat(e.file) + '\t' +
-               std::to_string(e.line) + '\t' + std::to_string(e.column) + '\t' + flat(e.message);
+        out += std::to_string(e.vpr_line) + '\t' + e.viper_id +
+               (e.expected_reason.empty() ? std::string() : "[" + flat(e.expected_reason) + "]") + '\t' + e.category +
+               '\t' + flat(e.file) + '\t' + std::to_string(e.line) + '\t' + std::to_string(e.column) + '\t' +
+               flat(e.message);
         if (e.has_note)
         {
             out += '\t' + flat(e.note_file) + ':' + std::to_string(e.note_line) + ':' + flat(e.note_text);

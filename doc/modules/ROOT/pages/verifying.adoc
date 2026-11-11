@@ -212,7 +212,7 @@ status is 2. Standard output is then empty:
 
 [source,console]
 ----
-"rejected_double.cpp", line 6: error #cerastes-unsupported_type: type "double" is not supported by "cerastes verify": only integer types, bool and the enumerations of the verified files are (decisions 0012 and 0018)
+"rejected_double.cpp", line 6: error #cerastes-unsupported_type: type "double" is not supported by "cerastes verify": only integer types, bool, the enumerations and the structs of the verified files, and pointers to them, are (decisions 0012, 0018 and 0043)
   double half(double x)
          ^
 
@@ -823,8 +823,30 @@ verified yet, so these rules do not reach it either):
   nothing: write `{}`;
 * returning the address of a local variable or a parameter (`return &x;`, also
   through parentheses, a cast, either arm of `?:` or the right operand of `,`),
-  which clang's `-Wreturn-stack-address` and GCC's `-Wreturn-local-addr` report
-  (xref:memory.adoc[Memory and ownership]).
+  or of an element of a local array (`return &a[1];`), which clang's
+  `-Wreturn-stack-address` and GCC's `-Wreturn-local-addr` report
+  (xref:memory.adoc[Memory and ownership]);
+* a constant index outside an array (`a[3]`, `a[-1]` or `&a[4]` of an `int a[3]`,
+  also through a macro, an enumerator or a `const` variable, and also in a branch
+  that cannot run, `if (0)`), which clang's `-Warray-bounds` reports: the front
+  end's own warning (`subscript_out_of_range`) is an error;
+* a truth test or a null comparison of an array (`if (a)`, `!a`, `a == NULL`,
+  `a != 0`), which is always true or always false (clang's
+  `-Wpointer-bool-conversion` and `-Wtautological-pointer-compare`, GCC's
+  `-Waddress`);
+* in C, a braced initializer with more elements than its array or structure
+  (`int a[3] = {1, 2, 3, 4};`), which both compilers report by default and
+  pass:[C++] refuses: the front end drops the extra elements, so its warning
+  (`excess_initializers_ignored`) is an error;
+* in pass:[C++], an array designator (`int a[3] = {[2] = 5};`), which is C's:
+  clang reports it (`-Wc99-designator`) and GCC refuses it (in C it is not
+  supported yet, below);
+* in C, the address of a `register` variable, also through an array
+  (`register int a[2];` then `a[1]`), which C forbids or leaves undefined and
+  clang refuses: the front end's warning (`address_of_register_variable`) is an error;
+* a plain `char` as an array index (`a[c]`), which both compilers report with
+  `-Wall` (`-Wchar-subscripts`): a `char` may be negative; use `unsigned char`
+  or `int`.
 
 [source,c]
 ----
@@ -1196,7 +1218,9 @@ The constructs that are rejected in this version are:
 * *Declarations:* a `const` local with no initializer, a local initialized
   from itself (`int x = x;`), `static const` and `static constexpr` locals,
   `thread_local` and `extern` locals and globals, `volatile` globals, globals
-  defined in another file (`extern` with no definition here), arrays, classes
+  defined in another file (`extern` with no definition here), arrays other than
+  the local arrays of xref:memory.adoc#arrays[Arrays] and designators in their
+  initializers (`{[2] = 5}`), classes
   other than the C structures xref:memory.adoc#structures[Structures] describes
   (`const` structure parameters and globals among them), unions,
   an enumeration declared in a function, a class or a template, or with a
@@ -1220,7 +1244,7 @@ The constructs that are rejected in this version are:
   pointer conversions other than adding `const` to the object pointed to; its
   xref:memory.adoc#not-yet[list] names the rest, such as `+owns(*r.q)+` of a
   returned structure),
-  references, arrays, floating point, `volatile`, `_BitInt`,
+  references, arrays other than local arrays, floating point, `volatile`, `_BitInt`,
   vector types, enumerations declared in system headers. Array types, `_BitInt`,
   vector types and class templates with a constant argument
   (`std::array<char, 4>`) are rejected also as the operand of `sizeof`,

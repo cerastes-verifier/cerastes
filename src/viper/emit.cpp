@@ -112,7 +112,19 @@ std::string expr(const E& e, bool top = false)
         case LExpr::Kind::Acc:
             return "acc(" + expr(e->a) + "." + e->text + (e->b ? ", " + expr(e->b, true) : std::string()) + ")";
         case LExpr::Kind::Old:
-            return "old(" + expr(e->a, true) + ")";
+            // decision 0059 item 8: `old[label](e)` names the state at a labeled statement; no label is today's `old(e)`
+            return (e->text.empty() ? std::string("old(") : "old[" + e->text + "](") + expr(e->a, true) + ")";
+        case LExpr::Kind::Forall:
+        {
+            // decision 0059 items 3, 7 and 8: the body extends as far as it can, so a quantifier that is not the whole condition is parenthesized
+            std::string s {"forall " + e->text + ": Int :: "};
+            for (const E& t : e->args)
+            {
+                s += "{ " + expr(t, true) + " } ";
+            }
+            s += expr(e->a, true);
+            return top ? s : "(" + s + ")";
+        }
         case LExpr::Kind::ForPerm:
             // decision 0047 item 7: only ever the whole condition of an assert
             return "forperm " + e->text + ": Ref [" + e->text + ".tok] :: " + expr(e->a, true);
@@ -149,6 +161,7 @@ public:
             MapEntry m;
             m.vpr_line = line_;
             m.viper_id = c.viper_id;
+            m.expected_reason = c.expected_reason;
             m.category = c.meta.category;
             m.file = c.meta.loc.file;
             m.line = c.meta.loc.line;

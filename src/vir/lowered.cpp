@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "lowered.h"
 
+#include <cctype>
 #include <stdexcept>
 
 #include "dec.h"
@@ -131,6 +132,46 @@ E old_(E a)
 {
     auto e {make(LExpr::Kind::Old)};
     e->a = std::move(a);
+    return e;
+}
+
+E old_(E a, std::string label)
+{
+    auto e {make(LExpr::Kind::Old)};
+    e->text = std::move(label);
+    e->a = std::move(a);
+    return e;
+}
+
+E forall_(std::string binder, std::vector<E> triggers, E body)
+{
+    const auto ident = [](const std::string& n)
+    {
+        if (n.empty() || (std::isdigit(static_cast<unsigned char>(n[0U])) != 0))
+        {
+            return false;
+        }
+        for (char ch : n)
+        {
+            if (std::isalnum(static_cast<unsigned char>(ch)) == 0 && ch != '_')
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!ident(binder))
+    {
+        throw std::logic_error("`" + binder + "` is not a Viper identifier for a quantifier's binder");
+    }
+    if (triggers.empty())
+    {
+        throw std::logic_error("a quantifier has at least one trigger");
+    }
+    auto e {make(LExpr::Kind::Forall)};
+    e->text = std::move(binder);
+    e->args = std::move(triggers);
+    e->a = std::move(body);
     return e;
 }
 

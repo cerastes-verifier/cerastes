@@ -556,14 +556,22 @@ EdgCommand build_edg_command(const Args& a, bool probe)
     // incompatible argument).  A conversion the front end accepts there would otherwise reach the encoder as a node it must reject.
     // C++ has #144 and #167 as discretionary warnings for exactly one shape, `int **` to `const int **` (an initializer, an argument), which clang++ and
     // g++ reject (it would let `*c = &constant` launder a const; decision 0040 item 2, P62 H1); every other #144/#167 there is already an error.
+    // C: #1162 (`int a[3] = {1, 2, 3, 4};`: excess initializers are ignored) is only a warning in EDG's C mode, and the IL then has no trace of the
+    // dropped elements (P78 F3), so verifying would silently prove another program.  clang (`-Wexcess-initializers`) and GCC warn by default; C++ has
+    // the hard error #146 (decision 0059 item 3).
+    // #138 (`register` on an array, or `&` of a `register` variable: EDG's C mode only warns) would let a block-scope `register int a[3]` or `&r` reach the encoder,
+    // where the object is a block whose address escapes; a C constraint violation (C23 6.5.3.2p1, 6.3.2.1p3), an error in clang and GCC (decision 0059, audit round 2).
     if (c_mode)
     {
-        edg.push_back("--diag_error=42,144,167,513");
+        edg.push_back("--diag_error=42,144,167,513,1162,138");
     }
     else
     {
         edg.push_back("--diag_error=144,167");
     }
+    // #175 (subscript out of range: `a[3]` or `&a[4]` of an `int a[3]`, a constant index whatever the spelling, also in code that cannot run) is an error in both
+    // modes: clang warns by default (-Warray-bounds), and the strictest reading applies (decision 0059 item 4; owner's rule).
+    edg.push_back("--diag_error=175");
     for (const std::string& d : a.includes)
     {
         edg.push_back("-I" + d);

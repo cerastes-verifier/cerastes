@@ -10,8 +10,8 @@ This version covers pointers to integers, `bool` and enumerations, and
 pointers to such pointers (<<pointers-to-pointers>>): in local variables, as
 parameters and as results, with contracts that say which objects
 a function may read or write (<<contracts>>), in loops (<<loops>>) and across
-jumps (<<leaving>>); global and `static` local variables (<<globals>>,
-<<static-locals>>); and memory from `malloc`, `calloc` and `free` (<<heap>>).
+jumps (<<leaving>>); local arrays (<<arrays>>); global and `static` local variables
+(<<globals>>, <<static-locals>>); and memory from `malloc`, `calloc` and `free` (<<heap>>).
 <<not-yet>> lists what is still rejected.
 
 == Objects whose address is taken
@@ -476,6 +476,59 @@ a value (`t = c ? a : b;`), the address of a `const` compound literal, a compoun
 literal in a loop's condition or step, and a compound literal used as an object
 without `&` (`(struct point){1, 2}.x = 3;`).
 
+[#arrays]
+== Arrays
+
+A local array (`int a[4];`, of integers, `bool`, an enumeration or pointers) is
+an object in memory with one element per index, from the moment its block is
+entered until the block ends, as any object whose address is taken. Its elements
+are read and written by index, and every access is checked: the index is inside
+the array (xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`]), and an
+element read has been given a value
+(xref:error-messages.adoc#_uninitialized[`uninitialized`]). Arithmetic on an
+element is checked like any other: `a[i] += 1` overflows exactly when
+`x += 1` would.
+
+[source,c]
+----
+include::example$memory/array_local.c[tag=source]
+----
+
+A braced initializer gives every element a value: the elements it names, and
+zero (`false`, a null pointer) for the rest, as C says, so `table[2]` above is
+0. `int a[] = {1, 2, 3};` takes its length from the list and `{}` sets every
+element to zero. Without an initializer no element has a value until it is
+written. An index that is a
+constant outside the array (`a[4]` of `int a[4]`), a truth test of an array
+(`if (a)`) and, in C, a list longer than its array are rejected, as the
+compilers warn about them (xref:verifying.adoc#_shapes_the_compilers_warn_about[Shapes
+the compilers warn about]).
+
+`&a[i]` is a pointer to one element, and a function that owns one object
+(`cerastes_owns(*p)`) can be given an element. Two elements are two objects, so
+a function that owns two can be given two different elements of one array:
+
+[source,c]
+----
+include::example$memory/array_element_pointer.c[tag=source]
+----
+
+`&a[n]` of an array of `n` elements is a pointer one past the end: it can be
+formed and compared, and reading or writing through it is reported as
+xref:error-messages.adoc#_permission[`permission`] (no element is there).
+`return &a[1];` is rejected, as `return &x;` is. When the array's block ends,
+a function that kept an element is reported as
+xref:error-messages.adoc#_lifetime[`lifetime`], as for any object.
+
+Not supported yet, each rejected with a diagnostic: designators in an array's
+initializer (`{[2] = 5}`: the front end keeps only the index's computed value,
+which cerastes cannot check as written); an element of the initializer that reads,
+writes or takes the address of the array itself; arrays of more than one
+dimension, of structures, and of owning pointers; `const`, `static` and global
+arrays; arrays as members and in compound literals; a variable length; a bound
+that names a `const` variable (`const int n = 4; int a[n];`); a contract over a
+range of elements; and pointer arithmetic (`p + 1`).
+
 [#globals]
 == Global variables
 
@@ -823,7 +876,7 @@ type `T` for its whole life. `calloc(1, sizeof(T))` gives an object whose
 members are all zero, null for a pointer member; the object from `malloc` has no
 value until the program gives it one (reading it first is
 xref:error-messages.adoc#_uninitialized[`uninitialized`]). Arrays of objects
-(`n * sizeof(T)`) and `realloc` are planned with arrays.
+(`n * sizeof(T)`) and `realloc` are planned with pointer arithmetic.
 
 [source,c]
 ----

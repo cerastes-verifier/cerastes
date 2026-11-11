@@ -9,7 +9,7 @@ at the line of the C or pass:[C++] source that causes it:
 <file>:<line>: note: <what the note says>
 ----
 
-The *category* names what could not be proved. There are twenty, and each has a
+The *category* names what could not be proved. There are twenty-one, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
 meet. Errors are sorted by file, line and category, and the exit status is 1
@@ -689,6 +689,40 @@ the pointer a new value before it is used again:
 [source,c]
 ----
 include::example$error-messages/lifetime_fixed.c[tag=source]
+----
+
+== out-of-bounds
+
+An index may be outside its array: `a[i]` read or written with `i` below 0 or
+not below the number of elements, or `&a[i]` formed with `i` below 0 or above
+the number of elements. It is reported at the subscript. `&a[n]` for an array
+of `n` elements is a pointer one past the end: C lets a program form it and
+compare it, never read or write through it (reading through such a pointer is
+reported as `permission`: no element is there).
+
+An access outside an array is undefined behaviour in C and pass:[C++]: it may
+read another object, or crash. An index that is a constant is checked by the
+compiler (cerastes rejects `a[3]` of a three-element array as the compilers warn
+about it); this category is for indexes that are computed. Look for the values
+the contract and the branches allow: an off-by-one bound (`+<=+` for `<`), or an
+index that a loop moves one step too far.
+
+[source,c]
+----
+include::example$error-messages/out_of_bounds_error.c[tag=source]
+----
+
+[source,console]
+----
+out_of_bounds_error.c:11: error: out-of-bounds: reads `prices[k]`, whose index may be outside `prices`
+----
+
+*How to fix it.* Bound the index on every path that reaches the access, in the
+precondition or by a test before it:
+
+[source,c]
+----
+include::example$error-messages/out_of_bounds_fixed.c[tag=source]
 ----
 
 == pointer-comparison

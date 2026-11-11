@@ -22,6 +22,8 @@ std::string Type::str() const
             return struct_type != nullptr
                        ? (struct_type->c_name.empty() ? "struct " + struct_type->tag : struct_type->c_name)
                        : "<struct>";
+        case Kind::Array:
+            return (element != nullptr ? element->str() : std::string("<?>")) + "[" + std::to_string(count) + "]";
     }
     return "?";
 }
@@ -285,11 +287,24 @@ Type Program::pointer_to(const Type& pointee)
     {
         if (t == pointee)
         {
-            return Type {Type::Kind::Ptr, nullptr, &t, nullptr};
+            return Type {Type::Kind::Ptr, nullptr, &t, nullptr, nullptr, 0U};
         }
     }
     pointees_.push_back(pointee);
-    return Type {Type::Kind::Ptr, nullptr, &pointees_.back(), nullptr};
+    return Type {Type::Kind::Ptr, nullptr, &pointees_.back(), nullptr, nullptr, 0U};
+}
+
+Type Program::array_of(const Type& element, unsigned long long count)
+{
+    for (const Type& t : pointees_)
+    {
+        if (t == element)
+        {
+            return Type {Type::Kind::Array, nullptr, nullptr, nullptr, &t, count};
+        }
+    }
+    pointees_.push_back(element);
+    return Type {Type::Kind::Array, nullptr, nullptr, nullptr, &pointees_.back(), count};
 }
 
 StructType* Program::add_struct(const std::string& tag, const std::string& c_name, SrcLoc loc)
@@ -688,6 +703,10 @@ const Expr* Builder::deref(const Expr* addr, SrcLoc loc)
     {
         e->c_text = place_text(*addr); // `*&p->x` is `p->x`
     }
+    else if (addr->kind == Expr::Kind::ElemAddr)
+    {
+        e->c_text = place_text(*addr); // `*&a[i]` is `a[i]`
+    }
     else if (!addr->c_text.empty())
     {
         e->c_text = "*" + addr->c_text;
@@ -741,6 +760,54 @@ std::string member_place(const Expr& ma)
     }
     return (simple ? op->c_text : "(" + op->c_text + ")") + "->" + name;
 }
+
+// The place spelling of an ElemAddr (decision 0059 item 4): `a[i]` for the address of a local array, `p[i]` for a pointer operand, `g[i]` for a global.
+// The index is spelled by its `c_text`, or by its value when it is a constant.  Empty when the operand or the index has no spelling.
+std::string elem_place(const Expr& ea)
+{
+    if (ea.user_spelling && ea.c_text.size() > 1U && ea.c_text[0U] == '&')
+    {
+        return ea.c_text.substr(1U);
+    }
+    const Expr* base {ea.a};
+    const Expr* index {ea.b};
+    if (base == nullptr || index == nullptr)
+    {
+        return "";
+    }
+    std::string idx {index->c_text};
+    if (idx.empty() && index->kind == Expr::Kind::Const)
+    {
+        idx = index->value;
+    }
+    if (idx.empty())
+    {
+        return "";
+    }
+    std::string root;
+    if (base->kind == Expr::Kind::AddrOf && base->var != nullptr)
+    {
+        root = base->var->name;
+    }
+    else if (base->kind == Expr::Kind::GlobalAddr && base->global != nullptr)
+    {
+        root = base->global->c_name;
+    }
+    else if (base->kind == Expr::Kind::MemberAddr)
+    {
+        root = member_place(*base);
+    }
+    else if (!base->c_text.empty())
+    {
+        bool simple {true};
+        for (char ch : base->c_text)
+        {
+            simple = simple && (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_' || ch == ':');
+        }
+        root = simple ? base->c_text : "(" + base->c_text + ")";
+    }
+    return root.empty() ? std::string() : root + "[" + idx + "]";
+}
 } // namespace
 
 const Expr* Builder::member_addr(const Expr* a, int index, SrcLoc loc)
@@ -756,6 +823,27 @@ const Expr* Builder::member_addr(const Expr* a, int index, SrcLoc loc)
     e->a = a;
     e->index = index;
     const std::string place {member_place(*e)};
+    if (!place.empty())
+    {
+        e->c_text = "&" + place;
+    }
+    return e;
+}
+
+const Expr* Builder::elem_addr(const Expr* base, const Expr* index, SrcLoc loc)
+{
+    // A pointer to an array (`AddrOf` of an array local) is the address of its first element: the element's pointer type.  Any other base keeps its own
+    // type, ill-typed on purpose when `base` is no pointer or `index` no integer (check_program refuses it).
+    Type t {base->type};
+    if (base->type.is_ptr() && base->type.pointee != nullptr && base->type.pointee->is_array() &&
+        base->type.pointee->element != nullptr)
+    {
+        t = p_.pointer_to(*base->type.pointee->element);
+    }
+    Expr* e {fresh(p_, Expr::Kind::ElemAddr, t, std::move(loc))};
+    e->a = base;
+    e->b = index;
+    const std::string place {elem_place(*e)};
     if (!place.empty())
     {
         e->c_text = "&" + place;
@@ -1333,6 +1421,10 @@ std::string place_text(const Expr& addr)
     if (addr.kind == Expr::Kind::MemberAddr)
     {
         return member_place(addr);
+    }
+    if (addr.kind == Expr::Kind::ElemAddr)
+    {
+        return elem_place(addr);
     }
     return addr.c_text.empty() ? std::string() : "*" + addr.c_text;
 }

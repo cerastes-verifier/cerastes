@@ -71,6 +71,23 @@ std::vector<MapRow> parse_position_map(const std::string& text, std::string* pro
             return rows;
         }
         r.viper_id = f[1U];
+        const size_t open {r.viper_id.find('[')};
+        if (open != std::string::npos)
+        {
+            // decision 0059 item 7: `assert.failed[insufficient.permission]`, a marked range row; any other bracket is refused
+            const std::string base {r.viper_id.substr(0U, open)};
+            const std::string reason {r.viper_id.substr(open + 1U)};
+            if (base != "assert.failed" || reason != "insufficient.permission]")
+            {
+                if (problem)
+                {
+                    *problem = "the position map line " + std::to_string(number) + " has a malformed error id";
+                }
+                return rows;
+            }
+            r.viper_id = base;
+            r.expected_reason = reason.substr(0U, reason.size() - 1U);
+        }
         r.category = f[2U];
         r.file = f[3U];
         r.message = f[6U];
@@ -142,7 +159,7 @@ MappedVerdict map_errors(const SiliconVerdict& verdict, const std::vector<MapRow
         for (const MapRow* h : hits)
         {
             if (h->category != first->category || h->file != first->file || h->line != first->line ||
-                h->message != first->message)
+                h->message != first->message || h->expected_reason != first->expected_reason)
             {
                 same = false;
             }
@@ -163,16 +180,22 @@ MappedVerdict map_errors(const SiliconVerdict& verdict, const std::vector<MapRow
         // The checks the encoder emits are assertions, preconditions, postconditions and invariants: each can fail only
         // because an assertion does not hold.  Any other reason (a division by zero Viper found, insufficient
         // permission, ...) is something the encoder did not mean to say (decision 0011 item 11).
+        // A marked range row (decision 0059 item 7) is the exception: it is a permission assertion, its failure is the missing permission, and a failed
+        // assertion on it is something the encoder did not mean to say; it accepts exactly its expected reason.
         const bool termination {e.viper_id == "termination.failed"};
-        const bool reason_ok {termination ? (e.reason == "tuple.false" || e.reason == "tuple.condition.false" ||
-                                             e.reason == "termination.condition.false")
-                                          : e.reason == "assertion.false"};
+        const bool marked {!first->expected_reason.empty()};
+        const bool reason_ok {marked
+                                  ? e.reason == first->expected_reason
+                                  : (termination ? (e.reason == "tuple.false" || e.reason == "tuple.condition.false" ||
+                                                    e.reason == "termination.condition.false")
+                                                 : e.reason == "assertion.false")};
         if (!reason_ok)
         {
             failures.insert("Silicon reported " + e.viper_id + " at line " + std::to_string(e.line) +
                             " of the program for the reason \"" + e.reason + "\", not " +
-                            (termination ? "a termination measure that fails" : "a failed assertion") + ": " +
-                            e.message);
+                            (marked ? "the missing permission \"" + first->expected_reason + "\" that the row checks"
+                                    : (termination ? "a termination measure that fails" : "a failed assertion")) +
+                            ": " + e.message);
             continue;
         }
         UserError u;

@@ -13,7 +13,7 @@
     in status).
 - **Milestone:** M4.5e1a.
 - **Amends:** 0011 item 10; 0012 item 12; 0024 item 6; 0028 items 4, 10 and 11; 0032 items 3 (the driver's
-  `--diag_error` list gains EDG's #1162 in C and #175 in both modes), 4 and 8; 0038 items 3 and 4; 0039 item 3; 0042
+  `--diag_error` list gains EDG's #1162 and #138 in C and #175 in both modes), 4 and 8; 0038 items 3 and 4; 0039 item 3; 0042
   items 3 and 5; 0043 item 6 (#1162 reaches struct initializers too); 0054 items 3 and 6.
 
 ## Context
@@ -75,6 +75,10 @@ pointers into arrays. Ranges in contracts (`owns_range`, `reads_range`, array pa
      (`const unsigned N = 65536u * 65536u + 1;` gives `int [1]`), so it is rejected (and with it a `constexpr` or
      `static const` local and a local lambda's call, which set the same flag: audit round 1, item 4) (`unsupported_declaration`, e1e,
      with 0024 item 6's types computed from constants), as the plan's stop rule for (a) says.
+   - **`register` arrays** (audit round 2, B1): `register int a[2] = {1, 2}; return a[1];` verified, with only EDG's
+     warning #138, though C23 6.3.2.1p3 makes the decay of a `register` array undefined (clang refuses it, GCC is
+     silent). The same warning was all that `register int x; int *p = &x;` gave, a constraint violation (6.5.3.2p1)
+     accepted since M4.5b1a. The driver makes #138 an error in C verify mode; C++ already refuses both (#2798).
    - **Rejected:** the rows of item 1's table; `int a[0]` (EDG accepts it with a warning, P78 F2: a zero-length
      array, M8); `static`, `extern` and thread storage (`unsupported_declaration`); a `const`, `volatile` or `_Atomic`
      element type (`unsupported_type`); `owning` or `ref_to_uninit` on the array (`unsupported_annotation`; P78 (d):
