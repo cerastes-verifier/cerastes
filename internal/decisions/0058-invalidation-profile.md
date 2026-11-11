@@ -199,8 +199,8 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
    - **Default mode, non-owning field:** the marker documents intent and changes no Viper (as 0052 item 4 for a local).
    - **Owning and marked field:** its closure clause is a marked block (0047 item 8's mode, as an owning and marked
      global's deep atom in 0054 item 2): a `requires` site claims no flags; a borrowed `ensures` site keeps them
-     (`(old(L != null) && old(flag)) ==> flag`) **only where it is tied** (an `E == old(E)` conjunct of its `ensures`
-     clause: the bodiless tie written, or spliced by `not_invalidating`), and then the row and the tie are one atomic
+     (`(old(L != null) && old(flag)) ==> flag`) **only where it is tied** (an `E == old(E)` conjunct placed as "What
+     counts as tied" below says: the bodiless tie written, or spliced by `not_invalidating`), and then the row and the tie are one atomic
      assertion at the return (`assert !(!(clause))`), so a body that replaces the block gets one `postcondition`; an
      untied or given site claims none (audit round 1, B1 and S2).
    - **Why not more** (B1). The draft took 0047 item 8's internal row unchanged. For a site through a load it compares

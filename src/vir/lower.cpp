@@ -4663,11 +4663,58 @@ private:
         }
         return false;
     }
+    // Whether `atom` is in `e` where contract_atoms finds sites (an `&&` operand, the right operand of `||`, an arm of `?:`), and when it is, whether an `&&` on the way
+    // from `e` down to it has, as its other operand, a tie for `pointer`: a tie placed as the splice of `not_invalidating` places it (`atom && E == old(E)`, under the
+    // site's own guards) counts; a tie under another guard, or in another arm of an `||` or `?:`, is never an operand of an `&&` on this path.
+    static bool tie_on_path(const Expr* e, const Expr* atom, const Expr* pointer, bool& tied)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e == atom)
+        {
+            return true;
+        }
+        if (e->kind == Expr::Kind::Binary && e->bop == BinaryOp::LAnd)
+        {
+            if (tie_on_path(e->a, atom, pointer, tied))
+            {
+                tied = tied || conjunct_ties(e->b, pointer);
+                return true;
+            }
+            if (tie_on_path(e->b, atom, pointer, tied))
+            {
+                tied = tied || conjunct_ties(e->a, pointer);
+                return true;
+            }
+            return false;
+        }
+        if (e->kind == Expr::Kind::Binary && e->bop == BinaryOp::LOr)
+        {
+            return tie_on_path(e->b, atom, pointer, tied);
+        }
+        if (e->kind == Expr::Kind::Cond)
+        {
+            return tie_on_path(e->b, atom, pointer, tied) || tie_on_path(e->c, atom, pointer, tied);
+        }
+        return false;
+    }
+    // decision 0058 item 4: the tie of a site is an unconditional top-level conjunct of any `ensures` clause, or a conjunct of an `&&` chain on the way from the root of the
+    // site's own clause to its atom (the other operand of each `&&` above it), which keeps the site's guards
     static bool site_tied(const Function& f, const AtomSite& s)
     {
         for (const Clause& c : f.ensures_)
         {
             if (conjunct_ties(c.expr, s.atom->a))
+            {
+                return true;
+            }
+        }
+        if (s.in_ensures && s.clause >= 0 && static_cast<size_t>(s.clause) < f.ensures_.size())
+        {
+            bool tied {false};
+            if (tie_on_path(f.ensures_[static_cast<size_t>(s.clause)].expr, s.atom, s.atom->a, tied) && tied)
             {
                 return true;
             }

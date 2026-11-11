@@ -28,19 +28,70 @@ void define_marked_fields()
     // `reads_first` puts the read first; the location of the read is returned through `rd`.  `tie`: the contract says `p->q == old(p->q)` (else it does not);
     // `replace`: the body frees p->q and stores a new block instead of filling it:
     //   { Pointer t = malloc(); free(p->q); p->q = NULL; if (t != NULL) { *t = 7; p->q = t; } }
-    auto mk_fill = [=](Kit& k, StructType* S, bool reads_first, const Expr** rd, bool tie = true, bool replace = false) -> Function*
+    // `shape` (decision 0058 item 4, S1: a tie counts by its position in the clause, as the splice of `not_invalidating` places it):
+    //   Plain: `own && tie && close`, as written above (a top-level conjunct);
+    //   Guarded: both clauses under the owning guard, `p == NULL || (own && tie && close)` (the tie is on the site's path, under its guard);
+    //   OtherGuard: `own && p->n == 0 && close && (p->n == 0 || tie)`: the tie is under a guard (here one that always holds), not an operand of an `&&` above the site: it does not count;
+    //   OtherArm: `own && p->n == 0 && (p->n == 0 ? close : tie)`: the tie is in the other arm of a `?:`, which the site is not in: it does not count;
+    //   OtherOr: `own && p->n == 0 && ((p->n != 0 && tie) || close)`: the tie is in the left operand of the `||` whose right operand holds the site: it does not count.
+    //   OtherOrBare: `own && (tie || close)`, for the `_replaces` case alone (where the body keeps the block, `tie` holds and `close` is not asserted: `fill` would leak);
+    //   (`p->n == 0` is also in the `requires` of the three before it, so no arm with a tie is taken and `fill` does not leak.  A tie that is wrongly counted shows only where the body
+    //   replaces the block and leaves the new one unwritten (`leave_unwritten`: a body that wrote it would satisfy the kept row), since the caller cannot derive
+    //   `p->q == old(p->q)` from a tie in such a position: the `_replaces` cases.)
+    enum class Shape
+    {
+        Plain,
+        Guarded,
+        OtherGuard,
+        OtherArm,
+        OtherOr,
+        OtherOrBare
+    };
+    auto mk_fill = [=](Kit& k, StructType* S, bool reads_first, const Expr** rd, bool tie = true, bool replace = false,
+                       Shape shape = Shape::Plain, bool leave_unwritten = false) -> Function*
     {
         Function* fill {k.fn("fill", k.vd, {{"p", k.ptr(k.st(S))}})};
         const auto atoms = [&](bool tie)
         {
             const Expr* pq {k.b.text(k.leaf(k.F(fill, 0), 0), "p->q")};
             const Expr* own {k.b.atom(AtomKind::Owns, k.b.text(k.F(fill, 0), "p"), 0, k.at())};
-            const Expr* close {k.lor(k.eq(k.leaf(k.F(fill, 0), 0), k.nul(PI(k))), k.b.atom(AtomKind::OwnsBlock, pq, -1, k.at()))};
+            const Expr* close {
+                k.lor(k.eq(k.leaf(k.F(fill, 0), 0), k.nul(PI(k))), k.b.atom(AtomKind::OwnsBlock, pq, -1, k.at()))};
+            const auto tie_expr = [&]()
+            {
+                return k.eq(k.leaf(k.F(fill, 0), 0), k.old(k.leaf(k.F(fill, 0), 0)));
+            };
+            const auto n_is_zero = [&]()
+            {
+                return k.eq(k.leaf(k.F(fill, 0), 1), N(k, "0"));
+            };
+            const auto null_guard = [&](const Expr* body)
+            {
+                return k.lor(k.eq(k.F(fill, 0), k.nul(k.ptr(k.st(S)))), body);
+            };
+            switch (shape)
+            {
+                case Shape::Guarded:
+                    return null_guard(tie ? k.land(k.land(own, tie_expr()), close) : k.land(own, close));
+                case Shape::OtherGuard:
+                    return tie ? k.land(k.land(k.land(own, n_is_zero()), close), k.lor(n_is_zero(), tie_expr()))
+                               : k.land(k.land(own, n_is_zero()), close);
+                case Shape::OtherArm:
+                    return k.land(k.land(own, n_is_zero()), tie ? k.cond(n_is_zero(), close, tie_expr()) : close);
+                case Shape::OtherOrBare:
+                    return k.land(own, tie ? k.lor(tie_expr(), close) : close);
+                case Shape::OtherOr:
+                    return k.land(k.land(own, n_is_zero()),
+                                  tie ? k.lor(k.land(k.ne(k.leaf(k.F(fill, 0), 1), N(k, "0")), tie_expr()), close)
+                                      : close);
+                case Shape::Plain:
+                    break;
+            }
             if (!tie)
             {
                 return k.land(own, close);
             }
-            return k.land(k.land(own, k.eq(k.leaf(k.F(fill, 0), 0), k.old(k.leaf(k.F(fill, 0), 0)))), close);
+            return k.land(k.land(own, tie_expr()), close);
         };
         k.req(fill, atoms(false));
         k.ens(fill, atoms(tie));
@@ -51,20 +102,28 @@ void define_marked_fields()
             *rd = k.deref(k.leaf(k.pv(fill, 0), 0));
             in.push_back(k.decl(x, *rd));
         }
+        // the `Guarded` contract allows `p == NULL`: its body is under `p != NULL`
+        const auto under_nonnull = [&](const Stmt* body) -> const Stmt*
+        {
+            return shape == Shape::Guarded ? k.blk({k.iff(k.ne(k.pv(fill, 0), k.nul(k.ptr(k.st(S)))), k.blkc({body}))})
+                                           : body;
+        };
         if (replace)
         {
             Function* m {heap_alloc_view(k, "malloc", k.i32, false)};
             Function* fr {heap_free_view(k, k.i32)};
             Var* t {k.local(fill, "t", PI(k))};
-            fill->body = k.blkc({k.decl(t, k.call(m, {})), k.es(k.call(fr, {k.leaf(k.pv(fill, 0), 0)})),
-                                 k.lstore(k.pv(fill, 0), 0, k.nul(PI(k))),
-                                 k.iff(k.ne(k.pn(t), k.nul(PI(k))),
-                                       k.blk({k.store(k.pn(t), N(k, "7")), k.lstore(k.pv(fill, 0), 0, k.pn(t))}))});
+            fill->body = under_nonnull(k.blkc(
+                {k.decl(t, k.call(m, {})), k.es(k.call(fr, {k.leaf(k.pv(fill, 0), 0)})),
+                 k.lstore(k.pv(fill, 0), 0, k.nul(PI(k))),
+                 k.iff(k.ne(k.pn(t), k.nul(PI(k))),
+                       leave_unwritten ? k.blk({k.lstore(k.pv(fill, 0), 0, k.pn(t))})
+                                       : k.blk({k.store(k.pn(t), N(k, "7")), k.lstore(k.pv(fill, 0), 0, k.pn(t))}))}));
             k.done(fill);
             return fill;
         }
         in.push_back(k.store(k.leaf(k.pv(fill, 0), 0), N(k, "7")));
-        fill->body = k.blk({k.iff(k.ne(k.leaf(k.pv(fill, 0), 0), k.nul(PI(k))), k.blkc(in))});
+        fill->body = under_nonnull(k.blk({k.iff(k.ne(k.leaf(k.pv(fill, 0), 0), k.nul(PI(k))), k.blkc(in))}));
         k.done(fill);
         return fill;
     };
@@ -88,8 +147,8 @@ void define_marked_fields()
                                        k.lstore(k.addr(s), 1, N(k, "0")), k.lstore(k.addr(s), 0, k.call(m, {}))};
         if (before)
         {
-            body.push_back(k.iff(k.ne(k.leaf(k.addr(s), 0), k.nul(PI(k))),
-                                 k.blk({k.store(k.leaf(k.addr(s), 0), N(k, "5"))})));
+            body.push_back(
+                k.iff(k.ne(k.leaf(k.addr(s), 0), k.nul(PI(k))), k.blk({k.store(k.leaf(k.addr(s), 0), N(k, "5"))})));
         }
         const Expr* call {k.call(fill, {k.addr(s)})};
         body.push_back(k.es(call));
@@ -180,6 +239,76 @@ void define_marked_fields()
            mk_use(k, fill, false, false);
            k.fail("postcondition", fill->end_loc);
        });
+    // ---- where a tie counts (decision 0058 item 4, S1) ----
+    lc("mf_tie_guarded_keeps",
+       "the tie is a conjunct on the site's path under the owning guard (`p == NULL || (own && tie && close)`, where not_invalidating splices it): it counts, and the caller's flag survives",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           mk_use(k, mk_fill(k, mk_s(k, true, true), false, &rd, true, false, Shape::Guarded), true, true);
+       });
+    lc("mf_tie_guarded_replaces",
+       "the same contract and a body that replaces the block: the tie counts, so the clause's one assertion fails (ONE postcondition) and nothing of Silicon's own fails after it",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           Function* fill {mk_fill(k, mk_s(k, true, true), false, &rd, true, true, Shape::Guarded)};
+           mk_use(k, fill, false, false);
+           k.fail("postcondition", fill->end_loc);
+       });
+    lc("mf_tie_guarded_untied_replaces",
+       "the owning guard without a tie and a body that replaces the block: the site claims no flag, so the contract holds",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           mk_use(k, mk_fill(k, mk_s(k, true, true), false, &rd, false, true, Shape::Guarded), false, false);
+       });
+    lc("mf_tie_other_guard_caller_reads",
+       "the tie is under a guard (`own && p->n == 0 && close && (p->n == 0 || tie)`) and is no operand of an && above the site: it does not count, the site claims no flag, and the caller's read after the call is uninitialized",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           Function* fill {mk_fill(k, mk_s(k, true, true), false, &rd, true, false, Shape::OtherGuard)};
+           k.fail("uninitialized", mk_use(k, fill, true, true).read);
+       });
+    lc("mf_tie_other_arm_caller_reads",
+       "the tie is in the other arm of a `?:` than the site: it does not count, and the caller's read after the call is uninitialized",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           Function* fill {mk_fill(k, mk_s(k, true, true), false, &rd, true, false, Shape::OtherArm)};
+           k.fail("uninitialized", mk_use(k, fill, true, true).read);
+       });
+    lc("mf_tie_other_or_caller_reads",
+       "the tie is the left operand of the || whose right operand holds the site: it does not count, and the caller's read after the call is uninitialized",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           Function* fill {mk_fill(k, mk_s(k, true, true), false, &rd, true, false, Shape::OtherOr)};
+           k.fail("uninitialized", mk_use(k, fill, true, true).read);
+       });
+    lc("mf_tie_other_guard_replaces",
+       "a tie under a guard and a body that replaces the block and leaves the new one unwritten: the tie does not count, the site claims no flag, and the contract holds (a counted tie would fail the kept row at the return)",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           mk_use(k, mk_fill(k, mk_s(k, true, true), false, &rd, true, true, Shape::OtherGuard, true), false, false);
+       });
+    lc("mf_tie_other_arm_replaces",
+       "a tie in the other arm of a `?:` and a body that replaces the block and leaves the new one unwritten: the tie does not count, the site claims no flag, and the contract holds (a counted tie would fail the kept row at the return)",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           mk_use(k, mk_fill(k, mk_s(k, true, true), false, &rd, true, true, Shape::OtherArm, true), false, false);
+       });
+    lc("mf_tie_other_or_replaces",
+       "the tie in the left operand of the `||` whose right operand holds the site (`own && (tie || close)`) and a body that replaces the block and leaves the new one unwritten: the tie is false, so `close` is asserted; the tie does not count, the site claims no flag, and the contract holds (a counted tie would fail the kept row inside `close`)",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           // no caller: from a call the `||` would not say which operand holds
+           mk_fill(k, mk_s(k, true, true), false, &rd, true, true, Shape::OtherOrBare, true);
+       });
     // ---- a marked owner closes nothing (question 202), in a loop's synthetic closures (lower.cpp make_closure's three call sites) ----
     // struct Leaf { int *x (owning); int k; }  static owning [ref_to_uninit] struct Leaf *gp;
     // int main(void) { gp = calloc(1, sizeof(struct Leaf)); if (gp == NULL) { return 1; } int i = 0;
@@ -254,7 +383,8 @@ void define_marked_fields()
         v->ref_to_uninit = marked;
         Var* i {k.local(f, "i", k.i32)};
         const Expr* nn {k.ne(k.pn(v), k.nul(k.ptr(k.st(S))))};
-        const Stmt* bs {k.blkc({k.iff(nn, k.blk({k.lstore(k.pn(v), 1, N(k, "1"))})), k.asg(i, k.add(k.v(i), N(k, "1")))})};
+        const Stmt* bs {
+            k.blkc({k.iff(nn, k.blk({k.lstore(k.pn(v), 1, N(k, "1"))})), k.asg(i, k.add(k.v(i), N(k, "1")))})};
         const Stmt* lp {k.whl(k.lt(k.v(i), k.pv(f, 0)), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
                               {k.cl(k.sub(k.pv(f, 0), k.v(i)))}, bs)};
         f->body = k.blkc({k.decl(v, k.call(ca, {})), k.decl(i, N(k, "0")), lp,
