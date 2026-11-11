@@ -2822,10 +2822,12 @@ def carried_term_family(leaves: list[str], term: str, pointer: str) -> str | Non
     return None
 
 
-def forperm_exemption_problem(body: str) -> str | None:
+def forperm_exemption_problem(body: str, carried_ok: bool = False) -> str | None:
     """Decision 0054 item 8: the exemption of a `forperm` leak row is `false` or a disjunction of terms, each a conjunction of guards
     with exactly one `t == loc(block_of(<pointer>), -1)`; `t` appears nowhere else, so an exemption only names the token of a block
-    by its location (a carried token), never `true`, `t != ...` or a negated term."""
+    by its location (a carried token), never `true`, `t != ...` or a negated term.  The loop-carry families of `carried_term_family` (terms
+    without `offset_of(P) == 0`) are accepted only when `carried_ok`: in the row of a loop's back edge (`LOOP_LEAK_ROW_MESSAGE` in its map
+    entry), where the lowering emits them; a function's `ensures` and end rows hold the conjunct, whatever their guard looks like."""
     body = _strip_wrap(body.strip())
     if body == "false":
         return None
@@ -2836,10 +2838,10 @@ def forperm_exemption_problem(body: str) -> str | None:
         if len(terms) == 1:
             pointer = token_term_pointer(re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", terms[0], re.S).group("loc"))
             if (pointer is None or not has_offset_zero(conjuncts, pointer)) and (
-                    pointer is None or carried_term_family(conjuncts, terms[0], pointer) is None):
+                    pointer is None or not carried_ok or carried_term_family(conjuncts, terms[0], pointer) is None):
                 return ("an exemption term of a `forperm` leak row holds `offset_of(<pointer>) == 0` for the pointer of its `t == loc(block_of(<pointer>), -1)`: "
-                        "a pointer into the middle of a block carries no token, unless the term is exactly one of the loop-carry families "
-                        "of decisions 0050 and 0056 (decision 0059 item 10)")
+                        "a pointer into the middle of a block carries no token, unless the row is a loop's back edge and the term exactly one of "
+                        "the loop-carry families of decisions 0050 and 0056 (decision 0059 item 10)")
         if len(terms) != 1:
             return ("an exemption term of a `forperm` leak row is `<guards> && t == loc(block_of(<pointer>), -1)` with exactly one "
                     "such comparison: it names a carried token by its location (decision 0054 item 8)")
@@ -2850,7 +2852,12 @@ def forperm_exemption_problem(body: str) -> str | None:
     return None
 
 
-def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> set[int]:
+# The map message of the leak row at a loop's back edge (lower.cpp: "an iteration of this loop may end while it still owns an allocation that the
+# loop does not carry to the next iteration"): the one row whose exemption may hold the loop-carry terms.
+LOOP_LEAK_ROW_MESSAGE = "an iteration of this loop may end while it still owns an allocation"
+
+
+def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], None], loop_rows: frozenset[int] = frozenset()) -> set[int]:
     """The rules of the free token (see above).  Returns the lines of the `forperm` assertions, whose map entries the caller
     checks against the category `leak`."""
     forperm_lines: set[int] = set()
@@ -2875,7 +2882,7 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
             if TOK_WORD_RE.search(m.group("body")):
                 add(lineno, "the exemption of a `forperm` leak row does not mention `tok`: it names the places the method "
                             "hands back (decision 0047 item 7)")
-            elif (why := forperm_exemption_problem(m.group("body"))) is not None:
+            elif (why := forperm_exemption_problem(m.group("body"), lineno in loop_rows)) is not None:
                 add(lineno, why)
             forperm_lines.add(lineno)
             continue
@@ -3433,7 +3440,9 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_carrier_clauses(src, decls, add)
     lint_owning_global_tags(src, decls, add)
     lint_ghost_refs(src, decls, add)
-    forperm_lines = lint_heap_token(src, decls, add)
+    loop_rows = frozenset(e.vpr_line for e in (parse_map(map_text, "")[0] if map_text is not None else [])
+                          if e.message.startswith(LOOP_LEAK_ROW_MESSAGE))
+    forperm_lines = lint_heap_token(src, decls, add, loop_rows)
     lint_views(src, decls, add, has_globals, global_facts)
     lint_marked_kept_rows(src, decls, add)
 

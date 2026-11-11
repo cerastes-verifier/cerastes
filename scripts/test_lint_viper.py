@@ -6654,8 +6654,14 @@ class CarriedTermFamilyTests(unittest.TestCase):
     decisions 0050 and 0056 as they were (reached only through owners, whose updates hold it).  A term without the conjunct is accepted only as
     exactly one of three families over a pointer variable (`temp`, `kt`, `replaced`); a carried shape that is none of them is refused."""
 
-    def probs(self, body):
-        lines = HeapTokenTests("test_the_emitters_shape_is_clean").fixture(body=[Check("  assert forperm t: Ref [t.tok] :: " + body, A, "leak")])
+    LOOP_ROW = "an iteration of this loop may end while it still owns an allocation that the loop does not carry to the next iteration"
+    END_ROW = "`p` may return while it still owns an allocation that its caller does not hand back"
+
+    def probs(self, body, message=None):
+        """The `forperm` problems of a leak row with this exemption: by default the row of a loop's back edge (where the lowering emits
+        the carried terms), or the row with `message` (a function's end)."""
+        lines = HeapTokenTests("test_the_emitters_shape_is_clean").fixture(
+            body=[Check("  assert forperm t: Ref [t.tok] :: " + body, A, "leak", message or self.LOOP_ROW)])
         return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "forperm" in p and "offset_of" in p]
 
     T = "(t == loc(block_of({p}), (-1)))"
@@ -6700,6 +6706,29 @@ class CarriedTermFamilyTests(unittest.TestCase):
             with self.subTest(shape=label):
                 probs = self.probs(body)
                 self.assertTrue(any("loop-carry families" in p for p in probs), (label, probs))
+
+    def test_a_family_is_accepted_only_in_the_row_of_a_loops_back_edge(self):
+        # the exact shape of a restated ensures-site term with its offset_of conjunct dropped by a regression: `[g &&] P != null && t == loc(block_of(P), -1)`
+        # for an identifier pointer is text-identical to the `replaced` family, so only the row's origin tells them apart (the map message)
+        t = self.term
+        shapes = (f"(res != null) && {t('res')}", f"(p_x__0 != null) && {t('p_x__0')}",
+                  f"((!(res == null)) && (res != null)) && {t('res')}",
+                  f"((!(((res == null) ? 1 : 0) != 0)) && (res != null)) && {t('res')}",
+                  f"(held_v && (res != null)) && {t('res')}",
+                  "t__9 && (t == loc(block_of(t__8), (-1)))",
+                  f"((v != null) && (kt_h0__0 > none)) && {t()}")
+        for body in shapes:
+            with self.subTest(shape=body):
+                self.assertTrue(any("loop's back edge" in p or "loop-carry families" in p for p in self.probs(body, self.END_ROW)), body)
+        # twins: the family shapes are clean in the loop row (the rest of the family tests), and a restated term is clean in the end row
+        for body in (f"(res != null) && {t('res')}", f"((v != null) && (kt_h0__0 > none)) && {t()}"):
+            self.assertEqual(self.probs(body, None), [], body)
+        self.assertEqual(self.probs(f"((res != null) && (offset_of(res) == 0)) && {t('res')}", self.END_ROW), [])
+        # a map entry that is not the loop row's, or no map entry, keeps the term refused
+        text, _ = build(HeapTokenTests("test_the_emitters_shape_is_clean").fixture(
+            body=[Check("  assert forperm t: Ref [t.tok] :: " + f"(res != null) && {t('res')}", A, "leak")]))
+        probs = [p for p in lv.lint_vpr(text, None, "t.vpr", "t.vpr.map") if "offset_of" in p]
+        self.assertTrue(probs, probs)
 
     def test_a_family_is_not_a_way_around_the_restated_terms(self):
         # the restated families keep their conjunct: a term over an expression pointer or with a ghost guard needs it even next to a carry term

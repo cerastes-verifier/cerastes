@@ -1,14 +1,19 @@
 # 0059 — Arrays inside one function (M4.5e1a)
 
-- **Status:** draft (2026-11-11, M4.5e1a), written before code (invariant 6) from the plan's section 3.5
-  (`.claude/plans/m4-5e1-arrays.md`, approved 2026-11-11); to be revised after P78 and S43
+- **Status:** accepted (2026-11-11, M4.5e1a), written before code (invariant 6) from the plan's section 3.5
+  (`.claude/plans/m4-5e1-arrays.md`, approved 2026-11-11); revised after P78 and S43
   (`internal/il-inventory.md`, chapter M4.5e1a), the Step-0 runs and the compiler matrix, and audit round 1 (B1 and B2:
-  array designators rejected; items 3–17 taken or stated; `build/m4.5e1a/auditor-report-1.md`). Owner decisions:
+  array designators rejected; items 3–17 taken or stated), audit round 2 on Parts A and B (B1: `register`, item 2's
+  #138; items 2–5 taken), audit round 3 on Parts C–E (no blocking item; `sizeof` only, a loaded base's spelling, the
+  array-place alias guards) and the re-audit of its fixes (no blocking item; the lint's loop-carry families tied to
+  their rows). Each item says what was built. Owner decisions:
   - At M4.5e1's planning (2026-11-11): **226** `forall` in C inlines a `pure` function's body (e1c); **227** the exact
     sum is in M4.5e1 (e1d); **228** `cerastes_reads_range` is added beside `owns_range` (e1b); the split into e1a–e1e.
   - Before this session (2026-11-11), each the recommendation: **229** a `*p` one past the end of an array is reported
     as `permission` (item 4); **230** `int a[static N]` parameters are rejected, an M8 entry (item 1); 231–233 are
     e1b's, e1c's and e1e's.
+  - Open at the session's end, each built as its recommendation (handoff §8): **234** array designators rejected in C
+    too (item 3); **235** the 1,080 existing `.vpr` files item 10 changes (item 10).
   - Standing: 69 (no EDG work), 77 (one context), 160 (a new test's expect line corrected after its first run, listed
     in status).
 - **Milestone:** M4.5e1a.
