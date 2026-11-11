@@ -886,7 +886,7 @@ void define_heap()
            const Stmt* r {k.ret(k.pn(f->param_var(0)))};
            f->body = k.blk({r});
            k.done(f);
-           k.fail_only("permission", r->loc, 11U, 0U);
+           k.fail_only("permission", r->loc, 11U, 10U);
        });
 
     // ======== sequencing: free(p) beside another use of p (item 9) ========
@@ -1216,7 +1216,7 @@ void define_heap_memory()
     lc("hbl_borrow_frees", "the borrower frees the block it promises back (permission at its closing brace)",
        [=](Kit& k)
        {
-           k.fail_only("permission", borrow(k, 1), 12U, 8U);
+           k.fail_only("permission", borrow(k, 1), 12U, 7U);
        });
     lc("hbl_borrow_leak", "the caller never frees the block set() returned (leak at the closing brace)",
        [=](Kit& k)
@@ -1428,7 +1428,7 @@ void define_heap_memory()
        "free(g) without setting g to NULL: g does not hold its block at the return (permission)",
        [=](Kit& k)
        {
-           k.fail_only("permission", owning_global(k, 2), 12U, 8U);
+           k.fail_only("permission", owning_global(k, 2), 12U, 7U);
        });
 
     // int main(void) { f(); } with the global of the cases above: main holds nothing at its start; f takes and returns g's block; at main's end g's block is exempt
