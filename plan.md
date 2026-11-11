@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start. The last was M4.5d2b2c's planning (2026-11-10); M4.5d2b2b's (2026-11-09) cut the Done table to
+each session's start. The last was M4.5e1's planning (2026-11-11); M4.5d2b2b's (2026-11-09) cut the Done table to
 one line per row, and the rows as they were are `git show 2430529:plan.md`. The plans of the finished milestones,
 the superseded text and the appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
@@ -180,17 +180,24 @@ cause and fixes the shim; the clang-20 CI profiles then drop their exclusion.
 designed it (records 0028 memory model, 0029 ownership annotations and C spec functions, 0030 vlibc);
 `internal/handoff.md` §4.2 has each remaining session's plan and the VeriFast ports it takes. The owner split it
 session by session, as each planning's survey measured the work (b1c, c, c2, d2, d2b, d2b2, d2b2c:
-`internal/status.md`'s history, and `git show 2430529:plan.md` for the wording). The last split (owner, 2026-11-10,
-question 198; the surveys measured 295–495 changed lines for the loop limits and 740–1,170 for the rest): d2b2c is
-d2b2b's loop limits and the long-running test tier, d2b2d `not_invalidating`, `--strict-owner` and marked fields.
+`internal/status.md`'s history, and `git show 2430529:plan.md` for the wording). The last split (M4.5e1's planning,
+2026-11-11; plan `.claude/plans/m4-5e1-arrays.md`): M4.5e1 is five sub-sessions, e1a–e1e, each a session of its own.
+The owner decided there (questions 226–228) that `forall` in C names a `pure` function whose body is inlined, that
+the exact array sum is in M4.5e1 (so e1d takes `pure` bodies and their recursion from M4.5f1/f2), and that
+`cerastes_reads_range` is added beside `owns_range`. e1a is ready; e1b–e1e each run their probes and spikes, then
+plan again.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5e1 Arrays** | next (its planning session first): local arrays, `a[i]`, array parameters, `owns_range` and quantified permissions, `forall` in C (0029 item 4), sum and max; P38's braced initializers over 1000 elements; M4.4b2's types computed from constants; inner arrays and arrays of structs on M4.5c1's member blocks | M4.5c1 |
-| **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, one-past-the-end, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))`, `realloc` (from M4.5d2a, question 120); `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` | M4.5e1, M4.5d2a |
-| **M4.5f1 Predicates and pure functions** | predicate and pure bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates | M4.5c2b, M4.5d2b2b |
+| **M4.5e1a Arrays inside one function** | next: local arrays as blocks, `a[i]`, `&a[i]`, braced initializers (P38), scope exits, the marked range rows in the driver, `out-of-bounds`, loops over arrays, sequencing between elements, pointers into arrays (`p[i]`, decay) | M4.5c1 |
+| **M4.5e1b Ranges in contracts** | `owns_range` and `reads_range` as quantified permissions, array parameters, calls and returns over ranges, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter; the `carrays.c` port | M4.5e1a |
+| **M4.5e1c Quantifiers** | `forall` in C (0029 item 4; question 226: a `pure` function's body inlined), max, the tutorial chapter | M4.5e1b |
+| **M4.5e1d Pure functions and the exact sum** | `pure` bodies as Viper functions, calls of `pure` functions in annotations, recursion with `decreases`; the exact array sum (question 227) | M4.5e1c |
+| **M4.5e1e Arrays in aggregates and storage** | inner arrays and arrays of structs on M4.5c1's member blocks, 2-D arrays, global and `static` arrays, array compound literals; M4.4b2's types computed from constants, for array types | M4.5e1b |
+| **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))`, `realloc` (from M4.5d2a, question 120); relational comparisons and `p - q` under `pointer-comparison`; `owning(n)` beyond parameters | M4.5e1a, M4.5e1b, M4.5d2a |
+| **M4.5f1 Predicates** | predicate bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates, pure functions over predicates | M4.5c2b, M4.5d2b2b, M4.5e1d |
 | **M4.5f2 Recursive predicates** | recursive predicates; a linked list (push, pop, length); recursive owning fields | M4.5f1 |
 | **M4.5f3 Lemmas and ghost sequences** | lemma functions and ghost sequences for content specifications (M4.6's string contracts); its record decides whether all of it is in M4 | M4.5f2 |
 
@@ -206,13 +213,14 @@ variadic functions and `printf`, several translation units (the contract manifes
 **Docs:** each session extends "Verifying a program", "Annotations" and "Error messages" (one section per new error
 category); from M4.5, a "Memory and ownership" page: `owns`/`reads`/`old` in C, structs, `malloc`/`free`, arrays and
 `owns_range`, `forall`, predicates and pure functions, `fold`/`unfold`, and the rejected constructs. The tutorial gains a
-chapter in the session that completes its concept (record 0049 item 4): arrays and quantifiers in M4.5e1, extended by
-pointer arithmetic in M4.5e2, predicates and a linked list in M4.5f2, strings in M4.6, function pointers in M4.7.
+chapter in the session that completes its concept (record 0049 item 4): arrays and quantifiers in M4.5e1c, extended by
+the exact sum in M4.5e1d and by pointer arithmetic in M4.5e2, predicates and a linked list in M4.5f2, strings in M4.6,
+function pointers in M4.7.
 
 **Acceptance (checked in M4.8):** pass/fail pairs for every construct, including swap, a struct field update, a
-linked list (push/pop/length with a recursive predicate), array sum/max with a quantifier, and an aliasing trap that
-must fail; the ported VeriFast C examples and their outcomes in `internal/differential.md`; the mutation run over the
-M4 tests with zero unexplained survivors; lint clean; every error category documented with a must-fail example;
+linked list (push/pop/length with a recursive predicate), array sum/max with a quantifier (the exact sum, by a
+recursive `pure` function: question 227), and an aliasing trap that must fail; the ported VeriFast C examples and
+their outcomes in `internal/differential.md`; the mutation run over the M4 tests with zero unexplained survivors; lint clean; every error category documented with a must-fail example;
 self-framing diagnostics in source terms (for example "reads `c->val` without owning it").
 
 ---

@@ -1,27 +1,34 @@
-# Handoff after M4.5d2b2d (2026-11-10) — M4.5e1 (arrays) next, after its planning session
+# Handoff after M4.5e1's planning (2026-11-11) — M4.5e1a (arrays inside one function) next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
-`internal/decisions/`; M4.5e1 has no approved plan yet, so its session starts with planning (§4.2). `status.md` has the
-formal entry. This file adds what a cold start would otherwise have to rediscover, and holds only what is live
-(owner, 2026-10-26).
+`internal/decisions/`, then its plan: `.claude/plans/m4-5e1-arrays.md`, whose section 3 is M4.5e1a's and is ready
+to run. `status.md` has the formal entry of the last finished session (M4.5d2b2d). This file adds what a cold
+start would otherwise have to rediscover, and holds only what is live (owner, 2026-10-26).
 
-It was consolidated at M4.5d2b2b's planning (2026-11-09) and again at M4.5d2b2c's (2026-11-10), both at the owner's
-request. The history of finished sessions, the notes that had moved into session plans and the digests of answered
-questions were cut, and the open notes were re-filed under the session that consumes each. **The text before this
-consolidation is `git show 262edb3:internal/handoff.md`**, to which the owner added inline answers to questions
-194–197 (§8 keeps them); the text before the first is `git show 2430529:internal/handoff.md`, whose header names
-every earlier version. Each note below keeps its origin in brackets, so its full wording can be found there. Session
-plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan's "Inputs".
+It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10) and at M4.5e1's
+(2026-11-11), each at the owner's request. The history of finished sessions, the notes that had moved into session
+plans and the digests of answered questions were cut, and the open notes were re-filed under the session that
+consumes each. **The text before this consolidation is `git show f57ee43:internal/handoff.md`** (the owner then
+answered questions 224 and 225 inline; §8 keeps the answers); the one before it is
+`git show 262edb3:internal/handoff.md`, and the first is `git show 2430529:internal/handoff.md`, whose header
+names every earlier version. Each note below keeps its origin in brackets, so its full wording can be found there.
+Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan's
+"Inputs".
 
 ## 1. State
 
-- **M4.5d2b2d** (2026-11-10; record 0058; plan `.claude/plans/m4-5d2b2d-invalidation-profile.md`) is done on branch
-  `m4.5d2b2d-invalidation-profile` (worktree `.claude/worktrees/m4.5d2b2d`), not merged: `main` is `023ea50`
-  (M4.5d2b2c, merged and pushed before the session). Its result is in `internal/status.md`; the box's full
-  `check.sh` with `CERASTES_LONG=1` on `b0caf2c` is all green (13,428 passed, 0 failed; the long tier's 16 runs passed;
-  73 minutes at `-j32`).
-- **M4.5e1 Arrays** is next. It has no approved plan: its session starts with a planning session (§4.2 has the
-  design notes; §3 "M4.5e1/e2").
+- **M4.5d2b2d** (2026-11-10; record 0058; plan `.claude/plans/m4-5d2b2d-invalidation-profile.md`) is done, merged
+  and pushed: `main` = `origin/main` = `f57ee43`. Its result is in `internal/status.md`; the box's full `check.sh`
+  with `CERASTES_LONG=1` on `b0caf2c` was all green (13,428 passed, 0 failed; the long tier's 16 runs passed; 73
+  minutes at `-j32`).
+- **M4.5e1 Arrays** is planned (2026-11-11, a session that only planned; question 224): five sub-sessions, each a
+  session of its own, in `.claude/plans/m4-5e1-arrays.md`.
+  - **M4.5e1a** arrays inside one function (record 0059) is next and ready: it runs from the plan's section 3.
+  - **M4.5e1b** ranges in contracts, **e1c** quantifiers, **e1d** pure functions and the exact sum, **e1e** arrays
+    in aggregates and storage: each starts with the probes and spikes its section gives, then plans again (saved
+    as `.claude/plans/m4-5e1<x>-<topic>.md`).
+  - The planning ran no build and no verifier. Its survey facts are read from the tree at `f57ee43`; the plan's
+    Step-0 runs and gates (R1–R3, G2–G4) check the ones the design rests on.
 - **CI:** unchanged (record 0053). The 2026-11-10 nightly was the first under the 360-minute limit and was cancelled at
   6 h 01 min, so the full check does not fit GitHub's runners as configured (question 176: the owner's). No
   `profiles=all` dispatch has run, so `macos-26` stays at `dispatch` (question 172).
@@ -31,31 +38,26 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 
 ## 2. Owner steps
 
-1. **Merge and push** the branch. The main checkout still holds your uncommitted edit of `internal/handoff.md` (the
-   answers to questions 215 and 216), which the branch already carries (`abfa8b5`), so discard it first or the merge is
-   refused: `git -C <main checkout> checkout -- internal/handoff.md`, then `git -C <main checkout> merge --ff-only
-   m4.5d2b2d-invalidation-profile`, then push `main`. The local ref `d2b2d-snap-F` (the audit's snapshot) can be deleted (`git branch -D`), with the worktrees
-   `git worktree remove .claude/worktrees/m4.5d2b2d` and `.claude/worktrees/m4.5d2b2d-aux` (P77's probe build and the
-   parallel encoder work; nothing in it is needed).
-2. **CI** (question 176): the nightly does not fit 360 minutes (§1); the `profiles=all` dispatch is still pending
+1. **Push** `main`: the planning commit (the plan, this file, `plan.md`).
+2. **Before M4.5e1a:** questions 229 and 230 (§8) have recommended answers; answer inline if either should differ.
+3. **CI** (question 176): the nightly does not fit 360 minutes (§1); the `profiles=all` dispatch is still pending
    (question 172).
-3. **Optional.** On the box, `~/cerastes-m4.5d1` and its container `cerastes-m4.5d1-p71` can go (`docker rm -f`,
-   `rm -rf`), and the bundles `~/cerastes-d2b2*.bundle` once merged; `~/cerastes-s8` stays.
+4. **Optional.** `git worktree remove .claude/worktrees/m4.5d2b2d-aux` (P77's probe build and the parallel encoder
+   work; nothing in it is needed). On the box, `~/cerastes-m4.5d1` and its container `cerastes-m4.5d1-p71` can go
+   (`docker rm -f`, `rm -rf`), and the bundles `~/cerastes-d2b2*.bundle`; `~/cerastes-s8` stays.
 
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
 
-
 **M4.8 C parity close-out, from M4.5d2b2b and M4.5d2b2c's planning** (with questions 66 and 189):
-- Two owning fields replaced in one loop under written invariants take 218.5 s (S40 `g3_two.c`, loaded machine; one
-  field 6.3 s); the audit probe `cover_twice.c` (two calls of a function returning `&s` of a `static` struct with an
-  owning field, then frees through both, a failing program) takes over 300 s. M4.5d2b2c tries each once under 1800 s
-  as a long-running test (questions 196, 199); one that does not pass comes back here with its time. [d2b2b]
 - N2: a `static` cache cannot hand out a pointer into the buffer its leaf owns (0054 item 7's cover does not reach
   blocks owned by a static leaf; `cov_of` covers only by implicit permission atoms). The cover already timed out
-  once (record 0055 item 3), so it goes with question 194. [d2b2b audit; d2b2c planning]
+  once (record 0055 item 3), so it goes with question 194 (owner, "Follow recommendation": the cover rule stays,
+  record 0055 item 3, "Covered atoms"; a function that returns `&s` on some paths and a fresh structure whose owning
+  field holds a block on others is reported; revisit with the cost work if a ported example needs it).
+  [d2b2b audit; d2b2c planning]
 - Automatic closure sites for a borrowed structure's owning fields in a loop (question 201: not built; a loop that
   replaces such a block writes `owns(*p)` in its invariant). They would change existing loops' Viper and give a
   structure with two owning fields the 218 s shape; revisit with the cost work. [d2b2c planning]
@@ -73,16 +75,22 @@ Notes that a session consumes move into its plan's "Inputs".
     over a marked field's unwritten buffer (`marked_field_loop_written_invariant.c`); a written `owns_block(p->q)` loop
     invariant on a marked owning field closes below it (`closure_marked` is read for contracts only). [d2b2d]
   - Three lint shapes of the marked closure (a `requires` site without a bare flag conjunct, no flag asserts in the
-    Uninit modes, a given site without flags) need the site's mode, which the Viper does not name: a mode comment in
-    the emitted Viper would let `lint_viper.py` check them. [d2b2d]
+    Uninit modes, a given site without flags) need the site's mode, which the Viper does not name. Question 225
+    ("Follow recommendation."): here, by a mode comment emitted beside each block site (no Viper semantics change),
+    with `lint_viper.py` reading it. [d2b2d]
 - **From M4.5d2b2c** (record 0056; none cut a limit, so nothing of its cut order is here):
-  - Question 196's programs ran past 1800 s in both modes on the quiet box (question 199): `cover_twice.c` (exit 3 at
-    1801 s, the base encoder) and `two_fields.c` with its twin (1801 s, Part L-2's build; its Viper is the same from the
-    base), recreated in `build/m4.5d2b2c/slow/` of the session worktree and on the box in
-    `~/cerastes-s8/p-ubuntu-26.04/build/slow-d2b2c/`; S40 (g)'s lost `g3_two.c` took 218.5 s on a loaded Mac, so the
-    two programs may differ in detail. They belong with the cost work (questions 66, 189). [d2b2c]
-  - The places test of record 0056 item 6 (question 212, kept as built): a site's cells are places only where the loop
-    writes neither the site's pointer nor, by name, any address-taken local; pins
+  - **Question 196's two slow programs** (the owner: "Increase time past 300s, if the increase does not allow the
+    program to pass, then move to M4.8"; question 199: 1800 s, once each on the quiet box). Both ran past 1800 s in
+    both modes: `cover_twice.c` (two calls of a function returning `&s` of a `static` struct with an owning field,
+    then frees through both, a failing program; exit 3 at 1801 s, the base encoder) and `two_fields.c` with its twin
+    (two owning fields replaced in one loop under written invariants; 1801 s, Part L-2's build; its Viper is the
+    same from the base), recreated in `build/m4.5d2b2c/slow/` of the session worktree and on the box in
+    `~/cerastes-s8/p-ubuntu-26.04/build/slow-d2b2c/`. S40 (g)'s lost `g3_two.c` took 218.5 s on a loaded Mac (one
+    field 6.3 s), so the two programs may differ in detail. They belong with the cost work (questions 66, 189).
+    [d2b2b, d2b2c]
+  - The places test of record 0056 item 6 (question 212: "Keep as built"; the recommendation was to narrow it): a
+    site's cells are places only where the loop writes neither the site's pointer nor, by name, any address-taken
+    local; pins
     `owning_field_loop_chain_cell_write_false_alarm.c` (verified on the base) and
     `owning_field_loop_chain_null_owner_false_alarm.c`. Narrowing it, with the base's live-guard places where the
     pointer may be written, is the fix the auditor proposed. [d2b2c audit round 2 on L-2, B2]
@@ -91,11 +99,16 @@ Notes that a session consumes move into its plan's "Inputs".
   - The replace tests carry no closure across a possible replacement of an owning global pointer or a struct global
     reached through a pointer: six pinned false alarms (`owning_global_loop_replace_*`, `owning_global_leaf_replace_*`);
     the guarded written site of record 0056 item 8 may serve there, untested. [d2b2c]
-  - The older `stores_type` clause of the `wef` rule: a loop copying a whole structure that holds an `int` beside an
-    owning pointer is a false `uninitialized` at the back edge (`owning_field_loop_struct_copy_int_false_alarm.c`, the
-    same on the base). [d2b2c]
-  - `owning_field_loop_owner_replaced_alias_false_alarm.c`: the invariant the loop needs cannot be written while the
-    owner is address-taken (question 215). [d2b2c]
+  - The older `stores_type` clause of the `wef` rule (0054 item 3): a loop copying a whole structure that holds an
+    `int` beside an owning pointer is a false `uninitialized` at the back edge
+    (`owning_field_loop_struct_copy_int_false_alarm.c`, the same on the base). Question 216 (the recommendation):
+    fixed here with question 212's places test, both refinements of 0054's carriers. [d2b2c]
+  - `owning_field_loop_owner_replaced_alias_false_alarm.c` (question 201's fifth pin): the loop frees and replaces an
+    owning local `v` through `pv = &v` and frees `v->data` in its first iteration only; the invariant it needs,
+    `v == NULL || i != 0 || v->data == NULL || owns_block(v->data)`, is rejected for an address-taken owner
+    (`unsupported_expression`) and is `permission` when spelled `(*pv)->data`. Question 215 (the recommendation):
+    M4.8 admits a written block site on an address-taken owning local's field (record 0054 item 6's owner in
+    memory), with the other loop false alarms; the pin stays until then. [d2b2c]
   - Item 2's call route has no pin (only a marked global's deep atom reaches it) and the whole-structure route is pinned
     in the VIR self-test only; both are the conservative direction. [d2b2c]
   - **Costs to watch:** six tests moved to `tests/long/memory/` (question 217; 120–641 s on the box, 20–84 s on the
@@ -109,17 +122,31 @@ Notes that a session consumes move into its plan's "Inputs".
   - A loop that frames a struct local out still loses an `int` member's value when the loop reaches it otherwise (the
     re-audit's r3 and r5 had to return `s.data == NULL ? 1 : 0` instead of `s.n`): the same on the base. [d2b2c]
 
-**M4.5e1/e2 Arrays and pointer arithmetic:** P38's braced initializers (§4.2); signed/unsigned and enumeration variants
-through `void*` cannot be written [M4.5a]; accepted completeness gap for e2's relational comparisons: `&s.x < &s.y` is
-reported, since members are different blocks [M4.5a].
-- **For M4.5e1 (arrays):** the `held_v`/`held_g` updates and `main`'s exemption need `offset_of == 0` once interior
-  pointers exist (audit round 1, note 20), and the flag clause of item 3(e) is restated on `hb_w`'s cell. [d2b2a]
-- **For M4.5e1:** record 0056 item 11's escape scan must see an array member decaying to a pointer as an escape of the
-  struct local (the re-audit's reading of `struct_local_escapes`). [d2b2c]
-- **For M4.5e2 / later:** `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized` get
-  contracts with their standard names'; `free_sized` needs a deallocation shape with a size [0050 item 6].
+**M4.5e1 Arrays** (five sub-sessions): its notes moved into its plan's Inputs (`.claude/plans/m4-5e1-arrays.md`,
+section 9): P38's braced initializers, the `offset_of == 0` restatements on `held_v`/`held_g`/`hb_w` (e1a), the
+escape scan's array members (e1e), the marked range rows, the `carrays.c` port. From its planning's survey, not in
+any record yet:
+- `out-of-bounds` lands in e1a (0028 item 10 gives it "an index"), not M4.5e2. [e1 planning]
+- `is_global_ref` and `inv_place_disjunct` (`lower.cpp` 6267–6271, 3809–3817) treat any `loc(GB_…, i)` as one place:
+  wrong once a global has more than one slot (e1e's global arrays). [e1 planning survey, read not run]
+- Stale citations: record 0022 item 3 and `il-inventory.md`'s P38 cite "handoff §8" for the P38 note (it is in the
+  plan's Inputs now); "audit round 1, note 20" of the `offset_of` note has no source in the repo. [e1 planning]
+
+**M4.5e2 Pointer arithmetic** (needs e1a and e1b; e1e for arrays of structures on the heap)
+- Signed/unsigned and enumeration variants through `void*` cannot be written [M4.5a]; accepted completeness gap for
+  its relational comparisons: `&s.x < &s.y` is reported, since members are different blocks [M4.5a].
+- `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized` get contracts with their
+  standard names'; `free_sized` needs a deallocation shape with a size [0050 item 6].
+- From M4.5e1's plan: whether `*p` gains a bounds row (question 229: e1a reports a `*p` one past the end as
+  `permission`); `owning(n)` on results, locals, fields and globals (e1b gives it to parameters only); the pins
+  `reject_malloc_size_*.c`, `reject_calloc_size_count.c`, `reject_realloc.c`, `reject_struct_member_arith.c`,
+  `global_address_arith_cpp.cpp`, `tests/vlibc/negative/reject_vlibc_realloc.c`; 0047 item 6's `offset_of(p) == 0`
+  free row gets its C test (`free(p + 1)`). [e1 planning]
 
 **M4.5f1/f2 Predicates**
+- M4.5e1d takes the slice an exact array sum needs (question 227): `pure` bodies as Viper functions, calls of `pure`
+  functions in annotations, recursion with `decreases`. M4.5f1 keeps predicates, `fold`/`unfold` and pure functions
+  over predicates; the two notes below are met first by e1c (the `pure` body reader) and e1d. [e1 planning]
 - `pure` bodies now reject globals and `static` locals (0041 item 12) [b2a]; R1–R13 do not reach `pure`/`predicate`
   bodies, and `static_assert_pure_body.c`'s listed entry goes stale when bodies are encoded [M4.4c].
 - A list traversal's truth tests need liveness inside f2's predicates; `forperm` sees only top-level tokens [M4.5a].
@@ -170,13 +197,12 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
 - **Costs to watch:** two written `owns_block` sites through loads over parameter places cost about 33 s for the loop
   alone and about 148 s with one drop in the body, quiet. The tests pin cheaper shapes (question 186). The `?:`
   framing chains repeat in every pair row and every `forperm` instantiation; the reads are hoisted, and the next step
-  is the pair and exclusivity structure. This belongs to M4.8 with question 66. [d2b2a]
+  is the pair and exclusivity structure. Question 189 (owner, 2026-11-09): this cost is fixed here with question 66;
+  owning fields make the shape more common (a structure with two owning fields under a written loop invariant: the
+  218.5 s and 1800 s programs above). [d2b2a, d2b2b planning]
 - **Record 0054's documented limits** (its items 2–5; the twelve bullets are in
   `git show 2430529:internal/handoff.md` §3 "From M4.5d2b2a" and in M4.5d2b2b's plan's Inputs): candidates for the
   close-out's review of false alarms. [d2b2a]
-- **Question 189** (owner, 2026-11-09): the cost of two written load-sites is fixed here with question 66. Owning
-  fields make the shape more common (a structure with two owning fields under a written loop invariant); M4.5d2b2b's
-  spike S40 (g) times it and records the time. [d2b2b planning]
 - **Costs to watch:** B1's splits against outside holders grow the paths exponentially with the number of holders (S37's
   adversarial fixture 93 s); a function with several pointer variables beside a heap loop may time out [audit 2 N10].
 
@@ -391,9 +417,9 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
 - **x86-64:** the EDG suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes
   to `matt@clang4.cpp.al` automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the
   fallback when the host is down).
-- **Records and plans:** a record takes the next free number when it is written (0055 is M4.5d2b2b's; 0056 and 0057
-  are M4.5d2b2c's). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
-  protocol").
+- **Records and plans:** a record takes the next free number when it is written (0058 is M4.5d2b2d's; 0059 is the
+  next, M4.5e1a's). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
+  protocol"); a sub-session that plans again after its spikes saves that plan the same way.
 - **What a worktree takes with it** (owner, 2026-11-09, question 193): session tools and spike summaries are
   committed. `vprdiff.py` and `regen.py` were lost with d2b1's worktree and again with d2b2a's, and so was S39's
   summary. From M4.5d2b2b they are `scripts/vprdiff.py` and `scripts/regen_vpr.py`, and a spike's summary goes into
@@ -403,7 +429,7 @@ Finished sessions: `plan.md`'s Done table has a row each, `.claude/plans/` their
 `internal/status.md` their results and the commits it names. The warning sweep (was M4.4e) is an M8 entry in
 `plan.md`.
 
-**Pending side sessions** (none blocks M4.5e1):
+**Pending side sessions** (none blocks M4.5e1a):
 - **The EDG box session** (§4.1, pending since M4.2c).
 - **The vlibc `<stdlib.h>` shim session** (owner, 2026-11-09, question 170: "Follow recommendation using a vlibc
   session"). With clang 20 and 18, vlibc's `<stdlib.h>` shim meets glibc's declarations with an incompatible linkage
@@ -446,34 +472,41 @@ M4.5e2 replaces it as a benchmark); 14 of the 22 files run VeriFast with `-disab
 need `requires` bounds; `functions.c`'s predicate families and constructors, consumed fractions, backward `goto` and
 `open_module` are M8 entries.
 
-**Finished: b1a to d2b2c** (records 0032–0057). `plan.md`'s Done table has a row each and `.claude/plans/` their
-plans. The narrative of their splits, the original d2 paragraph and d2's dependency map are in
-`git show 2430529:internal/handoff.md` §4.2. Each session rejects what a later one makes precise (fail closed).
-M4.5d2b2b landed about 2,750 `src/` lines against its plan's 1,700–3,300; M4.5d2b2c about 900 lines of `lower.cpp`
-against 295–495, the excess the owner's in-session answers (questions 206–214: the escape scan, two orderings, the
-replace routes).
+**Finished: b1a to d2b2d** (records 0032–0058). `plan.md`'s Done table has a row each and `.claude/plans/` their
+plans; the narrative of their splits is in `git show 2430529:internal/handoff.md` §4.2. Each session rejects what a
+later one makes precise (fail closed). **Sizes against estimates**, for the next plans: M4.5d2b2b landed about 2,750
+`src/` lines against 1,700–3,300; M4.5d2b2c about 900 lines of `lower.cpp` against 295–495 (the owner's in-session
+answers, questions 206–214); M4.5d2b2d about 1,960 against 740–1,170 (the audits' fixes).
 
 **Pre-approved** (owner): a session may retire or re-expect exactly the rejection pins its plan lists (its "Flips"),
 and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:`
 comment name the new session.
 
-**M4.5e1 Arrays** (next; its planning session first). Local arrays as blocks, `a[i]`, array parameters, `owns_range` as quantified permissions over the
-absolute slot, the marked range rows in the driver (owner, after S25), `forall` in C (0029 item 4: its planning decides
-between pure functions with contracts and moving M4.5f1 first), sum and max. P38: a braced initializer with more than
-1000 elements keeps no `expr` for its elements (`REDUCE_BACKING_EXPRESSION_USE`), only an `orig_type`; read every
-element through `constant_value`, which rejects that shape, never through `ck_aggregate`'s values directly, or a
-wrapping element would pass unchecked. M4.4b2's types computed from a constant (`sizeof`, `typeof`, typedefs). Inner arrays and arrays of
-structs use M4.5c1's member blocks (0028 item 16). Port:
-`carrays.c` (lists → `forall`; its `should_fail` at L35 and L42: below and one past the end).
+**M4.5e1 Arrays** (planned 2026-11-11; `.claude/plans/m4-5e1-arrays.md`; questions 226–228). Five sub-sessions,
+each a session of its own with its record, twins, docs, audits and one box `check.sh`:
 
-**M4.5e2 Pointer arithmetic.** `p + i`, `p - i`, `p - q`, relational comparisons within one object, one-past-the-end,
-`malloc(n * sizeof(T))`; `out-of-bounds`; relational comparisons and `p - q` under `pointer-comparison` (the category and
-the `==` exception of 0028 item 3 land in M4.5b1b). Port: an array
-insertion sort (in place of `insertion_sort.c`).
+| Sub-session | Scope | Plan |
+|---|---|---|
+| **e1a** (next) | local arrays as blocks, `a[i]`, `&a[i]`, initializers (P38), scope exits, the marked range rows in the driver, `out-of-bounds`, loops over arrays, sequencing, pointers into arrays, the `offset_of == 0` restatements | section 3, ready; record 0059 |
+| **e1b** | `owns_range`, `reads_range`, array parameters, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, the `carrays.c` port | section 4: P79 and S44, then plan again |
+| **e1c** | `cerastes_forall` with the `pure` function's body inlined, max, the fill loop, the tutorial chapter | section 5: P80 and S45, then plan again |
+| **e1d** | `pure` bodies as Viper functions, recursion, the exact sum | section 6: P81 and S46, then plan again |
+| **e1e** | array members, arrays of structures, 2-D arrays, global and `static` arrays, array compound literals, 0024 item 6 lifted for array types | section 7: P82 and S47, then plan again |
 
-**M4.5f1 Predicates and pure functions.** Bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive
-predicates. Port: `cell.c`. §3's notes on R1–R13 not reaching `pure`/`predicate` bodies and `static_assert_pure_body.c`
-go stale here.
+A sub-session marked "plan again" starts outside plan mode with its Step 0, Step 1, probes and spikes as its section
+gives them (they change no `src/`), commits their results to `internal/il-inventory.md`, then plans the encoding
+steps from them and from the as-built facts of the sub-sessions before it.
+
+**M4.5e2 Pointer arithmetic** (needs e1a and e1b; may run before e1c–e1e). `p + i`, `p - i`, `p - q`, relational
+comparisons within one object, `malloc(n * sizeof(T))`, `calloc(n, …)`, `realloc`; relational comparisons and
+`p - q` under `pointer-comparison` (the category and the `==` exception of 0028 item 3 landed in M4.5b1b);
+`out-of-bounds` and a one-past-the-end `&a[n]` are already e1a's. Port: an array insertion sort (in place of
+`insertion_sort.c`). §3 "M4.5e2" has what e1's plan leaves it.
+
+**M4.5f1 Predicates and pure functions.** Predicate bodies encoded (0011 item 4 lifted), `fold`/`unfold`,
+non-recursive predicates, pure functions over predicates; e1d has already encoded `pure` bodies and their calls
+(question 227). Port: `cell.c`. §3's notes on R1–R13 not reaching `pure`/`predicate` bodies and
+`static_assert_pure_body.c` go stale with e1d (for `pure`) and here (for `predicate`).
 
 **M4.5f2 Recursive predicates.** A linked list (push, pop, length), recursive owning fields (`next`), leaks inside
 predicates (0028 item 6). Ports: `stack.c`, `sum.c`, `popn.c`.
@@ -766,8 +799,8 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   brace** (`{ // …`, `} // …`; owner: "in the future I don't want comments on the same lines as braces"; `CLAUDE.md`,
   the developer guide's "Code style"). A `for`-init with two declarators (`encode.cpp`, the line-scanning loop) is the
   declarator rule's one exception. [S7]
-- **Tutorial upkeep** (0049 item 4): M4.5e1 owes the arrays chapter (and quantifiers), M4.5e2 extends it with pointer
-  arithmetic, M4.5f2 owes predicates and a linked list, M4.6 strings, M4.7 function pointers, M5 generic templates, M6
+- **Tutorial upkeep** (0049 item 4): M4.5e1c owes the arrays chapter (and quantifiers), M4.5e1d extends it with the
+  exact sum and M4.5e2 with pointer arithmetic, M4.5f2 owes predicates and a linked list, M4.6 strings, M4.7 function pointers, M5 generic templates, M6
   requirement contracts, M7 references and classes. Every session that changes a message, a category or an accepted
   construct a chapter shows updates its prose and `console` blocks: the blocks are copied from a run in
   `doc/modules/ROOT/examples/tutorial/` (`../../../../../build/cerastes verify <file>`), and only review checks them. A
@@ -780,10 +813,11 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-Each open question has a recommended answer. Answer inline, as before. Answered questions 1–193 are recorded in the
-decision records, the session plans, `internal/status.md` and the handoffs reachable from
-`git show 2430529:internal/handoff.md`, whose §8 digests questions 65–187 (188–193:
-`git show 262edb3:internal/handoff.md`).
+Each open question has a recommended answer. Answer inline, as before. Answered questions 1–228 are recorded in the
+decision records, the session plans, `internal/status.md` and the earlier handoffs:
+`git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
+188–193, and `git show f57ee43:internal/handoff.md` §8 has 194–225 with the owner's words. Records 0055–0058 hold
+what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).
@@ -797,87 +831,24 @@ decision records, the session plans, `internal/status.md` and the handoffs reach
   discontinue the testing runs since we know that things are going to change." Stop any suite or timing run on a build
   a queued fix will replace; the implementer's own proof of its fix still runs; one test run after the last fix.
 
-Other answers that steer a later session are in that session's notes (§3, §4): 66, 79 and 189 (M4.8), 78 (M4.6),
-120 (M4.5e2), 194, 196, 212, 215, 216 and 222 (M4.8). M4.5d2b2d's (175, 177–179, 192, 197, 202, 203, 218–223) are in
-record 0058.
+Other answers that steer a later session are in that session's notes (§3, §4) or its plan: 66, 79, 189, 194, 196,
+212, 215, 216, 222 and 225 (M4.8), 78 (M4.6), 120 (M4.5e2), 226–228 (M4.5e1's plan).
 
-**Answered at the end of M4.5d2b2b and at M4.5d2b2c's planning (2026-11-10).** Questions 169–172 and 188–193 are
-recorded in `plan.md` (M8's entries, the vlibc session), §4, M4.5d2b2b's plan and record 0055.
-- **194** "Follow recommendation": the cover rule stays (record 0055 item 3, "Covered atoms"). A function that
-  returns `&s` on some paths and a fresh structure whose owning field holds a block on others is reported; revisit
-  with M4.8's cost work if a ported example needs it.
-- **195** "Follow recommendation": M4.5d2b2c takes d2b2b's pinned loop limits first.
-- **196** (two owning fields in one loop, 218.5 s; `cover_twice.c`, over 300 s; the recommendation was M4.8):
-  "Increase time past 300s, if the increase does not allow the program to pass, then move to M4.8. As we continue
-  to make progress we will likely need other long running tests, and could make a long-running tests suite like
-  boost math and boost multiprecision."
-- **197** "Follow recommendation.": the collision pins keep naming the owning-specific reason at the field, and
-  `ref_to_uninit` beside an owning field stays rejected until M4.5d2b2d revisits it (202).
-- **198** M4.5d2b2c's size: "Two sessions now". d2b2c is the loop limits and the long-running tests; d2b2d is
-  `not_invalidating`, `--strict-owner` and marked fields. The surveys measured 295–495 lines for the loop limits
-  and 740–1,170 for d2b2d.
-- **199** the limit for question 196's programs: "1800 s (Recommended)", once each on the quiet box.
-- **200** the long-running suite: "Build now, opt-in tier (Recommended)": `tests/long/`, a `// timeout:` header,
-  `CERASTES_LONG=1`; the session's box check runs it; CI unchanged.
-- **201** the five loop pins that are not carrier bugs: "Keep the written-invariant rule (Recommended)". They keep
-  their `expect:` lines, their headers name the invariant the loop needs, and each gets a verifying twin.
-- **202** (for d2b2d) `ref_to_uninit` on a pointer to a structure with an owning field: "Accept, closing nothing
-  (Recommended)"; if the audit finds a hole, the rejections stay.
-- **203** (for d2b2d) `not_invalidating` on a pointer to a `const` object: "Accept (Recommended)".
+**Answered before and at M4.5e1's planning (2026-11-11):**
+- **224** (M4.5e1's planning) "Follow recommendation.": a planning session first. It split M4.5e1 into five
+  sub-sessions, e1a–e1e (the owner's request for the plan allowed the split); `plan.md`'s M4.5 table has a row each.
+- **225** (the three marked-closure lint shapes the Viper cannot show) "Follow recommendation.": M4.8, by a mode
+  comment emitted beside each block site, with `lint_viper.py` reading it (§3).
+- **226** `forall` in C (record 0029 item 4 left the route to this planning): "Inline the body (Recommended)".
+  `cerastes_forall(f, free...)`, where `f` is a `pure` function whose body is one `return E;`; the quantifier means
+  `E` with `f`'s first parameter bound, substituted at the `forall` site. It does not wait for M4.5f1 (e1c).
+- **227** what "array sum" must prove for M4's acceptance: "Exact sum in M4.5e1" (the recommendation was bounds now,
+  the exact sum in M4.5f2/f3). The slice of M4.5f1/f2 it needs (`pure` bodies as Viper functions, calls of `pure`
+  functions in annotations, recursion with `decreases`) is sub-session e1d.
+- **228** a read permission over a range: "Add cerastes_reads_range (Recommended)", beside `owns_range` (e1b).
 
-**Answered in M4.5d2b2c (2026-11-10)**, each recorded in record 0056 (or 0057) where it decides something:
-- **204** "Allow them": item 2 applies to every synthetic site (eleven programs' `wef_` literals change).
-- **205** "Apply as Flip B's mirror": the VIR case `owning_leaf_call_alias_leak` moves with Flip B.
-- **206** "Build it now": the dependent pre-read after the earlier site's rows (audit round 1, S1).
-- **207** "Require a twin outside": a positive outside `tests/long/` needs a twin outside it (audit round 1, S6).
-- **208** "Restrict to non-plain": item 2's call route (audit round 2 on L-1, S1).
-- **209** "Build it now" (the recommendation was M4.8): the escape scan, record 0056 item 11.
-- **210** "Fix now, bounded": a call's closure rows after the holding row, item 12.
-- **211** "Fix now": the loop-entry order (audit round 2 on L-2, B1).
-- **212** "Keep as built" (the recommendation was to narrow it): the places test; two pins for M4.8 (§3).
-- **213** "Add the routes now": the struct-global replace routes.
-- **214** "Fix now": the escape scan frames only structures with an owning leaf, in loops without an exit (re-audit B1).
-
-- **217** "Time all, move to long": the session's tests slow on the box go to `tests/long/` (record 0057 item 5).
-
-**For confirmation** (decided in the session without a question, under the plan's rules as read then; say if any
-should have been asked):
-- Item 12's row reorders changed the Viper of 34 existing programs beyond edg-backend's prediction (the explicit
-  `owns_block(p)` closures and two tutorial examples, whose printed output is unchanged), every outcome unchanged; taken
-  as within question 210.
-- Question 160's two wider corrections: `negative/owning_field_loop_site_call_entry_unwritten.c` L41→L47 (the same
-  category at the return, not the loop's entry row), and four tests re-laid so a loop's attribute lines share its
-  `while` line (C++20 reports a loop's entry row at its first attribute).
-
-**Answered at M4.5d2b2d's start (2026-11-10), both "Follow recommendation":**
-- **215** `owning_field_loop_owner_replaced_alias_false_alarm.c` (question 201's fifth pin): the loop frees and replaces
-  an owning local `v` through `pv = &v` and frees `v->data` in its first iteration only; the invariant it needs,
-  `v == NULL || i != 0 || v->data == NULL || owns_block(v->data)`, is rejected for an address-taken owner
-  (`unsupported_expression`) and is `permission` when spelled `(*pv)->data`. **Recommended:** M4.8 admits a written
-  block site on an address-taken owning local's field (record 0054 item 6's owner in memory), with the other loop false
-  alarms; the pin stays until then.
-- **216** The older `stores_type` clause of the `wef` rule (0054 item 3): a loop copying a whole structure that holds an
-  `int` beside an owning pointer gets a false `uninitialized` at the back edge (pinned,
-  `owning_field_loop_struct_copy_int_false_alarm.c`; the same on the base). **Recommended:** M4.8, with question 212's
-  places test, both refinements of 0054's carriers; nothing in M4.5d2b2d needs it.
-
-**Answered in M4.5d2b2d (2026-11-10)**, each recorded in record 0058:
-- **218** "Allow, listed": N1's swap may change the Viper of the other programs whose bodiless contracts hold both
-  asserts, outcomes unchanged.
-- **219** "Third flip": `owning_global_call_dangling_closure.c` keeps one message per site (it corrected 218's premise).
-  The question said no VIR self-test case was affected; one was (`owning_global_leaf_guarded_ensures`, verified, its two
-  asserts swapped, still verified).
-- **220** "Fix now, 3 flips": the return-row reorder (each ensures site's own rows before the separation rows); three
-  pinned tests lose one duplicate `permission` each. The question said `@ L58` went x2→x1; the file held three (x3→x2).
-- **221** "Keep": a marked site keeps flags across a call only where it is tied (0054 item 2 amended for owning marked
-  globals).
-- **222** "M4.8": the older exit 3 of §3 (a permission atom read through a block site's cell before the block's own
-  rows).
-- **223** "Follow the reorder": three VIR cases' `fail_only` index follows 220's reorder (it corrected 220: the
-  existing VIR cases had not been run through Silicon before 220 was asked).
-
-**For confirmation** (decided in the session without a question, under the plan's rules as read then; say if any
-should have been asked):
+**For confirmation** (decided in M4.5d2b2d without a question, under the plan's rules as read then; say if any
+should have been asked; M4.5d2b2c's two are in `git show f57ee43:internal/handoff.md`):
 - A `not_invalidating` parameter with no atom rooted at it is accepted (the check holds vacuously); one positive pins it.
 - Record 0058's draft placed the implicit equality under the site's own null test; the encoder survey and S42 showed a
   free-and-null body then verified, so it was changed to the framing atom's guards before any code (the plan's "a
@@ -895,12 +866,17 @@ should have been asked):
 - The orchestrator's docs prose was delegated to edg-backend (the test-mutator was busy); two agents (edg-backend,
   il-analyst) were replaced by fresh ones when their context ran low.
 
-**Open** (each with a recommendation; the next handoff's questions start at 226):
-- **224** M4.5e1's planning: the plan's M4.5 table gives it local arrays, `a[i]`, array parameters, `owns_range`,
-  `forall` in C, sum and max, P38's braced initializers, M4.4b2's types from constants, and inner arrays and arrays of
-  structs; §3 adds the `offset_of == 0` restatements and the escape scan's array members. **Recommended:** a planning
-  session first, as d2b2c's was, sized against question 77, with the survey measuring `src/` lines per part before the
-  owner splits it.
-- **225** The three marked-closure lint shapes the Viper cannot show (§3, M4.8): **Recommended:** M4.8, by a mode
-  comment emitted beside each block site (no Viper semantics change), with `lint_viper.py` reading it.
-
+**Open** (each with a recommendation, from M4.5e1's plan, section 8; answer inline before the sub-session named; the
+next handoff's questions start at 234):
+- **229** (before e1a) `*p` one past the end of an array is reported as `permission`: `*p` gets no bounds row, so
+  that every existing program's Viper stays as it is, and no permission exists at `len`. **Recommended:** as planned;
+  M4.5e2 decides the bounds row together with `p + i`.
+- **230** (before e1a's Step-0 run R1; otherwise e1b) `int a[static N]` parameters. **Recommended:** rejected, an M8
+  entry (C makes a shorter argument undefined, and no contract states it); if R1 shows such a parameter is accepted
+  today, e1a rejects it at once.
+- **231** (e1b) `owns_range(p, n)` and `reads_range(p, n)` imply `p != NULL`. **Recommended:** yes, as `owns(*p)`
+  does; a function that accepts `(NULL, 0)` writes `n == 0 || owns_range(p, n)`.
+- **232** (e1c) `cerastes_old(p[i])` in the body of a `pure` function that only an `ensures` names (the `carrays.c`
+  port needs `old` under a quantifier). **Recommended:** accept.
+- **233** (e1e) its planning may split it in two (aggregates; storage). **Recommended:** decide there, from its
+  measured sizes.
