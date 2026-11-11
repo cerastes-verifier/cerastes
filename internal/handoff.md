@@ -25,15 +25,16 @@ plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session cons
 - **CI:** unchanged (record 0053). The 2026-11-10 nightly was the first under the 360-minute limit and was cancelled at
   6 h 01 min, so the full check does not fit GitHub's runners as configured (question 176: the owner's). No
   `profiles=all` dispatch has run, so `macos-26` stays at `dispatch` (question 172).
-- **The Linux host** `matt@clang4.cpp.al`: `~/cerastes-s8/p-ubuntu-26.04` is detached at this session's last change
-  (from `~/cerastes-d2b2d.bundle`), with `d2b2d-times.txt` (the session's 391 programs timed, both modes: the slowest
-  84 s) and the `check.sh` log.
+- **The Linux host** `matt@clang4.cpp.al`: `~/cerastes-s8/p-ubuntu-26.04` is detached at `b0caf2c` (from
+  `~/cerastes-d2b2d.bundle`; only status and handoff changed after it), with the `check.sh` log.
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Merge and push** the branch: `git -C <main checkout> merge --ff-only m4.5d2b2d-invalidation-profile`, then push
-   `main`. The local ref `d2b2d-snap-F` (the audit's snapshot) can be deleted (`git branch -D`), with the worktrees
+1. **Merge and push** the branch. The main checkout still holds your uncommitted edit of `internal/handoff.md` (the
+   answers to questions 215 and 216), which the branch already carries (`abfa8b5`), so discard it first or the merge is
+   refused: `git -C <main checkout> checkout -- internal/handoff.md`, then `git -C <main checkout> merge --ff-only
+   m4.5d2b2d-invalidation-profile`, then push `main`. The local ref `d2b2d-snap-F` (the audit's snapshot) can be deleted (`git branch -D`), with the worktrees
    `git worktree remove .claude/worktrees/m4.5d2b2d` and `.claude/worktrees/m4.5d2b2d-aux` (P77's probe build and the
    parallel encoder work; nothing in it is needed).
 2. **CI** (question 176): the nightly does not fit 360 minutes (§1); the `profiles=all` dispatch is still pending
@@ -741,6 +742,14 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   commits as a git bundle (`git bundle create … <branch>`, then `run.sh update`). Never pipe a macOS `tar` into the
   trees (it adds AppleDouble `._*` files, and `scripts/._*.sh` breaks `check.sh`'s lint), and never clean them with
   `find -name "._*"`: EDG's test tree has directories named `._…`. [S8]
+- **Before an owner question about a lowering change** (M4.5d2b2d): run the end-to-end vprdiff against the session's
+  baseline and put every changed VIR self-test case through Silicon first; questions 219, 220 and 223 each needed a
+  correction because one of the two was skipped. [d2b2d]
+- **Tool pitfalls** (M4.5d2b2d): `patch -p1` leaves a `.orig` beside the patched file in `src/` (it reached an audit
+  snapshot once); `cerastes-vir-selftest --help` takes `--help` as its output directory and writes it; the box's
+  `ubuntu` containers have no `bc` (time with `date +%s%N` and shell arithmetic); a `pkill -f <word>` inside
+  `docker exec bash -c "…<word>…"` kills its own shell, and `docker restart <container>` is the clean way to stop
+  everything in a session's container. [d2b2d]
 - **Every session:** new tool code in the style (`CLAUDE.md`'s conventions, the developer guide's "Code style");
   `scripts/format.sh` before committing; brace initialization, `U` and one declarator per declaration are review rules.
   A new `.cpp` under `src/` changes `object_identity.py`'s TU-count constants (`EXPECTED_TU_ENTRIES` 30,
@@ -878,6 +887,10 @@ should have been asked):
 - The `--strict-init` per-leaf rule for struct initializers, compound literals and static initializers (audit S4's
   alias store listed, not rejected), and p4's owning leaf of an initializer, were built (the plan's p4 already named an
   owner field).
+- Parts N and S were committed before their audit rounds (the plan says each is audited on a snapshot before its
+  commit); their audits' fixes came in later commits. The two new lint rules and their two deviations (the Kept row's
+  tie anywhere in its clause; the converse row asked only of bodiless contracts) were in no audited snapshot; they
+  only add refusals.
 - The split point (Part N's commit) was passed without asking: Parts S and F were already built in a second worktree.
 - The orchestrator's docs prose was delegated to edg-backend (the test-mutator was busy); two agents (edg-backend,
   il-analyst) were replaced by fresh ones when their context ran low.

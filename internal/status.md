@@ -31,8 +31,7 @@ item 4, 0054 item 2, 0055 items 3 and 11). Read `internal/handoff.md` next: §1,
 
 **Told to the owner and corrected later** (each in §8 of the handoff): 219 said no VIR case was affected by N1, one was
 (its asserts swapped, still verified; the orchestrator's grep was misread); 220 said `@ L58` went x2→x1, the file held
-three (x3→x2); 220 said `q7_alias.c` would give one user error, it gives two (its `leak`, printed before, and the
-`permission`); 223 says the existing VIR cases had not been through Silicon before 220 was asked.
+three (x3→x2); 223 says the existing VIR cases had not been through Silicon before 220 was asked.
 
 **Step 0 and Step 1.**
 - `main` and `origin/main` held M4.5d2b2c (`023ea50`, merged and pushed; handoff §1's "not merged" was stale); the
@@ -63,7 +62,7 @@ each owner question, the box run and the close):
 - **Round 2 on Parts S and F** (`714796f` the return-row order, B1, question 220; `f0fd5b9` S2, N2, N3, N4 and 0054's
   docs; `5293eb1` S1, a tie counted by position), the re-audit's notes and question 222 (`133665f`), a lint false
   positive in the session's own rule (`67d901a`), question 223 and the member-function pins (`3a2a042`).
-- **Tests.** 171 new tests in `tests/memory` (four retired pins deleted, seven expectations flipped: N1's three, B1's three
+- **Tests.** 171 new tests in `tests/memory` (four retired pins deleted, nine expectations flipped: N1's three, B1's three
   of which two in `tests/long`, and question 223's three VIR indexes), 40 S42 fixtures, 34 doc examples; VIR self-test
   1,765 cases (was 1,732); `test_lint_viper.py` 736 (was 717; two rules); `test_run_tests.py` 1,221 (was 1,216).
   `src/` and `include/`: +1,962, −173 (the plan's 740–1,170 without self-tests).
