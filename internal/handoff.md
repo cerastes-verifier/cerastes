@@ -43,6 +43,19 @@ origin in brackets, so its full wording can be found there. Session plans approv
 3. **CI** (question 176): unchanged from the last handoff (the nightly does not fit 360 minutes; the `profiles=all`
    dispatch is pending, question 172).
 4. **Optional.** On the box, e1a's bundles in `/tmp` and `~`.
+5. **Start M4.5e1b** with this opening prompt. It replaces `plan.md`'s general one for this session: no plan mode
+   (the plan is approved and complete), and only the records the plan rests on (reading all of
+   `internal/decisions/` would spend the context that the split point at Part C's commit depends on):
+
+   ```
+   You are the orchestrator of M4.5e1b (ranges in contracts). Do not use plan mode: the plan is approved and
+   complete. Read CLAUDE.md, .claude/plans/m4-5e1b-ranges-in-contracts.md (all of it), the M4.5e1a entry of
+   internal/status.md, internal/handoff.md §1, §2, the rules of §4, §6 and §8, and decision records 0059, 0037,
+   0028, 0029, 0038, 0039, 0040 and 0042 (not the rest of internal/decisions/). Then execute the plan from its
+   section 4. Use the ensemble exactly as its section 2 assigns it: edg-backend, il-analyst and test-mutator
+   (Sonnet) and the soundness-auditor (Opus) from .claude/agents/, and the Fable advisor at the plan's five
+   checkpoints. Stop and ask me at every stop rule of the plan's sections 5, 7 and 11.
+   ```
 
 ## 3. Open notes, by the session that consumes them
 
@@ -884,7 +897,8 @@ only an `ensures` names), 233 (e1e: its planning may split it).
 asked, with the answers, are in `git show 825a9ee:internal/handoff.md` §8): 234 (array designators stay rejected in C and C++, an M8
 entry needing an EDG change; a bound naming a local constant stays rejected), 235 (the 1,080 `.vpr` files of the
 `offset_of == 0` restatements are accepted as e1a's Flips D). M4.5e1a's deviations (its status entry) were listed
-there for confirmation, and nothing was objected to.
+there for confirmation; the owner answered 234 and 235 beside them and wrote nothing about them, so they stand
+unless the owner says otherwise.
 
 **Answered at M4.5e1b's planning (2026-11-11), each the recommendation:**
 - **236** An atom on one element in a contract (`cerastes_owns(p[i])`): **deferred to M4.5e2**, with

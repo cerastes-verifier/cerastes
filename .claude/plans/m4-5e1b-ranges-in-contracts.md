@@ -7,7 +7,10 @@ outside its table stops the session and asks the owner.
 
 **Written for this ensemble** (owner, 2026-11-11): an Opus orchestrator; three Sonnet implementers from
 `.claude/agents/` (`edg-backend`, `il-analyst`, `test-mutator`); the Opus `soundness-auditor`; a Fable advisor the
-orchestrator consults. Section 2 assigns every task; the orchestrator does not re-divide the work.
+orchestrator consults. Section 2 assigns every task; the orchestrator does not re-divide the work. **The session
+starts outside plan mode**, from the opening prompt in `internal/handoff.md` §2, and reads the records this plan
+names (0059 and the ones section 6 amends), not all of `internal/decisions/`: this replaces `plan.md`'s general
+opening prompt for this session.
 
 Branch `m4.5e1b-ranges-in-contracts`, worktree `.claude/worktrees/m4.5e1b`, `build/m4.5e1b/`, record
 `internal/decisions/0060-ranges-in-contracts.md`.
@@ -87,7 +90,10 @@ read in a loop invariant. e1b lets ranges cross calls, as M4.5b1b did for single
 - **Every agent** (the orchestrator puts this in each briefing):
   - reads `CLAUDE.md`, this plan, record 0060 and the files it is assigned; edits only its own files;
   - any question stops its work and goes to the orchestrator; an owner question goes to the owner;
-  - writes each report to `build/m4.5e1b/<role>-report-<n>.md` as well as returning it;
+  - writes each report to `build/m4.5e1b/<role>-report-<n>.md` as well as returning it (the soundness-auditor
+    cannot write: the orchestrator cuts each snapshot commit and the audit worktree, copies the binaries built
+    from exactly that source, and saves each audit report to `build/m4.5e1b/auditor-report-<n>.md` itself, as
+    soon as the round returns);
   - follows the build and runner rules above;
   - a test generator lives in `build/m4.5e1b/` and is never re-run over the tree;
   - tool code in the owner's style (`scripts/format.sh`; brace initialization, `U`, one declarator per
