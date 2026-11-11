@@ -900,8 +900,13 @@ exempt loop-carry shapes; audit round 1 item 15's pin replaced).
   compilers warn), with duplicate indexes and GNU range designators. Beside it, P78 F1's pre-agreed rejection of a bound
   naming a local constant also refuses `constexpr int N = 4; int a[N];` in C++ (a namespace-scope constant works).
   **Recommended:** keep both as built; no answer makes accepting designators sound without EDG work.
+
+Follow recommendation.
+
 - **235** (from M4.5e1a, Part D) The `offset_of == 0` restatements (record 0059 item 10, defensive backstops no
   encoder path reaches) changed 1,080 existing `.vpr` files (no `.map`); the allow-list computed before the build
   predicted 849 (its search missed the `.tok` spelling). Every changed line was classified (2,630 held-ghost updates,
   902 leak-row exemption terms, 52 flag clauses), the 1,080 programs re-run (status "Checks"), the six slowest timed
   before and after on the box. **Recommended:** accept the 1,080 as the plan's Flips D.
+
+Follow recommendation.
