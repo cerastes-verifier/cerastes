@@ -146,7 +146,8 @@ any record yet:
 **M4.5f1/f2 Predicates**
 - M4.5e1d takes the slice an exact array sum needs (question 227): `pure` bodies as Viper functions, calls of `pure`
   functions in annotations, recursion with `decreases`. M4.5f1 keeps predicates, `fold`/`unfold` and pure functions
-  over predicates; the two notes below are met first by e1c (the `pure` body reader) and e1d. [e1 planning]
+  over predicates; the next bullet's notes on `pure` bodies are met first by e1c (the `pure` body reader) and e1d.
+  [e1 planning]
 - `pure` bodies now reject globals and `static` locals (0041 item 12) [b2a]; R1–R13 do not reach `pure`/`predicate`
   bodies, and `static_assert_pure_body.c`'s listed entry goes stale when bodies are encoded [M4.4c].
 - A list traversal's truth tests need liveness inside f2's predicates; `forperm` sees only top-level tokens [M4.5a].
@@ -816,8 +817,9 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 Each open question has a recommended answer. Answer inline, as before. Answered questions 1–228 are recorded in the
 decision records, the session plans, `internal/status.md` and the earlier handoffs:
 `git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
-188–193, and `git show f57ee43:internal/handoff.md` §8 has 194–225 with the owner's words. Records 0055–0058 hold
-what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3.
+188–193, and `git show f57ee43:internal/handoff.md` §8 has 194–223 with the owner's words (224 and 225 only as
+asked: their answers are below). Records 0055–0058 hold what each of 194–223 decided; the ones that steer M4.8 are
+re-filed in §3.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).

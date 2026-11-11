@@ -220,8 +220,9 @@ function pointers in M4.7.
 **Acceptance (checked in M4.8):** pass/fail pairs for every construct, including swap, a struct field update, a
 linked list (push/pop/length with a recursive predicate), array sum/max with a quantifier (the exact sum, by a
 recursive `pure` function: question 227), and an aliasing trap that must fail; the ported VeriFast C examples and
-their outcomes in `internal/differential.md`; the mutation run over the M4 tests with zero unexplained survivors; lint clean; every error category documented with a must-fail example;
-self-framing diagnostics in source terms (for example "reads `c->val` without owning it").
+their outcomes in `internal/differential.md`; the mutation run over the M4 tests with zero unexplained survivors;
+lint clean; every error category documented with a must-fail example; self-framing diagnostics in source terms (for
+example "reads `c->val` without owning it").
 
 ---
 
