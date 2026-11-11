@@ -1315,6 +1315,18 @@ P4417R0's invalidation profile marks owners with `[[owner]]`. In cerastes:
 
 |raw storage (`malloc`, `free`) is outside the profile
 |checked like any other block
+
+|`[[not_invalidating]]` on a pointer parameter
+|`cerastes::not_invalidating`
+  (xref:annotations.adoc#not-invalidating[The not_invalidating marker])
+
+|p4: an owning result must initialize an owner, be assigned to one, be returned by a
+  function that gives its result's block, or be released in its full expression
+|`--strict-owner` (xref:verifying.adoc#strict-owner[The strict ownership mode])
+
+|p6: only an owner is released
+|`--strict-owner`; without the option the default mode reports the release of anything
+  that is not a block it owns (`invalid-free`)
 |===
 
 [#block-guards]
@@ -1408,13 +1420,13 @@ These are rejected with a diagnostic, never approximated
   integer member, reported as `uninitialized` at the end of an iteration;
 * `cerastes::uninit` on anything but a local, and `cerastes::must_init` on
   anything but a parameter (P4222 defines it for parameters only);
-* the attributes of the P4417R0 and P4418R0 invalidation profile: a pointer
-  parameter the function does not invalidate (`cerastes::not_invalidating`) and an
-  opt-in mode for the profile's syntactic owner rules (`--strict-owner`) are planned
-  for the next version. An owner parameter that transfers its object to the callee is
-  the contract `requires(p == NULL || cerastes_owns_block(p))`, and there is no
-  suppression for a pointer that dangles on purpose: cerastes proves or reports
-  each use;
+* the attributes of the P4417R0 and P4418R0 invalidation profile that are not
+  taken over: `cerastes::not_invalidating` on a function (the profile's member
+  function form; the front end refuses it, and a member function is
+  planned with the classes) and `no_dangling`. An owner parameter that transfers its
+  object to the callee is the contract `requires(p == NULL || cerastes_owns_block(p))`,
+  and there is no suppression for a pointer that dangles on purpose: cerastes proves
+  or reports each use;
 * allocations of more than one object (`n * sizeof(T)`) and `realloc` (<<heap>>);
 * in a function whose body is not in the file, an allocation that its contract
   takes or hands over through a pointer or a global (<<blocks-through-memory>>);

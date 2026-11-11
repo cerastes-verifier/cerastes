@@ -190,6 +190,19 @@ A function that borrows the structure with `cerastes_owns(*b)` borrows the buffe
 too, and may free it and store a new one, but a pointer it stores into the member
 must be null or a whole allocation it holds.
 
+That freedom has a price for the caller. A pointer taken into the buffer before the
+call, `int *t = b->data;`, may not be used after it, because the callee may have
+replaced the block. A function that promises not to replace it says so with
+`CERASTES_NOT_INVALIDATING` on the parameter: whatever the contract takes through the
+parameter comes back, and the pointer to the buffer is unchanged. `bump` below does,
+and `use` writes through `t` after the call (xref:annotations.adoc#not-invalidating[The
+not_invalidating marker] has the rules, and what the verifier checks about the body):
+
+[source,c]
+----
+include::example$tutorial/heap_not_invalidating.c[tag=source]
+----
+
 == What you have learned
 
 * The result of `malloc` must be tested against `NULL` before it is used.
@@ -203,6 +216,8 @@ must be null or a whole allocation it holds.
   `cerastes_owns(g)` carries the block with it, and `main` may end while it holds one.
 * A member marked `CERASTES_OWNING` owns its allocation for its structure: whoever
   owns the structure owns the buffer, and a destructor frees both.
+* A parameter marked `CERASTES_NOT_INVALIDATING` leaves the buffers it borrows in
+  place, so a caller's pointer into one stays valid across the call.
 
 That is the end of the tutorial for this version. The
 xref:memory.adoc#heap[reference on allocated memory] covers `calloc`, loops

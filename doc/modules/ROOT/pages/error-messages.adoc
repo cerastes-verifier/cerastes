@@ -32,6 +32,10 @@ test; then either fix the code or give the verifier the missing fact.
 Problems that are not verification errors, for example a program the tool does
 not accept, are described in xref:verifying.adoc#not-supported[What is not
 supported yet].
+The rejections of `--strict-owner` (`cerastes-owner_result_unowned` and
+`cerastes-owner_release_unowned`) are described with the option
+(xref:verifying.adoc#strict-owner[The strict ownership mode]), as those of
+`--strict-init` are.
 
 == precondition
 
@@ -104,6 +108,25 @@ postcondition_must_init_error.c:9: note: this is the postcondition
 ----
 include::example$error-messages/postcondition_must_init_fixed.c[tag=source]
 ----
+
+A parameter marked `cerastes::not_invalidating` promises that every pointer on the
+way to what the contract names is unchanged (xref:annotations.adoc#not-invalidating[The
+not_invalidating marker]). The equality the marker adds to the contract is named in the
+message, and the note points at the parameter:
+
+[source,c]
+----
+include::example$annotations/not_invalidating_replaces.c[tag=source]
+----
+
+[source,console]
+----
+not_invalidating_replaces.c:22: error: postcondition: the postcondition of `touch` may not hold (with `p->data == old(p->data)`, which `cerastes::not_invalidating` on `p` adds)
+not_invalidating_replaces.c:13: note: this is the postcondition
+----
+
+*How to fix it.* Keep the pointer: write through it instead of freeing and replacing
+the block, or remove the marker from a function that has to replace it.
 
 == check
 
@@ -607,6 +630,27 @@ callee what it asks for, or return what the `ensures` promises:
 [source,c]
 ----
 include::example$error-messages/permission_fixed.c[tag=source]
+----
+
+A parameter marked `cerastes::not_invalidating` must get back what its contract takes,
+on every path. When the `requires` takes `*p` whatever `c` is and the `ensures` returns it
+only where `c` is not zero, the contract takes it on a path where it does not return it:
+
+[source,c]
+----
+include::example$error-messages/permission_not_invalidating_error.c[tag=source]
+----
+
+[source,console]
+----
+permission_not_invalidating_error.c:9: error: permission: the contract of `maybe` takes `*p` on a path where it does not return it, but `p` is `cerastes::not_invalidating`
+----
+
+*How to fix it.* Take it under the condition that returns it:
+
+[source,c]
+----
+include::example$error-messages/permission_not_invalidating_fixed.c[tag=source]
 ----
 
 == lifetime

@@ -64,6 +64,11 @@ dialect that was changed behind its back.
   marked `CERASTES_UNINIT`, and only such a local's address is passed to a parameter
   that receives an object without a value. See <<strict-init>>.
 
+| `--strict-owner`
+| The strict ownership mode: a call whose result owns a block must go to an owner
+  (an `owning` variable or member), and only an owner is released. P4417's rules
+  p4 and p6. See <<strict-owner>>.
+
 | `--timeout=<seconds>`
 | The wall-clock limit for the proof search. The default is 300. Reaching it is
   a failure of the tool, not a verdict on your program (exit status 3).
@@ -526,6 +531,85 @@ include::example$verifying/strict_init_null_argument.c[tag=source]
 Without `--strict-init` the marker on a local documents the intent and changes
 nothing: the checks of the default mode, on every path, already report a read of
 an object that has no value.
+
+[#strict-owner]
+=== The strict ownership mode
+
+With `--strict-owner`, cerastes also asks for what P4417's owner rules p4 and p6 ask
+for. The default mode already reports every leak and every bad release on the path
+where it happens (`leak`, `invalid-free`); the strict mode asks, in addition, that the
+program names its owners, so that the reader can tell which pointer owns which block.
+It only rejects more: a program it accepts means the same, and has the same Viper, as
+without the option. It can be given with `--strict-init`, and each rejects what it
+rejects on its own.
+
+*p4*. A call whose contract gives its result's block (a function marked
+`cerastes::owning`, `malloc`, `calloc`, vlibc's allocations, a function whose
+`ensures` holds `owns_block` of the result) must be one of:
+
+* the initializer of an owner, or the value assigned to one: an `owning` local, global
+  or `static` local, or an `owning` member (`p->data = make();`, and an owning
+  member in an initializer list or a compound literal);
+* the operand of a `return` in a function that gives its result's block;
+* the argument of a parameter whose contract consumes its block (`free(make())`). A
+  parameter consumes its block when the contract takes it and does not return it.
+
+Anywhere else, a plain local, a member that is not owning, a discarded result,
+it is `cerastes-owner_result_unowned`:
+
+[source,c]
+----
+include::example$verifying/strict_owner_unowned_result.c[tag=source]
+----
+
+*p6*. The argument of a parameter that consumes its block (`free`, `vlibc_free`,
+a destructor of yours) must be an owner by name (`v`, `g`, `s.data`, `p->data`,
+`(*pp)->data`), a parameter of the enclosing function whose own contract consumes its
+block, or a call that p4 accepts. An `owning` parameter is a borrow and is not an owner
+for this rule. Anything else is `cerastes-owner_release_unowned`:
+
+[source,c]
+----
+include::example$verifying/strict_owner_alias_release.c[tag=source]
+----
+
+Each of the positions p4 and p6 allow:
+
+[source,c]
+----
+include::example$verifying/strict_owner.c[tag=source]
+----
+
+The rules read names, not paths. Two lists say what that costs, as for
+<<strict-init>>. Accepted although the program is wrong, each still reported by the
+default mode on its path:
+
+* an owner that is already empty or dangling (the second `free(v)` below is
+  `invalid-free`);
+* a release on some paths only (`if (c) free(v);` is a `leak` at the end);
+* an assignment to an owner that still holds a block (a `leak`);
+* a member released through two aliases of its structure;
+* an owner parameter that is assigned before it is released;
+* a callee that consumes on some paths only, whose guarded `owns_block` is not seen by
+  the rule;
+* a discarded structure result with owning members.
+
+[source,c]
+----
+include::example$verifying/strict_owner_double_free.c[tag=source]
+----
+
+Rejected although harmless:
+
+* an alias of an owner that is released (`t = v; free(t);`, the example above);
+* `free(c ? a : a)`, and `p = c ? make() : NULL;` into an owner: only casts are looked
+  through, never `?:` or the comma operator;
+* `free(*pp)`, `pp == &v` included, `*pp = make()`, and `free(NULL)`;
+* a result stored in a plain local and released in the same function;
+* the owning member of a call's structure result (`free(mk().data)`).
+
+A structure parameter that is passed by value is a named owner (`free(s.data)` is
+accepted), and `(void)make();` is rejected, rightly: the default mode reports its leak.
 
 [#side-effects]
 == Side effects in expressions

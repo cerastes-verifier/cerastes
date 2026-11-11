@@ -120,7 +120,7 @@ its directory and suffix (or `<path>` and `<path>.map` with `--keep-vpr=<path>`)
 == The driver
 
 {gh}/src/driver/verify_main.cpp[`src/driver/verify_main.cpp`] implements `cerastes verify <file> [options]` (`cerastes
---help` lists them: include and macro options, `--std=pass:[c++20]|c23`, `--keep-vpr`, `--timeout`, `--strict-init`). It runs
+--help` lists them: include and macro options, `--std=pass:[c++20]|c23`, `--keep-vpr`, `--timeout`, `--strict-init`, `--strict-owner`). It runs
 EDG in process, lets the back end encode, then runs Silicon as a child process (`silicon.cpp`) and reports.
 
 * The tools are fixed when the build is configured: the paths of the JDK 17, `silicon.jar` and Z3 are compiled in from

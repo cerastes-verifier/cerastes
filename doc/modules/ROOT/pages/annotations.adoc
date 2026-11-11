@@ -343,6 +343,90 @@ a parameter; `must_init` on anything but a parameter) the front end reports that
 they do not apply (`ref_to_uninit` on a function is read as above, and on a pointer
 local as described next).
 
+[#not-invalidating]
+=== The not_invalidating marker
+
+`cerastes::not_invalidating` (`CERASTES_NOT_INVALIDATING`) is the attribute of the
+invalidation profile (P4418) for a pointer parameter whose function leaves what the
+pointer reaches in place. It promises two things. What the contract takes through the
+parameter comes back, and every pointer on the way to it is unchanged. A caller that
+holds a pointer into what the parameter reaches, `int *t = p->data;`, still holds a
+valid pointer after the call. Write it before the parameter's declaration or after its
+name, as `owning` is written (the two go together on a borrowed structure):
+
+[source,c]
+----
+include::example$annotations/not_invalidating.c[tag=source]
+----
+
+In `use`, the pointer `t` is taken before `bump(b)` and written after it. Without the
+marker the call gives the block of `b->data` back but says nothing about whether it
+is the same block, and the write through `t` fails with `permission`.
+
+The promise is checked, not trusted, wherever the function has a body. For each place
+of the parameter's contract that is reached through a loaded pointer (`p->data`, or
+`a->b->x` in a chain), the contract gets the clause `p->data == old(p->data)` and one
+for every pointer on the way, outermost first, as if you had written them after the
+atom that gives the place. The clause names pointers, never values: the marker promises
+nothing about `p->n`. A body that frees `p->data` and stores another block breaks
+it, and the postcondition fails at the end of the function, naming the equality that
+the marker added:
+
+[source,c]
+----
+include::example$annotations/not_invalidating_replaces.c[tag=source]
+----
+
+A declaration without a body needs no tie. A bodiless borrower of a structure with
+an owning field otherwise has to write `p->data == old(p->data)` itself
+(xref:memory.adoc#owning-fields[Owning members]); with the marker the clause is
+there, so the declaration only names the permission it borrows and returns:
+
+[source,c]
+----
+include::example$annotations/not_invalidating_bodiless.c[tag=source]
+----
+
+A contract nothing verifies is trusted (the contract manifest, M6), and the marker adds
+to it. A written `ensures` that contradicts the added equality (`p->data != old(p->data)`)
+makes every call of a bodiless declaration vacuous, as `ensures(false)` does; without
+the marker the tie reported by the check of the contract itself would have shown it.
+
+The contract of a marked parameter has to return what it takes. Each of these is
+`cerastes-unsupported_annotation`, reported at the parameter:
+
+* a `requires` atom or `owns_block` of a place reached through the parameter with no
+  matching atom in the `ensures`, a function that frees or keeps what it is given:
+
+[source,c]
+----
+include::example$annotations/not_invalidating_consumes_rejected.c[tag=source]
+----
+
+* an `ensures` atom or `owns_block` on a place reached through the parameter that the
+  `requires` does not take (the marker returns what it takes and gives nothing new
+  through the parameter);
+* an atom on a marked parameter of a function declared not to return, which has no
+  `ensures` to return it;
+* a contract whose place is reached through a pointer that no atom of the `ensures`
+  rooted at the parameter covers (a `requires(p == p2 && owns(*p2) && ...)` that
+  reads `p->q` through `p2`): the marker cannot say that pointer is unchanged.
+
+A marked parameter that has no atom at all is accepted: the function holds no permission
+through it, so it can neither free nor replace anything.
+
+The marker is accepted on a pointer to an object, on a pointer to a `const` object too,
+and beside `cerastes::owning`. Rejected, each with its own message, are a parameter
+that is not a pointer, a `+void *+`, a pointer to a function, the marker twice on one
+parameter, and the marker beside `cerastes::ref_to_uninit` or `cerastes::must_init` on
+the same parameter (an object that may hold no value has no pointers to keep). Every
+declaration of the function carries the same marker, or it is `annotation_mismatch`.
+On a function, on a parameter of a `predicate` or `pure` function and on a redeclaration
+of a function a system header declares first the marker is rejected rather than
+ignored, and a declaration nothing calls is checked on its own. The front end refuses
+it on a function and written after the `*`, as for `must_init`. P4418's
+`no_dangling` is not part of the cerastes spelling in C.
+
 [#marked-locals]
 === Owning and marked locals
 
@@ -1055,8 +1139,8 @@ include::example$annotations/errors/old_in_pure.cpp[tag=bad]
 === Declarations that disagree
 
 A later declaration with a different contract is `attr_redeclaration_mismatch`
-(and one whose `owning`, `must_init` or `ref_to_uninit` parameters differ,
-`annotation_mismatch`):
+(and one whose `owning`, `must_init`, `ref_to_uninit` or `not_invalidating`
+parameters differ, `annotation_mismatch`):
 
 [source,cpp]
 ----
@@ -1145,7 +1229,7 @@ anywhere in the translation unit and outside `<cerastes.h>` itself, of one of th
 `cerastes-annotation_macro_changed`, reported at the directive:
 
 * `cerastes`, an attribute name (`requires`, `ensures`, `invariant`, `check`, `fold`, `unfold`,
-  `predicate`, `pure`, `owning`, `uninit`, `must_init`, `ref_to_uninit`) and a specification-function name (`old`, `owns`, `reads`, `forall`,
+  `predicate`, `pure`, `owning`, `uninit`, `must_init`, `ref_to_uninit`, `not_invalidating`) and a specification-function name (`old`, `owns`, `reads`, `forall`,
   `owns_range`): `+#define ensures requires+` would turn every postcondition into a precondition;
 * `+CERASTES_H+` and every `+CERASTES_*+` macro, which are the header's own;
 * every predefined macro of the front end, among them `+__cplusplus+`,
