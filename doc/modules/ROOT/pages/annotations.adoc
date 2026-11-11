@@ -500,7 +500,7 @@ Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
   it to `T *` first);
 * `owning` on a pointer to a `const` or `volatile` object (nothing may be written
   through an owner);
-* `owning(n)`, an owned range, which comes with arrays;
+* `owning(n)`, an owned range, which comes with contracts over ranges of elements;
 * either attribute twice on one variable;
 * either attribute on a global or a `static` local whose initializer is not a null
   pointer (an owner owns only what it is given).

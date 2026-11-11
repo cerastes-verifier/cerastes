@@ -144,7 +144,7 @@ that they do not return (`CERASTES_ENSURES(false)`), and `malloc`, `calloc` and
 `free`, whose contracts say what an allocation is and that `free` takes the
 whole of one (xref:memory.adoc#heap[Allocated memory]). Every other function of
 the C library has no contract yet, and a call of one is rejected
-(`call_without_contract`); `realloc` gets its contract with arrays.
+(`call_without_contract`); `realloc` gets its contract with pointer arithmetic.
 
 These contracts are *trusted*: cerastes verifies the calls against them, never
 the functions, which in your build are the platform's, and stay so.

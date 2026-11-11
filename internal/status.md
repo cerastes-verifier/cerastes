@@ -111,6 +111,11 @@ handoff §3 has the rest.
   2,722 and GCC 2,722; the long tier ran; lint 5,747 files clean; VIR self-test 1,825 cases, 0 problems, 1,825 passed
   through Silicon, lint clean; the walker oracle; `test_run_tests.py` 1,221, `test_lint_viper.py` 782; format 86 files;
   docs). Before it, a Linux pre-check: regeneration 5,747 files, lint clean, R3 1,960 runs with 0 mismatches.
+- **After `check.sh`** (the closing review): three pins the Parts C and D rejections lacked
+  (`array_reject_contract_element.c`, `array_reject_invariant_pointer_element.c`, `array_reject_invariant_decay.c`),
+  6 runs passed on the Mac and on the box, `--check-headers` 5,167; doc sentences (`realloc`, `owning(n)`, the
+  overview, the tutorial's index), the record's items 1, 8 and 10, `plan.md`'s M8 entries and the handoff corrected;
+  `build_docs.sh` and the doc-tree self-tests (30) green. No code changed after `3ceb13c`.
 
 **First step for the next session:** merge and push (handoff §2), then M4.5e1b: its Step 0 and the probes and spikes of
 plan section 4 (P79, S44), then plan again.

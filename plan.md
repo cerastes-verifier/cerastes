@@ -371,6 +371,11 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
     0025 item 6's "still accepted" shapes and handoff §3's M4.4c notes first, and EDG's #550 on a global that only
     contracts read (M4.5b2a; the compilers are silent); its old plan is
     `git show 9017105:internal/handoff.md` §4.2. Its record takes the next free number when it runs.
+  - **From M4.5e1a** (record 0059): `int a[static N]` parameters (question 230: C makes a shorter argument undefined,
+    and no contract states it); array designators (`{[2] = 5}`, question 234: EDG keeps only the folded index outside
+    templates, so lifting them needs an EDG change that keeps the designator's expression); `_Alignof`/`alignof` of an
+    expression, accepted for scalars since before e1a although clang warns by default (`-Wgnu-alignof-expression`),
+    and rejected for arrays; VLAs, zero-length arrays, flexible array members, pointers to arrays.
   - **`ubuntu-24.04-clang18`** (owner, 2026-11-09, handoff question 169): EDG emulating clang 18 differs on eight
     tests (record 0053 item 11). The CI profile stays at `dispatch` as the record of what that emulation changes, and is
     revisited here.

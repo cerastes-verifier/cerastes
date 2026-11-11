@@ -49,7 +49,7 @@ pointers into arrays. Ranges in contracts (`owns_range`, `reads_range`, array pa
 
    | Construct | Lifted by |
    |---|---|
-   | `owns_range`, `reads_range`, atoms on elements (`owns(a[i])`, `owns(*&a[i])`), `owning(n)` on a parameter | e1b |
+   | `owns_range`, `reads_range`, atoms on elements (`owns(a[i])`, `owns(*&a[i])`), an element or an array as a pointer in a contract, `p[i]` of a pointer and an array as a pointer in a loop invariant or measure, `owning(n)` on a parameter | e1b |
    | `int a[static N]` parameters (`unsupported_declaration`; R1: accepted as `int *` in C until this session, the bound ignored; a front-end error in C++) | M8 (question 230: C makes a shorter argument undefined, and no contract states it) |
    | `cerastes_forall` (the C++ lambda form: M7) | e1c |
    | array members, arrays of structures, arrays of arrays, global and `static` arrays, array compound literals, array types in `sizeof(type)`, `typeof` and typedefs | e1e |
@@ -230,6 +230,14 @@ pointers into arrays. Ranges in contracts (`owns_range`, `reads_range`, array pa
    - **A missed write cannot give a false proof** (audit round 1, item 14): every conjunct is a checked invariant, so a
      values-kept conjunct on an array a write reaches, or any conjunct that is not inductive, fails as Silicon's
      `invariant.not.preserved` on an `internal` row (exit 3), never as a proof.
+   - **As built** (Part C and audits 2–3): the entry rows and the back-edge rows' fallback are positioned at the loop
+     keyword (`Stmt::keyword_loc`; C++ positions an attributed statement at its first attribute, so `Stmt::loc` would
+     differ between modes). A loop holds every array allocated in an open block: one declared later in its block (the
+     block allocates at entry), one declared in a `for` init, and one in the body (allocated and exited each
+     iteration). Beside a parameter whose atom is conditional (`c == 0 || owns(*p)`), a parameter place's guards gain
+     `block_of(p) != block_of(a)` and the liveness inequality for each array, with case splits before the snapshots, as
+     0038 item 3 gives cells (an exit 3 before the fix). `p[i]` of a pointer and an array used as a pointer stay
+     rejected in invariants and measures until e1b (pinned).
    - **What e1a cannot state:** after a loop that fills an array declared without an initializer, a read is
      `uninitialized` (only a quantified invariant says which elements were written). It is pinned
      (`array_loop_fill_then_read_false_alarm.c`) and e1c gives it its verifying twin.
@@ -260,6 +268,9 @@ pointers into arrays. Ranges in contracts (`owns_range`, `reads_range`, array pa
       those rows, outcomes unchanged (the plan's Flips D): 1,080 `.vpr` files (no `.map`), each changed line a
       held-ghost or token update, a leak row's exemption term, or the flag clause gaining `offset_of(x) == 0`. The
       allow-list computed before the build predicted 849 (its search missed the token's `.tok` spelling; question 235).
+    - **Until M4.5e2** (audit round 3 and the re-audit): the restated premise is redundant in `flag_follows`' user row
+      and the ending leak rows only while every heap block has one slot and no store gives an owner an interior
+      pointer; M4.5e2's `malloc(n * sizeof(T))` and `p + i` break both, and it re-argues them (handoff §3).
     - **No case splits are added** for pointers into arrays: a pointer assigned `&a[i]` or `a` and read after the
       assignment is framed by the array's range place; a pointer the loop reassigns has no loop place of its own, as
       for scalar cells.

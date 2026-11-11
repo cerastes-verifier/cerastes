@@ -20,8 +20,8 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
 - **M4.5e1a** (2026-11-11; record 0059; plan `.claude/plans/m4-5e1-arrays.md` section 3) is done on branch
   `m4.5e1a-arrays-in-functions`, **not merged**: `main` = `1c5f9bd` (the owner's answers to 229–233, not pushed),
   `origin/main` = `d88a457`. Its result is in `internal/status.md`; its commits are `05b4075` (record draft, P78, S43),
-  `d09c3fc` (record after audit round 1), `0209647` (Parts A and B), `ccb5910` (Parts C, D and E), then status and
-  this file. The box's full `check.sh` with `CERASTES_LONG=1` on `3ceb13c` was all green (14,208 passed, 0 failed;
+  `d09c3fc` (record after audit round 1), `0209647` (Parts A and B), `ccb5910` (Parts C, D and E), `d507551` (the
+  re-audit's lint fix, record 0059 accepted), then status, this file and docs. The box's full `check.sh` with `CERASTES_LONG=1` on `3ceb13c` was all green (14,208 passed, 0 failed;
   the long tier ran; 78 minutes at `-j32`).
 - **M4.5e1b** ranges in contracts is next: section 4 of the plan (P79, S44), then plan again; §3 "M4.5e1b" below has
   e1a's as-built inputs (the plan's 4.5). e1c, e1d, e1e as before.
@@ -163,6 +163,11 @@ Part D was not cut):
   its relational comparisons: `&s.x < &s.y` is reported, since members are different blocks [M4.5a].
 - `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized` get contracts with their
   standard names'; `free_sized` needs a deallocation shape with a size [0050 item 6].
+- **The `offset_of == 0` backstops rest on two facts M4.5e2 breaks** (audit round 3 and the re-audit): every heap
+  block has one slot, and no store gives an owner an interior pointer. While both hold, the premise that 0059 item 10
+  adds to `flag_follows`' user `permission` row and to the ending leak rows is redundant; with `malloc(n * sizeof(T))`
+  and `p + i` an owner may hold `&p[1]`, and those rows (and the lint's loop-carry exemption, which accepts carried
+  terms without the conjunct) must be re-argued, with tests, before M4.5e2 lands. [e1a rounds 3, 4]
 - From M4.5e1's plan: whether `*p` gains a bounds row (question 229: e1a reports a `*p` one past the end as
   `permission`); `owning(n)` on results, locals, fields and globals (e1b gives it to parameters only); the pins
   `reject_malloc_size_*.c`, `reject_calloc_size_count.c`, `reject_realloc.c`, `reject_struct_member_arith.c`,
@@ -444,8 +449,8 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
 - **x86-64:** the EDG suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes
   to `matt@clang4.cpp.al` automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the
   fallback when the host is down).
-- **Records and plans:** a record takes the next free number when it is written (0058 is M4.5d2b2d's; 0059 is the
-  next, M4.5e1a's). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
+- **Records and plans:** a record takes the next free number when it is written (0059 is M4.5e1a's; 0060 is the
+  next, M4.5e1b's). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
   protocol"); a sub-session that plans again after its spikes saves that plan the same way.
 - **What a worktree takes with it** (owner, 2026-11-09, question 193): session tools and spike summaries are
   committed. `vprdiff.py` and `regen.py` were lost with d2b1's worktree and again with d2b2a's, and so was S39's
@@ -456,7 +461,7 @@ Finished sessions: `plan.md`'s Done table has a row each, `.claude/plans/` their
 `internal/status.md` their results and the commits it names. The warning sweep (was M4.4e) is an M8 entry in
 `plan.md`.
 
-**Pending side sessions** (none blocks M4.5e1a):
+**Pending side sessions** (none blocks M4.5e1b):
 - **The EDG box session** (§4.1, pending since M4.2c).
 - **The vlibc `<stdlib.h>` shim session** (owner, 2026-11-09, question 170: "Follow recommendation using a vlibc
   session"). With clang 20 and 18, vlibc's `<stdlib.h>` shim meets glibc's declarations with an incompatible linkage
@@ -499,11 +504,12 @@ M4.5e2 replaces it as a benchmark); 14 of the 22 files run VeriFast with `-disab
 need `requires` bounds; `functions.c`'s predicate families and constructors, consumed fractions, backward `goto` and
 `open_module` are M8 entries.
 
-**Finished: b1a to d2b2d** (records 0032–0058). `plan.md`'s Done table has a row each and `.claude/plans/` their
+**Finished: b1a to e1a** (records 0032–0059). `plan.md`'s Done table has a row each and `.claude/plans/` their
 plans; the narrative of their splits is in `git show 2430529:internal/handoff.md` §4.2. Each session rejects what a
 later one makes precise (fail closed). **Sizes against estimates**, for the next plans: M4.5d2b2b landed about 2,750
 `src/` lines against 1,700–3,300; M4.5d2b2c about 900 lines of `lower.cpp` against 295–495 (the owner's in-session
-answers, questions 206–214); M4.5d2b2d about 1,960 against 740–1,170 (the audits' fixes).
+answers, questions 206–214); M4.5d2b2d about 1,960 against 740–1,170 (the audits' fixes); M4.5e1a +1,943/−93 without self-tests (+3,457 with
+them) against 2,200–3,450.
 
 **Pre-approved** (owner): a session may retire or re-expect exactly the rejection pins its plan lists (its "Flips"),
 and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:`
@@ -849,7 +855,7 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-Each open question has a recommended answer. Answer inline, as before. Answered questions 1–228 are recorded in the
+Each open question has a recommended answer. Answer inline, as before. Answered questions 1–233 are recorded in the
 decision records, the session plans, `internal/status.md` and the earlier handoffs:
 `git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
 188–193, and `git show f57ee43:internal/handoff.md` §8 has 194–223 with the owner's words (224 and 225 only as
