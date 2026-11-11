@@ -15,6 +15,41 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, and M4.5d2b2c's
 `git show 023ea50:internal/status.md`.
 
+## M4.5e1a — Arrays inside one function (2026-11-11): IN PROGRESS on branch `m4.5e1a-arrays-in-functions`
+
+Draft, kept current during the session (the final entry replaces it). Plan: `.claude/plans/m4-5e1-arrays.md`
+section 3 (there is no `m4-5e1a-*.md`). Record 0059 (draft).
+
+**Step 0.** The owner's inline answers to questions 229–233 (each "Follow recommendation") were committed to local
+`main` as `1c5f9bd`, and the branch is from it (not from `origin/main` = `d88a457`, which lacks only that commit).
+CI recorded only: no `workflow_dispatch` run; the 2026-11-10 nightly cancelled at 6 h 01 min; the 2026-11-11 one in
+progress. Baseline: 5,412 `.vpr`/`.map` and the VIR self-test's 1,765 cases, frozen binaries in
+`build/m4.5e1a/cerastes-base/`. R1: `int a[static 3]` verified in C (question 230: rejected from this session); R2's
+messages recorded; R3: 1,875 runs of the `rejected` tests, 0 mismatches on the base.
+
+**Done so far.** P78 and S43 with record 0059's draft (`05b4075`; gates G2–G4 pass; 49 fixtures, now 50 with
+G2's probe). Audit round 1 (B1, B2: array designators rejected; items 3–17 taken). Part A (736 `src/` lines with its
+self-tests) and Part B (1,300 without self-tests, 538 of self-tests): the plan's 300–450 and 1,000–1,500. Snapshots
+`snap/m4.5e1a-partA`, `snap/m4.5e1a-partB-E`, `snap/m4.5e1a-partAB` (side refs, not on the branch).
+
+**Deviations from the plan, for confirmation:**
+- edg-backend built all of Part A (the plan split it with the il-analyst, who was running S43) and Part B's
+  `check.cpp`; the il-analyst holds `lower.cpp`.
+- Part B's encoder half was started before audit round 1 returned (the record draft existed; invariant 6 held).
+- The first il-analyst (P78, S43) was replaced for Part B's lowering; the second continues into Part C (three Sonnet
+  agents alive at a time).
+- The plan's constant-index twins (`a[3]`, `a[-1]`, `&a[4]`) became rejections: EDG's #175 is an error in verify
+  mode in both modes (the compilers warn; the strictest reading also rejects `if (0) { a[3]; }`, where only EDG warns).
+  C's excess initializers are EDG's #1162 made an error (the IL drops them).
+- New rejections like the compilers: `array_address_null_test`, `c99_designator` (C++), `char_subscripts`.
+- **Question 234 (open):** array designators are rejected in C too (audit round 1, B1: the IL keeps only a folded
+  index, so a wrapping one would pass unchecked; no EDG work this session, question 69). P78 F1's pre-agreed
+  rejection also refuses `constexpr int N = 4; int a[N];`.
+
+**Corrections of new tests after their first run** (question 160): `array_reject_self_reading_init.c` lost an unrun
+`frontend-warning used_before_set` line (verify mode disables that warning); the plan's `p[1]` twin on a parameter
+with only `owns(*p)` expects two errors (`out-of-bounds` and `permission`, S43 N1).
+
 ## M4.5d2b2d — `not_invalidating`, `--strict-owner`, marked fields (2026-11-10): done on branch `m4.5d2b2d-invalidation-profile`
 
 Plan: `.claude/plans/m4-5d2b2d-invalidation-profile.md`. Record 0058 (amends 0029 items 1–2, 0042 items 4 and 8, 0052
