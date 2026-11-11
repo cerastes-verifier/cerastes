@@ -84,7 +84,8 @@ text says. The messages in the output blocks are copied from a run.
   structures as values.
 . xref:tutorial/heap.adoc[The heap]: `malloc`, `free`, leaks and owning locals.
 
-Arrays, predicates over linked structures, and pass:[C++] templates are not
-supported yet; each gets its chapter in the version that supports it. Until
+Contracts over arrays (local arrays already work: xref:memory.adoc#arrays[Arrays]),
+predicates over linked structures, and pass:[C++] templates are not supported
+yet; each gets its chapter in the version that supports it. Until
 then, cerastes rejects them with a diagnostic rather than verifying them
 partly (xref:verifying.adoc#not-supported[What is not supported yet]).

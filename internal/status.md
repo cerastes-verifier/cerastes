@@ -46,12 +46,14 @@ before the box run):
 - **Parts C, D and E** (`ccb5910`): loops carrying arrays (range places, marked entry and back-edge rows at the loop
   keyword, quantified conjuncts, the reach rule), the decay and `p[i]` on any pointer, the `offset_of == 0` backstops
   (1,080 `.vpr` files, each changed line classified), `sizeof(a)`, `uninit` on arrays; audit round 3's fixes.
-- **Tests.** 286 new test files in `tests/memory` (positives and twins, pins), 56 S43 fixtures, 6 doc examples; three
-  staging pins deleted by their parts; Flips A and B (plan 3.8) and Flip C's `Pins:` comments. VIR self-test 1,825
-  cases (was 1,765; 303 rejection cases), every expect line now naming Silicon's reason; `test_lint_viper.py` 781 (was
+- **Tests.** 217 new test files in `tests/memory` (positives and twins, pins), 56 S43 fixtures, 6 doc examples (counted
+  by `git diff --diff-filter=A 1c5f9bd`); the staging pins written and deleted inside the session; Flip A's
+  `reject_array.c` retired, Flip B's line, Flip C's `Pins:` comments. VIR self-test 1,825
+  cases (was 1,765; 303 rejection cases), every expect line now naming Silicon's reason; `test_lint_viper.py` 782 (was
   736); `test_run_tests.py` 1,221.
-- **`src/` sizes** without self-tests: Part A about 300, Part B 1,300, Parts C–E about 400 net (the plan's 300–450,
-  1,000–1,500, 880–1,500); about 3,200 in all with self-tests.
+- **`src/` sizes** (`git diff --numstat 1c5f9bd`, measured): without self-tests, Parts A and B +1,575/−67, Parts C–E
+  with audit round 3's fixes +480/−138, +1,943/−93 in all (the plan's 2,200–3,450 with Parts A–E); with self-tests
+  +3,457/−96.
 - **Docs:** Memory and ownership "Arrays", Error messages `out-of-bounds`, Verifying (the compilers' shapes,
   `--strict-init`, not-supported), Annotations (`uninit`), the developer guide's map description, `tests/README.md`,
   `internal/encoding.md` §3 "Arrays", `internal/il-inventory.md` chapter M4.5e1a, ten records amended. No tutorial
@@ -73,6 +75,9 @@ before the box run):
 - VIR self-test expect lines name Silicon's reason (audit round 2): every existing case's header changed.
 - The lint exempts three exact loop-carry shapes from the `offset_of == 0` rule (records 0050, 0056: not restated).
 - Audit round 1 item 15's predicted `pk[0]` false alarm did not reproduce; its pin became a positive with twins.
+- `internal/encoding.md` and the developer guide's paragraph were delegated to edg-backend; the orchestrator wrote the
+  user pages and the six doc examples itself (the plan has the test-mutator write examples).
+- Four Sonnet agents were spawned in all, never more than three alive at once (the il-analyst was replaced after S43).
 
 **Corrections of new tests after their first run** (question 160): `array_reject_self_reading_init.c` lost an unrun
 `frontend-warning` line; the `p[1]` twin on a parameter with only `owns(*p)` expects two errors (S43 N1); Flip A's twin
@@ -95,7 +100,8 @@ handoff §3 has the rest.
   (native-ok clang 150, GCC 150); VIR self-test 1,825 cases, the 60 array cases through Silicon (1,816 with reasons
   earlier, and the 156 changed bodies); R3 1,968 runs, only the flips and 95 new pin runs differ; vprdiff 4,332
   identical, 1,080 allowed, 0 unexpected, no `.map`; lint clean on 5,743 + 1,825 files; `test_lint_viper.py` 781,
-  `test_run_tests.py` 1,221, `--check-headers` 5,164, format 86 files, docs.
+  `test_run_tests.py` 1,221, `--check-headers` 5,164, format 86 files, docs; after the re-audit's lint fix
+  (`d507551`) 5,743 + 1,825 files lint clean and `test_lint_viper.py` 782.
 - The box (`ubuntu-26.04` container, `-j32`), before `check.sh`, on `ccb5910`: the 552 tests behind the 1,080 Flips D
   files (6 in `tests/long`), 2,042 runs passed (native-ok clang 479, GCC 479; 837 s); the six slowest default-tier tests
   before and after the backstops, one at a time: 794 s against 803 s in all (ratio 1.01, the slowest 74.9 s, none
