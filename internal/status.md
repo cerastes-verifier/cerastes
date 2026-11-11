@@ -106,7 +106,11 @@ handoff §3 has the rest.
   files (6 in `tests/long`), 2,042 runs passed (native-ok clang 479, GCC 479; 837 s); the six slowest default-tier tests
   before and after the backstops, one at a time: 794 s against 803 s in all (ratio 1.01, the slowest 74.9 s, none
   doubled); the `tests/long` ones 111–over 300 s (within their `timeout:` headers).
-- `CERASTES_LONG=1 scripts/check.sh` on the box: [pending].
+- `CERASTES_LONG=1 scripts/check.sh` on the box (`ubuntu-26.04` container, `-j32`) on `3ceb13c`, the branch's last
+  change before this status commit: **all green** in 78 minutes (14,208 passed, 0 failed, 10 skipped; native-ok clang
+  2,722 and GCC 2,722; the long tier ran; lint 5,747 files clean; VIR self-test 1,825 cases, 0 problems, 1,825 passed
+  through Silicon, lint clean; the walker oracle; `test_run_tests.py` 1,221, `test_lint_viper.py` 782; format 86 files;
+  docs). Before it, a Linux pre-check: regeneration 5,747 files, lint clean, R3 1,960 runs with 0 mismatches.
 
 **First step for the next session:** merge and push (handoff §2), then M4.5e1b: its Step 0 and the probes and spikes of
 plan section 4 (P79, S44), then plan again.

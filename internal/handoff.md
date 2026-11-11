@@ -21,13 +21,14 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
   `m4.5e1a-arrays-in-functions`, **not merged**: `main` = `1c5f9bd` (the owner's answers to 229–233, not pushed),
   `origin/main` = `d88a457`. Its result is in `internal/status.md`; its commits are `05b4075` (record draft, P78, S43),
   `d09c3fc` (record after audit round 1), `0209647` (Parts A and B), `ccb5910` (Parts C, D and E), then status and
-  this file. The box's full `check.sh`: see `internal/status.md` "Checks".
+  this file. The box's full `check.sh` with `CERASTES_LONG=1` on `3ceb13c` was all green (14,208 passed, 0 failed;
+  the long tier ran; 78 minutes at `-j32`).
 - **M4.5e1b** ranges in contracts is next: section 4 of the plan (P79, S44), then plan again; §3 "M4.5e1b" below has
   e1a's as-built inputs (the plan's 4.5). e1c, e1d, e1e as before.
 - **CI:** unchanged (record 0053; question 176 the owner's). No `profiles=all` dispatch has run (question 172).
 - **The Linux host** `matt@clang4.cpp.al`: container `cerastes-s8-ubuntu-26.04`, checkout `/work/cerastes`
-  (`~/cerastes-s8/p-ubuntu-26.04`), detached at this branch's last code commit with the `check.sh` log; the bundle
-  `~/e1a.bundle` (or as the status entry names it) can go after the merge.
+  (`~/cerastes-s8/p-ubuntu-26.04`), detached at `3ceb13c` with `e1a-check.log`; the bundles `/tmp/e1a.bundle` and
+  `/tmp/e1a-final.bundle` on the host (and in the container's `/tmp`) can go after the merge.
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
