@@ -6035,6 +6035,26 @@ class MarkedKeptRowTests(unittest.TestCase):
         self.assertEqual(self.probs(f"(true && {self.row('p_p__0')})"), [])
         self.assertEqual(self.probs(f"(true && {self.row('res')})"), [])
 
+    def test_a_member_cell_of_the_pointees_block_needs_the_tie_of_its_pointer(self):
+        # a marked field's closure keeps the flags of the cells of its pointee: the cell is loc(member(Q, k), 0), the
+        # pointer read through a load is Q, and the tie is Q's (found when the first corpus run flagged these rows)
+        cell = f"loc(member({self.E}, 1), 0)"
+        row = f"((old(!({self.E} == null)) && old({cell}.d_int)) ==> {cell}.d_int)"
+        probs = self.probs(f"(true && {row})")
+        self.assertTrue(any("is in a clause without" in p and self.E + " == old(" in p for p in probs), probs)
+        self.assertEqual(self.probs(f"(true && ({self.E} == old({self.E})) && {row})"), [])
+        # twin: a cell of a formal's own block (member of the parameter) needs no tie
+        formal = "loc(member(p_p__0, 1), 0)"
+        formal_row = f"((old(!(p_p__0 == null)) && old({formal}.d_int)) ==> {formal}.d_int)"
+        self.assertEqual(self.probs(f"(true && {formal_row})"), [])
+        # and a nested cell is tied by the innermost pointer's load, at any depth
+        nested = f"loc(member(loc(member({self.E}, 0), 0).v_ptr_struct_0_U, 2), 0)"
+        inner = f"loc(member({self.E}, 0), 0).v_ptr_struct_0_U"
+        nested_row = f"((old(!({inner} == null)) && old({nested}.d_int)) ==> {nested}.d_int)"
+        probs = self.probs(f"(true && {nested_row})")
+        self.assertTrue(any(inner + " == old(" in p for p in probs), probs)
+        self.assertEqual(self.probs(f"(true && ({inner} == old({inner})) && {nested_row})"), [])
+
     def test_a_row_is_found_in_a_deeper_pointer_too(self):
         deep = self.E + ".v_ptr_int"
         probs = self.probs(f"(true && {self.row(deep)})")

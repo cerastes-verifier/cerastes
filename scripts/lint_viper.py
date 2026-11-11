@@ -2834,6 +2834,7 @@ def lint_heap_token(src: Source, decls: list[Decl], add: Callable[[int, str], No
 # through a load that is not tied claims no flags and has no such row.
 KEPT_ROW_RE = re.compile(r"\(\(old\((?P<guard>.+?)\) && old\((?P<cell>[^&]+?\.d_\w+)\)\) ==> (?P=cell)\)")
 FLAG_FIELD_RE = re.compile(r"\.d_\w+$")
+MEMBER_CELL_RE = re.compile(r"loc\(member\((?P<base>.+), \d+\), 0\)")
 NOT_INVALIDATING_ROW_MARK = "does not return it, but"
 
 
@@ -2862,6 +2863,10 @@ def lint_marked_kept_rows(src: Source, decls: list[Decl], add: Callable[[int, st
             continue
         for m in KEPT_ROW_RE.finditer(code):
             pointer = FLAG_FIELD_RE.sub("", m.group("cell"))
+            # a cell of a block reached through a pointer (`loc(member(E, k), 0)`, a member of the pointee structure) is
+            # kept under the tie of that pointer E (E is itself a loaded pointer, so one step reaches it)
+            if (cell := MEMBER_CELL_RE.fullmatch(pointer)) is not None:
+                pointer = cell.group("base")
             if ".v_" not in pointer:
                 continue
             tie = f"{pointer} == old({pointer})"
