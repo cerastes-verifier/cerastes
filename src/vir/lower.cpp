@@ -11893,6 +11893,25 @@ private:
         {
             return r.site->atom->a->c_text.empty() ? std::string("a pointer") : "`" + r.site->atom->a->c_text + "`";
         };
+        // Each site's own rows first: they end the path where the function no longer holds the block, and the separation rows below read the pointers of nested sites
+        // (`a->b->x` through `a->b`'s block), which are only readable where it does (audit round 3 B1: exit 3 on a correct program; the return-side twin of the order
+        // at a call, where the separation rows follow the block's own rows)
+        for (const R& r : rs)
+        {
+            block_rows(
+                r.ptr, block_ptr_type(*r.site), r.site->atom->a->c_text, block_mode(f, *r.site), false,
+                [&](const char* category, E cond, const std::string& message)
+                {
+                    // decision 0054 item 5 (Returns): the deep atom of an owning global says what to do
+                    const Global* og {site_global(*r.site)};
+                    const std::string text {og != nullptr && std::string(category) == "permission"
+                                                ? "returns while owning global `" + og->c_name +
+                                                      "` does not hold its block: set it to `NULL` after freeing it"
+                                                : message};
+                    emit_assert(out, low::implies(r.g, std::move(cond)), note(meta(category, at, text), *r.site));
+                },
+                std::string(), true, r.site->atom->vlibc_block ? Allocator::Vlibc : Allocator::Platform);
+        }
         for (size_t i {0U}; i < rs.size(); ++i)
         {
             for (size_t j {i + 1U}; j < rs.size(); ++j)
@@ -11920,22 +11939,6 @@ private:
                                           " as an owned place, but they may be the same object"),
                                  *rs[i].site));
             }
-        }
-        for (const R& r : rs)
-        {
-            block_rows(
-                r.ptr, block_ptr_type(*r.site), r.site->atom->a->c_text, block_mode(f, *r.site), false,
-                [&](const char* category, E cond, const std::string& message)
-                {
-                    // decision 0054 item 5 (Returns): the deep atom of an owning global says what to do
-                    const Global* og {site_global(*r.site)};
-                    const std::string text {og != nullptr && std::string(category) == "permission"
-                                                ? "returns while owning global `" + og->c_name +
-                                                      "` does not hold its block: set it to `NULL` after freeing it"
-                                                : message};
-                    emit_assert(out, low::implies(r.g, std::move(cond)), note(meta(category, at, text), *r.site));
-                },
-                std::string(), true, r.site->atom->vlibc_block ? Allocator::Vlibc : Allocator::Platform);
         }
     }
 

@@ -12,7 +12,7 @@
 // expect: error leak @ L63
 // expect: error permission @ L63
 // expect: error permission @ L63
-// expect: error permission @ L63
+// Record 0058's round-2 B1 reorder leaves one fewer duplicate `permission` at this line (owner question 220); the line was: expect: error permission @ L63
 // expect: error uninitialized @ L63
 // expect: error uninitialized @ L63
 // mode: c23, c++20
