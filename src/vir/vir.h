@@ -538,6 +538,10 @@ struct Stmt
     // While: a `for` loop's increment (an Assign or ExprStmt, or a Block of them: a discarded comma `i++, j--`), run
     // after the body and after each `continue`; may be null
     const Stmt* step {nullptr};
+    // While: the position of the loop's keyword (`while`, `do`, `for`), the same line in both modes: `loc` is the statement's own position, which C++ puts at
+    // the first attribute (`CERASTES_INVARIANT(...)` on a line of its own).  Set by the encoder (Builder::with_keyword_loc); unknown (line 0) when a program is
+    // built without it (the VIR self-tests): use `loc` then.  Rows that must report one line in both modes (decision 0059 item 8's array rows) use it.
+    SrcLoc keyword_loc;
     int jump_id {0};          // While, Switch: this construct's id (> 0 when a Break or Continue may name it;
                               // unique within a Function, Builder::jump_id()); Break, Continue, Goto: the target's id;
                               // Label: its own id
@@ -1125,6 +1129,9 @@ const Expr* member_root(const Expr* e, std::vector<int>* path = nullptr);
 // The spelling of the place a Store/StoreE/Deref through `addr` writes or reads, for messages: the global's name for a `GlobalAddr` (`g`), "*" + `c_text`
 // otherwise (empty when the operand has no spelling), the member place (`p->x`, `s.t.x`; decision 0043) for a MemberAddr.
 std::string place_text(const Expr& addr);
+// The text of an operand of a postfix `[i]`, `.m` or `->m`, as C needs it (decision 0059 item 4; invariant 7): a name or a postfix expression (`p`, `s.q`, `p->q`,
+// `a[1]`, `f()`) stays as written, anything else (`*pp`, `p + 1`, `&x`) is parenthesized, so a loaded base reads `(*pp)[1]`, not `*pp[1]`.
+std::string postfix_operand_text(const std::string& text);
 
 // ---- user gotos (decision 0015 item 2) -------------------------------------------------------------------------
 
@@ -1238,6 +1245,8 @@ public:
     // Break or Continue names this loop).
     const Stmt* loop(const Expr* c, std::vector<Clause> invariants, std::vector<Clause> measure, const Stmt* body,
                      const Stmt* step, LoopForm form, int jump_id, SrcLoc loc);
+    // Records the position of `loop`'s keyword (Stmt::keyword_loc) and returns it; `loop` must be a node of this Builder's Program built by loop()/while_stmt().
+    const Stmt* with_keyword_loc(const Stmt* loop, SrcLoc keyword);
     const Stmt* switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc);
     // null: `default`; a value needs the folded form below
     const Stmt* case_label(const Expr* value_or_null, SrcLoc loc);

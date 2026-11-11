@@ -408,8 +408,9 @@ marked `cerastes::must_init` or `cerastes::ref_to_uninit`
 With `--strict-init`, cerastes also asks for what P4222's profile asks for, as
 written in the source:
 
-* every definition of a local without an initializer carries `CERASTES_UNINIT`
-  (`cerastes-uninit_unmarked` otherwise); a `static` local is not asked;
+* every definition of a local without an initializer, a local array included,
+  carries `CERASTES_UNINIT` (`cerastes-uninit_unmarked` otherwise); a `static`
+  local is not asked;
 * every argument of a parameter marked `cerastes::must_init` or
   `cerastes::ref_to_uninit` is the address of such a local (`&x`), or the calling
   function's own marked parameter passed on unchanged
@@ -1251,6 +1252,9 @@ The constructs that are rejected in this version are:
   `_Alignof`, `typeof` or `decltype` (`sizeof(int[3])`, `sizeof("abc")`): the
   compiler computes their size from a constant, which may have wrapped
   (`sizeof(char[65536u * 65536u + 1])` is 1). So is a typedef of an array type.
+  `sizeof(a)` of a local array declared with its bound
+  (xref:memory.adoc#arrays[Arrays]) are accepted: its bound is checked as
+  written where the array is declared.
 * *Expressions:* the bitwise shapes the compilers warn about
   (xref:integer-semantics.adoc#bitwise[Bitwise operators]), a character literal
   with more than one character or one that does not fit its type (`'ab'`,

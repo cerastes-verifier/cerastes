@@ -88,6 +88,8 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   pointer-typed node, a cell, `AddrOf`, `Deref` or `Store`; a `Return` in a loop while a cell of an enclosing block is
   live; a `Break`/`Continue`/`Goto` leaving a block that declares a cell; a cell-declaring block without `end_loc`.
   `sequence_problems` treats `Store(addr, value)` as two unsequenced operands.
+- **Arrays (M4.5e1a, decision 0059).** `Type::Kind::Array`, `Expr::Kind::ElemAddr`, `Var::zero_filled` and `Stmt::keyword_loc` (§3, "Arrays"): the
+  array local, the element address and the zero fill, and a loop's keyword position for the rows that must report one line in both modes.
 - **Contracts over memory (M4.5b1b, decision 0037).** Pointer `Param`s and a pointer `Function::ret` (P58: no
   separate copy in the IL; `Param::is_restrict` from the parameter variable's type, C only). `Expr::Kind::Atom`
   (`AtomKind` `Owns`/`Reads`/`Live`, `a` = the pointer `Formal`, `amount` = the index of the `requires` atom, 0..N-1 in
@@ -862,6 +864,96 @@ owning globals) skip a marked owner; its own block site is still carried. A WRIT
 is a plain site and claims the flags: an unwritten buffer is `uninitialized` at the loop entry (a false alarm, as for an
 unmarked field; the way out is to write the buffer first). Cases `mv_*`.
 
+**Arrays (M4.5e1a, decision 0059).** An automatic local `T a[N]` (one dimension, `T` a `bool`, an integer, an enumeration or a pointer to an
+object type, `N >= 1`) is one block of `len` N whose element `k` is `loc(b, k)`, in the value and flag fields of `T`'s cell type (the same
+`v_<t>`/`d_<t>` as a scalar cell: `v_ptr_<t>` for a pointer element). Cases: `selftest_cases28.inc` (rejections), `selftest_cases29.inc` (lowering,
+`arr_*` for Part B and `arrl_*` for the loops); the Viper spikes are `tests/viper-smoke/memory/s43_*` (S43 and its addendum in
+`internal/il-inventory.md`, chapter M4.5e1a, with P78's IL facts).
+
+- **VIR.** `Type::Kind::Array` (`element`, `count`; `Program::array_of` interns the element like `pointer_to`); `Expr::Kind::ElemAddr(a, b)`, the
+  address of the element `b` slots after the address `a` (its type is `a`'s, or `Ptr(T)` when `a` is `AddrOf` of an array local, whose own type is
+  `Ptr(Array(T, N))`); `Var::zero_filled` (the declaration fills the block with C's static-storage zero before the written elements, which follow as
+  ordinary `Store`s); `Stmt::keyword_loc` (a loop's keyword, the same line in both modes: C++ puts a statement with attributes at its first attribute,
+  `loc`). `a[i]` is `Deref(ElemAddr(AddrOf(a), i))`, a write a `Store` to it, `&a[i]` the node as a value; `p[i]` is `Deref(ElemAddr(p, i))`; the decay of
+  a local array is `ElemAddr(AddrOf(a), 0)` (a pointer to the element type, so `*a` is the place of `a[0]`). `check.cpp` accepts an array only as an
+  address-taken local of an accepted element type (never owning, a parameter copy or a compound literal), `AddrOf` of it only as the base of an `ElemAddr`,
+  and an `ElemAddr` base that is that address or any accepted pointer to a non-struct (a non-enumeration `Int` index of any `IntType`; never in a contract);
+  every other array type (parameter, result, member, global, pointee, array of arrays) is an error. `place_text` spells `a[i]`/`p[i]` (the index by its
+  `c_text`, a constant's value, or `+ - *` of those).
+- **Allocation.** One trusted method per element cell type, `// cerastes:trusted-contract`: `alloc_arr_<t>(n: Int) returns (r: Ref)` (`requires n >= 1`;
+  `r != null`, `r == loc(block_of(r), 0)`, `len(block_of(r)) == n`, `lvloc(block_of(r)) == loc(block_of(r), -2)` with full permission to its `lv`, and, as
+  two quantifiers over the absolute slot with the trigger `{ loc(block_of(r), k) }`, full permission to `v_<t>` and `d_<t>` of every slot in `[0, n)` with
+  every flag false) and `zero_arr_<t>(r, n)` (takes and returns the same permissions, ensures every element zero, `false` or `null` and every flag
+  true). Both are emitted only for a program that uses them (keys `arr_<t>` and `zero_arr_<t>` of `alloc_at_`, so `program_start`'s insertion index
+  counts them). The block is allocated where its block is entered (`v_a := alloc_arr_int(N)`, 0032 item 4), and a zero-filled `Decl` calls
+  `zero_arr_int(v_a, N)`; elements an initializer does not write are zero in C (6.7.11p11, p21), so a list that writes all N skips the fill (`{}` is a fill alone). An enumeration's zero fill is `v == 0` even when 0 is not an enumerator.
+  Without an initializer the flags stay false: reading an unwritten element is `uninitialized`. A `Decl` a `switch` jumps past does not run its fill.
+- **Element rows, in this order, each one atomic** (`elem_addr` emits the bound itself, through `obl`, so it precedes the consumer's rows): for a pointer
+  base `null-dereference` and `lifetime` (`ptr_use`); `out-of-bounds`, place `!(off < 0 || len <= off)`, value `!(off < 0 || len < off)` with
+  `off = offset_of(base) + i` (one past the end is formed, never accessed; the index's value, not a conversion, is the offset: `a[-1]` is outside); then
+  the consumer's `permission` (`perm > none` for a read, `== write` for a write) and, for a read, `uninitialized`. A named array in scope needs no null or
+  liveness row (`address_or_null`). Messages name the place as written ("reads `a[i]`, whose index may be outside `a`", "forms `&a[i]` beyond one
+  past the end of `a`"). A store goes through a `Ref` temporary as for a cell. `*p` keeps today's rows: a `*p` one past the end is a `permission` error.
+- **Scope exits** (`array_scope_exit`, 0032 item 8's order): per field one marked range row (below), category `lifetime`, "the address of an element of
+  `a` may still be in use when its lifetime ends", then the liveness row and three `exhale`s (the two quantified permissions and the `lv` cell). After a
+  failed marked row Silicon reports nothing else on that path (S43 G2), so the `exhale`s need no guard.
+- **Marked range rows.** `assert forall k: Int :: { loc(B, k) } lo <= k && k < hi ==> acc(loc(B, k).f)`, one field per row; `low::Check::expected_reason`
+  (`insufficient.permission`) puts `[insufficient.permission]` after the row's Viper id in the map (§5), and `LExpr::Kind::Forall` (`forall k: Int :: { t }
+  body`, parenthesized unless it is the whole condition) and `old_(e, label)` (`old[lbl](e)`) are the lowered forms the loop conjuncts use.
+- **Loops** (`loop`, 0038 items 3 and 4 over a block of N slots). Every array local of an open scope becomes an `ArrayPlace` (a block that declares the
+  array allocates it at its entry, so a loop before the declaration carries it too); it is not a `Place`: `loop_places` skips array cells. Arrays are
+  carried exactly when the loop carries its places (`stmt_touches`, or a `return`/outward `goto` while something is held). *Entry*, after the scalar
+  snapshots: per array a marked row per field (`permission`, "this loop begins without the permission to every element of `a`", at
+  `Stmt::keyword_loc` when the encoder set it, else `loc`), then `kl := perm(lvloc(..).lv)`; `label lh_<loop>` sits right before the Viper `while`.
+  *Conjuncts* (`internal` rows, after the places' own, every `acc` first): `acc(lv, kl)`; the two quantified `acc`s; the flags kept (`forall k :: in range
+  && old[lh](flag) ==> flag`); the type's range (`forall k :: in range && flag ==> lo <= v && v <= hi`; `WF` for a pointer element; none for `bool`); and,
+  when no write reaches the array, the values kept (`forall k :: in range ==> v == old[lh](v)`). The flag and range conjuncts go on every array the loop
+  holds, reached or not. *Reach*: a store by name to an element (`ElemAddr(AddrOf(a), i)`, `Store` or `StoreE`) goes into `LoopWrites::cells` under the
+  array's id (it reaches that array and every pointer-reached place, no scalar cell and no other array); a store through a pointer or a callee owning a cell
+  of the field reaches by field. *Back edge*: per array a marked row per field (`permission`, "an iteration of this loop ends without the permission to `a`
+  that it began with") and the liveness row, at the body's closing brace (fallback the loop's keyword). *Invariants and measures*: `inv_deref` sends
+  `Deref(ElemAddr)` to `inv_elem`, `ite(in bounds, a[e], dummy)` plus two obligation clauses (`out-of-bounds`, "this loop invariant reads `a[e]`, whose index
+  may be outside `a`"; `uninitialized`, guarded by the bound); no framing chain, the `acc` conjuncts come first. A missed write cannot give a false proof:
+  every conjunct is a checked invariant, so one that is not inductive fails as an `internal` `invariant.not.preserved` (exit 3). An array declared in a
+  body needs nothing new (allocated per iteration, exited at the body's end and by `continue`/`break`/`return`). After a loop that fills an array declared
+  without an initializer a read is `uninitialized` (e1c's quantified invariants say which elements were written; pinned).
+- **Sequencing.** Lowering gives every element access a FRESH key (`key_of_addr` falls through for an address it does not know), so `register_access` never
+  skips a pair as "the same object" and each pair of an element with another write of the field, or with a `*p`, gets the path-precise row `place_a !=
+  place_b` (`unsequenced`; S43 (e): `loc(b, i) != loc(b, j)` holds exactly when `i != j`). `check.cpp`'s `object_of` has a separate key space used only
+  for the static rejection: `a[const]` and `a[local]` name one element as written (array id, index), so `a[i] = a[i]++`, `a[i]++ + a[i]` and
+  `a[0] = a[0]++` are `unsequenced_modification`, as GCC's `-Wsequence-point`; `a[i] = i++` is 0020 item 4's rule on `i`. Any other index form is left to the
+  path-precise row.
+- **Interior pointers: `p[i]`, the decay and the owners' `offset_of == 0` restatements (Part D).** `elem_addr` takes any pointer base. A named array
+  (`AddrOf` of an array local, which includes the decay `&a[0]`) keeps the rows above. Any other pointer `p` gets, in order: `null-dereference` (place
+  "dereferences `p`, which may be null"; value "forms `&p[i]`, but `p` may be null"), `lifetime` (`ptr_use`, at the consumer's position for a place), the bound
+  against the pointer's own offset (place `0 <= offset_of(p) + i < len(block_of(p))`, value `<=`: "reads/writes `p[i]` outside the object `p` points
+  into", "forms `&p[i]` beyond one past the end of the object `p` points into"), then the consumer's `permission` and `uninitialized`. The consumers (`deref`,
+  `store`, `cell_write`) skip their own null row for any `ElemAddr` and use the array-specific permission message only for a named array. Keys are fresh, as
+  for arrays. `*p` is untouched. **No case splits were added** for a pointer assigned `&a[i]`: one assigned inside a loop and read after the assignment
+  verifies as it is (`array_ptr_walk`, `array_ptr_loop_kept`); a pointer the loop does not reassign keeps its loop place, and `pk[0]`
+  verifies wherever `*pk` does (`array_ptr_loop_pk_cell.c`; audit round 1's predicted false alarm does not reproduce); one the loop reassigns already
+  fails at `*pk` (`null-dereference`, `permission`), as for scalar cells, and `pk[i]` adds `lifetime` and `out-of-bounds` against the unknown
+  `len(block_of(pk))`. On a pointer
+  known through `owns(*p)` or `reads(*p)`, `p[0]` verifies (the atom carries `offset_of(p) < len(block_of(p))`); `p[1]` fails twice, `out-of-bounds`
+  and `permission` (S43 N1). Cases: `define_array_pointers` (`arrp_*`).
+  *The restatements (item 10), backstops that no encoder path reaches.* `holds_token(p)` is `p != null && offset_of(p) == 0 && perm(tok) > none`; the three
+  `leak_exemption` terms (the `ensures` block site; an owning global or `static` local, `held && offset_of(v) == 0 && t == tok_slot(v)`; and
+  `exempt_owned_fields`) gain `offset_of == 0`; 0054 item 3(e)'s `flag_follows` premise gains `offset_of(pl.lroot) == 0` (the place's pointer then starts the
+  block, so the place's cell is the owner's cell). They guard against an owner holding an interior pointer (`&p[1]` of a one-object heap block), which
+  would exempt the block at `main`'s end and miss the leak; the owning stores' own rows (`owning_rows`, `global_owner_rows`, `block_rows`, which
+  already require `offset_of == 0`) end the path before any state with an interior owner exists, so no VIR program reaches the restated terms with
+  `&p[1]`: there is no VIR twin, and the hole is shown only by the hand-written fixtures `tests/viper-smoke/memory/s43_f_*`. The change reaches every
+  program with an owner: 1,080 existing `.vpr` files changed (no `.map`), every one the same edit (deleting each `offset_of(..) == 0` conjunct restores
+  the baseline line; 566 `held_x := held_x && ...` lines, 192 leaf-token lines, 48 global ones, 32 flag-clause lines), with outcomes unchanged. What the
+  encoder hands lowering: the decay as a value is `ElemAddr(AddrOf(a), 0)`, `p[i]`/`i[p]`/`&p[i]` over any pointer value (parameter, local, loaded
+  pointer, call result) is `ElemAddr(<pointer>, i)`; a pointer to a structure, a pointer element in a loop invariant or measure, and any element in a
+  contract stay rejected.
+- **Front-end options** (`verify_main.cpp`, with the diagnostics' lists): `--diag_error=175` in both modes (`subscript out of range`, a constant index
+  outside a named array, also in dead code: the strictest reading; `&a[3]`, `p[3]`, `sizeof(a[3])` and `0 && a[3]` raise none), `--diag_error=1162` in
+  C (excess initializers are only a warning there and the IL drops them; C++ has the hard error #146) and `--diag_error=138` in C (`register` on an array,
+  `&` of a `register` variable). New encoder diagnostics: `char_subscripts` (`-Wchar-subscripts`), `array_address_null_test` (`-Wpointer-bool-conversion`,
+  `-Wtautological-pointer-compare`, `-Waddress`) and `c99_designator` (C++).
+
 ## 4. Viper shape
 
 ```
@@ -897,6 +989,9 @@ then one trusted method per cell type, `alloc_<t>() returns (r: Ref)`, whose `en
 rows at the first cell of that type). `<t>` is `bool`, `schar`/`uchar`, `short`/`ushort`, `int`/`uint`, `long`/`ulong`,
 `i128`/`u128` (else `i<bits>`/`u<bits>`), or `enum_<n>_<name>` for an enumeration (`_e` appended when the name would end
 in `__<digits>`). One pair per VIR type: `long` and `long long` share one (0032 items 3 and 5 say why that is sound).
+A program with an array local (decision 0059) also has `alloc_arr_<t>(n: Int)` (and, for an initializer that leaves elements out, `zero_arr_<t>(r, n)`)
+for each element type it uses: trusted, tagged like `alloc_<t>`, ensuring the block's `len == n` and two quantified permissions over `[0, n)` (§3,
+"Arrays"); `lint_viper.py` pins their contracts beside `alloc_contract`'s `len == 1` rule.
 With globals (0041 item 4), the domain also holds one `unique function GB_<name>__<id>(): Block` per global and
 `static` local (the text is unchanged without them), and a trusted bodyless `program_start()` follows the `alloc_<t>`
 methods in every unit with a global: its first `ensures` row is the global facts, then one row per global, positioned at
@@ -930,7 +1025,14 @@ One line per check, tab-separated, UTF-8, `\n`-terminated:
 - The two guards of M4.2b1 are `internal` entries on an `assert` line: "the value of `X` as written differs from the
   front end's" (at the constant's declaration) and "case value as written differs from the front end's" (at the case
   label). A failing guard means EDG's folding and cerastes's reading of the same expression disagree: exit 3.
-- The driver matches each Silicon error by its `.vpr` line and id; no match is exit 3 (0011 item 11).
+- A **marked range row** (decision 0059 item 7: an `assert forall k: Int :: { loc(B, k) } lo <= k && k < hi ==> acc(loc(B, k).f)` over an array's slots)
+  writes its id as `assert.failed[insufficient.permission]`: the second column is `<id>[<reason>]`, the reason the one Silicon gives when the
+  permission is missing; every other row is written as before. `parse_position_map` reads the bracket and refuses any pair but exactly
+  `assert.failed[insufficient.permission]` (a malformed id is a map problem, exit 3).
+- The driver matches each Silicon error by its `.vpr` line and id (the id before the bracket); no match is exit 3 (0011 item 11). A row's reason must be
+  `assertion.false` (`tuple.false`, `tuple.condition.false` or `termination.condition.false` for `termination.failed`) as today; a **marked row accepts
+  exactly its expected reason** instead, mapped to the row's category and message, so `assertion.false` on it, `qp.not.injective` anywhere, and
+  `insufficient.permission` on an unmarked row are all exit 3.
 - The driver's classifier of Silicon's messages and the harness's (`_VIPER_ERRORS`) are two copies of one
   table pinned to the Silicon version; a self-test runs both on the same recorded outputs and requires
   agreement.
@@ -1019,8 +1121,12 @@ variable that is not a named constant (below); a weak function (`is_weak`/`is_we
 `asm`; a template; a `constexpr` or `consteval`
 function; a variadic function; a function without a prototype; a `static`, unnamed-namespace or `inline` function
 that is declared (with a contract, say) and not defined in the file (no other unit can define it, so its contract
-would be trusted for nothing); locals that are `static`, `extern` or `thread_local`, arrays and VLAs, a `const` local
-without an initializer, a local used in its own initializer. Since M4.2c a local without an initializer
+would be trusted for nothing); locals that are `static`, `extern` or `thread_local`, an array other than an automatic local written as an array
+declarator (since M4.5e1a an array local of a bool, integer, enumeration or object-pointer element with a constant bound is a block, §3 "Arrays"; a VLA, a
+zero-length array, a bound naming a local constant, `const`/`volatile`/`_Atomic` elements, an array of arrays or of structures, one reached through
+`typeof`, `decltype`, a typedef or an alias, an `int a[static N]` parameter, a string-literal initializer and an array compound literal are rejected with
+the session that lifts each in the message), a `const` local without an initializer, a local used in its own initializer (an array's included: an element
+that reads, writes, takes the address of or decays the array being declared). Since M4.2c a local without an initializer
 (`initk_none`, no `stmk_init`) is a `Decl` without one (decision 0019). **A body written in a verified file that this encoder does not
 encode is rejected, never skipped** (M3 pre-commit audit): the body of a lambda, of a compiler-generated function,
 of an explicit specialization or other body for a template declared elsewhere, or of an out-of-line member of a class
@@ -1253,9 +1359,33 @@ type rule to every type operand and template argument it meets, skipped or not. 
 in C); `encode_named_enumerator` does the same for a written initializer without `expr`, the character type from
 `character_kind`. *Types:* `computed_type_reason` (arrays, `_BitInt`, vectors, class instances with a `tak_nontype`
 argument, through typerefs, pointers and routine types) runs on `sizeof`/`_Alignof`/`__datasizeof` operands
-(`reject_computed_sizeof_operand`), on the C++ top-level `sizeof` enumerator, and on array typedefs of verified files
+(`reject_computed_sizeof_operand`; since M4.5e1a an expression operand that names an array local written as a declarator is let through, its constant
+keeping its `expr`: the bound is checked as written by `check_array_bound`, a local constant of the function whose prologue row is an `overflow` for a
+wrapping bound such as `65536u * 65536u + 1`, and the value is EDG's `N * sizeof(T)`; a type operand, `typeof`, a typedef, a string or compound literal
+stay rejected), on the C++ top-level `sizeof` enumerator, and on array typedefs of verified files
 (`declaration_level_checks`); `vtype` rejects a typeref chain through an alias-template instance or a member typedef of a
 class instance with a non-type argument (`typeref_chain_reason`).
+
+**Arrays in the encoder (M4.5e1a, decision 0059).** *Types:* `declaration` sends a local whose type entry is `tk_array` (not a VLA) to `array_vtype`, which
+alone makes an `Array` type (`vtype_object`/`vtype` still refuse arrays, so parameters, results, globals, members and pointees stay rejected, each message
+naming the session that lifts it); only a type written as an array declarator counts (`written_as_array_declarator`: a typedef, alias, `typeof`, `decltype`
+or `auto` in the typeref chain is `unsupported_declaration`). The bound is `number_of_elements`, and a bound that kept an `expr` (`2 * 3`, a macro sum,
+`65536u * 65536u + 1`, which EDG folds to 1) is checked as written by `check_array_bound` (`constant_value`, then `add_local_const`: obligations in the
+prologue, an `overflow` for the wrapping one); a literal, macro literal or enumerator bound and `int a[] = {…}` keep none. A bound naming a local constant
+(`constant_bound_expr_in_local_expr_node_ref`), `[0]`, qualified elements, `static`/`extern`/thread storage, `owning` and `ref_to_uninit` on an array
+(`read_variable_markers`) are rejected. The array is always a cell (`mark_address_taken`; `a[i]` sets EDG's `address_taken` but `sizeof(a)` and annotations do
+not, P78 F4). *Initializers* (`array_initializer`, from `init_statement` or at the declaration): the list's elements through `collect_array_elems` (a
+cursor; a nested list, a range designator and every array designator are rejected, `c99_designator` in C++), each value through `constant_initializer` or
+`expr`, `Var::zero_filled` set when fewer than N distinct indexes are written; C evaluates every non-constant element into an `init_<i>` temporary before
+the first store (`unsequenced_calls` for two with an effect), C++ stores each in order; the array being declared is in `cx_.declaring`/`pending`, so an
+element that reads, writes, takes the address of or decays it is "a local variable used in its own initializer". *Expressions:* `eok_subscript`
+(`subscript_address`: the pointer operand is the one of pointer type, so `i[a]` works; an `array_to_pointer(var a)` base is `AddrOf(a)`, any other pointer
+value is the base as it is; a pointee that is a structure and a pointer element in a loop invariant or measure are rejected; a plain `char` index is
+`char_subscripts`), `&a[i]` (`address_of`), writes (`assign_target`), the decay (`array_decay`, after the own-initializer test and the
+`array_address_null_test` detection in `truth_context` and `comparison`), `return a;`/`return &a[i];` (`returned_local_address`), `a[i] == a[i]`
+(`same_pure_expr`), an element inside a folded constant's original expression read as written (`0 && a[3]`), `eok_padd`/`psubtract`/`pdiff` and pointer
+ordering rejected with M4.5e2 in the text. Elements are allowed in `check`, a loop invariant and a loop measure (`loop_clause`), not in a contract (e1b).
+`loop_keyword_position` gives each `b_.loop` its `keyword_loc` (`Builder::with_keyword_loc`).
 
 **Known over-rejection.** A call written inside an annotation's own `sizeof` operand (`CERASTES_REQUIRES(sizeof(int[p(2)]) > 0)`)
 is rejected as a call in an annotation, although the operand is never evaluated: the encoder reads the folded constant's

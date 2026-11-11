@@ -316,8 +316,9 @@ Three attributes from the pass:[C++] initialization profile (P4222), in the
 
 | `cerastes::uninit`
 | `CERASTES_UNINIT`
-| On a local without an initializer: it starts without a value. Every read is
-  checked as for any such local; with an initializer the attribute is
+| On a local without an initializer, a local array included: it starts without
+  a value. Every read is checked as for any such local; with an initializer the
+  attribute is
   `cerastes-uninit_initialized` (xref:verifying.adoc#uninitialized[Locals without an
   initializer]).
 

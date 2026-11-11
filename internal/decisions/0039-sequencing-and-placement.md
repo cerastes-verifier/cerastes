@@ -265,3 +265,5 @@ matrix of unsequenced accesses and returned addresses) and S29 (Silicon), in `in
   its own arguments and with the statement's top-level store (0037 item 8; P60 C1: `x = bump(&x);` and
   `x = (bump(&x), 2);`), which item 4 orders as before.
 - `return &x;` is rejected; returning a copy of a local's address is still found at the caller's first use.
+
+*2026-11-11, amended by 0059 (M4.5e1a): item 3 — two unsequenced accesses to elements get the `unsequenced` row that their addresses differ, whatever the index; same-element shapes the compilers warn about are `unsequenced_modification` (0059 item 9).*

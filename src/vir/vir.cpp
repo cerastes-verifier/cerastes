@@ -799,12 +799,7 @@ std::string elem_place(const Expr& ea)
     }
     else if (!base->c_text.empty())
     {
-        bool simple {true};
-        for (char ch : base->c_text)
-        {
-            simple = simple && (std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_' || ch == ':');
-        }
-        root = simple ? base->c_text : "(" + base->c_text + ")";
+        root = postfix_operand_text(base->c_text);
     }
     return root.empty() ? std::string() : root + "[" + idx + "]";
 }
@@ -934,6 +929,12 @@ const Stmt* Builder::loop(const Expr* c, std::vector<Clause> invariants, std::ve
     s->form = form;
     s->jump_id = jump_id;
     return s;
+}
+
+const Stmt* Builder::with_keyword_loc(const Stmt* loop, SrcLoc keyword)
+{
+    const_cast<Stmt*>(loop)->keyword_loc = std::move(keyword);
+    return loop;
 }
 
 const Stmt* Builder::switch_stmt(const Expr* scrutinee, const Stmt* body, int jump_id, SrcLoc loc)
@@ -1410,6 +1411,37 @@ int atom_place_key(const Expr& atom)
 {
     const PlaceKey k {atom_place(atom)};
     return k.path.empty() && k.via.empty() ? k.root : kNoPlaceKey;
+}
+
+std::string postfix_operand_text(const std::string& text)
+{
+    if (text.empty())
+    {
+        return text;
+    }
+    // a name or a postfix expression: it starts with a letter, a digit, `_` or `::`, and holds no operator outside brackets and parentheses (`->` and `.` aside)
+    bool postfix {std::isalnum(static_cast<unsigned char>(text[0U])) != 0 || text[0U] == '_' || text[0U] == ':'};
+    int depth {0};
+    for (size_t k {0U}; postfix && k < text.size(); ++k)
+    {
+        const char ch {text[k]};
+        if (ch == '[' || ch == '(')
+        {
+            ++depth;
+        }
+        else if (ch == ']' || ch == ')')
+        {
+            --depth;
+        }
+        else if (depth == 0 &&
+                 !(std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_' || ch == ':' || ch == '.') &&
+                 !(ch == '-' && k + 1U < text.size() && text[k + 1U] == '>') &&
+                 !(ch == '>' && k > 0U && text[k - 1U] == '-'))
+        {
+            postfix = false;
+        }
+    }
+    return postfix && depth == 0 ? text : "(" + text + ")";
 }
 
 std::string place_text(const Expr& addr)

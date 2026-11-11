@@ -2376,7 +2376,9 @@ private:
     // to.
     E holds_token(const E& p)
     {
-        return low::and_(low::bin(low::BinOp::Ne, p, low::null_()),
+        // `offset_of(p) == 0` (decision 0059 item 10, defensive): the token slot is the block's, so a pointer into the block's interior (`&p[1]`) holds no token
+        return low::and_(low::and_(low::bin(low::BinOp::Ne, p, low::null_()),
+                                   low::bin(low::BinOp::Eq, low::dom("offset_of", {p}), low::int_lit("0"))),
                          low::bin(low::BinOp::Gt, low::perm_of(tok_slot(p), "tok"), low::no_perm()));
     }
     static const Expr* expr_at(const std::vector<const Expr*>* v, size_t i)
@@ -3976,8 +3978,42 @@ private:
     }
 
     // `*q` in an invariant or a measure: the chain `(q == x_1 && kv_1 > none ? q.v : (q == x_2 && ... : dummy))` over the places of the field.
+    // `a[e]` in an invariant or a measure (decision 0059 item 8): the loop carries the array whole (the loop's own `acc` conjuncts come before the user's), so the read needs no
+    // framing chain, only the bound: `ite(in bounds, a[e], dummy)`, with `out-of-bounds` and the flag (`uninitialized`, 0038 item 6) as obligation clauses.
+    LV inv_elem(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
+    {
+        using low::BinOp;
+        const Expr& ea {*e.a};
+        if (ea.a == nullptr || ea.b == nullptr || ea.a->kind != Expr::Kind::AddrOf || ea.a->var == nullptr ||
+            !ea.a->var->type.is_array())
+        {
+            internal_error(e.loc, "an element of anything but a local array in a loop annotation reached lowering");
+            return {inv_dummy(e.type), {}};
+        }
+        const LV b {lower(*ea.a, env, guard, gdep, full)};
+        const LV i {lower(*ea.b, env, guard, gdep, full)};
+        const E offset {low::bin(BinOp::Add, low::dom("offset_of", {b.e}), i.e)};
+        const E in {low::not_(low::bin(BinOp::Or, low::bin(BinOp::Lt, offset, low::int_lit("0")),
+                                       low::bin(BinOp::Le, low::dom("len", {block_of(b.e)}), offset)))};
+        const E slot {low::dom("loc", {block_of(b.e), offset})};
+        const std::string place {e.c_text.empty() ? place_text(ea) : e.c_text};
+        obl(full, guard, gdep, in, i.dep,
+            meta("out-of-bounds", e.loc,
+                 "this loop " + inv_what_ + " reads " + quoted(place, "an element of the array") +
+                     ", whose index may be outside `" + ea.a->var->name + "`"));
+        obl(full, guard, gdep, low::ite(in, cell_flag(slot, e.type), low::bool_lit(false)), i.dep,
+            meta("uninitialized", e.loc,
+                 "this loop " + inv_what_ + " reads " + quoted(place, "an element of the array") +
+                     " before it is given a value"));
+        return {low::ite(in, cell_value(slot, e.type), inv_dummy(e.type)), i.dep};
+    }
+
     LV inv_deref(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
     {
+        if (e.a != nullptr && e.a->kind == Expr::Kind::ElemAddr)
+        {
+            return inv_elem(e, env, guard, gdep, full);
+        }
         LV p {lower(*e.a, env, guard, gdep, full)};
         const Type& t {e.type};
         const std::string sfx {cell_suffix(t)};
@@ -4123,6 +4159,7 @@ private:
         // `p->x`: the null check is the chain's, on its root pointer; `a[i]` (decision 0059 item 4): the bound row is the element address's, and a named array is never null
         const bool member {e.a->kind == Expr::Kind::MemberAddr};
         const bool elem {e.a->kind == Expr::Kind::ElemAddr};
+        const bool named_elem {elem && e.a->a != nullptr && e.a->a->kind == Expr::Kind::AddrOf};
         if (member || elem)
         {
             place_nodes_[e.a] = e.loc;
@@ -4140,8 +4177,8 @@ private:
         }
         obl(full, guard, gdep, may_read(p.e, t), p.dep,
             meta("permission", e.loc,
-                 elem ? "reads " + quoted(place, "an element of the array") +
-                            " without owning it: a callee may have kept its object"
+                 named_elem ? "reads " + quoted(place, "an element of the array") +
+                                  " without owning it: a callee may have kept its object"
                  : rooted_at_global(*e.a)
                      ? "reads `" + place + "` without owning it: `" + fn_.f->c_name + "` needs `reads(" + place +
                            ")` or `owns(" + place + ")` in its contract"
@@ -4363,6 +4400,7 @@ private:
         // `p->x = e;`: the null check is the chain's (decision 0043 item 5); `a[i] = e;`: the bound row is the element address's (decision 0059 item 4)
         const bool member {s.addr->kind == Expr::Kind::MemberAddr};
         const bool elem {s.addr->kind == Expr::Kind::ElemAddr};
+        const bool named_elem {elem && s.addr->a != nullptr && s.addr->a->kind == Expr::Kind::AddrOf};
         if (member || elem)
         {
             place_nodes_[s.addr] = s.loc;
@@ -4394,8 +4432,8 @@ private:
         }
         emit_assert(out, may_write(recv, t, false),
                     meta("permission", s.loc,
-                         elem ? "writes " + quoted(place, "an element of the array") +
-                                    " without owning it: a callee may have kept its object"
+                         named_elem ? "writes " + quoted(place, "an element of the array") +
+                                          " without owning it: a callee may have kept its object"
                          : rooted_at_global(*s.addr)
                              ? "writes `" + place + "` without owning it: `" + fn_.f->c_name + "` needs `owns(" +
                                    place + ")` in its contract"
@@ -7578,6 +7616,7 @@ private:
         std::string text;
         const bool member {store && e.c->kind == Expr::Kind::MemberAddr};
         const bool elem {store && e.c->kind == Expr::Kind::ElemAddr};
+        const bool named_elem {elem && e.c->a != nullptr && e.c->a->kind == Expr::Kind::AddrOf};
         if (member || elem)
         {
             place_nodes_[e.c] = e.loc;
@@ -7654,8 +7693,8 @@ private:
         }
         obl(full, nullptr, {}, may_write(addr.e, t, false), wset,
             meta("permission", e.loc,
-                 elem    ? "writes " + quoted(text, "an element of the array") +
-                               " without owning it: a callee may have kept its object"
+                 named_elem ? "writes " + quoted(text, "an element of the array") +
+                                  " without owning it: a callee may have kept its object"
                  : store ? (rooted_at_global(*e.c) ? "writes `" + text + "` without owning it: `" + fn_.f->c_name +
                                                          "` needs `owns(" + text + ")` in its contract"
                                                    : "writes " + quoted(text, "the object the pointer points to") +
@@ -8089,27 +8128,44 @@ private:
             internal_error(e.loc, "the address of an array element in a contract or an invariant reached lowering");
             return {low::null_(), {}};
         }
-        if (e.a == nullptr || e.b == nullptr || e.a->kind != Expr::Kind::AddrOf || e.a->var == nullptr ||
-            !e.a->var->type.is_array())
+        if (e.a == nullptr || e.b == nullptr || !e.a->type.is_ptr())
         {
-            internal_error(e.loc, "the address of an element of anything but a local array reached lowering");
+            internal_error(e.loc, "the address of an element of anything but a pointer reached lowering");
             return {low::null_(), {}};
         }
+        // a named array (`a[i]`, the decay `&a[0]`): its block was entered and has not been left; any other pointer (`p[i]`, decision 0059 item 10) is null or
+        // dangling or short of the element like any pointer
+        const bool named {e.a->kind == Expr::Kind::AddrOf && e.a->var != nullptr && e.a->var->type.is_array()};
         const LV b {lower(*e.a, env, guard, gdep, full)};
         const LV i {lower(*e.b, env, guard, gdep, full)};
         const Deps dep {join(b.dep, i.dep)};
+        const std::string spelling {place_text(e)};
+        const std::string object {named ? "`" + e.a->var->name + "`"
+                                        : "the object " + quoted(e.a->c_text, "the pointer") + " points into"};
+        if (!named)
+        {
+            // item 4's rows in order: `null-dereference` (the address of an element of a null pointer is undefined), `lifetime` (0037's ptr_use), then the bound
+            obl(full, guard, gdep, low::bin(BinOp::Ne, b.e, low::null_()), b.dep,
+                meta("null-dereference", at,
+                     place ? "dereferences " + quoted(e.a->c_text, "the pointer") + ", which may be null"
+                           : "forms " + quoted("&" + spelling, "the address of an element") + ", but " +
+                                 quoted(e.a->c_text, "the pointer") + " may be null"));
+            ptr_use(*e.a, b, guard, gdep, full, false, &at);
+        }
         const E offset {low::bin(BinOp::Add, low::dom("offset_of", {b.e}), i.e)};
         const E len {low::dom("len", {block_of(b.e)})};
-        const std::string array {e.a->var->name};
         const E outside {low::bin(BinOp::Or, low::bin(BinOp::Lt, offset, low::int_lit("0")),
                                   place ? low::bin(BinOp::Le, len, offset) : low::bin(BinOp::Lt, len, offset))};
-        const std::string spelling {place_text(e)};
         obl(full, guard, gdep, low::not_(outside), dep,
             meta("out-of-bounds", at,
-                 place ? std::string(writing ? "writes " : "reads ") + quoted(spelling, "an element of the array") +
-                             ", whose index may be outside `" + array + "`"
+                 place ? (named ? std::string(writing ? "writes " : "reads ") +
+                                      quoted(spelling, "an element of the array") + ", whose index may be outside " +
+                                      object
+                                : std::string(writing ? "writes " : "reads ") + quoted(spelling, "an element") +
+                                      " outside " + object)
                        : "forms " + quoted("&" + spelling, "the address of an element") +
-                             " beyond one past the end of `" + array + "`"));
+                             (named ? " beyond one past the end of " + object
+                                    : " beyond one past the end of " + object)));
         return {low::dom("loc", {block_of(b.e), offset}), dep};
     }
 
@@ -12040,7 +12096,9 @@ private:
             const std::string n {"exm_" + std::to_string(exm_count_++)};
             fn_.snapshots.push_back(low::LVar {n, low::LType::Bool});
             assign(out, n, g);
-            const E term {low::and_(low::var(n), low::bin(low::BinOp::Eq, low::var("t"), tok_slot(v)))};
+            const E term {low::and_(
+                low::and_(low::var(n), low::bin(low::BinOp::Eq, low::dom("offset_of", {v}), low::int_lit("0"))),
+                low::bin(low::BinOp::Eq, low::var("t"), tok_slot(v)))};
             r = r ? low::bin(low::BinOp::Or, r, term) : term;
             if (l.type.is_ptr() && l.type.pointee != nullptr && l.type.pointee->is_struct() &&
                 l.type.pointee->struct_type != nullptr)
@@ -12070,7 +12128,10 @@ private:
             {
                 continue;
             }
-            E term {low::bin(low::BinOp::Eq, low::var("t"), tok_slot(block_ptr_ret(s, env)))};
+            // `offset_of == 0` before the token (decision 0059 item 10): a pointer into the block's interior exempts no token
+            const E bp {block_ptr_ret(s, env)};
+            E term {low::and_(low::bin(low::BinOp::Eq, low::dom("offset_of", {bp}), low::int_lit("0")),
+                              low::bin(low::BinOp::Eq, low::var("t"), tok_slot(bp)))};
             if (const E g = site_guard(s, env))
             {
                 term = low::and_(g, term);
@@ -12093,7 +12154,10 @@ private:
                     assign(out, n, low::and_(held, leaf_cell_held(g_ref)));
                     held = low::var(n);
                 }
-                const E term {low::and_(held, low::bin(low::BinOp::Eq, low::var("t"), tok_slot(owner_value(g_ref))))};
+                const E term {
+                    low::and_(low::and_(held, low::bin(low::BinOp::Eq, low::dom("offset_of", {owner_value(g_ref)}),
+                                                       low::int_lit("0"))),
+                              low::bin(low::BinOp::Eq, low::var("t"), tok_slot(owner_value(g_ref))))};
                 r = r ? low::bin(low::BinOp::Or, r, term) : term;
                 // decision 0055 item 5 (audit S4; P4417R0 Note 3): a static owner owns what its owning fields own, so the blocks reached through the owner's pointee's owning
                 // fields are exempt too (a chain `g.q->r`, the field `gp->q` of an owning `struct S *`), each term framed by the cells it reads: `main` can hold a block's token
@@ -12543,6 +12607,16 @@ private:
         }
     }
 
+    // An array local of an open scope that a loop carries (decision 0059 item 8): a range place over its slots `[0, count)`, held at `write`.
+    struct ArrayPlace
+    {
+        const Var* var {nullptr};
+        Type element;
+        unsigned long long count {0U};
+        std::string kl;     // the ghost snapshot of the liveness permission
+        bool reach {false}; // a write in the loop can reach an element
+    };
+
     // The writes a loop can make to memory (decision 0038 item 3): the cells it assigns by name, and the cell fields a store through a pointer, or a
     // call of a function that owns a cell of that field (Viper havocs what a callee owns), can write.
     struct LoopWrites
@@ -12626,6 +12700,21 @@ private:
         return true;
     }
 
+    // The array local whose element the address `addr` names by name (`ElemAddr(AddrOf(a), i)`, decision 0059 item 4), or null.
+    static const Var* elem_array_var(const Expr* addr)
+    {
+        while (addr != nullptr && addr->kind == Expr::Kind::ReportAt)
+        {
+            addr = addr->a;
+        }
+        if (addr != nullptr && addr->kind == Expr::Kind::ElemAddr && addr->a != nullptr &&
+            addr->a->kind == Expr::Kind::AddrOf && addr->a->var != nullptr && addr->a->var->type.is_array())
+        {
+            return addr->a->var;
+        }
+        return nullptr;
+    }
+
     void writes_in_expr(const Expr* e, LoopWrites& w)
     {
         if (e == nullptr)
@@ -12638,7 +12727,11 @@ private:
         }
         if (e->kind == Expr::Kind::StoreE)
         {
-            if (e->c != nullptr && is_global_addr(*e->c))
+            if (const Var* av {elem_array_var(e->c)}; av != nullptr)
+            { // decision 0059 item 8: an element of a local array by name reaches that array (and, like any cell written by name, every pointer-reached place), no other cell
+                w.cells.insert(av->id);
+            }
+            else if (e->c != nullptr && is_global_addr(*e->c))
             {
                 w.globals.insert(e->c->global->id);
             }
@@ -12721,7 +12814,11 @@ private:
         switch (s->kind)
         {
             case Stmt::Kind::Store:
-                if (s->addr != nullptr && is_global_addr(*s->addr))
+                if (const Var* av {elem_array_var(s->addr)}; av != nullptr)
+                { // decision 0059 item 8: see writes_in_expr
+                    w.cells.insert(av->id);
+                }
+                else if (s->addr != nullptr && is_global_addr(*s->addr))
                 {
                     w.globals.insert(s->addr->global->id);
                 }
@@ -13307,6 +13404,10 @@ private:
         {
             for (const Var* cell : sc.cells)
             {
+                if (cell->type.is_array())
+                {
+                    continue; // a range place of its own (decision 0059 item 8), carried by `loop` itself
+                }
                 if (loop != nullptr && struct_local_framed_in(*loop, *cell, loop_used))
                 {
                     continue;
@@ -14394,8 +14495,26 @@ private:
                 }
             }
         }
+        // decision 0059 item 8: each array local of an open scope is a range place of the loop, whenever the loop carries its places at all
+        std::vector<ArrayPlace> arrays;
+        for (const Fn::Scope& sc : fn_.scopes)
+        {
+            for (const Var* cell : sc.cells)
+            {
+                if (cell->type.is_array())
+                {
+                    ArrayPlace ap;
+                    ap.var = cell;
+                    ap.element = *cell->type.element;
+                    ap.count = cell->type.count;
+                    ap.kl = "kl_" + var_name(*cell) + "__" + std::to_string(loop_number);
+                    ap.reach = writes.fields.count(cell_suffix(ap.element)) != 0U || writes.cells.count(cell->id) != 0U;
+                    arrays.push_back(std::move(ap));
+                }
+            }
+        }
         bool frame {stmt_touches(&s)};
-        if (!frame && !places.empty())
+        if (!frame && (!places.empty() || !arrays.empty()))
         {
             bool has_return {false};
             std::set<int> gotos;
@@ -14415,6 +14534,30 @@ private:
         if (!frame)
         {
             places.clear();
+            arrays.clear();
+        }
+        // Decision 0038 item 3 (audit round 2, B1) for arrays: a parameter place whose atom can be false holds nothing on that path, and nothing tells Silicon that its pointer
+        // is not a slot of the array's block (the snapshot would pick up the array's permission, and the invariant would demand it twice): its guards gain
+        // `block_of(p) != block_of(a)` for an array of the field and `lvloc(block_of(p)) != lvloc(block_of(a))` for every array, as they have `p != x` and the liveness
+        // inequality for every cell
+        for (Place& pl : places)
+        {
+            if (pl.cell)
+            {
+                continue;
+            }
+            for (const ArrayPlace& ap : arrays)
+            {
+                const E ar {low::var(var_name(*ap.var))};
+                if (pl.value && pl.suffix == cell_suffix(ap.element))
+                {
+                    pl.gv = low::and_(pl.gv, low::bin(low::BinOp::Ne, block_of(pl.recv), block_of(ar)));
+                }
+                if (pl.live)
+                {
+                    pl.gl = low::and_(pl.gl, low::bin(low::BinOp::Ne, live_cell(lv_of(pl)), live_cell(ar)));
+                }
+            }
         }
         // B1 item 3: the pointer variables that hold blocks beside the loop's heap places
         std::vector<HeapHolder> holders {std::move(heap_holders_)};
@@ -14815,6 +14958,22 @@ private:
                     }
                 }
             }
+            // the same against each array (decision 0059 item 8): Silicon must branch on whether the parameter's block is the array's before it reads either snapshot
+            for (const Place* a : pparams)
+            {
+                for (const ArrayPlace& ap : arrays)
+                {
+                    const E ar {low::var(var_name(*ap.var))};
+                    if (a->value && a->suffix == cell_suffix(ap.element))
+                    {
+                        case_split(entry, low::bin(BinOp::Eq, block_of(a->recv), block_of(ar)));
+                    }
+                    if (a->live)
+                    {
+                        case_split(entry, low::bin(BinOp::Eq, live_cell(lv_of(*a)), live_cell(ar)));
+                    }
+                }
+            }
             // Record 0047 item 10 (re-audit B1): a heap place's snapshot holds a symbolic permission, and Silicon cannot decide `k == none` for a holder it never
             // branched on (a member address `&s->b`, a pointer reached through a load, a cursor parameter): the invariant's `acc(.., k)` then fails on entry
             // ("insufficient permission") for a correct program.  A catch-all `if (k > none) { }` after each heap snapshot gives it the branch.
@@ -14944,6 +15103,60 @@ private:
                     auto_invariant(low::implies(rows(low::and_(low::bin(BinOp::Gt, kd, none), low::var(pl.ds))),
                                                 cell_flag(pl.recv, pl.type)),
                                    s.loc));
+            }
+        }
+
+        // Decision 0059 item 8: the arrays' entry rows, after the scalar snapshots: a marked row per field (an element a callee kept: `permission`), then the liveness snapshot;
+        // the label `lh_<loop>` follows right before the Viper loop, and the flag, range and value conjuncts name the state at it (`old[lh]`)
+        const std::string array_label {"lh_" + std::to_string(loop_number)};
+        // the loop statement's own position, the keyword's (the same line in both modes; unknown in a hand-built program: the statement's)
+        const SrcLoc loop_at {s.keyword_loc.known() ? s.keyword_loc : s.loc};
+        for (const ArrayPlace& ap : arrays)
+        {
+            const E r {low::var(var_name(*ap.var))};
+            const std::string sfx {use_cell_type(ap.element)};
+            const std::string entry_message {"this loop begins without the permission to every element of " +
+                                             object_phrase(*ap.var, ap.var->name)};
+            emit_marked_row(entry, range_perm(r, 0, ap.count, "v_" + sfx), meta("permission", loop_at, entry_message));
+            emit_marked_row(entry, range_perm(r, 0, ap.count, "d_" + sfx), meta("permission", loop_at, entry_message));
+            fn_.snapshots.push_back(low::LVar {ap.kl, low::LType::Perm});
+            assign(entry, ap.kl, live_perm(r));
+        }
+        // the conjuncts: every `acc` first (so every read after it is framed), then the flags, the range and the values (item 8's list; S43 (c) and its addendum)
+        for (const ArrayPlace& ap : arrays)
+        {
+            const E r {low::var(var_name(*ap.var))};
+            const std::string sfx {use_cell_type(ap.element)};
+            w.invariants.push_back(auto_invariant(low::acc(live_cell(r), "lv", low::var(ap.kl)), s.loc));
+            w.invariants.push_back(auto_invariant(range_perm(r, 0, ap.count, "v_" + sfx), s.loc));
+            w.invariants.push_back(auto_invariant(range_perm(r, 0, ap.count, "d_" + sfx), s.loc));
+        }
+        for (const ArrayPlace& ap : arrays)
+        {
+            using low::BinOp;
+            const E r {low::var(var_name(*ap.var))};
+            const E k {low::var("k")};
+            const E slot {low::dom("loc", {block_of(r), k})};
+            const E in {low::bin(BinOp::And, low::bin(BinOp::Le, low::int_lit("0"), k),
+                                 low::bin(BinOp::Lt, k, low::int_lit(std::to_string(ap.count))))};
+            const E flag {cell_flag(slot, ap.element)};
+            // the flags kept: an element initialized when the loop was entered is initialized at every head
+            w.invariants.push_back(auto_invariant(
+                low::forall_("k", {slot}, low::implies(low::and_(in, low::old_(flag, array_label)), flag)), s.loc));
+            // the type's range (a pointer element: WF; none for bool), over the initialized elements, reached or not (0042 item 5)
+            if (const E range = cell_range_inv(slot, ap.element))
+            {
+                w.invariants.push_back(
+                    auto_invariant(low::forall_("k", {slot}, low::implies(low::and_(in, flag), range)), s.loc));
+            }
+            // the values kept, when no write in the loop can reach the array
+            if (!ap.reach)
+            {
+                const E value {cell_value(slot, ap.element)};
+                w.invariants.push_back(auto_invariant(
+                    low::forall_("k", {slot},
+                                 low::implies(in, low::bin(BinOp::Eq, value, low::old_(value, array_label)))),
+                    s.loc));
             }
         }
 
@@ -15224,6 +15437,10 @@ private:
         {
             out.push_back(std::move(st));
         }
+        if (!arrays.empty())
+        {
+            label(out, array_label);
+        }
 
         std::set<int> breaks;
         std::set<int> continues;
@@ -15396,6 +15613,19 @@ private:
                     }
                 }
             }
+        }
+        // Decision 0059 item 8: the back edge of an array place: a marked row per field, then the liveness row, before Silicon's own invariant check
+        for (const ArrayPlace& ap : arrays)
+        {
+            const SrcLoc at {s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : loop_at};
+            const E r {low::var(var_name(*ap.var))};
+            const std::string sfx {use_cell_type(ap.element)};
+            const std::string msg {"an iteration of this loop ends without the permission to " +
+                                   object_phrase(*ap.var, ap.var->name) + " that it began with"};
+            emit_marked_row(w.then_body, range_perm(r, 0, ap.count, "v_" + sfx), meta("permission", at, msg));
+            emit_marked_row(w.then_body, range_perm(r, 0, ap.count, "d_" + sfx), meta("permission", at, msg));
+            emit_assert(w.then_body, low::not_(low::bin(low::BinOp::Lt, live_perm(r), low::var(ap.kl))),
+                        meta("permission", at, msg));
         }
         owner_flag_rows(owners, places, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc,
                         w.then_body);
@@ -17557,12 +17787,15 @@ private:
         {
             if (c.path == pl.mpath && cell_suffix(c.type) == pl.suffix && c.type == pl.type)
             {
-                const E premise {
-                    low::and_(low::and_(low::and_(g, low::not_(low::var(snap))),
-                                        low::and_(low::bin(low::BinOp::Ne, pl.lroot, low::null_()),
-                                                  low::bin(low::BinOp::Eq, block_of(low::var(var_name(*lo.owner.var))),
-                                                           block_of(pl.lroot)))),
-                              low::and_(low::bin(low::BinOp::Gt, low::var(pl.kd), low::no_perm()), low::var(pl.ds)))};
+                // `offset_of(pl.lroot) == 0` (decision 0059 item 10): the place's cell is the owner's cell only when the place's pointer starts the block
+                const E premise {low::and_(
+                    low::and_(
+                        low::and_(g, low::not_(low::var(snap))),
+                        low::and_(
+                            low::and_(low::bin(low::BinOp::Ne, pl.lroot, low::null_()),
+                                      low::bin(low::BinOp::Eq, low::dom("offset_of", {pl.lroot}), low::int_lit("0"))),
+                            low::bin(low::BinOp::Eq, block_of(low::var(var_name(*lo.owner.var))), block_of(pl.lroot)))),
+                    low::and_(low::bin(low::BinOp::Gt, low::var(pl.kd), low::no_perm()), low::var(pl.ds)))};
                 return low::implies(premise, cell_flag(c.recv, c.type));
             }
         }

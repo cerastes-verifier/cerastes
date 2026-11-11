@@ -180,7 +180,7 @@ std::string describe_operation(an_expr_operator_kind k)
         case eok_pdiff:
             return "a difference of pointers, `p - q` (M4.5e2, decision 0059 item 1)";
         case eok_array_to_pointer:
-            return "an array used as a pointer (the decay of an array: Part D of M4.5e1a for a local array, decision 0059 item 10; M4.6 for a string literal)";
+            return "an array used as a pointer that is not a local array (a string literal: M4.6; an array in a structure, a global or a `static` local: M4.5e1e, decision 0059 item 1)";
         case eok_dot_field:
         case eok_points_to_field:
             return "a member access";
@@ -220,9 +220,6 @@ private:
         vir::Function* fn {nullptr};
         std::map<a_variable_ptr, vir::Var*> vars;
         std::set<a_variable_ptr> pending; // declared, initializer not yet seen
-        // The array locals of the blocks open at this point of the walk (decision 0059 item 8): a loop met while one is open, and an array declared inside a loop,
-        // are rejected until Part C.
-        std::vector<const vir::Var*> open_arrays;
         // The IL nodes with a side effect (assignment, ++/--, call) encoded in this function (decision 0020 item 10).
         std::set<an_expr_node_ptr> encoded_effects;
         // The IL position of each AssignE built (for the report of vir::sequence_problems, decision 0020 item 4).
@@ -668,11 +665,13 @@ private:
                 "an array element in a contract (ranges and element places in contracts: M4.5e1b, decision 0059 item 1)");
             return nullptr;
         }
-        if (cx_.annotation && !cx_.check_clause)
+        // a `check` clause, a loop invariant and a loop measure read an element like code does (decision 0059 item 8, 0038 item 6); `loop_clause` is
+        // set by encode_loop_clauses for both; any other annotation position is refused
+        if (cx_.annotation && !cx_.check_clause && !cx_.loop_clause)
         {
             reject(
                 Diag::unsupported_expression, e->position,
-                "an array element in an invariant or a measure (the loop rules for arrays are Part C of M4.5e1a, decision 0059 item 8)");
+                "an array element in an annotation other than a `check`, a loop invariant or a loop measure (decision 0059 item 8)");
             return nullptr;
         }
         an_expr_node_ptr base {nullptr};
@@ -693,46 +692,73 @@ private:
                    "a subscript of something that is not an array or a pointer");
             return nullptr;
         }
+        // the base of the element address: the address of a local array (`a[i]`), or any pointer value (`p[i]`: decision 0059 item 10)
+        const Expr* base_expr {nullptr};
+        std::string name;
         a_variable_ptr av {array_variable(base)};
-        if (av == nullptr)
+        if (av != nullptr)
         {
-            if (base->kind == enk_operation && base->variant.operation.kind == eok_array_to_pointer)
+            if (cx_.rejected_vars.count(av) != 0U || rejected_globals_.count(av) != 0U)
+            {
+                return nullptr; // diagnosed at its declaration
+            }
+            auto it {cx_.vars.find(av)};
+            if (it == cx_.vars.end())
+            {
+                const char* n {av->source_corresp.name};
+                reject(Diag::unsupported_expression, e->position,
+                       std::string("an element of \"") + (n ? n : "?") +
+                           "\", which is not an array local of this function");
+                return nullptr;
+            }
+            // An element that reads (or writes) the array being declared, `int a[2] = {1, a[0]};` (decision 0059 item 3), as a local initialized from itself.
+            if (cx_.declaring == av || cx_.pending.count(av) != 0U)
+            {
+                reject(Diag::unsupported_declaration, av->source_corresp.decl_position,
+                       "a local variable used in its own initializer");
+                return nullptr;
+            }
+            if (!it->second->type.is_array())
+            {
+                reject(Diag::unsupported_expression, e->position, "a subscript of something that is not a local array");
+                return nullptr;
+            }
+            base_expr = b_.addr_of(it->second, loc_of(base->position));
+            name = it->second->name;
+        }
+        else if (base->kind == enk_operation && base->variant.operation.kind == eok_array_to_pointer)
+        {
+            reject(
+                Diag::unsupported_expression, e->position,
+                "an element of an array that is not a local variable (arrays in structures, globals, `static` locals and compound literals: M4.5e1e, decision 0059 item 1)");
+            return nullptr;
+        }
+        else
+        {
+            // `p[i]` of a pointer value (a parameter, a local, a loaded pointer, a call's result): the element address after the pointer's own
+            if (cx_.loop_clause)
             {
                 reject(
                     Diag::unsupported_expression, e->position,
-                    "an element of an array that is not a local variable (arrays in structures, globals, `static` locals and compound literals: M4.5e1e, decision 0059 item 1)");
+                    "an element of a pointer in a loop invariant or measure (places through a pointer's range are M4.5e1b, decision 0059 item 8)");
+                return nullptr;
             }
-            else
+            base_expr = expr(base);
+            if (base_expr == nullptr)
             {
-                reject(Diag::unsupported_expression, e->position,
-                       "an element of a pointer, `p[i]` (Part D of M4.5e1a, decision 0059 item 10)");
+                return nullptr;
             }
-            return nullptr;
-        }
-        if (cx_.rejected_vars.count(av) != 0U || rejected_globals_.count(av) != 0U)
-        {
-            return nullptr; // diagnosed at its declaration
-        }
-        auto it {cx_.vars.find(av)};
-        if (it == cx_.vars.end())
-        {
-            const char* n {av->source_corresp.name};
-            reject(Diag::unsupported_expression, e->position,
-                   std::string("an element of \"") + (n ? n : "?") +
-                       "\", which is not an array local of this function");
-            return nullptr;
-        }
-        // An element that reads (or writes) the array being declared, `int a[2] = {1, a[0]};` (decision 0059 item 3), as a local initialized from itself.
-        if (cx_.declaring == av || cx_.pending.count(av) != 0U)
-        {
-            reject(Diag::unsupported_declaration, av->source_corresp.decl_position,
-                   "a local variable used in its own initializer");
-            return nullptr;
-        }
-        if (!it->second->type.is_array())
-        {
-            reject(Diag::unsupported_expression, e->position, "a subscript of something that is not a local array");
-            return nullptr;
+            if (!base_expr->type.is_ptr() || base_expr->type.pointee == nullptr || base_expr->type.pointee->is_struct())
+            {
+                reject(
+                    Diag::unsupported_expression, e->position,
+                    base_expr->type.is_ptr() && base_expr->type.pointee != nullptr
+                        ? "an element of a pointer to a structure (arrays of structures: M4.5e1e, decision 0059 item 1)"
+                        : "a subscript of something that is not a pointer to a bool, an integer, an enumeration or a pointer");
+                return nullptr;
+            }
+            name =
+                !base_expr->c_text.empty() ? vir::postfix_operand_text(base_expr->c_text) : std::string("the pointer");
         }
         // a plain `char` index (-Wchar-subscripts, clang and GCC at -Wall; a constant such as 'a' is exempt in GCC), decision 0059 item 4 (audit round 1, item 6)
         if (an_expr_node_ptr in {peel_generated_conversions(index)};
@@ -740,7 +766,7 @@ private:
             skip_typerefs(in->type)->kind == tk_integer && !skip_typerefs(in->type)->variant.integer.enum_type &&
             skip_typerefs(in->type)->variant.integer.int_kind == ik_char)
         {
-            reject_args(Diag::char_subscripts, index->position, {it->second->name});
+            reject_args(Diag::char_subscripts, index->position, {name});
             return nullptr;
         }
         const Expr* ix {expr(index)};
@@ -760,15 +786,44 @@ private:
                                           : "an array index that is not an integer");
             return nullptr;
         }
-        const Expr* r {b_.elem_addr(b_.addr_of(it->second, loc_of(base->position)), ix, l)};
+        const Expr* r {b_.elem_addr(base_expr, ix, l)};
         const std::string t {index_text(ix)};
-        if (!t.empty())
+        if (!t.empty() && (av != nullptr || !base_expr->c_text.empty()))
         {
             Expr* m {const_cast<Expr*>(r)};
-            m->c_text = "&" + it->second->name + "[" + t + "]";
+            m->c_text = "&" + name + "[" + t + "]";
             m->user_spelling = true;
         }
         return r;
+    }
+
+    // The decay of a local array used as a pointer value (decision 0059 item 10): the address of its element 0, `ElemAddr(AddrOf(a), 0)`, a pointer to the
+    // element type (`*a` is then a read of `a[0]`'s place, as the decayed pointer's `*`).  The own-initializer test and the null-test rejections come before.
+    const Expr* array_decay(an_expr_node_ptr e, a_variable_ptr av)
+    {
+        if (cx_.contract || (cx_.annotation && !cx_.check_clause))
+        {
+            reject(Diag::unsupported_expression, e->position,
+                   cx_.contract
+                       ? "an array used as a pointer in a contract (arrays in contracts: M4.5e1b, decision 0059 item 1)"
+                       : "an array used as a pointer in an invariant or a measure (decision 0059 item 8)");
+            return nullptr;
+        }
+        if (cx_.rejected_vars.count(av) != 0U || rejected_globals_.count(av) != 0U)
+        {
+            return nullptr; // diagnosed at its declaration
+        }
+        auto it {cx_.vars.find(av)};
+        if (it == cx_.vars.end() || !it->second->type.is_array())
+        {
+            const char* n {av->source_corresp.name};
+            reject(Diag::unsupported_expression, e->position,
+                   std::string("the array \"") + (n ? n : "?") + "\", which is not an array local of this function");
+            return nullptr;
+        }
+        const SrcLoc l {loc_of(e->position)};
+        const Expr* zero {b_.int_const(vir::Type::integer(prog_.int_type("long", 64, true)), "0", l)};
+        return finish(e, b_.elem_addr(b_.addr_of(it->second, l), zero, l));
     }
 
     // `a[i]` as a read.
@@ -1060,20 +1115,6 @@ private:
         }
     }
 
-    // A loop met while an array local is in scope (decision 0059 item 8): Part C reads it; until then it is rejected.
-    bool loop_over_array(a_statement_ptr s)
-    {
-        if (cx_.open_arrays.empty())
-        {
-            return false;
-        }
-        // at the condition: the line of the loop's keyword in both modes (C++ puts a statement with attributes at its first attribute)
-        reject(Diag::unsupported_statement, s->expr != nullptr ? s->expr->position : s->position,
-               "a loop while the array `" + cx_.open_arrays.back()->name +
-                   "` is in scope (the loop rules for arrays are Part C of M4.5e1a, decision 0059 item 8)");
-        return true;
-    }
-
     // The enumerators with a written initializer of the enumerations that passed their checks (decision 0018 item 10): each is
     // a named constant of the unit, checked in the prologue.
     std::vector<a_constant_ptr> pending_enumerators_;
@@ -1123,6 +1164,20 @@ private:
             q.orig_column = 0U;
         }
         return diag_position(q);
+    }
+
+    // The position of a loop's keyword as a VIR location (Stmt::keyword_loc): `while`, `do` or `for`, the same line in both modes.
+    SrcLoc keyword_loc_of(a_statement_ptr s)
+    {
+        DiagPos d {loop_keyword_position(s)};
+        SrcLoc l;
+        if (d.known)
+        {
+            l.file = d.file;
+            l.line = static_cast<int>(d.line);
+            l.column = static_cast<int>(d.col);
+        }
+        return l;
     }
 
     SrcLoc loc_of(const a_source_position& p) const
@@ -4797,16 +4852,30 @@ private:
     {
         const auto& si {node->variant.sizeof_info};
         a_type_ptr t {si.is_type ? si.variant.type : (si.variant.expr != nullptr ? si.variant.expr->type : nullptr)};
+        // `sizeof(a)`, `sizeof a` of an array local written with an array declarator (decision 0059 item 11; `_Alignof(a)` of an array is clang's default
+        // -Wgnu-alignof-expression and `__datasizeof(a)` is not in the record: both stay rejected): EDG's constant keeps its written
+        // expression and its value is the checked bound's (check_array_bound) times the element's size.  A type operand, `typeof`, a typedef, a string
+        // literal and a compound literal stay as they were (e1e, M4.6): only the expression operand that names such a local is lifted.
+        if (node->kind == enk_sizeof && !si.is_type && si.variant.expr != nullptr &&
+            si.variant.expr->kind == enk_variable && si.variant.expr->variant.variable.ptr != nullptr)
+        {
+            auto vit {cx_.vars.find(si.variant.expr->variant.variable.ptr)};
+            if (vit != cx_.vars.end() && vit->second->type.is_array())
+            {
+                return false;
+            }
+        }
         std::set<a_type_ptr> seen;
         const char* why {computed_type_reason(t, seen)};
         if (why == nullptr)
         {
             return false;
         }
-        reject(Diag::unsupported_type, at,
-               render_type(t) + " (" + why +
-                   " in sizeof, _Alignof or __datasizeof: the front end computes its size alone; rejected until arrays "
-                   "are encoded, M4.5e1e, and `sizeof(a)` of a local array in M4.5e1a Part E; decision 0024 item 6)");
+        reject(
+            Diag::unsupported_type, at,
+            render_type(t) + " (" + why +
+                " in sizeof, _Alignof or __datasizeof: the front end computes its size alone; rejected until arrays "
+                "are encoded, M4.5e1e (decision 0024 item 6); `sizeof(a)` of a local array is accepted, decision 0059 item 11; `_Alignof(a)` and `__datasizeof(a)` of an array are e1e's)");
         return true;
     }
 
@@ -5286,7 +5355,7 @@ private:
         {
             reject(Diag::unsupported_expression, e->position,
                    "the array `" + it->second->name + "` used as a value (an element is read as `" + it->second->name +
-                       "[i]`; the decay of an array is Part D of M4.5e1a, decision 0059 item 10)");
+                       "[i]` or decays to a pointer, decision 0059 item 10)");
             return nullptr;
         }
         const Expr* local {b_.local(it->second, loc_of(e->position))};
@@ -10658,7 +10727,13 @@ private:
                 return member_of(expr(ops[0U]), ops[1U], e->position);
             }
         }
-        if (is_compound_temp(peel_value(e)))
+        if (is_subscript_node(e))
+        {
+            reject(
+                Diag::unsupported_expression, e->position,
+                "an element of an array of structures or of a pointer to structures (M4.5e1e, decision 0059 item 1)");
+        }
+        else if (is_compound_temp(peel_value(e)))
         {
             reject(
                 Diag::unsupported_expression, e->position,
@@ -11171,6 +11246,10 @@ private:
                     reject(Diag::unsupported_declaration, av->source_corresp.decl_position,
                            "a local variable used in its own initializer");
                     return nullptr;
+                }
+                if (a_variable_ptr dv = array_variable(e))
+                {
+                    return array_decay(e, dv);
                 }
                 break;
             case eok_indirect:
@@ -13565,19 +13644,6 @@ private:
             }
             if (vt.t.is_array())
             {
-                bool in_loop {false};
-                for (const Ctx::Target& tg : cx_.targets)
-                {
-                    in_loop = in_loop || !tg.is_switch;
-                }
-                if (in_loop)
-                {
-                    reject(
-                        Diag::unsupported_declaration, at,
-                        "an array declared inside a loop (the loop rules for arrays are Part C of M4.5e1a, decision 0059 item 8)");
-                    cx_.rejected_vars.insert(v);
-                    continue;
-                }
                 if (v->init_kind != initk_none && v->init_kind != initk_dynamic && v->init_kind != initk_static)
                 {
                     reject(Diag::unsupported_declaration, at, "this kind of array initialization");
@@ -13671,7 +13737,6 @@ private:
                 }
                 else if (vt.t.is_array())
                 {
-                    cx_.open_arrays.push_back(var);
                     if (v->init_kind == initk_static)
                     {
                         array_initializer(v, var, nullptr, v->initializer.constant, at, out);
@@ -15457,6 +15522,12 @@ private:
         auto ops {operands_of(e)};
         switch (e->variant.operation.kind)
         {
+            case eok_array_to_pointer:
+            { // `return a;` of a local array (decision 0059 item 10): the decay is the address of its first element, inside the local
+                a_variable_ptr av {array_variable(e)};
+                auto ait {av != nullptr ? cx_.vars.find(av) : cx_.vars.end()};
+                return ait != cx_.vars.end() ? ait->second : nullptr;
+            }
             case eok_question:
                 if (ops.size() != 3U)
                 {
@@ -16755,16 +16826,6 @@ private:
             case stmk_block:
             {
                 Out inner;
-                // the array locals declared in this block go out of scope with it (decision 0059 item 8)
-                struct OpenArrays
-                {
-                    std::vector<const vir::Var*>& v;
-                    size_t mark;
-                    ~OpenArrays()
-                    {
-                        v.resize(mark);
-                    }
-                } open_arrays_guard {cx_.open_arrays, cx_.open_arrays.size()};
                 if (s->compiler_generated)
                 {
                     // Guards (decision 0015 item 2; P20 found neither shape): a flattened block must not hold a user label (its scope
@@ -16903,10 +16964,6 @@ private:
                     rejected_statement(s, "a while statement with a declaration in its condition");
                     return;
                 }
-                if (loop_over_array(s))
-                {
-                    return;
-                }
                 std::vector<vir::Clause> inv;
                 std::vector<vir::Clause> measure;
                 const bool inv_ok {encode_loop_clauses(s, inv, measure)};
@@ -16920,8 +16977,9 @@ private:
                 cx_.targets.pop_back();
                 if (c != nullptr && inv_ok)
                 {
-                    out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr, vir::LoopForm::While,
-                                          id, loc_of(s->position)));
+                    out.push_back(b_.with_keyword_loc(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
+                                                              vir::LoopForm::While, id, loc_of(s->position)),
+                                                      keyword_loc_of(s)));
                 }
                 return;
             }
@@ -16935,10 +16993,6 @@ private:
                 // `do { B } while (0)` runs once and needs no measure (0014 item 5).
                 // ... unless the condition names a variable or parameter (0017 item 7): then it is a measured loop in both modes.
                 const bool once {is_zero_constant(s->expr) && !names_object(s->expr)};
-                if (!once && loop_over_array(s))
-                {
-                    return;
-                }
                 std::vector<vir::Clause> inv;
                 std::vector<vir::Clause> measure;
                 const bool inv_ok {encode_loop_clauses(s, inv, measure, !once, /*atoms_ok=*/!once)};
@@ -16952,9 +17006,10 @@ private:
                 cx_.targets.pop_back();
                 if (c != nullptr && inv_ok)
                 {
-                    out.push_back(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
-                                          once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id,
-                                          loc_of(s->position)));
+                    out.push_back(b_.with_keyword_loc(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
+                                                              once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id,
+                                                              loc_of(s->position)),
+                                                      keyword_loc_of(s)));
                 }
                 return;
             }
@@ -16969,10 +17024,6 @@ private:
                 if (s->expr != nullptr && s->expr->kind == enk_condition)
                 {
                     rejected_statement(s, "a for statement with a declaration in its condition");
-                    return;
-                }
-                if (loop_over_array(s))
-                {
                     return;
                 }
                 // init; while (cond) { body; incr }  (0012 item 3)
@@ -17015,10 +17066,12 @@ private:
                                                            : block_of(std::move(step), fl->increment->position)};
                 if (c != nullptr && inv_ok)
                 {
-                    whole.push_back(b_.loop(
-                        c, std::move(inv), std::move(measure),
-                        cell_block(std::move(body), s->position, s->variant.for_loop.statement, /*loop_body=*/true),
-                        step_stmt, vir::LoopForm::While, id, loc_of(s->position)));
+                    whole.push_back(b_.with_keyword_loc(
+                        b_.loop(c, std::move(inv), std::move(measure),
+                                cell_block(std::move(body), s->position, s->variant.for_loop.statement,
+                                           /*loop_body=*/true),
+                                step_stmt, vir::LoopForm::While, id, loc_of(s->position)),
+                        keyword_loc_of(s)));
                 }
                 if (fl->initialization == nullptr)
                 {

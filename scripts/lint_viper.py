@@ -1891,11 +1891,12 @@ def owner_assignment_ok(g: str, rhs: str) -> bool:
         lo = leaf_cell_owner(m.group("c"))
         if lo is not None:
             return g == leaf_ghost_name(lo[1], lo[2])
-    if re.fullmatch(rf"{e}&&\(\((?P<x>{_ID})!=null\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)>none\)\)", r):
+    # decision 0059 item 10: `holds_token(x)` is `x != null && offset_of(x) == 0 && perm(tok) > none` (a pointer into the middle of a block holds no token)
+    if re.fullmatch(rf"{e}&&\(\(\((?P<x>{_ID})!=null\)&&\(offset_of\((?P=x)\)==0\)\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)>none\)\)", r):
         return True
     if re.fullmatch(rf"{e}\|\|\(\(\((?P<x>{_ID})!=null\)&&\(offset_of\((?P=x)\)==0\)\)&&\(perm\(loc\(block_of\((?P=x)\),\(?-1\)?\)\.tok\)==write\)\)", r):
         return True
-    m = re.fullmatch(rf"\({e}&&\(perm\((?P<c>.+?)\)>none\)\)&&\(\((?P=c)!=null\)&&\(perm\(loc\(block_of\((?P=c)\),\(?-1\)?\)\.tok\)>none\)\)", r)
+    m = re.fullmatch(rf"\({e}&&\(perm\((?P<c>.+?)\)>none\)\)&&\(\(\((?P=c)!=null\)&&\(offset_of\((?P=c)\)==0\)\)&&\(perm\(loc\(block_of\((?P=c)\),\(?-1\)?\)\.tok\)>none\)\)", r)
     if m:
         c = m.group("c")
         if lo := leaf_cell_owner(c):
@@ -2369,7 +2370,7 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
         body = _strip_wrap(m.group("body").strip())
         enclosing = next((d for d in decls if d.kind == "method" and d.line <= lineno <= d.end_line), None)
         for disjunct in _flatten_or(body):
-            conjuncts = [_strip_wrap(c) for c in _split_top(_strip_wrap(disjunct), "&&")]
+            conjuncts = _and_leaves(disjunct)  # decision 0059 item 10 nests `held && offset_of(p) == 0` as one operand of the term
             helds = [c for c in conjuncts if re.fullmatch(r"held_[\w$']*", c)]
             for e in (c for c in conjuncts if re.fullmatch(r"exm_[0-9]+", c)):
                 got = exm_info.get(enclosing.line if enclosing else -1, {}).get(int(e[len("exm_"):]))
@@ -2379,6 +2380,9 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                 elif tt is None or re.fullmatch(rf"loc\(block_of\({re.escape(got[1])}\),\(?-1\)?\)", _nospace(tt.group("loc"))) is None:
                     add(lineno, f"the exemption term guarded by `{e}` is exactly `t == loc(block_of({got[1]}), -1)`: the block of the cell `{e}` "
                                 "read, one member further than its guard (decision 0055 item 9)")
+                elif not has_offset_zero(conjuncts, got[1]):
+                    add(lineno, f"the exemption term guarded by `{e}` holds `offset_of({got[1]}) == 0`: the cell `{e}` read must start its block "
+                                "(decision 0059 item 10)")
             if not helds:
                 continue
             for c in conjuncts:
@@ -2390,6 +2394,10 @@ def lint_owning_global_tags(src: Source, decls: list[Decl], add: Callable[[int, 
                     add(lineno, f"an exemption term `held_... && t == loc(block_of(...{g}()...), -1)` names the cell of `{g}`, which "
                                 f"`program_start` does not tag `// cerastes:owning-global {g}`: only an owning global's block is exempt "
                                 "at `main`'s end (decision 0054 item 8)")
+                pointer = token_term_pointer(t.group("loc"))
+                if pointer is not None and not has_offset_zero(conjuncts, pointer):
+                    add(lineno, f"the exemption term `held_... && t == loc(block_of({pointer}), -1)` holds `offset_of({pointer}) == 0`: a held owner "
+                                "exempts the block its pointer starts, never one it points into (decision 0059 item 10)")
                 for h in helds:
                     if h not in ghosts:
                         continue
@@ -2747,6 +2755,73 @@ def _flatten_or(text: str) -> list[str]:
     return out
 
 
+def _and_leaves(text: str) -> list[str]:
+    """The conjuncts of a nested `&&` chain at any grouping (`(A && B) && (C && D)` is A, B, C, D), as raw text."""
+    text = _strip_wrap(text.strip())
+    parts = _split_top(text, "&&")
+    if len(parts) == 1:
+        return [text]
+    out: list[str] = []
+    for part in parts:
+        out += _and_leaves(part)
+    return out
+
+
+def token_term_pointer(loc_text: str) -> str | None:
+    """`P` of `loc(block_of(P), -1)` (the token slot of the block of P), the text between `block_of(` and its closing parenthesis."""
+    m = re.match(r"^loc\(\s*block_of\(", loc_text)
+    if m is None:
+        return None
+    end = _group_end(loc_text, m.end() - 1)
+    return None if end < 0 else loc_text[m.end():end]
+
+
+def has_offset_zero(conjuncts: list[str], pointer: str) -> bool:
+    """Whether the conjuncts hold `offset_of(<pointer>) == 0` (decision 0059 item 10: an exemption names a block's token only through a
+    pointer to the start of the block)."""
+    want = _nospace(f"offset_of({pointer}) == 0")
+    return any(_nospace(c) == want for c in conjuncts)
+
+
+# The loop-carried exemption terms of records 0050 and 0056 (record 0059 item 10 leaves them unrestated: they are reached only through owners,
+# whose updates require `offset_of == 0`).  A term that lacks `offset_of(P) == 0` is accepted only when it is exactly one of these families,
+# each over a pointer variable `P` (an identifier), so that a carried shape that is not one of them is refused:
+#   temp      `T && t == loc(block_of(U), -1)` with `T` and `U` the loop's temporaries `t__<n>`;
+#   kt        `P != null && kt_<...> > none && t == loc(block_of(P), -1)` (one kt snapshot compare), with alias guards: `block_of(P) != block_of(X)`,
+#             `!ad_<...>`, `!((P != null && X != null) && block_of(P) == block_of(X))`;
+#   replaced  `P != null && t == loc(block_of(P), -1)` (a replaced or written loop's owner), with the nullness guards `!(P == null)` or
+#             `!(((P == null) ? n : n) != n)` of a block site read through a loop.
+CARRY_ID = r"[A-Za-z_$][\w$']*"
+
+
+def carried_term_family(leaves: list[str], term: str, pointer: str) -> str | None:
+    """The loop-carry family of a term (`temp`, `kt` or `replaced`, see above), or None."""
+    p = _nospace(pointer)
+    if not re.fullmatch(CARRY_ID, p):
+        return None
+    others = [_nospace(l) for l in leaves if l != term]
+    if len(others) == 1 and re.fullmatch(r"t__[0-9]+", others[0]) and re.fullmatch(r"t__[0-9]+", p):
+        return "temp"
+    nonnull = f"{p}!=null"
+    if nonnull not in others:
+        return None
+    rest = list(others)
+    rest.remove(nonnull)
+    kts = [x for x in rest if re.fullmatch(r"kt_[\w$']*>none", x)]
+    if len(kts) == 1:
+        rest.remove(kts[0])
+        e = re.escape(p)
+        if all(re.fullmatch(rf"block_of\({e}\)!=block_of\({CARRY_ID}\)|!ad_[\w$']*|"
+                            rf"!\(\(\({e}!=null\)&&\({CARRY_ID}!=null\)\)&&\(block_of\({e}\)==block_of\({CARRY_ID}\)\)\)", x)
+               for x in rest):
+            return "kt"
+        return None
+    e = re.escape(p)
+    if all(re.fullmatch(rf"!\({e}==null\)|!\(\(\({e}==null\)\?[0-9]+:[0-9]+\)!=[0-9]+\)", x) for x in rest):
+        return "replaced"
+    return None
+
+
 def forperm_exemption_problem(body: str) -> str | None:
     """Decision 0054 item 8: the exemption of a `forperm` leak row is `false` or a disjunction of terms, each a conjunction of guards
     with exactly one `t == loc(block_of(<pointer>), -1)`; `t` appears nowhere else, so an exemption only names the token of a block
@@ -2755,9 +2830,16 @@ def forperm_exemption_problem(body: str) -> str | None:
     if body == "false":
         return None
     for disjunct in _flatten_or(body):
-        conjuncts = [_strip_wrap(c) for c in _split_top(_strip_wrap(disjunct), "&&")]
+        conjuncts = _and_leaves(disjunct)
         terms = [c for c in conjuncts if (m := re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", c, re.S)) and TOKEN_SLOT_RE.search(m.group("loc"))
                  and _group_end(m.group("loc"), 3) == len(m.group("loc")) - 1]
+        if len(terms) == 1:
+            pointer = token_term_pointer(re.match(r"^t\s*==\s*(?P<loc>loc\(.*\))$", terms[0], re.S).group("loc"))
+            if (pointer is None or not has_offset_zero(conjuncts, pointer)) and (
+                    pointer is None or carried_term_family(conjuncts, terms[0], pointer) is None):
+                return ("an exemption term of a `forperm` leak row holds `offset_of(<pointer>) == 0` for the pointer of its `t == loc(block_of(<pointer>), -1)`: "
+                        "a pointer into the middle of a block carries no token, unless the term is exactly one of the loop-carry families "
+                        "of decisions 0050 and 0056 (decision 0059 item 10)")
         if len(terms) != 1:
             return ("an exemption term of a `forperm` leak row is `<guards> && t == loc(block_of(<pointer>), -1)` with exactly one "
                     "such comparison: it names a carried token by its location (decision 0054 item 8)")
@@ -3149,7 +3231,7 @@ def marked_row_shape(code: str) -> bool:
 def _loop_conjunct(q) -> tuple[str, list[str]] | None:
     """(kind, labels read by old[...]) of item 8's four quantified loop conjuncts, or None.  The kinds: `acc` (full permission over
     the range), `flags` (`... && old[L](E.d_t) ==> E.d_t`), `range` (`... && E.d_t ==> lo_T <= E.v_t && E.v_t <= hi_T`) and
-    `values` (`... ==> E.v_t == old[L](E.v_t)`).  A pointer element's `WF` conjunct is not one of them yet (Part C adds it)."""
+    `values` (`... ==> E.v_t == old[L](E.v_t)`).  The `range` of a pointer element `ptr_<t>` is `WF` of its value (S43 `s43_c_ptr_elem`); a pointer to a structure's extra `WF_S` conjunct is not accepted yet."""
     k, b, extra, cons = q
     cell = rf"loc\({re.escape(_squash(b))},{re.escape(k)}\)"
     cons = _squash(cons)
@@ -3174,6 +3256,12 @@ def _loop_conjunct(q) -> tuple[str, list[str]] | None:
             return None
         v = rf"{cell}\.v_{re.escape(m.group(2))}"
         if len(lows) == 2 and re.match(rf"^\(*-?\d+\)*<={v}$", lows[0]) and re.match(rf"^{v}<=\(*-?\d+\)*$", lows[1]):
+            return "range", []
+        # a pointer element: the range of its value is `WF` (null, or the pointer's own block with 0 <= offset <= len), the same
+        # text as a view's, over the element read under the quantifier (S43 `s43_c_ptr_elem`); a pointer to a structure adds
+        # the guarded `WF_S` conjunct (decision 0043 item 8), which is not accepted here yet
+        element = f"loc({_squash(b)},{k}).v_{m.group(2)}"
+        if len(lows) == 1 and m.group(2).startswith("ptr_") and norm_viper(lows[0]) == norm_viper(_view_wf(element)):
             return "range", []
     return None
 
@@ -3408,6 +3496,21 @@ def _top_level_items(measure: str) -> list[str]:
     return items
 
 
+def loop_body_line(src: Source, lineno: int, column: int) -> int:
+    """The line of the `{` that opens the body of the `while` at (`lineno`, `column`): a `{` that follows `::` or the `}` of a
+    trigger set belongs to a quantifier of an invariant (`forall k: Int :: { loc(b, k) } ...`, decision 0059 item 8), not to the body."""
+    tail = ""
+    for ln in range(lineno, len(src.code) + 1):
+        code = src.code[ln - 1]
+        for ch in (code[column:] if ln == lineno else code):
+            if ch.isspace():
+                continue
+            if ch == "{" and not (tail.endswith("::") or tail.endswith("}")):
+                return ln
+            tail = (tail + ch)[-2:]
+    return len(src.code)
+
+
 def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None],
                              measures: dict[int, str] | None = None) -> None:
     """Decision 0013 item 5: Silicon checks termination only where a `decreases` clause is present, so every
@@ -3444,7 +3547,7 @@ def lint_termination_clauses(src: Source, decls: list[Decl], add: Callable[[int,
                         "unconditional")
     for lineno, code in enumerate(src.code, start=1):
         for _w in WHILE_WORD_RE.finditer(code):
-            body = next((ln for ln in range(lineno, len(src.code) + 1) if "{" in src.code[ln - 1]), len(src.code))
+            body = loop_body_line(src, lineno, _w.end())
             if not any(DECREASES_LINE_RE.match(src.code[ln - 1]) for ln in range(lineno, body)):
                 add(lineno, "`while` loop without a `decreases` clause: Silicon checks termination only "
                             "where one is present (decision 0013 item 5)")

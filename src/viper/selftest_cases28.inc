@@ -17,52 +17,14 @@ void define_arrays_rejected_until_part_b()
     {
         return k.prog.array_of(k.i32, 3U);
     };
-    // `&p[1]` of the pointer parameter p of `f`
-    auto ea = [=](Kit& k, Function* f)
-    {
-        return k.b.elem_addr(k.b.text(k.pv(f, 0), "p"), N(k, "1"), k.at());
-    };
-
-    // ---- the node `ElemAddr`, in every position ----
-    rc("arr_rej_elem_addr_as_value", "of anything but a local array",
+    // ---- the node `ElemAddr`, in every position the accepted shapes do not cover (the pointer-based and array-based element places are lowering cases) ----
+    rc("arr_rej_elem_addr_over_struct_pointer", "structures: M4.5e1e",
        [=](Kit& k)
        {
-           // int *q = &p[1];
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           Var* q {k.local(f, "q", PI(k))};
-           f->body = k.blk({k.decl(q, ea(k, f))});
-           k.done(f);
-       });
-    rc("arr_rej_elem_addr_read", "of anything but a local array",
-       [=](Kit& k)
-       {
-           // return p[1];
-           Function* f {k.fn("f", k.i32, {{"p", PI(k)}})};
-           f->body = k.blk({k.ret(k.deref(ea(k, f)))});
-           k.done(f);
-       });
-    rc("arr_rej_elem_addr_write", "of anything but a local array",
-       [=](Kit& k)
-       {
-           // p[1] = 5;
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           f->body = k.blk({k.store(ea(k, f), N(k, "5"))});
-           k.done(f);
-       });
-    rc("arr_rej_elem_addr_compound_write", "of anything but a local array",
-       [=](Kit& k)
-       {
-           // p[1] += 5;
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           f->body = k.blk({k.cstore(ea(k, f), BinaryOp::Add, N(k, "5"))});
-           k.done(f);
-       });
-    rc("arr_rej_elem_addr_write_as_value", "of anything but a local array",
-       [=](Kit& k)
-       {
-           // return p[1] = 5;
-           Function* f {k.fn("f", k.i32, {{"p", PI(k)}})};
-           f->body = k.blk({k.ret(k.b.store_expr(ea(k, f), N(k, "5"), k.at()))});
+           // sp[1] of a `struct S *sp`
+           StructType* S {k.strukt("S", {{"x", k.i32}})};
+           Function* f {k.fn("f", k.vd, {{"sp", k.ptr(k.st(S))}})};
+           f->body = k.blk({k.es(k.b.elem_addr(k.pv(f, 0), N(k, "1"), k.at()))});
            k.done(f);
        });
     rc("arr_rej_elem_addr_in_requires", "the address of an array element in a contract",
@@ -83,30 +45,6 @@ void define_arrays_rejected_until_part_b()
            f->body = k.blk({});
            k.done(f);
        });
-    rc("arr_rej_elem_addr_in_check", "of anything but a local array",
-       [=](Kit& k)
-       {
-           // check(p[1] == 0)
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           f->body = k.blk({k.chk(k.eq(k.deref(ea(k, f)), N(k, "0")))});
-           k.done(f);
-       });
-    rc("arr_rej_elem_addr_in_condition", "of anything but a local array",
-       [=](Kit& k)
-       {
-           // if (p[1] == 0) { }
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           f->body = k.blk({k.iff(k.eq(k.deref(ea(k, f)), N(k, "0")), k.blk({}))});
-           k.done(f);
-       });
-    rc("arr_rej_elem_addr_in_loop_invariant", "of anything but a local array",
-       [=](Kit& k)
-       {
-           // while (true) invariant(p[1] == 0) decreases(0) { }
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           f->body = k.blk({k.whl(k.yes(), {k.cl(k.eq(k.deref(ea(k, f)), N(k, "0")))}, {k.cl(N(k, "0"))}, k.blk({}))});
-           k.done(f);
-       });
     rc("arr_rej_elem_addr_in_atom", "the address of an array element in a contract",
        [=](Kit& k)
        {
@@ -116,7 +54,7 @@ void define_arrays_rejected_until_part_b()
            f->body = k.blk({});
            k.done(f);
        });
-    rc("arr_rej_elem_addr_ill_typed_base", "of anything but a local array",
+    rc("arr_rej_elem_addr_ill_typed_base", "of anything but a local array or a pointer",
        [=](Kit& k)
        {
            // a base that is no pointer is built as it is and refused

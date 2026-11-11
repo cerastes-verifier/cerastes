@@ -249,13 +249,28 @@ pointers into arrays. Ranges in contracts (`owns_range`, `reads_range`, array pa
       hand-written Viper). The change is defensive (audit round 1, item 10): `offset_of == 0` is already required by
       `block_rows` for `free` and `owns_block`, by `block_conj`, by the three owning-assignment rows and by
       `held_updates`, so no assignment the encoder writes hands an owner `&p[1]`: storing `&p[1]` into an owning
-      global is `permission` at the store, and `free(&p[1])` is already `invalid-free`. The Viper of every existing
-      program with an owner changes in those rows, outcomes unchanged (the plan's Flips D).
-    - **Loop places of a reassigned pointer local** carry no `offset_of < len` (audit round 1, item 15): `pk[0]` inside
-      such a loop is a false `out-of-bounds`, pinned.
+      global is `permission` at the store, and `free(&p[1])` is already `invalid-free`. The restated rows are
+      backstops: no encoder path reaches them with an interior pointer, so only the hand-written fixtures `s43_f_*`
+      show the hole they close, and no VIR case can. The Viper of every existing program with an owner changes in
+      those rows, outcomes unchanged (the plan's Flips D): 1,080 `.vpr` files (no `.map`), each changed line a
+      held-ghost or token update, a leak row's exemption term, or the flag clause gaining `offset_of(x) == 0`. The
+      allow-list computed before the build predicted 849 (its search missed the token's `.tok` spelling; question 235).
+    - **No case splits are added** for pointers into arrays: a pointer assigned `&a[i]` or `a` and read after the
+      assignment is framed by the array's range place; a pointer the loop reassigns has no loop place of its own, as
+      for scalar cells.
+    - **The loop-carried exemption terms** of records 0050 and 0056 (`t__N && …`, `(v != null && kt_h > none) && …`
+      and their alias-guarded forms) are not restated: they are reached only through owners whose updates already
+      require `offset_of == 0`; the lint pins them as their own family.
+    - **Loop places of pointer locals** (audit round 1, item 15, predicted a false `out-of-bounds` for `pk[0]`): it does
+      not reproduce. A pointer local the loop does not reassign keeps its loop place and `pk[0]` verifies wherever `*pk`
+      does (`array_ptr_loop_pk_cell.c`); one the loop reassigns already fails at `*pk` (`null-dereference`,
+      `permission`), as for scalars.
 
 11. **`sizeof` and markers.** `sizeof(a)` of an array local is `N * sizeof(T)`, computed from the checked bound
-    (P78 (c): `sizeof(a)`, `sizeof(a[0])` and their quotient fold to constants that keep `expr`); type operands stay
+    (P78 (c): `sizeof(a)`, `sizeof(a[0])` and their quotient fold to constants that keep `expr`); only `sizeof`:
+    `_Alignof(a)` and C++'s `alignof(a)` of an expression are a GNU extension clang warns about by default
+    (`-Wgnu-alignof-expression`), and `__datasizeof(a)` is clang's own, so they stay rejected (audit round 3, item 1).
+    Only an array written with an array declarator qualifies; type operands, `typeof`, `decltype` and typedefs stay
     rejected (e1e). `cerastes::uninit` on an array local without an initializer is
     accepted (0042 item 3), and `--strict-init` asks for it as for a scalar (0042 item 8).
 

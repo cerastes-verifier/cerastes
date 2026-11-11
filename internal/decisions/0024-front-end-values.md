@@ -189,3 +189,5 @@ rejected).
 - The emitted Viper of programs without these constructs is unchanged.
 
 *2026-10-26, amended by 0025 (M4.4c): item 2 — the cross-check also covers each encoded body's region: a block-scope static assertion the encoder did not reach is rejected, except in `predicate` and `pure` bodies (0025 item 5).*
+
+*2026-11-11, amended by 0059 (M4.5e1a): item 6 — `sizeof(a)` and `_Alignof(a)` of a local array written with an array declarator are accepted: its bound is checked as written at the declaration (0059 items 2 and 11); type operands, `typeof`, `decltype` and typedefs of array types stay rejected until M4.5e1e, and a local whose type reaches an array through them is rejected too.*

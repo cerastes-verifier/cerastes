@@ -104,6 +104,10 @@ carries the source position it came from, so an obligation can be reported at th
 (`prelude.cpp`), and writes the position map (`posmap.cpp`). The map says, for each line of Viper that can fail, which
 source position and which error category it stands for; its format is section 5 of the encoding specification. Each
 check is on its own line so that it has an entry.
+A check of the permission to a whole range of array elements is a _marked range row_ (decision
+{gh}/internal/decisions/0059-arrays-inside-one-function.md[0059]): its entry names the one Silicon reason that row may fail with,
+`insufficient.permission`, and `report.cpp` accepts exactly that reason on it (and the failed assertion on every other row), so a
+missing permission is told apart from a failure Silicon should never report.
 
 To keep the Viper of a run:
 

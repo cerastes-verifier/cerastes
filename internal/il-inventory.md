@@ -8348,3 +8348,21 @@ Evidence: 49 fixtures `tests/viper-smoke/memory/s43_*.vpr` (49 passed, 0 failed,
 | the marked entry rows | **none: new.** 0038 item 4 says "on entry nothing can fail: the snapshots are what is held"; an array range place instead demands the full amount, so an element kept by a callee before the loop must fail at a row of its own rather than inside Silicon's `invariant.not.established` (`s43_c_entry_keep_fail` pins it) | new |
 
 **Not covered by S43 (so nothing here about them):** `old[lh]` with a loop whose body `break`s or returns, array parameters and ranges in contracts (e1b), the lowering of the loop's `old[lh]` Viper label when two arrays and a heap place share one loop (`s43_h_three_arrays` has three range places; heap places and range places together were tried only in `s43_d_heap_array`, outside a loop), and the lint's view of the fixtures.
+
+### S43 addendum: element types in loops (record 0059 item 8; audit round 1, item 9; macOS, pinned Silicon through `scripts/run_tests.py`, one file at a time) **PASS: the range conjunct of every element type is accepted, kept and used by Silicon (2.3-4.0 s per program, no `qp.not.injective`); each twin without its conjunct fails at the one assertion that needs it**
+
+Six fixtures in `tests/viper-smoke/memory/` in S43 (c)'s shape (alloc, zero fill, marked entry rows, the label, the conjuncts, a store of the element, marked back-edge rows, a use of the elements after the loop, scope exit), generated once by `build/m4.5e1a/c/gen_spike.py` from the emitted preamble of a C program with `int *a[3]`, `bool b[3]` and an enumeration array.
+
+| fixture | the loop | the conjunct under test | outcome |
+|---|---|---|---|
+| `s43_c_ptr_elem` | `int *a[3] = {0}`; `a[i] = &x` | `forall k :: in range && d_ptr_int ==> WF(loc(B,k).v_ptr_int)`: `WF(p)` is `p == null \|\| (p == loc(block_of(p), offset_of(p)) && 0 <= offset_of(p) && offset_of(p) <= len(block_of(p)))`, a term that reads the heap through the element and applies three domain functions to it, under the quantifier (trigger `loc(B,k)` only) | verifies in 2.5 s: entry (zero fill: null) is established, the conjunct is preserved by the store of `&x`, and `WF(a[1])` holds after the loop |
+| `s43_c_ptr_elem_norange_fail` | the same without that conjunct | | fails at the one `assert WF(p)` after the loop (assertion.false), 2.3 s |
+| `s43_c_bool_elem` | `bool b[3] = {false}`; `b[i] = (i == 1)` | none for `bool` (no range conjunct); the flags-kept conjunct is what makes the read of `b[1]` after the loop initialized | verifies in 3.8 s |
+| `s43_c_bool_elem_noflags_fail` | the same without the flags-kept conjunct | | fails at the one `//INIT` row after the loop, 4.0 s |
+| `s43_c_enum_elem` | an enumeration array over the value range `[0, 2]` (the zero fill is in range); `a[i] = 2` | `forall k :: in range && flag ==> 0 <= v <= 2` | verifies in 2.3 s; after the loop `0 <= a[1] <= 2` holds |
+| `s43_c_enum_elem_norange_fail` | the same without the range conjunct | | fails at the one atomic `assert !(s < 0 \|\| 2 < s)`, 3.0 s |
+
+Findings.
+- **The `WF` conjunct is a plain implication: Silicon takes it, keeps it across the back edge and needs no extra trigger** (the heap-dependent term `loc(B,k).v_ptr_int` appears inside `block_of(..)`, `offset_of(..)` and `len(..)` under the one trigger `loc(block_of(B), k)`). The conjunct carries the pointer's shape only; nothing about liveness, which is the element's own use of the pointer (0037 item 3).
+- **An atomic assertion for the twin's use:** a twin that asserts `0 <= s && s <= 2` is reported twice (N2 again); the lowering's rows are atomic, and so are these.
+- The enumeration fixture uses the range `[0, 2]`; an enumeration whose range excludes 0 never reaches a zero-filled loop, since the encoder rejects the elements the fill would give 0 (the range conjunct could not be established at entry).

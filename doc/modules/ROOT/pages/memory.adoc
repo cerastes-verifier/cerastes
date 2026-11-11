@@ -513,12 +513,48 @@ a function that owns two can be given two different elements of one array:
 include::example$memory/array_element_pointer.c[tag=source]
 ----
 
+An array used as a value is a pointer to its first element: `int *p = a;`, or
+`a` as an argument, which a function that owns one object can take. `p[i]`
+indexes any pointer, with the checks of `a[i]` against the object the pointer
+points into, so a pointer to `a[1]` reaches `a[2]` as `q[1]`. A function that
+receives a pointer with `cerastes_owns(*p)` owns one object, `p[0]`: `p[1]`
+there is reported as
+xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`] (the object may end at
+`p`) and as xref:error-messages.adoc#_permission[`permission`] (or it goes on,
+and the function does not own the rest).
+
+[source,c]
+----
+include::example$memory/array_decay.c[tag=source]
+----
+
 `&a[n]` of an array of `n` elements is a pointer one past the end: it can be
 formed and compared, and reading or writing through it is reported as
 xref:error-messages.adoc#_permission[`permission`] (no element is there).
-`return &a[1];` is rejected, as `return &x;` is. When the array's block ends,
+`return a;` and `return &a[1];` are rejected, as `return &x;` is. When the array's block ends,
 a function that kept an element is reported as
 xref:error-messages.adoc#_lifetime[`lifetime`], as for any object.
+
+In a loop, every array in scope is carried like the other objects in memory
+(<<loops>>): its elements keep their values when no write in the loop can reach
+the array (no assignment to one of its elements, no write through a pointer to
+its element type, no call of a function whose contract owns an object of that
+type), and an element that has a value keeps one. A loop invariant or measure
+may read an element, with the checks code has: the index is inside the array,
+and the element has a value.
+
+[source,c]
+----
+include::example$memory/array_loop_sum.c[tag=source]
+----
+
+What cannot be said yet is a fact about every element at once. After a loop that
+fills an array declared without an initializer, reading an element is reported
+as xref:error-messages.adoc#_uninitialized[`uninitialized`], because only an
+invariant over all the elements could say which ones the loop has written; and
+after a loop that writes an array, an element's value is known only as far as an
+invariant states it for that element. Invariants over every element
+(`forall`) are planned next.
 
 Not supported yet, each rejected with a diagnostic: designators in an array's
 initializer (`{[2] = 5}`: the front end keeps only the index's computed value,

@@ -2931,8 +2931,23 @@ private:
                 }
                 if (!array_base)
                 {
-                    err(e.loc,
-                        "the address of an element of anything but a local array (decision 0059 item 10: a pointer base is Part D)");
+                    // Decision 0059 item 10: any accepted pointer is a base (`p[i]`, `&p[i]`); a pointer to a structure is e1e's, and the type is the pointer's own.
+                    if (!e.a->type.is_ptr() || !accepted_pointer(e.a->type) || e.a->type.pointee == nullptr ||
+                        e.a->type.pointee->is_struct())
+                    {
+                        err(e.loc,
+                            "the address of an element of anything but a local array or a pointer to a bool, an integer, an enumeration or a pointer (decision 0059 item 10; structures: M4.5e1e)");
+                        break;
+                    }
+                    if (!e.b->type.is_int() || is_enum(e.b->type))
+                    {
+                        err(e.b->loc,
+                            "an array index of type " + e.b->type.str() + ", not an integer (decision 0059 item 4)");
+                    }
+                    if (e.type != e.a->type)
+                    {
+                        err(e.loc, "the address of an element of a pointer does not have the pointer's type");
+                    }
                     break;
                 }
                 if (!e.b->type.is_int() || is_enum(e.b->type))
