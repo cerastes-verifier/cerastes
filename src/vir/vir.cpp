@@ -635,7 +635,25 @@ const Expr* Builder::atom(AtomKind kind, const Expr* ptr, int amount, SrcLoc loc
             case AtomKind::OwnsBlock:
                 e->c_text = "owns_block(" + ptr->c_text + ")";
                 break;
+            case AtomKind::OwnsRange:
+            case AtomKind::ReadsRange:
+                break; // built by range_atom, which has the count; a range atom made here has no spelling and check_program refuses it (no count)
         }
+    }
+    return e;
+}
+
+const Expr* Builder::range_atom(AtomKind kind, const Expr* ptr, const Expr* count, int amount, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc))};
+    e->atom = kind;
+    e->a = ptr;
+    e->b = count; // record 0060 item 3: the count is the atom's second operand
+    e->amount = amount;
+    if (ptr != nullptr && count != nullptr && !ptr->c_text.empty() && !count->c_text.empty())
+    {
+        e->c_text = std::string(kind == AtomKind::OwnsRange ? "owns_range(" : "reads_range(") + ptr->c_text + ", " +
+                    count->c_text + ")";
     }
     return e;
 }
@@ -662,7 +680,9 @@ const Expr* Builder::global_atom(AtomKind kind, const Expr* global_addr, int amo
                 e->c_text = "live(&" + n + ")";
                 break;
             case AtomKind::OwnsBlock:
-                break; // never on a global (decision 0047 item 4: d2b); check_program refuses it
+            case AtomKind::OwnsRange:
+            case AtomKind::ReadsRange:
+                break; // never on a global (decision 0047 item 4: d2b; record 0060 item 3: a range's base is a parameter); check_program refuses it
         }
     }
     return e;
@@ -1292,6 +1312,49 @@ bool reads_heap(const Expr& e)
     return false;
 }
 
+namespace {
+
+bool same_pure_operand(const Expr* a, const Expr* b)
+{
+    if (a == nullptr || b == nullptr)
+    {
+        return a == b;
+    }
+    return same_pure_expr(*a, *b);
+}
+
+} // namespace
+
+bool same_pure_expr(const Expr& a, const Expr& b)
+{
+    if (a.kind != b.kind || !(a.type == b.type))
+    {
+        return false;
+    }
+    switch (a.kind)
+    {
+        case Expr::Kind::Const:
+            return a.value == b.value;
+        case Expr::Kind::Local:
+            return a.var != nullptr && a.var == b.var;
+        case Expr::Kind::Formal:
+            return a.index == b.index;
+        case Expr::Kind::Unary:
+            return a.uop == b.uop && same_pure_operand(a.a, b.a);
+        case Expr::Kind::Binary:
+            return a.bop == b.bop && same_pure_operand(a.a, b.a) && same_pure_operand(a.b, b.b);
+        case Expr::Kind::Cond:
+            return same_pure_operand(a.a, b.a) && same_pure_operand(a.b, b.b) && same_pure_operand(a.c, b.c);
+        case Expr::Kind::Convert:
+        case Expr::Kind::ToBool:
+        case Expr::Kind::BoolToInt:
+        case Expr::Kind::Old:
+            return same_pure_operand(a.a, b.a);
+        default:
+            return false; // a call, a read of memory, an atom, an assignment, ...: never "equal"
+    }
+}
+
 const Expr* member_root(const Expr* e, std::vector<int>* path)
 {
     std::vector<int> rev;
@@ -1361,6 +1424,17 @@ PlaceKey atom_place(const Expr& atom)
     {
         return k;
     }
+    // Record 0060 item 3: a range atom names the pointer parameter `p` it is written on (a bare `Formal`; any other base has no place, `valid()` false, which the
+    // checker refuses), with no steps and no member path.  The count is not part of the place: two range atoms of one kind on one parameter are duplicates
+    // whatever their counts, and `atom_partners` adds the counts for the `requires`/`ensures` partner rule.
+    if (is_range_atom(atom.atom))
+    {
+        if (atom.a->kind == Expr::Kind::Formal)
+        {
+            k.root = atom.a->index;
+        }
+        return k;
+    }
     // Decision 0054 item 2: an `owns_block` atom names a pointer VALUE, `atom.a` itself, and its place is that pointer's: the root and the steps of `atom.a`
     // (`p`: the Formal, no steps; `*pp`: root `pp`, one load; `g`: `Deref(GlobalAddr g)`), with no member tail (the pointer is the base).
     const Expr* base {atom.atom == AtomKind::OwnsBlock ? atom.a : member_root(atom.a, &k.path)};
@@ -1405,6 +1479,21 @@ PlaceKey atom_place(const Expr& atom)
             break;
     }
     return k;
+}
+
+bool atom_partners(const Expr& a, const Expr& b)
+{
+    if (a.atom != b.atom)
+    {
+        return false;
+    }
+    const PlaceKey pa {atom_place(a)};
+    const PlaceKey pb {atom_place(b)};
+    if (!pa.valid() || !pb.valid() || pa != pb)
+    {
+        return false;
+    }
+    return !is_range_atom(a.atom) || (a.b != nullptr && b.b != nullptr && same_pure_expr(*a.b, *b.b));
 }
 
 int atom_place_key(const Expr& atom)

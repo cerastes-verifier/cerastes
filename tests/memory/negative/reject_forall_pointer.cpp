@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L9
 // mode: c++20
 // twin: tests/memory/owns_inc.c
-// Pins: 0037 items 5 and 15: forall over a pointer's elements is rejected (lifted by M7 for the lambda form written here; M4.5e1c gives C's forall over a pure function, record 0059 item 1)
+// Pins: 0037 items 5 and 15, 0060 item 1 (flip B): forall over a pointer's elements is rejected (lifted by M7 for the lambda form written here; M4.5e1c gives C's forall over a pure function, record 0059 item 1); it shared owns_range's message, and now says only "a quantifier: M4.5e1c" since owns_range is accepted
 #include <cerastes.h>
 #include <stddef.h>
 

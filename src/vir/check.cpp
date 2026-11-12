@@ -755,6 +755,7 @@ private:
         ok_globals_.clear();
         ok_members_.clear();
         array_addr_ok_.clear();
+        contract_elem_ok_.clear();
         struct_pos_.clear();
         field_base_.clear();
         literal_stores_.clear();
@@ -1064,6 +1065,62 @@ private:
         }
     }
 
+    // Record 0060 item 3, what the encoder refuses first and this repeats: a guard of a range atom reads no memory (its rows are pure `assert`s); one range atom
+    // of a parameter (the same kind twice, `owns_range` beside `reads_range`) and no cell atom, `live` or `owns_block` beside it on the same parameter, in one clause
+    // list or one in each (M4.8).
+    void range_sites(const Function& f, const std::vector<AtomSite>& sites, const std::vector<AtomSite>& block_sites)
+    {
+        for (size_t i {0U}; i < sites.size(); ++i)
+        {
+            const AtomSite& a {sites[i]};
+            if (!is_range_atom(a.atom->atom))
+            {
+                continue;
+            }
+            for (const AtomGuard& g : a.guards)
+            {
+                if (g.cond != nullptr && reads_heap(*g.cond))
+                {
+                    err(a.atom->loc, "the guard of a range permission atom reads memory (record 0060 item 4)");
+                }
+            }
+            const PlaceKey pa {atom_place(*a.atom)};
+            if (!pa.valid())
+            {
+                continue; // refused in expr()
+            }
+            for (size_t j {0U}; j < sites.size(); ++j)
+            {
+                const AtomSite& o {sites[j]};
+                if (i == j || atom_place(*o.atom).root != pa.root || !atom_place(*o.atom).valid())
+                {
+                    continue;
+                }
+                if (!is_range_atom(o.atom->atom))
+                {
+                    err(a.atom->loc, "a range permission atom and a cell atom on the same parameter of '" + f.c_name +
+                                         "' (record 0060 item 1: M4.8)");
+                }
+                else if (j < i && o.in_ensures == a.in_ensures)
+                {
+                    err(a.atom->loc,
+                        std::string("two range permission atoms on one parameter in one clause list") +
+                            (o.atom->atom == a.atom->atom ? " of one kind" : " (`owns_range` and `reads_range`)") +
+                            " (record 0060 item 1: M4.8)");
+                }
+            }
+            for (const AtomSite& o : block_sites)
+            {
+                const PlaceKey ob {atom_place(*o.atom)};
+                if (ob.root == pa.root && ob.via.empty())
+                {
+                    err(a.atom->loc,
+                        "a range permission atom beside `owns_block` of the same pointer (record 0060 item 1)");
+                }
+            }
+        }
+    }
+
     void atoms(const Function& f)
     {
         std::set<const Expr*> all;
@@ -1082,6 +1139,7 @@ private:
         const std::vector<AtomSite> sites {contract_atoms(f)};
         // decision 0047 item 4: no ghost amount, no partner
         const std::vector<AtomSite> block_sites {contract_block_atoms(f)};
+        range_sites(f, sites, block_sites);
         std::set<const Expr*> placed;
         for (const AtomSite& s : sites)
         {
@@ -1147,6 +1205,12 @@ private:
                 continue;
             }
             const Expr& a {*s.atom};
+            if (is_range_atom(a.atom) && (a.amount < 0 || static_cast<size_t>(a.amount) >= req.size()))
+            {
+                err(a.loc,
+                    "an `ensures` range permission atom without a `requires` range atom of its kind, parameter and count to return (record 0060 item 3: M4.5e2)");
+                continue;
+            }
             if (a.amount >= 0 && static_cast<size_t>(a.amount) >= req.size())
             {
                 // Decision 0052 item 2: an atom without a partner carries the number of its OUTPUT amount, numbered
@@ -1207,8 +1271,7 @@ private:
                 continue;
             }
             const Expr& partner {*req[static_cast<size_t>(a.amount)]->atom};
-            if (partner.atom != a.atom || !atom_place(partner).valid() || !atom_place(a).valid() ||
-                atom_place(partner) != atom_place(a))
+            if (!atom_partners(a, partner))
             {
                 err(a.loc,
                     "an `ensures` atom whose partner in the `requires` is of another kind or on another parameter or global (decisions 0037 item 6, 0041 item 8)");
@@ -1247,6 +1310,68 @@ private:
         }
         init_markers(f, sites, block_sites);
         not_invalidating_markers(f, sites, block_sites);
+    }
+
+    // Whether `e` mentions a node of the kind `k`.
+    static bool mentions_kind(const Expr* e, Expr::Kind k)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e->kind == k)
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (mentions_kind(x, k))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (mentions_kind(x, k))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Record 0060 item 3, the operands of a range atom (the encoder reports each first with its own message; this is the backstop): the base is a bare pointer parameter to a
+    // bool, an integer, an enumeration or a pointer (a structure is e1e's), the count an integer expression (not a bool, an enumeration, a pointer or a float) that reads no memory
+    // and names no result.  The atom is no implicit one and has no marker.
+    void range_atom_operands(const Expr& e, Ctx ctx)
+    {
+        if (e.implicit_atom)
+        {
+            err(e.loc, "an implicit range permission atom (record 0060 item 3)");
+        }
+        if (e.a == nullptr || e.b == nullptr)
+        {
+            err(e.loc, "a range permission atom without its pointer and its count (record 0060 item 3)");
+            return;
+        }
+        expr(*e.a, ctx, false);
+        expr(*e.b, ctx, false);
+        if (e.a->kind != Expr::Kind::Formal || !e.a->type.is_ptr() || !accepted_pointer(e.a->type) ||
+            e.a->type.pointee == nullptr || e.a->type.pointee->is_struct())
+        {
+            err(e.loc,
+                "a range permission atom of something other than a pointer parameter to a bool, an integer, an enumeration or a pointer (record 0060 item 3; other bases: M4.5e2, structures: M4.5e1e)");
+        }
+        if (!e.b->type.is_int() || e.b->type.is_bool() || is_enum(e.b->type))
+        {
+            err(e.b->loc, "the count of a range permission atom has the type " + e.b->type.str() +
+                              ", not an integer (record 0060 item 3)");
+        }
+        if (reads_heap(*e.b) || mentions_kind(e.b, Expr::Kind::Result) || mentions_kind(e.b, Expr::Kind::Old))
+        {
+            err(e.b->loc,
+                "the count of a range permission atom reads memory, names the result or is under `old` (record 0060 item 3)");
+        }
     }
 
     // Decision 0047 items 2, 4 and 5: the rules of the `owns_block` atoms (the encoder reports each first with its own message; this is the backstop).
@@ -1440,6 +1565,14 @@ private:
                 const PlaceKey pk {atom_place(*s.atom)};
                 if (pk.root != k || (s.atom->a != nullptr && member_root(s.atom->a)->kind != Expr::Kind::Formal))
                 {
+                    continue;
+                }
+                // Record 0060 item 12 (Part E): a marker over a range is not lowered yet; the encoder refuses it first, and a marked range would assume its flags.
+                if (is_range_atom(s.atom->atom))
+                {
+                    err(pr.loc,
+                        who +
+                            " is marked `ref_to_uninit` or `must_init` beside a range permission atom (record 0060 item 12: not lowered yet)");
                     continue;
                 }
                 // `owns(*p)` (the whole pointee) is the atom a marker needs; a `reads` of the pointee or of any member of it beside a marker is refused.
@@ -2603,6 +2736,10 @@ private:
                 if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
                 {
                     mark_contract_place(e.a); // the read of `g`, of `p->x` (decision 0043)
+                    if (e.a != nullptr && e.a->kind == Expr::Kind::ElemAddr)
+                    {
+                        contract_elem_ok_.insert(e.a); // record 0060 item 5: `p[e]` read in a contract
+                    }
                 }
                 if (e.a != nullptr && shared_addrs_.count(e.a) != 0U)
                 { // the address of the enclosing store, already checked (decision 0039 item 5)
@@ -2631,7 +2768,9 @@ private:
                 {
                     // In a contract the place is `*p`, `*result`, `g` or, decision 0043 item 9, a member of one of them (`p->x`, `r->t.y`) or, decision 0045 item 2,
                     // any of those reached through loads and pointer leaves (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`): the root under MemberAddr, Deref and Field nodes.
-                    const Expr* root {place_root(e.a)};
+                    // record 0060 item 5: the element `p[e]` of a pointer parameter (its ElemAddr is checked where it stands) is rooted at that parameter
+                    const Expr* root {e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr ? e.a->a
+                                                                                             : place_root(e.a)};
                     if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal &&
                         root->kind != Expr::Kind::GlobalAddr &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
@@ -2652,6 +2791,13 @@ private:
                 }
                 break;
             case Expr::Kind::Atom:
+                // Record 0060 item 3: a range atom stands in a function's `requires` and `ensures` and nowhere else (a loop invariant is M4.5e2's, question 237).
+                if (is_range_atom(e.atom) && ctx != Ctx::Requires && ctx != Ctx::Ensures)
+                {
+                    err(e.loc,
+                        "a range permission atom (`owns_range`, `reads_range`) outside the `requires` and `ensures` of a function (record 0060 item 3; in a loop invariant: M4.5e2, question 237)");
+                    break;
+                }
                 // Decision 0037 item 5: owns(*p), reads(*p) and live(p) of a pointer parameter p, in a contract, outside `old`.  Where it may
                 // stand and how it pairs with its partner is checked by `atoms`.  Decision 0040 item 5: the same of a pointer variable (a Local) in the
                 // invariant of a loop (not a `do ... while (0)`); `loop_atom_sites` checks the positions.  A measure, a `check` and code hold none
@@ -2675,6 +2821,11 @@ private:
                 {
                     err(e.loc,
                         "the vlibc mark on a permission atom that is not an `owns_block` (decision 0052 item 7)");
+                }
+                if (is_range_atom(e.atom))
+                {
+                    range_atom_operands(e, ctx);
+                    break;
                 }
                 if (e.atom == AtomKind::OwnsBlock)
                 {
@@ -2910,12 +3061,28 @@ private:
                 break;
             case Expr::Kind::ElemAddr:
             {
-                // Decision 0059 item 4: the address of element `b` of the array local whose address is `a`; a pointer base is part D's, a contract's is e1b's.
+                // Decision 0059 item 4: the address of element `b` of the array local whose address is `a`; a pointer base is part D's.
+                // Record 0060 item 5: in a contract the element is a READ (`p[e]`, the operand of a Deref) of a pointer parameter, with an index that reads no memory;
+                // its address as a value (`&p[e]`, `p + i`) is M4.5e2's (question 236).
                 if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
                 {
-                    err(e.loc,
-                        "the address of an array element in a contract (decision 0059 item 1: ranges in contracts are M4.5e1b)");
-                    break;
+                    if (contract_elem_ok_.count(&e) == 0U)
+                    {
+                        err(e.loc,
+                            "the address of an array element in a contract is a read only as the operand of `p[e]`; used as a value (`&p[e]`, `p + i`, an atom on an element) it is M4.5e2's (record 0060 item 1, question 236)");
+                        break;
+                    }
+                    if (e.a == nullptr || e.b == nullptr || e.a->kind != Expr::Kind::Formal)
+                    {
+                        err(e.loc,
+                            "an element read in a contract of anything but a pointer parameter (record 0060 item 5)");
+                        break;
+                    }
+                    if (reads_heap(*e.b))
+                    {
+                        err(e.b->loc, "an element read in a contract whose index reads memory (record 0060 item 5)");
+                        break;
+                    }
                 }
                 const bool array_base {e.a != nullptr && e.a->kind == Expr::Kind::AddrOf && e.a->var != nullptr &&
                                        e.a->var->type.is_array()};
@@ -3651,6 +3818,8 @@ private:
     std::set<const Expr*> ok_members_;
     // the `AddrOf` nodes of array locals that stand as the base of an ElemAddr (decision 0059 item 4)
     std::set<const Expr*> array_addr_ok_;
+    // the ElemAddr nodes that are the operand of a Deref in a contract (record 0060 item 5: `p[e]` is a read there, `&p[e]` is not)
+    std::set<const Expr*> contract_elem_ok_;
     std::unordered_set<const StructType*> structs_; // the program's struct types
     // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field
     // operand; decision 0044 item 2)

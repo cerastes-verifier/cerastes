@@ -10,7 +10,10 @@
   question 238 restated, S3 the count's and the base's conversions (item 3), S4 the count bound to a local (item 8),
   S5 the argument that no range sum row is needed at a call (item 8), S6 the cell's return sum (item 9), S7 the
   multi-error twins (item 8); notes N2, N4, N5, N10 and N11 taken in items 1, 5, 15 and the tests;
-  `build/m4.5e1b/auditor-report-1.md`). Owner
+  `build/m4.5e1b/auditor-report-1.md`), and by audit round 2 on Parts A and B (no blocking item; five should-fix items,
+  all taken: diagnostics in source terms, four pins, one of them a rejection item 1 now lists, the guard-true vacuity
+  form and two twins in the VIR cases, the lint's amount rule for item 6's minimum; N3 corrected item 6's example;
+  `build/m4.5e1b/auditor-report-2.md`). Owner
   decisions:
   - At M4.5e1's planning and before e1a (2026-11-11): **228** `cerastes_reads_range(p, n)` beside `owns_range`;
     **230** `int a[static N]` stays rejected (M8); **231** `owns_range(p, n)` and `reads_range(p, n)` imply `p !=
@@ -56,7 +59,7 @@ outcome to the branch of the plan's decision table it took.
    |---|---|
    | an atom on one element (`owns(p[i])`, `reads(a[i])`); `&p[e]` and `p + i` in a contract | M4.5e2 (236) |
    | a range atom in a loop invariant; a loop in a function that assigns its range parameter (a false alarm) | M4.5e2 (237) |
-   | a range whose base is not a pointer parameter (`result`, a global, a member, a loaded pointer); a count that reads memory; a partnerless `ensures` range; an `ensures` range with another count than its `requires` partner; `owning(n)` on results, locals, fields and globals | M4.5e2 (members: e1e) |
+   | a range whose base is not a pointer parameter (`result`, a global, a member, a loaded pointer); a count that reads memory; a guard of a range atom that reads memory (cell atoms accept one, 0045 item 3; audit round 2, S2); a partnerless `ensures` range; an `ensures` range with another count than its `requires` partner; `owning(n)` on results, locals, fields and globals | M4.5e2 (members: e1e) |
    | `owns_range` and `reads_range` on one parameter in one clause list; a range atom and a cell atom of the same parameter, in one clause list or one in each | M4.8 |
    | `cerastes_forall`; a `must_init` filler that fills with a loop (a false alarm); the full lists of `carrays.c` | e1c |
    | ranges over structures, array members, global arrays | e1e |
@@ -150,9 +153,11 @@ outcome to the branch of the plan's decision table it took.
    read atoms of one field that may alias (two `reads_range` parameters, or one and a `reads` cell) gets a false
    `permission` when it passes one of them on, because the range's first slot may be where the two overlap
    (`s44_c_unequal_fail.vpr`; the audit's `abl/E1_unequal_own_amounts.vpr` and `abl/E3_two_reads_pass_both_own_amounts.vpr`
-   verify with it). **Listed limit:** a caller whose holding over the range is unequal for another reason (a callee
-   kept a fraction of one element of a local array) gets a false `permission` (pinned; question 238, restated with this
-   scope). S44 (c): this amount needs no
+   verify with it). **Listed limit:** a caller whose holding over the range is unequal for another reason gets a false
+   `permission` (pinned; question 238, restated with this scope). A callee that kept a fraction of one element of a
+   local array is not such a case (audit round 2, N3): every taker of a slot takes the same fraction of the liveness
+   cell, which is in the minimum. A callee that keeps a slot's fraction but gives the liveness back (a partnerless
+   `ensures(live(p))`) is. S44 (c): this amount needs no
    case split and no sum row at the call; `(a, a)` to a `reads_range` pair, overlapping and disjoint read ranges, a
    caller holding the range whole or borrowing it, and a write after the call all verify; the unequal-fractions twin
    is one error.
@@ -177,6 +182,9 @@ outcome to the branch of the plan's decision table it took.
      S43 N1; the tests expect both. So does an argument the caller holds nothing of (an unconstrained pointer
      parameter passed beside a local array): three errors, the shape row, the liveness row and the first marked row
      (null, dangling, or another object the caller does not hold; audit round 1, S7, `abl/D1_unconstrained_arg.vpr`).
+     These counts are Silicon's; the driver prints one error per distinct line, category and message
+     (`src/driver/report.cpp`), and the shape row and the marked rows share a message, so the user sees one
+     `permission` at the call where the rows that fail share it.
      *(An order the table does not name, the marked rows before the shape row for
      `owns_range`, gave one error everywhere in S44 (b) (`s44_b_caller_orderD.vpr`); it is not built.)* The built
      order is pinned by `s44_b_*_orderB*`, the `s44_c_*`, `s44_d_*`, `s44_e_*`, `s44_h_*` and `s44_i_*` fixtures

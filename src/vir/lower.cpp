@@ -3785,15 +3785,22 @@ private:
         scope_exit(out, cells, at);
         owners_exit(out, k, at, returning);
     }
-    // `forall k: Int :: { loc(B, k) } lo <= k && k < hi ==> acc(loc(B, k).<field>)` with `B` the block of `ref`: the quantified permission a marked row asserts and an
-    // `exhale` gives up (decision 0059 item 7).  `lo` and `hi` read no heap.
-    E range_perm(const E& ref, long long lo, unsigned long long hi, const std::string& field)
+    // `forall k: Int :: { loc(B, k) } lo <= k && k < hi ==> acc(loc(B, k).<field>[, amount])` with `B` the block of `ref`: the quantified permission a marked row asserts
+    // and an `exhale` gives up (decision 0059 item 7; record 0060 item 4: the bounds are expressions and the permission may have an amount).  `lo` and `hi` read no
+    // heap and do not mention the binder `k`; a null `amount` is full permission.
+    E range_perm(const E& ref, const E& lo, const E& hi, const std::string& field, const E& amount = nullptr)
     {
         const E k {low::var("k")};
         const E slot {low::dom("loc", {block_of(ref), k})};
-        const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, low::int_lit(std::to_string(lo)), k),
-                             low::bin(low::BinOp::Lt, k, low::int_lit(std::to_string(hi))))};
-        return low::forall_("k", {slot}, low::bin(low::BinOp::Implies, in, low::acc(slot, field)));
+        const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, lo, k), low::bin(low::BinOp::Lt, k, hi))};
+        return low::forall_("k", {slot},
+                            low::bin(low::BinOp::Implies, in,
+                                     amount != nullptr ? low::acc(slot, field, amount) : low::acc(slot, field)));
+    }
+    // The same over literal bounds `[lo, hi)` with full permission (an array local's whole extent).
+    E range_perm(const E& ref, long long lo, unsigned long long hi, const std::string& field)
+    {
+        return range_perm(ref, low::int_lit(std::to_string(lo)), low::int_lit(std::to_string(hi)), field);
     }
     // A marked range row (decision 0059 item 7): `assert forall ... acc(...)`, whose failure Silicon reports as `insufficient.permission` and the driver maps to the
     // row's category.  Counted by `drop_assert` like every assertion.
@@ -3807,6 +3814,47 @@ private:
         s.check.expected_reason = "insufficient.permission";
         out.push_back(std::move(s));
     }
+    // `forall k: Int :: { loc(block_of(p), k) } offset_of(p) <= k && k < offset_of(p) + n ==> BODY(loc(block_of(p), k))` (record 0060 item 4): the rows of a range atom over
+    // the absolute slot `k`.  `ptr` is a variable (S44 F-b1: Silicon refuses a trigger `loc(block_of(e), k)` whose `e` holds an operator) and `count` reads no heap and does not
+    // mention `k`; the lint admits exactly these shapes.
+    E range_quant(const E& ptr, const E& count, const std::function<E(const E&)>& body)
+    {
+        const E k {low::var("k")};
+        const E slot {low::dom("loc", {block_of(ptr), k})};
+        const E lo {low::dom("offset_of", {ptr})};
+        const E hi {low::bin(low::BinOp::Add, lo, count)};
+        const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, lo, k), low::bin(low::BinOp::Lt, k, hi))};
+        return low::forall_("k", {slot}, low::bin(low::BinOp::Implies, in, body(slot)));
+    }
+    // `q` is a slot of the range `base[0..n)`: the same block, `offset_of(base) <= offset_of(q) < offset_of(base) + n` (item 5's framing, item 9's sums).
+    E in_range(const E& q, const E& base, const E& count)
+    {
+        const E lo {low::dom("offset_of", {base})};
+        return low::bin(low::BinOp::And,
+                        low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, block_of(q), block_of(base)),
+                                 low::bin(low::BinOp::Le, lo, low::dom("offset_of", {q}))),
+                        low::bin(low::BinOp::Lt, low::dom("offset_of", {q}), low::bin(low::BinOp::Add, lo, count)));
+    }
+    // The pure line of a range atom (item 4): `p != null && WF(p) && 0 <= n && offset_of(p) + n <= len(block_of(p))`; the shape row of a call (`!(p == null || !WF(p) || n < 0 ||
+    // len(block_of(p)) < offset_of(p) + n)`) is its negation.
+    E range_shape(const E& ptr, const Type& ptr_type, const E& count)
+    {
+        const E lo {low::dom("offset_of", {ptr})};
+        E r {low::and_(low::bin(low::BinOp::Ne, ptr, low::null_()), wf_expr(ptr, &ptr_type))};
+        r = low::and_(r, low::bin(low::BinOp::Le, low::int_lit("0"), count));
+        return low::and_(
+            r, low::bin(low::BinOp::Le, low::bin(low::BinOp::Add, lo, count), low::dom("len", {block_of(ptr)})));
+    }
+    // The element type's range over the value `v` (an integer type's range, WF of a pointer element, nothing for a `bool`): null for none.
+    E element_range(const E& v, const Type& t)
+    {
+        if (t.is_ptr())
+        {
+            return wf_expr(v, &t);
+        }
+        return t.is_bool() ? E() : range_check(v, *t.int_type);
+    }
+
     // Leaving the scope of an array local (decision 0059 item 6): a marked range row per field ("the address of an element may still be in use": `lifetime`), the
     // liveness row as for a cell, then the `exhale` of both quantified permissions and of the liveness cell.  After a failed marked row Silicon reports nothing else
     // on that path (S43, gate G2), so the `exhale` needs no guard.
@@ -4519,9 +4567,50 @@ private:
         // >= 0: this key is the LOOP-ENTRY snapshot `lb` of the derived key `lb_of` (decision 0045 item 10)
         int lb_of {-1};
     };
+    // Record 0060 item 5: an element read in a contract (`p[e]`, the operand of a Deref over an ElemAddr of a pointer parameter) has a key of its own, above the derived keys:
+    // one per function, parameter and index (structurally equal indexes are one read), so that its ghost value in `f__wf` is named by base, index and state.
+    static constexpr int kElemKeyBase {1 << 29};
+    static bool is_elem_key(int k)
+    {
+        return k >= kElemKeyBase;
+    }
+    struct ElemRead
+    {
+        const Function* f {nullptr};
+        const Expr* addr {nullptr}; // the ElemAddr node of the first read with this base and index
+        int local {0};              // the function's own number of this read (its ghost's name)
+    };
+    const ElemRead& elem_of(int k) const
+    {
+        return elems_[static_cast<size_t>(k - kElemKeyBase)];
+    }
+    // The key of the element `addr` (`ElemAddr(Formal p, index)`) in `f`, created in evaluation order the first time.
+    int elem_key(const Function& f, const Expr& addr)
+    {
+        for (size_t i {0U}; i < elems_.size(); ++i)
+        {
+            const ElemRead& r {elems_[i]};
+            if (r.f == &f && r.addr->a->index == addr.a->index && same_pure_expr(*r.addr->b, *addr.b))
+            {
+                return kElemKeyBase + static_cast<int>(i);
+            }
+        }
+        elems_.push_back(ElemRead {&f, &addr, elem_count_[&f]++});
+        return kElemKeyBase + static_cast<int>(elems_.size()) - 1;
+    }
+    std::deque<ElemRead> elems_;
+    std::map<const Function*, int> elem_count_;
+    // `loc(block_of(p), offset_of(p) + i)`: the address of the element `addr` in the state `env` describes (its operands are parameters and constants, and read no heap).
+    E elem_ref(const Expr& addr, const Env& env)
+    {
+        Full scratch;
+        const LV b {lower(*addr.a, env, nullptr, Deps {}, scratch)};
+        const LV i {lower(*addr.b, env, nullptr, Deps {}, scratch)};
+        return low::dom("loc", {block_of(b.e), low::bin(low::BinOp::Add, low::dom("offset_of", {b.e}), i.e)});
+    }
     static bool is_derived_key(int k)
     {
-        return k >= kDerivedKeyBase;
+        return k >= kDerivedKeyBase && k < kElemKeyBase;
     }
     const Derived& derived_of(int k) const
     {
@@ -5758,6 +5847,15 @@ private:
     std::set<std::string> site_fields(const AtomSite& s)
     {
         std::set<std::string> out;
+        if (site_is_range(s))
+        {
+            // the one field of the element type (a range over a structure is refused by the checker: record 0060 item 3)
+            if (!site_pointee(s).is_struct())
+            {
+                out.insert(cell_suffix(site_pointee(s)));
+            }
+            return out;
+        }
         if (!site_takes_cell(s))
         {
             return out;
@@ -5822,6 +5920,13 @@ private:
     // The user's spelling of the place a site names in the contract: `*p` for a parameter's pointee (empty if unknown), `g` for a global.
     std::string site_text(const AtomSite& s) const
     {
+        if (site_is_range(s))
+        {
+            // `p[0..n)`: the pointer and the count as the user wrote them (empty if either has no spelling)
+            const std::string& base {s.atom->a->c_text};
+            const std::string& count {s.atom->b != nullptr ? s.atom->b->c_text : std::string()};
+            return base.empty() || count.empty() ? std::string() : base + "[0.." + count + ")";
+        }
         if (site_is_global(s))
         {
             return s.atom->a->global != nullptr ? s.atom->a->global->c_name : std::string();
@@ -5883,9 +5988,15 @@ private:
         }
         return out;
     }
+    // A range atom (record 0060: `owns_range(p, n)`, `reads_range(p, n)`) names the cells `p[0..n)` and is not a cell site: it has its own rows (`range_atom_value`,
+    // `range_returns`), and every consumer of the cell sites (the cells of a place, the places that must differ, the framing of a cell read) skips it unless it handles it.
+    static bool site_is_range(const AtomSite& s)
+    {
+        return is_range_atom(s.atom->atom);
+    }
     static bool site_takes_cell(const AtomSite& s)
     {
-        return s.atom->atom != AtomKind::Live;
+        return s.atom->atom != AtomKind::Live && !is_range_atom(s.atom->atom);
     }
     // Every atom on a struct root, `live(p)` included, states `offset_of(root) < len(block_of(root))` (decision 0043 item 9): a struct pointer a function holds an atom on points to an
     // object, never one past the end, so `&p->x` is in bounds; the scalar `live(p)` stays as it was.
@@ -6193,6 +6304,61 @@ private:
         return !s.via.empty() && is_derived_key(site_key(s)) && derived_of(site_key(s)).has_load;
     }
 
+    // A range atom `owns_range(p, n)` or `reads_range(p, n)` (record 0060 items 3 and 4) in a function's own method (Method) or its well-formedness method (Wf).  `p` is a
+    // parameter and `n` reads no memory; the count is lowered like any contract expression (its obligations are `f__wf`'s).  Wf: the pure line alone (no heap).  Method:
+    // that line, then one conjunct per fact, each quantified over the absolute slot: the permission to the value cells and the flag cells (write permission for `owns_range`,
+    // the atom's ghost amount for `reads_range`), the flags, the type's range, and the liveness cell at the ghost amount.  An empty range holds only the liveness
+    // fraction.  The guard of an `||` stands outside the whole atom here and is distributed over the conjuncts when the clause is split (`split_clause`).
+    LV range_atom_value(const Expr& e, const AtomSite& site, const Env& env, const E& guard, const Deps& gdep,
+                        Full* full)
+    {
+        using low::BinOp;
+        if (e.amount < 0)
+        {
+            internal_error(e.loc, "a range permission atom without its ghost amount reached lowering");
+            return {low::bool_lit(true), {}};
+        }
+        const E root {site_root(site, env, guard, gdep, full)};
+        const Type& t {site_pointee(site)};
+        Full scratch;
+        Full& fl {full != nullptr ? *full : scratch};
+        const LV n {lower(*e.b, env, guard, gdep, fl)};
+        const E pure {range_shape(root, e.a->type, n.e)};
+        if (cmode_ == CMode::Wf)
+        {
+            return {pure, n.dep};
+        }
+        const bool owns {e.atom == AtomKind::OwnsRange};
+        const E amount {low::var(amount_name(e.amount))};
+        const std::string sfx {use_cell_type(t)};
+        E r {pure};
+        r = low::and_(r, range_quant(root, n.e,
+                                     [&](const E& slot)
+                                     {
+                                         return owns ? low::acc(slot, "v_" + sfx) : low::acc(slot, "v_" + sfx, amount);
+                                     }));
+        r = low::and_(r, range_quant(root, n.e,
+                                     [&](const E& slot)
+                                     {
+                                         return owns ? low::acc(slot, "d_" + sfx) : low::acc(slot, "d_" + sfx, amount);
+                                     }));
+        r = low::and_(r, range_quant(root, n.e,
+                                     [&](const E& slot)
+                                     {
+                                         return cell_flag(slot, t);
+                                     }));
+        if (!t.is_bool())
+        {
+            r = low::and_(r, range_quant(root, n.e,
+                                         [&](const E& slot)
+                                         {
+                                             return element_range(cell_value(slot, t), t);
+                                         }));
+        }
+        r = low::and_(r, low::acc(live_cell(root), "lv", amount));
+        return {r, {}};
+    }
+
     // An atom (decision 0037 items 5 and 6) in the context being lowered.
     LV atom(const Expr& e, const Env& env, const E& guard = nullptr, const Deps& gdep = Deps {}, Full* full = nullptr)
     {
@@ -6215,6 +6381,10 @@ private:
             return {low::bool_lit(true), {}}; // asserted one by one at the call or the return
         }
         const AtomSite& site {fa.sites[idx]};
+        if (is_range_atom(e.atom))
+        {
+            return range_atom_value(e, site, env, guard, gdep, full);
+        }
         // The facts about the ROOT pointer (decision 0043 item 9: each atom, a member atom too, gives `root != null`, `WF_S(root)` and `offset_of(root) < len(block_of(root))`);
         // for a place without a path the root is the place.  A derived place's root is its lowered base (decision 0045): the loads of the atom's own place are read
         // once here, framed by the atoms before it (in the well-formedness method with their framing obligations).
@@ -6510,6 +6680,10 @@ private:
         {
             mem += "_m" + std::to_string(k);
         }
+        if (is_elem_key(param))
+        {
+            return "hv_e" + std::to_string(elem_of(param).local) + (post ? "_post" : "_pre");
+        }
         if (is_derived_key(param))
         { // decision 0045: a read through a load or a pointer leaf, numbered after the function's parameters
             const Derived& d {derived_of(param)};
@@ -6635,11 +6809,21 @@ private:
             }
         } depth_guard(old_depth_, old_state);
         std::vector<int> path; // decision 0043 item 9: a place is a root and a member path
-        const Expr* root {e.a == nullptr ? nullptr : member_root(e.a, &path)};
+        const bool elem {e.a != nullptr && e.a->kind == Expr::Kind::ElemAddr};
+        const Expr* root {e.a == nullptr || elem ? nullptr : member_root(e.a, &path)};
         int k {kNoPlaceKey};
         E p;
-        if (root != nullptr && (root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::Result ||
-                                root->kind == Expr::Kind::GlobalAddr))
+        if (elem)
+        {
+            // Record 0060 item 5: `p[i]` of a pointer parameter, the cell `loc(block_of(p), offset_of(p) + i)`.  No Silicon permission or bound row belongs to a contract read
+            // (the framing is `f__wf`'s obligation and the chain's guard); its key is its own, so no atom's place is "the very place read".
+            k = elem_key(*cf_, *e.a);
+            const LV b {lower(*e.a->a, env, guard, gdep, full)};
+            const LV i {lower(*e.a->b, env, guard, gdep, full)};
+            p = low::dom("loc", {block_of(b.e), low::bin(low::BinOp::Add, low::dom("offset_of", {b.e}), i.e)});
+        }
+        else if (root != nullptr && (root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::Result ||
+                                     root->kind == Expr::Kind::GlobalAddr))
         {
             // -1: the place `result` (decision 0040 item 4); a global is a place of its own (decision 0041 item 7)
             k = root->kind == Expr::Kind::Result
@@ -6672,7 +6856,7 @@ private:
         for (size_t i {0U}; i < fa.sites.size(); ++i)
         {
             const AtomSite& s {fa.sites[i]};
-            if (!site_takes_cell(s))
+            if (!site_takes_cell(s) && !site_is_range(s))
             {
                 continue;
             }
@@ -6696,6 +6880,16 @@ private:
             }
             if (site_fields(s).count(sfx) == 0U)
             {
+                continue;
+            }
+            if (site_is_range(s))
+            {
+                // Record 0060 item 5: a range atom frames the cells of its interval: `g_i && block_of(q) == block_of(p_i) && offset_of(p_i) <= offset_of(q) < offset_of(p_i) + n_i`
+                Full scratch;
+                const LV n {lower(*s.atom->b, env, nullptr, Deps {}, scratch)};
+                const E d {in_range(p, site_ref(s, env), n.e)};
+                const E g {site_guard(s, env)};
+                ds.push_back(g ? low::and_(g, d) : d);
                 continue;
             }
             // Decision 0042 item 5: a marked atom's site never covers a read of the pre-state, and covers one of the post-state only for `must_init`
@@ -6795,13 +6989,19 @@ private:
                 {
                     any = low::bool_lit(false);
                 }
+                // record 0060 item 5: an element reads as `p[i]`, from the Deref's own spelling or, failing that, its base's and its index's; with neither, no spelling is invented
+                std::string read_text {e.c_text};
+                if (read_text.empty() && elem && e.a->a != nullptr && e.a->b != nullptr && !e.a->a->c_text.empty() &&
+                    !e.a->b->c_text.empty())
+                {
+                    read_text = e.a->a->c_text + "[" + e.a->b->c_text + "]";
+                }
+                const char* what_read {elem ? "an element of a pointer" : "a pointer's object"};
                 obl(full, guard, gdep, any, {},
                     meta("permission", e.loc,
                          cmeasure_ ? "the termination measure of `" + cf_->c_name + "` reads " +
-                                         quoted(e.c_text.empty() ? std::string() : e.c_text, "a pointer's object") +
-                                         " without owning it"
-                                   : "the contract of `" + cf_->c_name + "` reads " +
-                                         quoted(e.c_text.empty() ? std::string() : e.c_text, "a pointer's object") +
+                                         quoted(read_text, what_read) + " without owning it"
+                                   : "the contract of `" + cf_->c_name + "` reads " + quoted(read_text, what_read) +
                                          " without owning it"));
             }
             return {low::var(ghost_name(key)), {}};
@@ -8550,6 +8750,18 @@ private:
         {
             return amounts;
         }
+        for (const AtomSite& rs : fa.sites)
+        {
+            if (site_is_range(rs))
+            {
+                // record 0060, staging pin S1: the rows of a call of a function that holds a range atom are Part C's; fail closed with no row built
+                internal_error(
+                    e.loc,
+                    "a call of a function whose contract holds a range permission atom reached lowering before Part C of record 0060 reads them");
+                amounts.assign(n, low::no_perm());
+                return amounts;
+            }
+        }
         Deps adep;
         for (const LV& a : args)
         {
@@ -8611,6 +8823,12 @@ private:
                 }
                 case AtomKind::OwnsBlock:
                     break; // never a site of contract_atoms (decision 0047 item 4: contract_block_atoms lists it)
+                case AtomKind::OwnsRange:
+                case AtomKind::ReadsRange:
+                    internal_error(
+                        x.site->atom->loc,
+                        "a range permission atom at a call reached lowering before the lowering reads them (record 0060 item 8)");
+                    break;
             }
             return std::string();
         };
@@ -11941,6 +12159,10 @@ private:
         for (size_t k {0U}; k < ens.size(); ++k)
         {
             const AtomSite& site {fa.sites[ens[k]]};
+            if (site_is_range(site))
+            {
+                continue; // its rows follow the others' (range_returns below)
+            }
             const Type& t {site_pointee(site)};
             const E amt {amt_of(k)};
             const bool owns {site.atom->atom == AtomKind::Owns};
@@ -12014,6 +12236,20 @@ private:
                                     total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), amt_of(j)));
                                 }
                             }
+                            // record 0060 item 9 (audit S6): the cell may lie inside a range the function borrows too, which returns its own amount there
+                            for (size_t j {0U}; j < ens.size(); ++j)
+                            {
+                                const AtomSite& sj {fa.sites[ens[j]]};
+                                if (sj.atom->atom != AtomKind::ReadsRange ||
+                                    cell_suffix(site_pointee(sj)) != cell_suffix(c.type))
+                                {
+                                    continue;
+                                }
+                                Full scratch;
+                                const E nj {lower(*sj.atom->b, env, nullptr, Deps {}, scratch).e};
+                                total = low::bin(BinOp::Add, total,
+                                                 term(low::and_(g[j], in_range(c.recv, p[j], nj)), amt_of(j)));
+                            }
                             add(low::bin(BinOp::Ge, flag ? flag_perm(c.recv, c.type) : value_perm(c.recv, c.type),
                                          total),
                                 perm_meta(msg, k));
@@ -12075,6 +12311,124 @@ private:
                 total = low::bin(BinOp::Add, total, term(low::and_(g[j], same), amt_of(j)));
             }
             add(low::bin(BinOp::Ge, live_perm(root[k]), total), perm_meta(msg, k));
+        }
+        range_returns(out, ens, g, root, amt_of, name, perm_meta, env);
+    }
+
+    // The rows of the `ensures` range atoms at a return (record 0060 item 9), after the cell atoms' rows, in this order per atom: the two marked rows (value then flag; the quantified
+    // permission at `write` for `owns_range`, at the atom's amount for `reads_range`, plus the amount of every other read atom of the field that may cover the slot: S44 (e)),
+    // inside `if (g) { }`; the shape row (a `permission` row with the marked rows' message: on a path where a guard that does not imply its partner's leaves the range empty,
+    // the marked rows pass and an `internal` row would be the first to fail); the flags; the type's range; the liveness sum.  A failed marked row ends its path (S43 G2).
+    template <typename AmtOf, typename Name, typename PermMeta>
+    void range_returns(std::vector<low::LStmt>& out, const std::vector<size_t>& ens, const std::vector<E>& g,
+                       const std::vector<E>& root, const AmtOf& amt_of, const Name& name, const PermMeta& perm_meta,
+                       const Env& env)
+    {
+        const Function& f {*fn_.f};
+        const FnAtoms& fa {atoms_of(f)};
+        const E none {low::no_perm()};
+        for (size_t k {0U}; k < ens.size(); ++k)
+        {
+            const AtomSite& site {fa.sites[ens[k]]};
+            if (!site_is_range(site))
+            {
+                continue;
+            }
+            const Type& t {site_pointee(site)};
+            const std::string sfx {use_cell_type(t)};
+            const bool owns {site.atom->atom == AtomKind::OwnsRange};
+            Full scratch;
+            const E n {lower(*site.atom->b, env, nullptr, Deps {}, scratch).e};
+            const E ptr {root[k]};
+            const E lo {low::dom("offset_of", {ptr})};
+            const E hi {low::bin(low::BinOp::Add, lo, n)};
+            const std::string pl {quoted(
+                name(k), "the range")}; // site_text: `p[0..n)` from the written pointer and count, or no spelling
+            const std::string msg {owns ? "returns without owning " + pl + ", which its contract promises"
+                                        : "returns without the permission to read " + pl + " it borrowed"};
+            const low::Meta meta_k {perm_meta(msg, k)};
+            const E gk {g[k]};
+            auto row = [&](E cond)
+            {
+                emit_assert(out, gk ? low::implies(gk, std::move(cond)) : std::move(cond), meta_k);
+            };
+            // the amount of the marked rows, over the binder `k` when another read atom of the field may cover a slot of this one
+            E amount;
+            if (!owns)
+            {
+                amount = amt_of(k);
+                const E kv {low::var("k")};
+                for (size_t j {0U}; j < ens.size(); ++j)
+                {
+                    const AtomSite& sj {fa.sites[ens[j]]};
+                    if (j == k || (sj.atom->atom != AtomKind::ReadsRange && sj.atom->atom != AtomKind::Reads) ||
+                        cell_suffix(site_pointee(sj)) != cell_suffix(t))
+                    {
+                        continue;
+                    }
+                    E inside;
+                    if (sj.atom->atom == AtomKind::ReadsRange)
+                    {
+                        Full sc2;
+                        const E nj {lower(*sj.atom->b, env, nullptr, Deps {}, sc2).e};
+                        const E loj {low::dom("offset_of", {root[j]})};
+                        inside = low::bin(low::BinOp::And,
+                                          low::bin(low::BinOp::And,
+                                                   low::bin(low::BinOp::Eq, block_of(root[j]), block_of(ptr)),
+                                                   low::bin(low::BinOp::Le, loj, kv)),
+                                          low::bin(low::BinOp::Lt, kv, low::bin(low::BinOp::Add, loj, nj)));
+                    }
+                    else
+                    {
+                        const E qj {site_ref(sj, env)};
+                        inside = low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, block_of(qj), block_of(ptr)),
+                                          low::bin(low::BinOp::Eq, low::dom("offset_of", {qj}), kv));
+                    }
+                    amount = low::bin(low::BinOp::Add, amount, low::ite(low::and_(g[j], inside), amt_of(j), none));
+                }
+            }
+            {
+                low::LStmt ifs;
+                std::vector<low::LStmt>& dst {gk ? ifs.then_body : out};
+                for (const char* field : {"v_", "d_"})
+                {
+                    emit_marked_row(dst, range_perm(ptr, lo, hi, std::string(field) + sfx, amount), meta_k);
+                }
+                if (gk)
+                {
+                    ifs.kind = low::LStmt::Kind::If;
+                    ifs.expr = gk;
+                    out.push_back(std::move(ifs));
+                }
+            }
+            row(range_shape(ptr, site.atom->a->type, n));
+            row(range_quant(ptr, n,
+                            [&](const E& slot)
+                            {
+                                return cell_flag(slot, t);
+                            }));
+            if (!t.is_bool())
+            {
+                row(range_quant(ptr, n,
+                                [&](const E& slot)
+                                {
+                                    return element_range(cell_value(slot, t), t);
+                                }));
+            }
+            E total {amt_of(k)};
+            for (size_t j {0U}; j < ens.size(); ++j)
+            {
+                if (j == k)
+                {
+                    continue;
+                }
+                const E same {same_expr(root[k], root[j])
+                                  ? nullptr
+                                  : low::bin(low::BinOp::Eq, live_cell(root[k]), live_cell(root[j]))};
+                const E c {low::and_(g[j], same)};
+                total = low::bin(low::BinOp::Add, total, c ? low::ite(c, amt_of(j), none) : amt_of(j));
+            }
+            row(low::bin(low::BinOp::Ge, live_perm(ptr), total));
         }
     }
 
@@ -14535,6 +14889,20 @@ private:
         {
             places.clear();
             arrays.clear();
+        }
+        else
+        {
+            for (const AtomSite& rs : atoms_of(*fn_.f).sites)
+            {
+                if (site_is_range(rs))
+                {
+                    // record 0060, staging pin S2 (its wording, a loop that touches memory, is narrower than this gate: a loop with a return or an outward goto in its body also carries places): Part D's; fail closed
+                    internal_error(
+                        s.loc,
+                        "a loop that carries places (it touches memory, or leaves the function or a block with a return or a goto) in a function whose contract holds a range permission atom reached lowering before Part D of record 0060 reads it");
+                    break;
+                }
+            }
         }
         // Decision 0038 item 3 (audit round 2, B1) for arrays: a parameter place whose atom can be false holds nothing on that path, and nothing tells Silicon that its pointer
         // is not a slot of the array's block (the snapshot would pick up the array's permission, and the invariant would demand it twice): its guards gain
@@ -18340,6 +18708,80 @@ private:
         return c;
     }
 
+    // Whether a contract expression holds a range atom (record 0060): its clause is written as one clause per conjunct (`push_clauses`).
+    static bool has_range_atom(const Expr* e)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e->kind == Expr::Kind::Atom && is_range_atom(e->atom))
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (has_range_atom(x))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (has_range_atom(x))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The conjuncts of a clause that holds a range atom, each under the one conjoined guard that reaches it (record 0060 item 4): `A && B` is the conjuncts of A and of B,
+    // `g ==> X` those of X under `g`, `g1 ==> (g2 ==> X)` those of X under `g1 && g2`, a conditional `c ? A : B` those of A under `c` and those of B under `!c`, and `true` nothing.
+    // Viper accepts `g ==> (acc(..) && acc(..))`, but the lint (record 0060 item 16) reads a quantifier only as the whole of a `requires` or `ensures` line, optionally after
+    // one guard, so the quantified rows of a range atom get a line each, a plain condition standing outside every quantifier.
+    static void split_conjuncts(const E& e, std::vector<E>& out, const E& guard = nullptr)
+    {
+        if (e->kind == low::LExpr::Kind::BoolLit && e->bool_value)
+        {
+            return;
+        }
+        if (e->kind == low::LExpr::Kind::Bin && e->bin == low::BinOp::And)
+        {
+            split_conjuncts(e->a, out, guard);
+            split_conjuncts(e->b, out, guard);
+            return;
+        }
+        if (e->kind == low::LExpr::Kind::Bin && e->bin == low::BinOp::Implies)
+        {
+            split_conjuncts(e->b, out, guard != nullptr ? low::bin(low::BinOp::And, guard, e->a) : e->a);
+            return;
+        }
+        if (e->kind == low::LExpr::Kind::Ite)
+        {
+            split_conjuncts(e->b, out, guard != nullptr ? low::bin(low::BinOp::And, guard, e->a) : e->a);
+            const E not_c {low::not_(e->a)};
+            split_conjuncts(e->c, out, guard != nullptr ? low::bin(low::BinOp::And, guard, not_c) : not_c);
+            return;
+        }
+        out.push_back(guard != nullptr ? low::bin(low::BinOp::Implies, guard, e) : e);
+    }
+    // The clause `source` lowered to `e`, as one clause (the Viper of every contract without a range atom is as it was) or, for a clause that holds a range atom, one per conjunct.
+    void push_clauses(std::vector<low::LClause>& out, const E& e, const Expr* source, const SrcLoc& loc, bool ensures,
+                      const std::string& what)
+    {
+        if (!has_range_atom(source))
+        {
+            out.push_back(clause_checks(e, loc, ensures, what));
+            return;
+        }
+        std::vector<E> parts;
+        split_conjuncts(e, parts);
+        for (const E& x : parts)
+        {
+            out.push_back(clause_checks(x, loc, ensures, what));
+        }
+    }
+
     // Parameter `k` as Viper formals (decision 0044 item 3): itself, or one per leaf of a by-value struct.
     struct LeafVar
     {
@@ -18482,7 +18924,7 @@ private:
                 v = lower(*c.expr, cenv, nullptr, {}, scratch);
             }
             pure_full(scratch, *c.expr, "a precondition");
-            m.requires_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, false, f.c_name));
+            push_clauses(m.requires_, v.e, c.expr, c.loc.known() ? c.loc : f.loc, false, f.c_name);
         }
         // the range of the result, or of each integer leaf of a struct result, and WF of each pointer (decision 0044
         // item 4)
@@ -18513,7 +18955,7 @@ private:
                 v = lower(*c.expr, cenv, nullptr, {}, scratch);
             }
             pure_full(scratch, *c.expr, "a postcondition");
-            m.ensures_.push_back(clause_checks(v.e, c.loc.known() ? c.loc : f.loc, true, f.c_name));
+            push_clauses(m.ensures_, v.e, c.expr, c.loc.known() ? c.loc : f.loc, true, f.c_name);
         }
         if (f.noreturn)
         {
@@ -18731,6 +19173,10 @@ private:
     // The `Ref` of the place (key, path) in the well-formedness method in a state: the ghost-built chain for a derived key (the base lowered in Wf mode), else the root's chain.
     E wf_place(const Env& env, int k, const std::vector<int>& path, bool post)
     {
+        if (is_elem_key(k))
+        {
+            return elem_ref(*elem_of(k).addr, env);
+        }
         if (!is_derived_key(k))
         {
             return chain_ref(place_of(env, k), path);
@@ -18807,7 +19253,8 @@ private:
                     const std::string txt {site.atom->a != nullptr ? site_text(site) : std::string()};
                     emit_assert(m.body, low::implies(prior, low::implies(ge, gp)),
                                 meta("permission", site.atom->loc.known() ? site.atom->loc : c.loc,
-                                     "the contract of `" + f.c_name + "` returns " + quoted(txt, "an object") +
+                                     "the contract of `" + f.c_name + "` returns " +
+                                         quoted(txt, site_is_range(site) ? "a range" : "an object") +
                                          " on a path where its `requires` did not take it"));
                 }
                 // the same for the `ensures` block sites of the clause that borrow their block (audit 2 B2)
@@ -19066,6 +19513,44 @@ private:
             {
                 const int kr {std::get<0>(key)};
                 const std::vector<int>& path {std::get<1>(key)};
+                if (is_elem_key(kr))
+                {
+                    // Record 0060 item 5: an element a `reads_range` (or `reads`) atom borrows and the `ensures` returns keeps its value: `g_r && g_e && the address in the
+                    // range (or the cell) ==> post == pre`, per requires atom of the base parameter and its partner (sound: no verified callee writes what it holds only
+                    // through read atoms, N4).
+                    if (!std::get<2>(key) || ghosts_now.count(GKey {kr, path, false}) == 0U)
+                    {
+                        continue;
+                    }
+                    const E addr {wf_place(env, kr, path, false)};
+                    const int base {elem_of(kr).addr->a->index};
+                    for (int i {0}; i < fa.nreq; ++i)
+                    {
+                        const AtomSite& rs {fa.sites[static_cast<size_t>(i)]};
+                        const bool range {rs.atom->atom == AtomKind::ReadsRange};
+                        if ((!range && rs.atom->atom != AtomKind::Reads) || site_key(rs) != base || !rs.path.empty() ||
+                            !rs.via.empty() || !site_fields(rs).count(cell_suffix(t)))
+                        {
+                            continue;
+                        }
+                        for (const AtomSite& es : fa.sites)
+                        {
+                            if (!es.in_ensures || es.atom->amount != i)
+                            {
+                                continue;
+                            }
+                            Full scratch;
+                            E cond {low::and_(site_guard(rs, env), site_guard(es, env))};
+                            cond =
+                                low::and_(cond, range ? in_range(addr, site_ref(rs, env),
+                                                                 lower(*rs.atom->b, env, nullptr, Deps {}, scratch).e)
+                                                      : low::bin(low::BinOp::Eq, addr, site_ref(rs, env)));
+                            facts_.push_back(low::implies(cond, low::bin(low::BinOp::Eq, low::var(ghost_name(key)),
+                                                                         low::var(ghost_name(kr, path, false)))));
+                        }
+                    }
+                    continue;
+                }
                 if (is_result_key(kr) && std::get<2>(key))
                 {
                     // The result's post-state ghost against the pre-state ghost of a `reads` place the function borrows and returns (audit S4, decision 0040

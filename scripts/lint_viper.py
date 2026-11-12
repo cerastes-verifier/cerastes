@@ -118,6 +118,18 @@ status 1) on:
   `owns` states under the flag: an integer's range of its field's type, a pointer's well-formedness (with the pointee's member blocks),
   nothing for a `bool`) and, for `calloc` only, the flags and then the values 0, `false` or `null` of every leaf, and for no view a
   clause more or fewer: a view with an extra clause would be an unchecked assumption;
+* where a `forall` may stand (decision 0059 items 7 and 8, decision 0060 item 16; every quantifier is `forall k: Int :: { loc(block_of(X), k) }
+  lo <= k && k < hi ==> ROW` with X a variable, and X, lo, hi and any amount reading no heap): a marked row (an unguarded `assert` of
+  `acc(loc(block_of(X), k).f[, amount])` whose map entry carries `assert.failed[insufficient.permission]`, and no other row's does), the range
+  `exhale`, item 8's four loop conjuncts (the permission with no amount or the method's own `Perm` formal, the flags kept, the type's range,
+  the values kept), alone or under a guard `g ==> `, a range atom's rows in a `method`'s `requires` and `ensures` (range `offset_of(X) <= k &&
+  k < offset_of(X) + n`; `acc(F.f)` or `acc(F.f, a)` with `a` a `Perm` formal of the method, the flag `F.d_t`, the standard range of an integer
+  type or WF of a pointer element, `F.d_t ==> range`, and in an `ensures` `old(F.d_t) ==> F.d_t`; a guard is a plain condition) and the pure
+  `assert` rows of the same four non-permission shapes (a guard there reads no heap); `old[label]` only in the loop conjuncts, for a label that
+  an earlier `label` of the method defines.  A `Perm` local may be assigned the amount of a range atom's call row divided by a decimal
+  literal of 2 or more: `perm(lvloc(block_of(B)).lv) / N`, with the guard `(g ? ... : write)` and, for `reads_range`, the minimum over the
+  first slot `loc(block_of(B), offset_of(B))`, whose nested-conditional minimum may also hold the method's own `Perm` formals (decision 0060 item 6, audit
+  round 2 S5);
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -1298,6 +1310,14 @@ def lint_ghost_amounts(src: Source, decls: list[Decl], add: Callable[[int, str],
                                    f"`ensures none < {o} && {o} <= write` (line {rows[0]}; decision 0052 item 5)")
 
 
+IDENT = r"[A-Za-z_$][\w$']*"
+BLOCK_BASE_RE = re.compile(rf"^block_of\(({IDENT})\)$")
+# What a guard `g ==> forall ...` may not hold (decision 0060 item 16): a guard is a plain condition, not a permission, a quantifier or a
+# labelled `old`; in an `assert` it also reads no heap (an `assert`'s failure must be its own row's, never a read in its guard).
+GUARD_BAD_RE = re.compile(r"(?<![\w$'])(?:forall|acc|perm|forperm)(?![\w$'])|(?<![\w$'])old\s*\[")
+
+
+
 # The ghost amounts of loops (decision 0038 item 9): snapshots of `perm(...)` in `Perm` locals, used as amounts in invariants.
 PERM_LOCAL_RE = re.compile(r"(?<![\w$'.])var\s+(?P<names>[A-Za-z_$][\w$']*(?:\s*,\s*[A-Za-z_$][\w$']*)*)\s*:\s*Perm\b"
                            r"(?P<rest>.*)$")
@@ -1343,11 +1363,130 @@ def _strip_outer_parens(text: str) -> str:
     return text
 
 
-def perm_value_ok(text: str) -> bool:
-    """Whether `text` is `perm(...)`, `none`, `write` or a conditional `c ? a : b` of those (parentheses anywhere)."""
+def _perm_divisor(text: str) -> tuple[str, int] | None:
+    """(the dividend, the divisor) of `A / N` with a top-level `/` and a decimal literal N, or None."""
+    depth, last = 0, -1
+    for i, ch in enumerate(text):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "/" and depth == 0:
+            last = i
+    if last < 0:
+        return None
+    m = re.fullmatch(r"\(*\s*(\d+)\s*\)*", text[last + 1:].strip())
+    return (text[:last], int(m.group(1))) if m else None
+
+
+def _split_conditional(text: str) -> tuple[str, str, str] | None:
+    """(condition, then, else) of a top-level `c ? a : b`, or None."""
+    text = _strip_outer_parens(text)
+    depth, q = 0, -1
+    for i, ch in enumerate(text):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "?" and depth == 0:
+            q = i
+            break
+    if q < 0:
+        return None
+    depth, nested = 0, 0
+    for i in range(q + 1, len(text)):
+        ch = text[i]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif depth == 0 and ch == "?":
+            nested += 1
+        elif depth == 0 and ch == ":":
+            if nested == 0:
+                return text[:q], text[q + 1:i], text[i + 1:]
+            nested -= 1
+    return None
+
+
+def _sq(text: str) -> str:
+    return "".join(_strip_outer_parens(text).split())
+
+
+RANGE_LIVENESS_RE = re.compile(rf"^perm\(lvloc\(block_of\(({IDENT})\)\)\.lv\)$")
+
+
+def _min_leaves(e: str, formals: frozenset[str]) -> list[str] | None:
+    """The leaves of a minimum written as Viper has it, `X < Y ? X : Y` nested (squashed text): `perm(...)` calls and names of the
+    method's own `Perm` formals; None if `e` is anything else (a `Perm` local, a literal, another comparison)."""
+    t = _sq(e)
+    if t.startswith("perm(") and _group_end(t, 4) == len(t) - 1:
+        return [t]
+    if re.fullmatch(IDENT, t) and t in formals:
+        return [t]
+    cond = _split_conditional(e)
+    if cond is None:
+        return None
+    c, a, b = cond
+    sides = _split_top(_strip_outer_parens(c), "<")
+    if len(sides) != 2 or _sq(sides[0]) != _sq(a) or _sq(sides[1]) != _sq(b):
+        return None
+    left, right = _min_leaves(a, formals), _min_leaves(b, formals)
+    return None if left is None or right is None else left + right
+
+
+def _range_amount_inner(d: str, formals: frozenset[str] = frozenset()) -> bool:
+    """The amount a range atom's call row divides (decision 0060 item 6, S44 (c), audit round 2 S5): the liveness
+    `perm(lvloc(block_of(B)).lv)` of a variable B (an `owns_range`), or, for a `reads_range`, `n > 0 ? min(perm(F.v_t), perm(F.d_t),
+    perm(L), a_1, ...) : perm(L)` over the first slot `F = loc(block_of(B), offset_of(B))`, the minimum written as nested conditionals
+    (Viper has no `min`) and the `a_i` the method's own `Perm` formals (the caller's read amounts, which only lower the amount).  The
+    three `perm`s of the first slot and the liveness cell must all be in it; no other `perm`, local or literal may be."""
+    live = RANGE_LIVENESS_RE.match(_sq(d))
+    if live:
+        return True
+    cond = _split_conditional(d)
+    if cond is None:
+        return False
+    c, a, b = cond
+    live = RANGE_LIVENESS_RE.match(_sq(b))
+    n = re.fullmatch(r"(.+)>0", _sq(c))
+    if live is None or n is None or not _heap_free(n.group(1)):
+        return False
+    bb, big = live.group(1), _sq(b)
+    leaves = _min_leaves(a, formals)
+    if leaves is None:
+        return False
+    slot = f"loc(block_of({bb}),offset_of({bb}))"
+    types = {m.group(1) for leaf in leaves if (m := re.fullmatch(rf"perm\({re.escape(slot)}\.v_({IDENT})\)", leaf))}
+    if len(types) != 1:
+        return False
+    t = next(iter(types))
+    required = {f"perm({slot}.v_{t})", f"perm({slot}.d_{t})", big}
+    return required <= set(leaves) and all(leaf in required or leaf in formals for leaf in leaves)
+
+
+def range_amount_dividend_ok(d: str, formals: frozenset[str] = frozenset()) -> bool:
+    """`_range_amount_inner`, or `g ? <that> : write` for a guarded atom (`g` plain: no permission, quantifier or heap read)."""
+    if _range_amount_inner(d, formals):
+        return True
+    cond = _split_conditional(d)
+    if cond is None or _sq(cond[2]) != "write":
+        return False
+    return (GUARD_BAD_RE.search(cond[0]) is None and _heap_free(cond[0]) and _range_amount_inner(cond[1], formals)
+            and not RANGE_LIVENESS_RE.match(_sq(cond[0])))
+
+
+def perm_value_ok(text: str, formals: frozenset[str] = frozenset()) -> bool:
+    """Whether `text` is `perm(...)`, `none`, `write` or a conditional `c ? a : b` of those (parentheses anywhere), or the amount of
+    a range atom's call row divided by a decimal literal of 2 or more: `perm(lvloc(block_of(B)).lv) / (N + 1)`, with the guard
+    `(g ? perm(...) : write)` and, for `reads_range`, the minimum over the first slot (decision 0060 item 6: `range_amount_dividend_ok`).
+    Any other quotient, a product or a sum could exceed what the method holds, and stays refused."""
     text = _strip_outer_parens(text)
     if text in ("none", "write"):
         return True
+    div = _perm_divisor(text)
+    if div is not None:
+        return div[1] >= 2 and range_amount_dividend_ok(div[0], formals)
     m = PERM_CALL_RE.match(text)
     if m:
         depth = 0
@@ -1384,7 +1523,7 @@ def perm_value_ok(text: str) -> bool:
             nested -= 1
     if colon < 0:
         return False
-    return perm_value_ok(text[q + 1:colon]) and perm_value_ok(text[colon + 1:])
+    return perm_value_ok(text[q + 1:colon], formals) and perm_value_ok(text[colon + 1:], formals)
 
 
 def while_loops(src: Source, d: Decl):
@@ -1611,11 +1750,12 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
         if d.kind != "method" or not d.has_body:
             continue
         names = perm_local_names(src, d)
+        formals = frozenset(m.group("name") for f in method_formals(src, d) if (m := PERM_FORMAL_RE.match(f)))
         for n in range(d.body_line, d.end_line + 1):
             code = src.code[n - 1]
             if (m := PERM_LOCAL_RE.search(code)) and ":=" in m.group("rest"):
                 rhs = _statement_rhs(m.group("rest"), m.group("rest").index(":=") + 2)
-                if not perm_value_ok(rhs) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
+                if not perm_value_ok(rhs, formals) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
                     add(n, f"`Perm` local `{m.group('names')}` is initialized with `{rhs}`: a snapshot is `perm(...)`, `none`, "
                            "`write` or a conditional of those (decision 0038 item 9)")
             for name in sorted(names):
@@ -1623,7 +1763,7 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
                 # 0044 item 13: a multi-target call is one assignment of every target; the first target must be seen too)
                 for a in re.finditer(r"(?<![\w$'.])" + re.escape(name) + r"\s*(?=(?:,\s*[A-Za-z_$][\w$']*\s*)*:=)", code):
                     rhs = _statement_rhs(code, code.index(":=", a.end()) + 2)
-                    if not perm_value_ok(rhs) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
+                    if not perm_value_ok(rhs, formals) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
                         if perm_call_target_ok(src, by_name, code, a.start(), a.end(), rhs):
                             continue
                         add(n, f"`Perm` local `{name}` is assigned `{rhs}`: a snapshot is `perm(...)`, `none`, `write` or a "
@@ -3169,6 +3309,9 @@ def lint_array_allocations(src: Source, decls: list[Decl], add: Callable[[int, s
 # `insufficient.permission` is the row's own failure (the map's `assert.failed[insufficient.permission]`); B, lo and hi read no
 # heap, so nothing else on the line can produce that reason.  `forall` appears nowhere else but the two trusted contracts
 # above, the `exhale` of the same shape, `domain Block`'s axioms and item 8's four loop conjuncts; `old[label]` only in two of those.
+# Decision 0060 item 16 adds a range atom's rows in a method's `requires` and `ensures` and their pure `assert` rows
+# (`range_atom_row_problem`), a guard `g ==> ` on any of them but a marked row, and the method's `Perm` formal as the amount of a
+# permission row or a loop's permission conjunct.
 FORALL_RE = re.compile(r"(?<![\w$'])forall(?![\w$'])")
 OLD_LABEL_RE = re.compile(r"(?<![\w$'])old\s*\[")
 QUANT_STMT_RE = re.compile(r"^\s*(?P<kw>assert|exhale|invariant|requires|ensures)\s+(?P<rest>.*)$")
@@ -3185,10 +3328,12 @@ def _heap_free(text: str) -> bool:
     return HEAP_READ_RE.search(text) is None
 
 
-def parse_range_quantifier(text: str):
-    """`forall k: Int :: { loc(B, k) } lo <= k && k < hi ==> CONSEQUENT` (what follows `assert`, `exhale` or `invariant`):
-    (k, B, antecedent extras, consequent), the extras being the conjuncts after the two range conjuncts; None if it is
-    not that shape (B, lo and hi must read no heap).  The antecedent's `lo <= k && k < hi` are its first two conjuncts."""
+def parse_range_quantifier_full(text: str):
+    """`forall k: Int :: { loc(block_of(X), k) } lo <= k && k < hi ==> CONSEQUENT` (what follows `assert`, `exhale`, `invariant`,
+    `requires` or `ensures`, after a guard): (k, B, antecedent extras, consequent, lo, hi), the extras being the conjuncts after
+    the two range conjuncts; None if it is not that shape.  B must be `block_of(X)` for a variable X (decision 0060 item 8, S44
+    F-b1: Silicon refuses a trigger `loc(block_of(e), k)` whose `e` holds an operator, so the base of a range is bound to a local
+    first), and B, lo and hi read no heap.  The antecedent's `lo <= k && k < hi` are its first two conjuncts."""
     head = QUANT_HEAD_RE.match(text.strip())
     if head is None:
         return None
@@ -3197,6 +3342,8 @@ def parse_range_quantifier(text: str):
     if trig is None:
         return None
     b = trig.group("b").strip()
+    if BLOCK_BASE_RE.match(_squash(b)) is None:
+        return None
     parts = _split_top(head.group("body"), "==>")
     if len(parts) != 2:
         return None
@@ -3210,7 +3357,114 @@ def parse_range_quantifier(text: str):
     hi = re.match(r"^" + re.escape(k) + r"<(?P<hi>.+)$", ante[1])
     if lo is None or hi is None or not (_heap_free(b) and _heap_free(lo.group("lo")) and _heap_free(hi.group("hi"))):
         return None
-    return k, b, ante[2:], _strip_wrap(parts[1])
+    return k, b, ante[2:], _strip_wrap(parts[1]), lo.group("lo"), hi.group("hi")
+
+
+def parse_range_quantifier(text: str):
+    """The first four fields of parse_range_quantifier_full: (k, B, antecedent extras, consequent), or None."""
+    q = parse_range_quantifier_full(text)
+    return None if q is None else q[:4]
+
+
+def split_guard(rest: str) -> tuple[str | None, str | None]:
+    """(guard, quantifier text) of what follows the keyword of a clause or statement: `forall ...`, `(forall ...)`, `g ==> forall ...`
+    or `(g) ==> (forall ...)`; the guard is None for an unguarded quantifier, and the quantifier text None when the text is not one
+    (decision 0060 item 4: the guard stands outside the quantifier, one conjunct per line)."""
+    text = rest.strip()
+    inner = _strip_wrap(text)
+    if FORALL_RE.match(inner):
+        return None, inner
+    parts = _split_top(text, "==>")
+    if len(parts) < 2:
+        return None, None
+    body = _strip_wrap(text[len(parts[0]) + len("==>"):])
+    if not FORALL_RE.match(body):
+        return None, None
+    return parts[0].strip(), body
+
+
+def _std_type_range(cons: str, cell: str, t: str) -> bool:
+    """Whether `cons` is the range of the value `cell.v_t`: the standard range of an integer type (8 to 128 bits, signed or
+    unsigned: a postcondition of a trusted method is an assumption, so the bounds are not free) or, for a pointer element, WF of
+    its value.  As a cell atom's range row is read (`view_problem`): an integer field whose type has a fixed range
+    (`VIEW_INT_RANGES`) takes exactly that one, another integer field a standard range, an enumeration's field (`enum_<name>`)
+    any `lo <= 0 <= hi` (its own range, decision 0018)."""
+    try:
+        parts = [_squash(x) for x in _flatten_and(cons)]
+    except ValueError:
+        return False
+    v = f"{_squash(cell)}.v_{t}"
+    if t.startswith("ptr_"):
+        return len(parts) == 1 and norm_viper(parts[0]) == norm_viper(_view_wf(v))
+    if len(parts) != 2:
+        return False
+    lo = re.match(r"^\(*(-?\d+)\)*<=" + re.escape(v) + r"$", parts[0])
+    hi = re.match(r"^" + re.escape(v) + r"<=\(*(-?\d+)\)*$", parts[1])
+    if lo is None or hi is None:
+        return False
+    low, high = int(lo.group(1)), int(hi.group(1))
+    if t.startswith("enum_"):
+        return low <= 0 <= high
+    if t in VIEW_INT_RANGES:
+        return (low, high) == VIEW_INT_RANGES[t]
+    return (low, high) in VIEW_STANDARD_RANGES
+
+
+def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]) -> str | None:
+    """Decision 0060 item 16: why the quantified `requires`, `ensures` or pure `assert` row `q` (under `guard`) is not one of the rows
+    of a range atom, or None.  The rows (X a variable, F = `loc(block_of(X), k)`, the range `offset_of(X) <= k && k <
+    offset_of(X) + n`): `acc(F.f[, a])` with `a` a `Perm` formal of the method (a `requires` or `ensures`; the marked `assert` rows are
+    another rule), the flag `F.d_t`, the type's range of `F.v_t`, `F.d_t ==> range`, and `old(F.d_t) ==> F.d_t` (an `ensures` or an
+    `assert`).  Nothing else holds a `forall` there."""
+    k, b, extra, cons, lo, hi = q
+    x = BLOCK_BASE_RE.match(_squash(b)).group(1)
+    if guard is not None:
+        if GUARD_BAD_RE.search(guard):
+            return "the guard holds a permission, a quantifier or a labelled `old`"
+        if kw == "assert" and not _heap_free(guard):
+            return "the guard of an `assert` row reads the heap"
+        if not guard.strip():
+            return "an empty guard"
+    if extra:
+        return "an antecedent beyond the range"
+    # the emitter parenthesizes every sum under a comparison: `k < (offset_of(p) + n)`
+    low, high = _squash(_strip_wrap(lo)), _squash(_strip_wrap(hi))
+    if low != f"offset_of({x})":
+        return f"the range does not start at `offset_of({x})`"
+    rem = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
+    if not rem or re.search(rf"(?<![\w$']){re.escape(k)}(?![\w$'])", rem):
+        return f"the range does not end at `offset_of({x}) + <a count that does not name {k}>`"
+    cell = f"loc({_squash(b)},{k})"
+    cells = re.escape(cell)
+    acc = _range_acc(cons, k, b)
+    if acc is not None:
+        if kw == "assert":
+            return "a permission row (`acc`) is a marked row: unguarded, no wrapping, `assert` only with its own map entry"
+        field, amount = acc
+        if amount is not None and not (re.fullmatch(IDENT, amount) and amount in perm_formals):
+            return "the amount of an `acc` is a `Perm` formal of the method"
+        return None
+    stripped = _strip_wrap(cons)
+    sides = _split_top(stripped, "==>")
+    cs = _squash(stripped)
+    if len(sides) == 1:
+        if re.fullmatch(cells + r"\.d_" + IDENT, cs):
+            return None
+        m = re.search(cells + r"\.v_(" + IDENT + ")", cs)
+        if m and _std_type_range(stripped, cell, m.group(1)):
+            return None
+        return "the consequent is not `acc(F.f)`, the flag, the type's range or a flag implication"
+    if len(sides) != 2:
+        return "the consequent is not `acc(F.f)`, the flag, the type's range or a flag implication"
+    ante, cons2 = _squash(_strip_wrap(sides[0])), _strip_wrap(sides[1])
+    c2 = _squash(cons2)
+    m = re.fullmatch(r"old\(" + cells + r"\.d_(" + IDENT + r")\)", ante)
+    if m and c2 == f"{cell}.d_{m.group(1)}":
+        return None if kw != "requires" else "`old` in a `requires`"
+    m = re.fullmatch(cells + r"\.d_(" + IDENT + ")", ante)
+    if m and _std_type_range(cons2, cell, m.group(1)):
+        return None
+    return "the consequent is not `acc(F.f)`, the flag, the type's range or a flag implication"
 
 
 def _range_acc(consequent: str, k: str, b: str) -> tuple[str, str | None] | None:
@@ -3235,16 +3489,17 @@ def marked_row_shape(code: str) -> bool:
     return acc is not None and (acc[1] is None or _heap_free(acc[1]))
 
 
-def _loop_conjunct(q) -> tuple[str, list[str]] | None:
+def _loop_conjunct(q, perm_formals: frozenset[str] = frozenset()) -> tuple[str, list[str]] | None:
     """(kind, labels read by old[...]) of item 8's four quantified loop conjuncts, or None.  The kinds: `acc` (full permission over
     the range), `flags` (`... && old[L](E.d_t) ==> E.d_t`), `range` (`... && E.d_t ==> lo_T <= E.v_t && E.v_t <= hi_T`) and
-    `values` (`... ==> E.v_t == old[L](E.v_t)`).  The `range` of a pointer element `ptr_<t>` is `WF` of its value (S43 `s43_c_ptr_elem`); a pointer to a structure's extra `WF_S` conjunct is not accepted yet."""
-    k, b, extra, cons = q
+    `values` (`... ==> E.v_t == old[L](E.v_t)`).  The `acc` of a range place of a `reads_range` parameter carries the function's own
+    amount (decision 0060 item 11): a `Perm` formal of the method (`perm_formals`), never a local or an expression.  The `range` of a pointer element `ptr_<t>` is `WF` of its value (S43 `s43_c_ptr_elem`); a pointer to a structure's extra `WF_S` conjunct is not accepted yet."""
+    k, b, extra, cons = q[:4]
     cell = rf"loc\({re.escape(_squash(b))},{re.escape(k)}\)"
     cons = _squash(cons)
     if not extra:
         acc = _range_acc(cons, k, b)
-        if acc is not None and acc[1] is None:
+        if acc is not None and (acc[1] is None or (re.fullmatch(IDENT, acc[1]) and acc[1] in perm_formals)):
             return "acc", []
         m = re.match(rf"^({cell}\.v_[\w$']+)==old\[([\w$']+)\]\(?({cell}\.v_[\w$']+)\)?$", cons)
         if m and m.group(1) == m.group(3):
@@ -3291,17 +3546,36 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
             if lm:
                 seen.add(lm.group(1))
     marked_lines: set[int] = set()
+    method_of: dict[int, Decl] = {}
+    for d in decls:
+        if d.kind == "method":
+            for n in range(d.line, d.end_line + 1):
+                method_of[n] = d
+    formals_of: dict[int, frozenset[str]] = {}
+
+    def perm_formals(lineno: int) -> frozenset[str]:
+        d = method_of.get(lineno)
+        if d is None:
+            return frozenset()
+        if d.line not in formals_of:
+            formals_of[d.line] = frozenset(m.group("name") for f in method_formals(src, d) if (m := PERM_FORMAL_RE.match(f)))
+        return formals_of[d.line]
+
     for lineno, code in enumerate(src.code, start=1):
         has_q, has_old = FORALL_RE.search(code), OLD_LABEL_RE.search(code)
         if not (has_q or has_old) or lineno in skip:
             continue
         m = QUANT_STMT_RE.match(code)
-        starts_q = bool(m and FORALL_RE.match(m.group("rest").strip()))
-        q = parse_range_quantifier(m.group("rest")) if starts_q else None
         kind = m.group("kw") if m else ""
+        guard, body = split_guard(m.group("rest")) if m else (None, None)
+        plain = bool(m and FORALL_RE.match(m.group("rest").strip()))  # no guard, no wrapping: the older rows' text
+        starts_q = body is not None
+        q = parse_range_quantifier_full(body) if starts_q else None
         old_labels: list[str] = []
         ok = False
-        if starts_q and kind in ("assert", "exhale"):
+        why = ""
+        if starts_q and plain and kind in ("assert", "exhale") and (q is None or _range_acc(q[3], q[0], q[1]) is not None):
+            # decision 0059 item 7's marked row (an `acc` of one field) or the range `exhale`
             acc = _range_acc(q[3], q[0], q[1]) if q is not None else None
             shaped = (q is not None and not q[2] and acc is not None and (acc[1] is None or _heap_free(acc[1]))
                       and (kind == "assert" or acc[1] is None))
@@ -3309,21 +3583,30 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                 marked_lines.add(lineno)
             if not shaped:
                 add(lineno, f"a quantified `{kind}` that is not a marked range row of decision 0059 item 7: "
-                            f"`{kind} forall k: Int :: {{ loc(B, k) }} lo <= k && k < hi ==> acc(loc(B, k).f)` with one field "
-                            "(an `assert` row may carry an amount) and B, lo, hi and the amount reading no heap")
+                            f"`{kind} forall k: Int :: {{ loc(block_of(X), k) }} lo <= k && k < hi ==> acc(loc(block_of(X), k).f)` "
+                            "with one field (an `assert` row may carry an amount) and X a variable, B, lo, hi and the amount reading no heap")
             ok = True  # reported above
         elif q is not None and kind == "invariant":
-            c = _loop_conjunct(q)
-            ok = c is not None
-            if c is None:
+            c = _loop_conjunct(q, perm_formals(lineno))
+            ok = c is not None and (guard is None or not GUARD_BAD_RE.search(guard))
+            if not ok:
                 add(lineno, "a quantified loop `invariant` that is not one of decision 0059 item 8's four conjuncts "
-                            "(permission over the range, the flags kept, the type's range, the values kept)")
+                            "(permission over the range with no amount or the method's own `Perm` formal, the flags kept, the type's "
+                            "range, the values kept), alone or under a guard `g ==> `")
+                ok = True  # reported above
+                old_labels = []
             else:
                 old_labels = c[1]
+        elif q is not None and kind in ("requires", "ensures", "assert") and m is not None and lineno in method_of:
+            # decision 0060 item 16: a range atom's quantifiers in a method's clauses and its pure rows
+            why = range_atom_row_problem(kind, guard, q, perm_formals(lineno)) or ""
+            ok = not why
         if not ok:
             if has_q:
                 add(lineno, "`forall` outside the shapes of decision 0059: the `alloc_arr_<t>` and `zero_arr_<t>` contracts, "
-                            "a marked range row (`assert`), the range `exhale` and item 8's loop conjuncts (and `domain Block`'s axioms)")
+                            "a marked range row (`assert`), the range `exhale` and item 8's loop conjuncts (and `domain Block`'s axioms) "
+                            "and decision 0060 item 16's range-atom rows (the quantifiers of a method's `requires` and `ensures` and "
+                            "their pure `assert` rows)" + (f": {why}" if why else ""))
         if has_old:
             found = re.findall(r"(?<![\w$'])old\s*\[\s*([^\]]*?)\s*\]", code)
             if not (ok and q is not None and kind == "invariant" and old_labels and len(found) == len(old_labels)):

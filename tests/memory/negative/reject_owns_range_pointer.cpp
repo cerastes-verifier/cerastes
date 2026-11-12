@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L9
 // mode: c++20
 // twin: tests/memory/owns_inc.c
-// Pins: 0037 items 5 and 15: owns_range over a pointer is rejected (lifted by M4.5e1b: owns_range, record 0059 item 1)
+// Pins: 0060 item 3 (0040 item 2; flip B): owns_range of a const pointee is rejected, and since M4.5e1b the rejection is the pointee's, not the range atom's: "cerastes::owns_range" of a const place (a function that only reads p[0..n) takes reads_range). tests/memory/range_cpp_forms.cpp's first_deref is the positive of this program with reads_range
 #include <cerastes.h>
 #include <stddef.h>
 

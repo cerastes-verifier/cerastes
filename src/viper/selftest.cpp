@@ -1498,6 +1498,7 @@ void define_not_invalidating_rejections();
 void define_marked_fields();
 void define_arrays_rejected_until_part_b();
 void define_arrays_lowering();
+void define_ranges_lowering();
 } // namespace
 
 #include "selftest_cases2.inc"
@@ -1528,6 +1529,7 @@ void define_arrays_lowering();
 #include "selftest_cases27.inc"
 #include "selftest_cases28.inc"
 #include "selftest_cases29.inc"
+#include "selftest_cases30.inc"
 
 namespace {
 
@@ -1813,6 +1815,7 @@ int main(int argc, char** argv)
     define_marked_fields();
     define_arrays_rejected_until_part_b();
     define_arrays_lowering();
+    define_ranges_lowering();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

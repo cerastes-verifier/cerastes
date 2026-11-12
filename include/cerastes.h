@@ -90,7 +90,9 @@
 // permission (decision 0047 item 4).  `cerastes_owns_vlibc_block(p)` is the same for a block of vlibc's allocator
 // (`vlibc_malloc` and its family; decision 0052 item 7: C programs only, the front end rejects it in C++ like vlibc's
 // allocations).  `cerastes_owns_block(p, size)` and `cerastes_zeroed(p)` are vlibc's own (the allocation contracts of
-// `malloc` and `calloc`; the front end rejects them in a program's contracts).  `cerastes_old(e)` takes a place and is
+// `malloc` and `calloc`; the front end rejects them in a program's contracts).  `cerastes_owns_range(p, n)` and `cerastes_reads_range(p, n)` take a
+// pointer parameter and a count: the elements `p[0..n)` (decision 0060: write permission, or a read fraction; both imply `p != NULL`).
+// `cerastes_old(e)` takes a place and is
 // a macro over `__typeof__` (accepted by clang,
 // gcc and the front end in both languages); it is only ever expanded inside a contract macro, which expands to nothing in another
 // compiler.
@@ -102,6 +104,8 @@ bool cerastes_live(...) noexcept;
 bool cerastes_owns_block(...) noexcept;
 bool cerastes_owns_vlibc_block(...) noexcept;
 bool cerastes_zeroed(...) noexcept;
+bool cerastes_owns_range(...) noexcept;
+bool cerastes_reads_range(...) noexcept;
 const void* cerastes_old_(const void*) noexcept;
 }
 #else
@@ -111,6 +115,8 @@ _Bool cerastes_live(...);
 _Bool cerastes_owns_block(...);
 _Bool cerastes_owns_vlibc_block(...);
 _Bool cerastes_zeroed(...);
+_Bool cerastes_owns_range(...);
+_Bool cerastes_reads_range(...);
 const void* cerastes_old_(const void*);
 #endif
 #define cerastes_old(e) (*(__typeof__(e)*)cerastes_old_(&(e)))
@@ -142,6 +148,9 @@ template <class F, class... Free>
 bool forall(F body, const Free&... free) noexcept;
 template <class T>
 bool owns_range(const T* first, decltype(sizeof 0) count) noexcept;
+// reads_range(p, n): the read fraction of the elements p[0..n) (decision 0060 item 2), owns_range's signature.
+template <class T>
+bool reads_range(const T* first, decltype(sizeof 0) count) noexcept;
 } // namespace cerastes
 #endif
 

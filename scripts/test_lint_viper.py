@@ -6771,5 +6771,486 @@ class ElementFlagTests(unittest.TestCase):
         self.assertEqual([p for p in self.probs(body) if "through a `Ref` temporary" in p], [])
 
 
+class RangeAtomQuantifierTests(unittest.TestCase):
+    """Decision 0060 item 16 (S44's shapes): a range atom's quantifiers in a method's `requires` and `ensures`, under an optional guard
+    `g ==> forall k :: { loc(block_of(X), k) } offset_of(X) <= k && k < offset_of(X) + n ==> ROW`; the pure `assert` rows over a range
+    (the flags, the type's range, the flag implication, `old(flag) ==> flag`); the marked rows over a `Ref` local's block and inside
+    `if (g) { }`; the loop conjuncts with the method's own amount and a guard; the amount of a call row.  Nothing else that holds a
+    `forall` is admitted: every twin changes one thing of a clean fixture, and the clean fixtures show the shapes pass."""
+
+    INT_RANGE = "(((-2147483648) <= {c}.v_int) && ({c}.v_int <= 2147483647))"
+
+    @staticmethod
+    def cell(x="v_p", k="k"):
+        return f"loc(block_of({x}), {k})"
+
+    def quant(self, cons, x="v_p", n="v_n", k="k", lo=None, hi=None, trigger=None, extra=None, binder=None, wrap=False):
+        lo = f"offset_of({x})" if lo is None else lo
+        hi = f"offset_of({x}) + {n}" if hi is None else hi
+        ante = f"(({lo} <= {k}) && ({k} < {hi}))"
+        if extra:
+            ante = f"({ante} && {extra})"
+        trigger = f"loc(block_of({x}), {k})" if trigger is None else trigger
+        text = f"forall {binder or k + ': Int'} :: {{ {trigger} }} {ante} ==> {cons}"
+        return f"({text})" if wrap else text
+
+    def acc(self, f="v_int", amount="", x="v_p", k="k"):
+        return f"acc({self.cell(x, k)}.{f}{amount})"
+
+    def flag(self, x="v_p", k="k", t="int"):
+        return f"{self.cell(x, k)}.d_{t}"
+
+    def rng(self, x="v_p", k="k", t="int"):
+        return self.INT_RANGE.format(c=self.cell(x, k))
+
+    def flag_rng(self, x="v_p", k="k"):
+        return f"({self.flag(x, k)} ==> {self.rng(x, k)})"
+
+    def old_flag(self, x="v_p", k="k"):
+        return f"(old({self.flag(x, k)}) ==> {self.flag(x, k)})"
+
+    def method(self, requires=(), ensures=(), body=(), formals="v_p: Ref, v_n: Int, amt: Perm"):
+        lines = [f"method m__1({formals})", Check("  requires none < amt && amt < write", WF, "internal")]
+        lines += [Check(f"  requires {r}", WF, "internal") for r in requires]
+        lines += [Check(f"  ensures {e}", P, "postcondition") for e in ensures]
+        return lines + ["  decreases", "{", "  var ra1: Ref", *body, "}"]
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+                if any(w in p for w in ("`forall`", "quantified", "old[", "marked range row", "expected reason", "`Perm` local"))]
+
+    def clean(self, lines):
+        self.assertEqual(self.probs(lines), [])
+        self.assertEqual(lint_vpr_other(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    def refused(self, lines, fragment="`forall` outside the shapes"):
+        probs = self.probs(lines)
+        self.assertTrue(any(fragment in p for p in probs), probs)
+
+    # --- a method's requires and ensures
+    def test_the_rows_of_an_atom_in_requires_and_ensures_are_clean(self):
+        rows = [self.quant(self.acc()), self.quant(self.acc("d_int")), self.quant(self.flag()), self.quant(self.rng()),
+                self.quant(self.flag_rng())]
+        self.clean(self.method(requires=rows, ensures=rows + [self.quant(self.old_flag())]))
+
+    def test_a_permission_row_may_carry_a_perm_formal_as_its_amount(self):
+        rows = [self.quant(self.acc(amount=", amt")), self.quant(self.acc("d_int", amount=", amt"))]
+        self.clean(self.method(requires=rows, ensures=rows))
+
+    def test_a_guard_stands_outside_the_quantifier_in_either_spelling(self):
+        for guard in ("(v_n != 0)", "v_n != 0", "(v_p != null)", "(v_n != 0 && v_p != null)"):
+            for wrap in (False, True):
+                with self.subTest(guard=guard, wrap=wrap):
+                    row = self.quant(self.acc(), wrap=wrap)
+                    flag = self.quant(self.flag_rng(), wrap=wrap)
+                    self.clean(self.method(requires=[f"{guard} ==> {row}", f"{guard} ==> {flag}"],
+                                           ensures=[f"{guard} ==> {row}", f"{guard} ==> {self.quant(self.old_flag(), wrap=wrap)}"]))
+
+    def test_an_element_type_is_any_field_suffix(self):
+        t = "ptr_int"
+        view = lv._view_wf(f"{self.cell()}.v_{t}")
+        rows = [self.quant(self.acc(f"v_{t}")), self.quant(self.flag(t=t)), self.quant(f"({self.flag(t=t)} ==> ({view}))")]
+        self.clean(self.method(requires=rows, ensures=rows))
+
+    def test_the_range_must_be_the_atoms(self):
+        mutants = {
+            "a low bound of zero": self.quant(self.acc(), lo="0"),
+            "a low bound of another base": self.quant(self.acc(), lo="offset_of(v_q)"),
+            "a high bound of a literal": self.quant(self.acc(), hi="3"),
+            "a high bound of another base": self.quant(self.acc(), hi="offset_of(v_q) + v_n"),
+            "a high bound that is the count alone": self.quant(self.acc(), hi="v_n"),
+            "a high bound that names k": self.quant(self.acc(), hi="offset_of(v_p) + k"),
+            "an extra conjunct in the antecedent": self.quant(self.acc(), extra="v_n > 1"),
+            "a heap read in the count": self.quant(self.acc(), n="v_p.v_int"),
+            "a perm in the count": self.quant(self.acc(), n="perm(v_p.v_int)"),
+            "an old in the count": self.quant(self.acc(), n="old(v_n)"),
+            "the quantifier over Bool": self.quant(self.acc(), binder="k: Bool"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(requires=[row]))
+                self.refused(self.method(ensures=[row]))
+
+    def test_the_trigger_is_loc_of_the_block_of_a_variable(self):
+        mutants = {
+            "no trigger": self.quant(self.acc()).replace("{ loc(block_of(v_p), k) } ", ""),
+            "another function": self.quant(self.acc(), trigger="offset_of(loc(block_of(v_p), k))"),
+            "an offset index": self.quant(self.acc(), trigger="loc(block_of(v_p), k + 1)"),
+            "another variable": self.quant(self.acc(), trigger="loc(block_of(v_p), j)"),
+            "two triggers": self.quant(self.acc()).replace("{ loc(block_of(v_p), k) }", "{ loc(block_of(v_p), k) } { loc(block_of(v_p), k + 1) }"),
+            "a base that is not a variable": self.quant(self.acc(x="loc(block_of(v_p), offset_of(v_p) + 1)"),
+                                                        x="loc(block_of(v_p), offset_of(v_p) + 1)", lo="offset_of(v_p)",
+                                                        hi="offset_of(v_p) + v_n"),
+            "a base that is not a block_of": self.quant(self.acc(), trigger="loc(v_p, k)"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(requires=[row]))
+
+    def test_the_consequent_is_one_of_the_rows(self):
+        c = self.cell()
+        mutants = {
+            "two fields": self.quant(f"{self.acc()} && {self.acc('d_int')}"),
+            "a value comparison": self.quant(f"{c}.v_int == 0"),
+            "a value inequality": self.quant(f"{c}.v_int > 0"),
+            "a flag and another": self.quant(f"{self.flag()} && {self.flag()}"),
+            "a range of a smaller type that is not standard": self.quant(f"({c}.d_int ==> ((0 <= {c}.v_int) && ({c}.v_int <= 5)))"),
+            "a range with one bound": self.quant(f"{c}.v_int <= 2147483647"),
+            "a flag of another type than the range": self.quant(f"({self.flag(t='bool')} ==> {self.rng()})"),
+            "an implication from the value": self.quant(f"({c}.v_int > 0 ==> {self.flag()})"),
+            "a flag of another cell": self.quant(self.flag(k="j")),
+            "an acc of another cell": self.quant(self.acc(k="j")),
+            "an acc of another base": self.quant(self.acc(x="v_q")),
+            "an acc with an amount that is not a formal": self.quant(self.acc(amount=", kl")),
+            "an acc with the amount write": self.quant(self.acc(amount=", write")),
+            "an acc with a computed amount": self.quant(self.acc(amount=", amt / 2")),
+            "an acc with a heap amount": self.quant(self.acc(amount=", perm(v_p.v_int)")),
+            "a pointer range that is not WF": self.quant(f"({self.flag(t='ptr_int')} ==> ({c}.v_ptr_int != null))"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(requires=[row]))
+                self.refused(self.method(ensures=[row]))
+
+    def test_old_of_a_flag_stands_in_an_ensures_and_an_assert_only(self):
+        row = self.quant(self.old_flag())
+        self.refused(self.method(requires=[row]))
+        self.clean(self.method(ensures=[row]))
+        mutants = {
+            "the flag of another cell": self.quant(f"(old({self.flag(k='j')}) ==> {self.flag()})"),
+            "the consequent of another cell": self.quant(f"(old({self.flag()}) ==> {self.flag(k='j')})"),
+            "the value, not the flag": self.quant(f"(old({self.cell()}.v_int) ==> {self.flag()})"),
+            "old of the permission": self.quant(f"(old({self.acc()}) ==> {self.flag()})"),
+        }
+        for label, r in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(ensures=[r]))
+
+    def test_a_guard_is_a_plain_condition(self):
+        row = self.quant(self.acc())
+        for label, guard in (("a quantifier", f"({self.quant(self.flag())})"), ("a permission", "(acc(v_p.v_int))"),
+                             ("a perm", "(perm(v_p.v_int) > none)"), ("a forperm", "(forperm t: Ref [t.tok] :: true)"),
+                             ("a labelled old", "(old[lh_0](v_n) > 0)")):
+            with self.subTest(guard=label):
+                self.refused(self.method(requires=[f"{guard} ==> {row}"]))
+        # twin: a plain condition is fine
+        self.clean(self.method(requires=[f"(v_n != 0) ==> {row}"]))
+
+    def test_forall_stands_nowhere_else_in_the_clauses(self):
+        row = self.quant(self.acc())
+        cases = {
+            "a function's requires": ["function f_f(v_p: Ref, v_n: Int): Bool", f"  requires {row}", "{", "  true", "}"],
+            "a conjunction in a requires": self.method(requires=[f"true && ({row})"]),
+            "a disjunction in an ensures": self.method(ensures=[f"v_n == 0 || ({row})"]),
+            "a negation": self.method(requires=[f"!({row})"]),
+            "an inhale": self.method(body=[f"  inhale {row} // cerastes:inhale-ok test"]),
+            "an if condition": self.method(body=[f"  if ({self.quant(self.flag())}) {{", "  }"]),
+            "a variable initializer": self.method(body=[f"  var b: Bool := {self.quant(self.flag())}"]),
+        }
+        for label, lines in cases.items():
+            with self.subTest(case=label):
+                self.refused(lines)
+
+    def typed_range(self, t, lo, hi, flagged=True, x="v_p", k="k"):
+        c = self.cell(x, k)
+        rng = f"((({lo}) <= {c}.v_{t}) && ({c}.v_{t} <= {hi}))"
+        return f"({self.flag(x, k, t)} ==> {rng})" if flagged else rng
+
+    def test_the_emitters_parenthesized_bounds_are_read(self):
+        # the emitter writes every sum under a comparison in parentheses: k < (offset_of(p) + n)
+        rows = [self.quant(self.acc(), hi="(offset_of(v_p) + v_n)"), self.quant(self.flag(), lo="(offset_of(v_p))", hi="(offset_of(v_p) + v_n)"),
+                self.quant(self.flag_rng(), hi="((offset_of(v_p) + v_n))")]
+        self.clean(self.method(requires=rows, ensures=rows))
+        self.clean(self.method(body=[Check(f"  assert {r}", A, "uninitialized") for r in rows[1:]]))
+        # twins: the parentheses do not let a wrong bound through
+        mutants = {
+            "another base": self.quant(self.acc(), hi="(offset_of(v_q) + v_n)"),
+            "the count alone": self.quant(self.acc(), hi="(v_n)"),
+            "a count that names k": self.quant(self.acc(), hi="(offset_of(v_p) + k)"),
+            "a low bound of zero": self.quant(self.acc(), lo="(0)", hi="(offset_of(v_p) + v_n)"),
+            "a high bound that reads the heap": self.quant(self.acc(), hi="(offset_of(v_p) + v_p.v_int)"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(requires=[row]))
+                self.refused(self.method(ensures=[row]))
+
+    def test_an_enumerations_range_is_its_own_as_a_cells_row_reads_it(self):
+        t = "enum_1_color"
+        rows = [self.quant(self.typed_range(t, 0, 2)), self.quant(self.typed_range(t, 0, 2, flagged=False)),
+                self.quant(self.typed_range(t, -1, 3)), self.quant(self.acc(f"v_{t}")), self.quant(self.flag(t=t))]
+        self.clean(self.method(requires=rows, ensures=rows))
+        self.clean(self.method(body=[Check(f"  assert {self.quant(self.typed_range(t, 0, 2))}", A, "permission")]))
+        mutants = {
+            "a range that excludes zero": self.quant(self.typed_range(t, 1, 2)),
+            "a range below zero": self.quant(self.typed_range(t, -3, -1)),
+            "a bare range that excludes zero": self.quant(self.typed_range(t, 1, 2, flagged=False)),
+            "a flag of another field": self.quant(f"({self.flag(t='int')} ==> {self.typed_range(t, 0, 2, flagged=False)})"),
+            "one bound only": self.quant(f"({self.flag(t=t)} ==> ({self.cell()}.v_{t} <= 2))"),
+            "a non-literal bound": self.quant(self.typed_range(t, "v_n", 2)),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(requires=[row]))
+                self.refused(self.method(ensures=[row]))
+
+    def test_an_integer_field_takes_its_own_types_range_as_a_cells_row_does(self):
+        ok = {"int": (-2**31, 2**31 - 1), "uint": (0, 2**32 - 1), "schar": (-128, 127), "ulong": (0, 2**64 - 1), "i128": (-2**127, 2**127 - 1)}
+        for t, (lo, hi) in ok.items():
+            with self.subTest(field=t):
+                self.clean(self.method(requires=[self.quant(self.typed_range(t, lo, hi))]))
+        # twins: another type's standard range, or a range that is no integer type's
+        bad = {"int": (0, 2**32 - 1), "uint": (-2**31, 2**31 - 1), "schar": (0, 255), "short": (-128, 127), "int ": (0, 5), "i128": (0, 5)}
+        for t, (lo, hi) in bad.items():
+            with self.subTest(field=t, mutant=True):
+                self.refused(self.method(requires=[self.quant(self.typed_range(t.strip(), lo, hi))]))
+
+    # --- the pure assert rows and the marked rows
+    def test_the_pure_assert_rows_are_clean_unguarded_and_guarded(self):
+        pure = [self.quant(self.flag()), self.quant(self.rng()), self.quant(self.flag_rng()), self.quant(self.old_flag())]
+        body = [Check(f"  assert {r}", A, "uninitialized") for r in pure]
+        body += [Check(f"  assert (v_n != 0) ==> ({r})", A, "uninitialized") for r in pure]
+        body += [Check(f"  assert v_n != 0 ==> {r}", A, "uninitialized") for r in pure]
+        body += [Check(f"  assert ({r})", A, "uninitialized") for r in pure]
+        self.clean(self.method(body=body))
+
+    def test_a_pure_assert_row_has_the_shape_too(self):
+        c = self.cell()
+        mutants = {
+            "a guard that reads the heap": f"(v_p.v_int != 0) ==> ({self.quant(self.flag())})",
+            "a guard with perm": f"(perm(v_p.v_int) > none) ==> ({self.quant(self.flag())})",
+            "a guarded permission row": f"(v_n != 0) ==> ({self.quant(self.acc())})",
+            "a wrapped permission row": f"({self.quant(self.acc())})",
+            "an equality": self.quant(f"{c}.v_int == 0"),
+            "a bound that reads the heap": self.quant(self.flag(), hi="offset_of(v_p) + v_p.v_int"),
+            "a zero-based range": self.quant(self.flag(), lo="0", hi="3"),
+            "a trigger of another shape": self.quant(self.flag(), trigger="loc(block_of(v_p), k + 1)"),
+            "a base that is not a variable": self.quant(self.flag(x="loc(block_of(v_p), 1)"), x="loc(block_of(v_p), 1)"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                probs = self.probs(self.method(body=[Check(f"  assert {row}", A, "uninitialized")]))
+                self.assertTrue(any("`forall` outside the shapes" in p or "not a marked range row" in p for p in probs), probs)
+        # a permission row that is guarded or wrapped is not the marked row of decision 0059 item 7 (that one is unguarded, and a guard
+        # stands as `if (g) { }` around it), and it is no pure row either
+        for label in ("a guarded permission row", "a wrapped permission row"):
+            with self.subTest(mutant=label):
+                probs = self.probs(self.method(body=[Check(f"  assert {mutants[label]}", A, "uninitialized")]))
+                self.assertTrue(any("`forall` outside the shapes" in p for p in probs), probs)
+                self.assertFalse(any("has no expected reason" in p for p in probs), probs)
+
+    def test_a_marked_row_over_a_local_base_inside_a_guard_is_clean(self):
+        acc, dacc = self.quant(self.acc(x="ra1"), x="ra1"), self.quant(self.acc("d_int", x="ra1"), x="ra1")
+        body = ["  ra1 := loc(block_of(v_p), offset_of(v_p) + 1)", "  if (v_n != 0) {",
+                Check(f"    assert {acc}", MARKED, "permission"), Check(f"    assert {dacc}", MARKED, "permission"), "  }"]
+        self.clean(self.method(body=body))
+        # twin: a row whose base is the address expression is not a trigger Silicon accepts (S44 F-b1)
+        bad = self.quant(self.acc(x="loc(block_of(v_p), offset_of(v_p) + 1)"), x="loc(block_of(v_p), offset_of(v_p) + 1)", lo="offset_of(v_p)",
+                         hi="offset_of(v_p) + v_n")
+        self.assertTrue(self.probs(self.method(body=[Check(f"  assert {bad}", MARKED, "permission")])))
+
+    def test_a_marked_row_may_carry_the_sum_form_and_an_amount_that_reads_no_heap(self):
+        sums = [", amt", ", amt + ((block_of(v_q) == block_of(v_p) && offset_of(v_q) <= k && k < offset_of(v_q) + v_m) ? amt : none)",
+                ", l1 + (inq ? l2 : none)"]
+        for amount in sums:
+            with self.subTest(amount=amount):
+                body = [Check(f"  assert {self.quant(self.acc(amount=amount))}", MARKED, "permission")]
+                self.assertEqual(self.probs(self.method(body=body)), [])
+        for amount in (", amt + (v_q.v_int > 0 ? amt : none)", ", amt + (perm(v_q.v_int) > none ? amt : none)"):
+            with self.subTest(amount=amount):
+                body = [Check(f"  assert {self.quant(self.acc(amount=amount))}", MARKED, "permission")]
+                self.assertTrue(any("not a marked range row" in p for p in self.probs(self.method(body=body))))
+
+    def test_an_unmarked_row_with_the_reason_of_a_marked_one_is_refused(self):
+        # a pure row whose map entry says insufficient.permission would let a read of a flag without permission pass for a user error
+        for row in (self.quant(self.flag()), self.quant(self.flag_rng()), self.quant(self.old_flag()), f"(v_n != 0) ==> ({self.quant(self.flag())})"):
+            with self.subTest(row=row):
+                probs = self.probs(self.method(body=[Check(f"  assert {row}", MARKED, "permission")]))
+                self.assertTrue(any("carries the expected reason" in p for p in probs), probs)
+        # and a marked row without the reason is refused, as the older rule says
+        probs = self.probs(self.method(body=[Check(f"  assert {self.quant(self.acc())}", "assert.failed", "permission")]))
+        self.assertTrue(any("has no expected reason" in p for p in probs), probs)
+
+    # --- loops
+    def loop_lines(self, *invariants, label=True):
+        lines = ["method m__1(v_p: Ref, v_n: Int, amt: Perm)", Check("  requires none < amt && amt < write", WF, "internal"),
+                 "  decreases", "{", "  var v_a: Ref"]
+        if label:
+            lines.append("  label lh_0")
+        return lines + ["  while (true)", *[Check(i, INV, "internal") for i in invariants], "  {", "  }", "}"]
+
+    def conjuncts(self, guard=None, amount=", amt"):
+        g = f"{guard} ==> " if guard else ""
+        c = self.cell()
+        rng = f"((offset_of(v_p) <= k) && (k < offset_of(v_p) + v_n))"
+
+        def inv(ante, cons):
+            return f"    invariant {g}(forall k: Int :: {{ {c} }} {ante} ==> {cons})"
+        return {
+            "acc": inv(rng, f"acc({c}.v_int{amount})"),
+            "dacc": inv(rng, f"acc({c}.d_int{amount})"),
+            "flags": inv(f"({rng} && old[lh_0]({c}.d_int))", f"{c}.d_int"),
+            "range": inv(f"({rng} && {c}.d_int)", self.rng()),
+            "values": inv(rng, f"({c}.v_int == old[lh_0]({c}.v_int))"),
+        }
+
+    def test_the_loop_conjuncts_with_an_amount_and_a_guard_are_clean(self):
+        for guard in (None, "(v_n != 0)", "v_p != null"):
+            for amount in ("", ", amt"):
+                with self.subTest(guard=guard, amount=amount):
+                    self.assertEqual(self.probs(self.loop_lines(*self.conjuncts(guard, amount).values())), [])
+
+    def test_a_loop_amount_is_the_methods_own_perm_formal(self):
+        for amount in (", kl", ", write", ", amt / 2", ", perm(v_p.v_int)", ", other"):
+            with self.subTest(amount=amount):
+                probs = self.probs(self.loop_lines(self.conjuncts(None, amount)["acc"]))
+                self.assertTrue(any("item 8's four conjuncts" in p for p in probs), probs)
+        # a formal of another method does not count
+        lines = ["method m__0(v_p: Ref, other: Perm)", "  decreases", "{", "}"] + self.loop_lines(self.conjuncts(None, ", other")["acc"])
+        self.assertTrue(any("item 8's four conjuncts" in p for p in self.probs(lines)))
+
+    def test_a_loop_guard_is_a_plain_condition_and_old_label_is_still_read(self):
+        c = self.conjuncts("(acc(v_p.v_int))")
+        for name, inv in c.items():
+            with self.subTest(conjunct=name):
+                self.assertTrue(self.probs(self.loop_lines(inv)), name)
+        c = self.conjuncts("(v_n != 0)")
+        probs = self.probs(self.loop_lines(c["flags"], label=False))
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in probs), probs)
+        inv = c["acc"] + " && old[lh_0](true)"
+        self.assertTrue(any("`old[label]` outside" in p for p in self.probs(self.loop_lines(inv))))
+
+    def test_a_loop_conjunct_under_a_guard_keeps_its_shape(self):
+        c = self.conjuncts("(v_n != 0)")
+        cell = self.cell()
+        mutants = {
+            "flags without old": c["flags"].replace(f"old[lh_0]({cell}.d_int)", f"{cell}.d_int"),
+            "values of another field": c["values"].replace("old[lh_0](loc(block_of(v_p), k).v_int)", "old[lh_0](loc(block_of(v_p), k).v_bool)"),
+            "a base that is not a variable": c["acc"].replace("block_of(v_p)", "block_of(loc(block_of(v_p), 1))"),
+            "a consequent of any kind": c["acc"].replace(f"acc({cell}.v_int, amt)", f"{cell}.v_int > 0"),
+        }
+        for label, inv in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.loop_lines(inv)), label)
+
+    # --- the amount of a call row
+    SLOT = "loc(block_of(ra1), offset_of(ra1))"
+    LIVE = "perm(lvloc(block_of(ra1)).lv)"
+
+    def reads_amount(self, count="v_n", t="int", slot=None, live=None, live2=None):
+        slot, live = slot or self.SLOT, live or self.LIVE
+        live2 = live2 or live
+        m = f"(perm({slot}.v_{t}) < perm({slot}.d_{t}) ? perm({slot}.v_{t}) : perm({slot}.d_{t}))"
+        return f"(({count} > 0) ? ({m} < {live} ? {m} : {live}) : {live2})"
+
+    def amount_lines(self, rhs):
+        return self.method(body=["  var l1: Perm", "  ra1 := v_p", f"  l1 := {rhs}"])
+
+    def test_the_amount_of_a_range_call_row_is_a_quotient_by_a_literal(self):
+        for label, rhs in {
+            "owns": f"{self.LIVE} / 2",
+            "owns, more atoms": f"{self.LIVE} / 3",
+            "owns, a parenthesized divisor": f"{self.LIVE} / (3)",
+            "owns, guarded": f"(v_n != 0 ? {self.LIVE} : write) / 2",
+            "reads": f"{self.reads_amount()} / 2",
+            "reads, a counted expression": f"{self.reads_amount('v_n - 1')} / 4",
+            "reads, guarded": f"(v_p != null ? {self.reads_amount()} : write) / 2",
+            "reads, another element type": f"{self.reads_amount(t='bool')} / 2",
+        }.items():
+            with self.subTest(amount=label):
+                self.clean(self.amount_lines(rhs))
+
+    def test_any_other_quotient_is_refused(self):
+        slot2 = "loc(block_of(v_q), offset_of(v_q))"
+        live2 = "perm(lvloc(block_of(v_q)).lv)"
+        for label, rhs in {
+            "a divisor of one": f"{self.LIVE} / 1",
+            "a divisor of zero": f"{self.LIVE} / 0",
+            "a divisor that is a variable": f"{self.LIVE} / v_n",
+            "a divisor that is an expression": f"{self.LIVE} / (v_n + 1)",
+            "a product": f"{self.LIVE} * 2",
+            "a sum": f"{self.LIVE} + {self.LIVE}",
+            "a cell's permission": "perm(v_p.v_int) / 2",
+            "none": "none / 2",
+            "write": "write / 2",
+            "a liveness over an address expression": "perm(lvloc(block_of(loc(block_of(v_p), offset_of(v_p) + 1))).lv) / 2",
+            "a guard that reads the heap": f"(v_p.v_int != 0 ? {self.LIVE} : write) / 2",
+            "a guard with perm": f"(perm(v_p.v_int) > none ? {self.LIVE} : write) / 2",
+            "a guard that is the liveness": f"({self.LIVE} ? {self.LIVE} : write) / 2",
+            "a guard whose else is not write": f"(v_n != 0 ? {self.LIVE} : none) / 2",
+            "a count that reads the heap": f"{self.reads_amount('v_p.v_int')} / 2",
+            "a minimum over another base": f"{self.reads_amount(slot=slot2)} / 2",
+            "a minimum with the other liveness": f"{self.reads_amount(live2=live2)} / 2",
+            "a minimum with the other element types": self.reads_amount().replace(".d_int", ".d_bool", 1) + " / 2",
+            "a minimum compared with the other liveness": self.reads_amount().replace(f"< {self.LIVE} ?", f"< {live2} ?", 1) + " / 2",
+            "a minimum that falls back to the other liveness": self.reads_amount().replace(f": {self.LIVE})", f": {live2})", 1) + " / 2",
+            "a minimum not over the first slot": self.reads_amount(slot="loc(block_of(ra1), offset_of(ra1) + 1)") + " / 2",
+            "a conditional count of anything": f"(v_n > 0 ? {self.LIVE} : none) / 2",
+        }.items():
+            with self.subTest(amount=label):
+                probs = self.probs(self.amount_lines(rhs))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), probs)
+
+    # --- the minimum of item 6 with the caller's own read amounts (audit round 2, S5)
+    def fold(self, leaves):
+        """`a < b ? a : b` nested to the left over the leaves, as a minimum written in Viper."""
+        cur = leaves[0]
+        for x in leaves[1:]:
+            cur = f"({cur} < {x} ? {cur} : {x})"
+        return cur
+
+    def own_min_lines(self, leaves, formals="v_p: Ref, v_n: Int, amt: Perm, amt2: Perm", count="v_n", live=None):
+        live = live or self.LIVE
+        rhs = f"(({count} > 0) ? {self.fold(leaves)} : {live}) / 2"
+        return [f"method m__1({formals})", Check("  requires none < amt && amt < write", WF, "internal"),
+                Check("  requires none < amt2 && amt2 < write", WF, "internal"), "  decreases", "{", "  var ra1: Ref", "  var kl: Perm",
+                "  kl := perm(lvloc(block_of(v_p)).lv)", "  ra1 := v_p", "  var l1: Perm", f"  l1 := {rhs}", "}"]
+
+    def test_the_minimum_may_hold_the_methods_own_perm_formals(self):
+        v, d = f"perm({self.SLOT}.v_int)", f"perm({self.SLOT}.d_int)"
+        for label, leaves in {
+            "the three of item 6": [v, d, self.LIVE],
+            "one formal": [v, d, self.LIVE, "amt"],
+            "two formals": [v, d, self.LIVE, "amt", "amt2"],
+            "formals first": ["amt", "amt2", v, d, self.LIVE],
+            "a formal repeated": [v, d, self.LIVE, "amt", "amt"],
+        }.items():
+            with self.subTest(minimum=label):
+                self.clean(self.own_min_lines(leaves))
+
+    def test_the_minimum_takes_nothing_but_the_slot_the_liveness_and_the_formals(self):
+        v, d = f"perm({self.SLOT}.v_int)", f"perm({self.SLOT}.d_int)"
+        slot2 = "loc(block_of(ra1), offset_of(ra1) + 1)"
+        other = "perm(lvloc(block_of(v_q)).lv)"
+        for label, leaves in {
+            "a Perm local": [v, d, self.LIVE, "kl"],
+            "a formal of another method": [v, d, self.LIVE, "other"],
+            "the literal write": [v, d, self.LIVE, "write"],
+            "a quotient": [v, d, self.LIVE, "(amt / 2)"],
+            "a perm of a second slot": [v, d, self.LIVE, f"perm({slot2}.v_int)"],
+            "a perm of another cell": [v, d, self.LIVE, "perm(v_q.v_int)"],
+            "another liveness cell": [v, d, self.LIVE, other],
+            "no liveness cell": [v, d, "amt"],
+            "no flag permission": [v, self.LIVE, "amt"],
+            "no value permission": [d, self.LIVE, "amt"],
+            "the flag of another type": [v, f"perm({self.SLOT}.d_bool)", self.LIVE, "amt"],
+        }.items():
+            with self.subTest(minimum=label):
+                probs = self.probs(self.own_min_lines(leaves))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), probs)
+        # a maximum is no minimum: the comparison must be of the two branches in this order
+        bad = f"(({v} < {d} ? {d} : {v}) < {self.LIVE} ? {self.LIVE} : {v})"
+        lines = self.own_min_lines([v, d, self.LIVE])
+        lines[-2] = f"  l1 := (((v_n > 0) ? {bad} : {self.LIVE})) / 2"
+        self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in self.probs(lines)))
+
+    def test_a_quotient_is_still_not_assigned_in_a_loop_that_uses_it(self):
+        lines = self.method(body=["  var l1: Perm", "  ra1 := v_p", f"  l1 := {self.LIVE} / 2", "  label lh_0", "  while (true)",
+                                  "    invariant acc(lvloc(block_of(ra1)).lv, l1)", "  {", f"    l1 := {self.LIVE} / 2", "  }"])
+        probs = [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "assigned inside the loop" in p]
+        self.assertTrue(probs)
+
+
 if __name__ == "__main__":
     unittest.main()

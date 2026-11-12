@@ -27,24 +27,6 @@ void define_arrays_rejected_until_part_b()
            f->body = k.blk({k.es(k.b.elem_addr(k.pv(f, 0), N(k, "1"), k.at()))});
            k.done(f);
        });
-    rc("arr_rej_elem_addr_in_requires", "the address of an array element in a contract",
-       [=](Kit& k)
-       {
-           // requires(p[1] == 0)
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           k.req(f, k.eq(k.deref(k.b.elem_addr(k.F(f, 0), N(k, "1"), k.at())), N(k, "0")));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("arr_rej_elem_addr_in_ensures", "the address of an array element in a contract",
-       [=](Kit& k)
-       {
-           // ensures(p[1] == 0)
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}})};
-           k.ens(f, k.eq(k.deref(k.b.elem_addr(k.F(f, 0), N(k, "1"), k.at())), N(k, "0")));
-           f->body = k.blk({});
-           k.done(f);
-       });
     rc("arr_rej_elem_addr_in_atom", "the address of an array element in a contract",
        [=](Kit& k)
        {

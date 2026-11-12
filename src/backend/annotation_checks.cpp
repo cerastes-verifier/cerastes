@@ -174,9 +174,10 @@ a_constant_ptr unknown_callee_constant(a_constant_ptr c)
 // The specification functions of <cerastes.h> (namespace cerastes).
 bool is_spec_name(const char* n)
 {
-    return n != nullptr && (std::strcmp(n, "old") == 0 || std::strcmp(n, "owns") == 0 || std::strcmp(n, "reads") == 0 ||
-                            std::strcmp(n, "live") == 0 || std::strcmp(n, "forall") == 0 ||
-                            std::strcmp(n, "owns_range") == 0 || std::strcmp(n, "owns_block") == 0);
+    return n != nullptr &&
+           (std::strcmp(n, "old") == 0 || std::strcmp(n, "owns") == 0 || std::strcmp(n, "reads") == 0 ||
+            std::strcmp(n, "live") == 0 || std::strcmp(n, "forall") == 0 || std::strcmp(n, "owns_range") == 0 ||
+            std::strcmp(n, "reads_range") == 0 || std::strcmp(n, "owns_block") == 0);
 }
 
 // Whether `ns` (an alias resolved) is the namespace cerastes declared in the
@@ -1645,6 +1646,7 @@ bool is_protected_macro_name(const std::string& n, const std::set<std::string>& 
                                       "live",
                                       "forall",
                                       "owns_range",
+                                      "reads_range",
                                       "CERASTES_H",
                                       "owning",
                                       "uninit",
@@ -1659,7 +1661,9 @@ bool is_protected_macro_name(const std::string& n, const std::set<std::string>& 
                                       "owns_block",
                                       "cerastes_owns_block",
                                       "cerastes_owns_vlibc_block",
-                                      "cerastes_zeroed"};
+                                      "cerastes_zeroed",
+                                      "cerastes_owns_range",
+                                      "cerastes_reads_range"};
     for (const char* f : fixed)
     {
         if (n == f)

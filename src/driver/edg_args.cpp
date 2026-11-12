@@ -109,9 +109,9 @@ bool is_reserved_identifier(std::string_view n)
 // make contracts vanish, or change what they mean, without a diagnostic.
 bool is_cerastes_name(std::string_view n)
 {
-    static constexpr std::string_view names[] {"cerastes", "requires",   "ensures",    "invariant", "check", "fold",
-                                               "unfold",   "predicate",  "pure",       "old",       "owns",  "reads",
-                                               "forall",   "owns_range", "owns_block", "CERASTES_H"};
+    static constexpr std::string_view names[] {
+        "cerastes", "requires", "ensures", "invariant", "check",      "fold",        "unfold",     "predicate", "pure",
+        "old",      "owns",     "reads",   "forall",    "owns_range", "reads_range", "owns_block", "CERASTES_H"};
     for (std::string_view x : names)
     {
         if (n == x)

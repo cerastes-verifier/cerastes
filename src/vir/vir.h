@@ -287,13 +287,26 @@ enum class BinaryOp
 // for the whole heap block `p` starts, with write permission: offset 0, the free token, the liveness cell, the length and every leaf cell.  It has no
 // ghost amount (`amount` stays -1, requires_atom_count and contract_atoms skip it) and no partner rule: in a `requires` alone the function takes
 // the block, in an `ensures` alone (on the `Result`) it hands the block to the caller, in both on one `Formal` it borrows and returns it.
+//
+// Record 0060 item 3 (M4.5e1b, Part A: plumbing only; the encoder builds none yet and check_program refuses them): `OwnsRange` and `ReadsRange` take the pointer
+// `p` in `a` (a pointer `Formal`, in an `ensures` its entry value) and the count `n` in `b` (an integer expression that reads no memory), and stand for the
+// permission on the elements `p[0..n)`: write permission for `OwnsRange`, the atom's ghost amount for `ReadsRange`.  They carry a ghost amount like `Owns`
+// and `Reads`, numbered with them.  Every consumer that does not handle them refuses them; Part B lifts the refusals it reads.
 enum class AtomKind
 {
     Owns,
     Reads,
     Live,
-    OwnsBlock
+    OwnsBlock,
+    OwnsRange,
+    ReadsRange
 };
+
+// Whether the kind is one of the range atoms of record 0060 (`a` the pointer, `b` the count).
+constexpr bool is_range_atom(AtomKind k)
+{
+    return k == AtomKind::OwnsRange || k == AtomKind::ReadsRange;
+}
 
 struct Expr
 {
@@ -356,7 +369,7 @@ struct Expr
         // loop_atoms collect exactly the allowed ones; any other Atom is a check_program error. Decision 0041: in a
         // contract `a` may also be a GlobalAddr (`owns(g)`, `reads(g)`; the Owns of a `static` local's implicit atom
         // has `implicit_atom`).  An atom pairs with its `requires` partner by place (atom_place_key), not by the
-        // parameter's index.
+        // parameter's index.  Record 0060 item 3: a range atom (OwnsRange, ReadsRange) holds its count in `b`.
         Atom,
         // ---- a write through a pointer used as a value (decision 0039 item 2; appended) ----
         // `*c := a` as a value: `c` is the address (a Ptr), `a` the stored value (already of the pointee's type); the
@@ -1042,6 +1055,12 @@ bool restrict_backed(const Function& f, int param, int* offender = nullptr);
 std::string restrict_hazard(const Function& f, int param);
 // Whether the expression reads the heap: it contains a `Deref` or an `Atom` (an `Old` of one included).
 bool reads_heap(const Expr& e);
+// Structural equality of two pure expressions (record 0060 item 3: the partner rule of range atoms compares counts with it).  The two have the same shape
+// and the same leaves: kinds, types, operators, constants' values, the `Local` variable (the same `Var`), the `Formal`'s index.  Only the nodes of a pure
+// integer or Bool expression are compared: Const, Local, Formal, Unary, Binary, Cond, Convert, ToBool, BoolToInt and Old; any other node (a call, a read of
+// memory, an atom, an assignment) makes the answer false, as does a difference the comparison does not look through (`Old(Formal)` is not `Formal`), so the
+// answer "equal" is always true and a caller that pairs by it fails closed.  Positions, spellings (`c_text`, `c_type_name`) and `explicit_cast` do not count.
+bool same_pure_expr(const Expr& a, const Expr& b);
 // The place a permission atom names (decision 0041 item 8: the sites of 0037 are keyed by place, not by the parameter's index): the parameter's index
 // (>= 0) for an atom on a `Formal`, `kGlobalSiteBase + global->id` for an atom on a `GlobalAddr`, `kNoPlaceKey` for anything else (an invariant's
 // `Local`).  Two atoms name one place iff their keys are equal and not `kNoPlaceKey`; `kResultSiteKey` is reserved for lowering's result site.
@@ -1117,6 +1136,9 @@ struct PlaceKey
     }
 };
 PlaceKey atom_place(const Expr& atom);
+// Whether the atoms `a` (an `ensures` atom) and `b` (a `requires` atom) are partners: the same kind on the same place and, for the range atoms of record 0060 item 3, counts that are
+// structurally equal (`same_pure_expr`; the place of a range atom is its parameter, the count is not in it).  False when either has no place.
+bool atom_partners(const Expr& a, const Expr& b);
 // The root of a place expression (decision 0045 item 2): `e` under any number of MemberAddr, Deref and Field nodes (and an `Old` of a Formal directly under a Field), the
 // first node that is none of them (a Formal, Result, GlobalAddr, Local, AddrOf, or anything else, which a caller refuses).  `*steps` (if given) receives the
 // steps from the root outward, members included (so the steps of `member_root`'s path come last).  A read of a cell by name, a `Local` whose variable is
@@ -1209,6 +1231,9 @@ public:
     // An atom on a global (decision 0041): `ptr` is a GlobalAddr; c_text "owns(g)" / "reads(g)".  `implicit` marks the Owns the encoder adds for a `static`
     // local (item 12).  Same as atom() otherwise (the atom's `a` is the GlobalAddr).
     const Expr* global_atom(AtomKind kind, const Expr* global_addr, int amount, SrcLoc loc, bool implicit = false);
+    // A range atom (record 0060 item 3): `kind` is OwnsRange or ReadsRange, `ptr` a `Formal` of pointer type (the atom's `a`), `count` an integer expression (the
+    // atom's `b`), `amount` as for atom().  Type Bool.  c_text: "owns_range(p, n)" or "reads_range(p, n)" when both operands have a spelling.
+    const Expr* range_atom(AtomKind kind, const Expr* ptr, const Expr* count, int amount, SrcLoc loc);
 
     // Pointers (decision 0032).  `ptr_type` is a Ptr type from Program::pointer_to.
     const Expr* null_const(Type ptr_type, SrcLoc loc);
