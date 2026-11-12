@@ -71,6 +71,7 @@ method wr(p: Ref, n: Int, l_p: Perm)
   ensures acc(lvloc(block_of(p)).lv, l_p)
   ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> (old(loc(block_of(p), k).d_int) ==> loc(block_of(p), k).d_int)
 {
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
   assert !((perm(loc(block_of(p), offset_of(p) + 0).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 0).d_int) != write)) //WPERM
@@ -98,16 +99,19 @@ method fill3(p: Ref, l_p: Perm)
   ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + 3)) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647))
   ensures acc(lvloc(block_of(p)).lv, l_p)
 {
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
   assert !((perm(loc(block_of(p), offset_of(p) + 0).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 0).d_int) != write)) //WPERM
   loc(block_of(p), offset_of(p) + 0).v_int := 1
   loc(block_of(p), offset_of(p) + 0).d_int := true
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + 1 < 0) || (len(block_of(p)) <= offset_of(p) + 1)) //BOUND
   assert !((perm(loc(block_of(p), offset_of(p) + 1).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 1).d_int) != write)) //WPERM
   loc(block_of(p), offset_of(p) + 1).v_int := 2
   loc(block_of(p), offset_of(p) + 1).d_int := true
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + 2 < 0) || (len(block_of(p)) <= offset_of(p) + 2)) //BOUND
   assert !((perm(loc(block_of(p), offset_of(p) + 2).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 2).d_int) != write)) //WPERM
@@ -129,11 +133,11 @@ method uninit_then_fill()
   var t: Int
   v_a := alloc_arr_int(3)
   ra1 := loc(block_of(v_a), offset_of(v_a) + 0)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   l1 := perm(lvloc(block_of(ra1)).lv) / 2
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).d_int) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 //LIVESUM
   fill3(ra1, l1)
@@ -166,11 +170,11 @@ method ref_keeps_flag()
   loc(block_of(v_a), offset_of(v_a) + 0).v_int := 7
   loc(block_of(v_a), offset_of(v_a) + 0).d_int := true
   ra1 := loc(block_of(v_a), offset_of(v_a) + 0)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   l1 := perm(lvloc(block_of(ra1)).lv) / 2
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).d_int) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 //LIVESUM
   wr(ra1, 3, l1)

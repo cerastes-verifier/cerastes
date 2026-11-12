@@ -113,12 +113,12 @@ method access_then_call()
   assert perm(loc(block_of(v_a), offset_of(v_a) + 0).v_int) > none && perm(loc(block_of(v_a), offset_of(v_a) + 0).d_int) > none && loc(block_of(v_a), offset_of(v_a) + 0).d_int
   t0 := loc(block_of(v_a), offset_of(v_a) + 0).v_int
   ra1 := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (2 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 2)) //SHAPE
   assert !((block_of(loc(block_of(v_a), offset_of(v_a) + 0)) == block_of(ra1)) && (offset_of(ra1) <= offset_of(loc(block_of(v_a), offset_of(v_a) + 0))) && (offset_of(loc(block_of(v_a), offset_of(v_a) + 0)) < offset_of(ra1) + 2)) //UNSEQ
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   l1 := perm(lvloc(block_of(ra1)).lv) / 2
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> acc(loc(block_of(ra1), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> acc(loc(block_of(ra1), k).d_int) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (2 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 2)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> loc(block_of(ra1), k).d_int //FLAGS
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 //LIVESUM
@@ -162,12 +162,13 @@ method two_calls_disjoint()
   loc(block_of(v_a), offset_of(v_a) + 3).d_int := true
   ra1 := loc(block_of(v_a), offset_of(v_a) + 0)
   ra2 := loc(block_of(v_a), offset_of(v_a) + 2)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (2 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 2)) //SHAPE
+  assert !((ra2 == null) || !((ra2 == loc(block_of(ra2), offset_of(ra2))) && (0 <= offset_of(ra2)) && (offset_of(ra2) <= len(block_of(ra2)))) || (2 < 0) || (len(block_of(ra2)) < offset_of(ra2) + 2)) //SHAPE
   assert !((block_of(ra1) == block_of(ra2)) && (0 < 2) && (0 < 2) && (offset_of(ra1) < offset_of(ra2) + 2) && (offset_of(ra2) < offset_of(ra1) + 2)) //UNSEQ
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   l1 := perm(lvloc(block_of(ra1)).lv) / 2
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> acc(loc(block_of(ra1), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> acc(loc(block_of(ra1), k).d_int) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (2 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 2)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> loc(block_of(ra1), k).d_int //FLAGS
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 //LIVESUM
@@ -176,7 +177,6 @@ method two_calls_disjoint()
   l2 := perm(lvloc(block_of(ra2)).lv) / 2
   assert forall k: Int :: { loc(block_of(ra2), k) } ((offset_of(ra2) <= k) && (k < offset_of(ra2) + 2)) ==> acc(loc(block_of(ra2), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra2), k) } ((offset_of(ra2) <= k) && (k < offset_of(ra2) + 2)) ==> acc(loc(block_of(ra2), k).d_int) //MARKED
-  assert !((ra2 == null) || !((ra2 == loc(block_of(ra2), offset_of(ra2))) && (0 <= offset_of(ra2)) && (offset_of(ra2) <= len(block_of(ra2)))) || (2 < 0) || (len(block_of(ra2)) < offset_of(ra2) + 2)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra2), k) } ((offset_of(ra2) <= k) && (k < offset_of(ra2) + 2)) ==> loc(block_of(ra2), k).d_int //FLAGS
   assert forall k: Int :: { loc(block_of(ra2), k) } ((offset_of(ra2) <= k) && (k < offset_of(ra2) + 2)) ==> (loc(block_of(ra2), k).d_int ==> ((-2147483648 <= loc(block_of(ra2), k).v_int) && (loc(block_of(ra2), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra2)).lv) >= l2 //LIVESUM

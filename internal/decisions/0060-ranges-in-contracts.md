@@ -14,7 +14,8 @@
   - Open, each built as its recommendation unless answered (handoff §8): **238** `reads_range`'s amount from the
     range's first cell, a caller holding unequal fractions a pinned limit (item 6); **239** a `must_init` filler that
     fills with a loop a pinned false alarm until e1c (item 12); **240** the array-parameter shapes the compilers warn
-    about rejected like the compilers (item 15).
+    about rejected like the compilers (item 15; the matrix's reading: in both modes); **241** (this session, Step 0's
+    R2) VLA parameters on a declaration without a body rejected like those of a definition (item 15).
   - Standing: 69 (no EDG work), 77 (one context), 160 (a new test's expect line corrected after its first run, listed
     in status).
 - **Milestone:** M4.5e1b.
@@ -140,7 +141,12 @@ outcome to the branch of the plan's decision table it took.
      gets two errors, the shape row (`len(block_of(p))` is unknown there, so its assumption is consistent) and then
      the first marked row: two real cases (the object may end at `p + n`, or go on without the callee holding it), as
      S43 N1; the tests expect both. *(An order the table does not name, the marked rows before the shape row for
-     `owns_range`, gave one error everywhere in S44 (b) (`s44_b_caller_orderD.vpr`); it is not built.)*
+     `owns_range`, gave one error everywhere in S44 (b) (`s44_b_caller_orderD.vpr`); it is not built.)* The built
+     order is pinned by `s44_b_*_orderB*`, the `s44_c_*`, `s44_d_*`, `s44_e_*`, `s44_h_*` and `s44_i_*` fixtures
+     (both kinds; S44's addendum), with `reads_range`'s null and too-long twins one error each; the unsuffixed
+     `s44_b_*` files keep the planned order as the table's evidence (its two-error null twins). The separation rows
+     follow every atom's shape, first-slot and liveness rows and precede the amounts; a placement row (item 10)
+     follows the call's shape rows.
    - **Before the amounts**, with the cell atoms' rows: for `reads_range`, `!(n > 0 && (perm(F.v_T) == none ||
      perm(F.d_T) == none))`, and for both kinds the liveness row (`permission`).
    - **Separation**, with the cell pairs: for a pair of one field with at least one `owns` or `owns_range`, a range and
@@ -190,6 +196,9 @@ outcome to the branch of the plan's decision table it took.
       without them a loop over two ranges fails its liveness conjunct on entry.
     - **Order of the conjuncts:** the place's permission conjuncts come before the user's invariants, so an invariant
       that reads the range (a search's progress clause) is well-formed (S44 (g)).
+    - **The count's type range** (`n <= INT_MAX` for an `int` count) must be known to a loop that stores its index
+      (S44 (g)); lowering already writes every integer parameter's range as a `requires` of its method (0010), so
+      nothing is added.
     - **Reads in invariants and measures:** `p[e]` of any pointer and `a` used as a pointer (`q == a`) are accepted. A
       read is framed by a range place (the interval test of item 5) or a cell place; unframed, it is `permission`
       ("this loop invariant reads `p[e]`, which this loop does not hold"); a named array keeps e1a's `out-of-bounds`
@@ -246,7 +255,9 @@ outcome to the branch of the plan's decision table it took.
         are silent: accepted (the bound is ignored), listed for M8.
     - **VLA parameters on a declaration without a body** (`void f(int n, int a[n]);`, `int a[*]`) verify today (R2;
       only definitions were rejected, by C's VLA error or EDG's #411/#890): the plan's scope rejects them, so item 15's
-      rule covers every declaration, with a pin.
+      rule covers every declaration, at the site and with the reach of the `[static N]` rejection, with a pin. It
+      rejects programs that verify today, as question 230 did for `[static N]`: question 241, built as its
+      recommendation (reject; M8 lifts both).
 
 16. **The lint.** New admitted shapes, each with twins: a range atom's quantifiers in `requires` and `ensures`
     (permission with or without a `Perm` formal as amount, flags, range or `WF`, `old(flag) ==> flag`); marked rows with
@@ -271,7 +282,7 @@ its decision table, and the item it revised. An outcome outside its table stops 
 | P79 (d) `old(p[i])` | C `address_of(subscript(p, i))`, never folded; C++ a reference bound to the subscript | Expected: read as the element | 5 |
 | P79 (e) `p[i]` in contracts | `eok_subscript(param p, index)` in `requires`, `ensures`, `decreases`; the index may be the result binder | Expected | 5 |
 | P79 (f) a marker on `int a[]` | leading or after the declarator-id: a marked `int *` parameter; after the bound EDG's #1835 | Expected | 12 |
-| S44 (a) the callee | the guard outside each quantifier verifies, marked rows in `if (g) { }`; `p[n]` two errors (N1); a write under a false guard three (lifetime, bound, permission: 0059 item 4's rows on a pointer nothing is known of) | Expected | 4 |
+| S44 (a) the callee | the guard outside each quantifier verifies, marked rows in `if (g) { }`; `p[n]` two errors (N1); a write under a false guard two (`null-dereference`, then `lifetime`: 0059 item 4's rows on a pointer nothing is known of; the addendum added the null row the first fixtures lacked) | Expected | 4 |
 | S44 (b) the caller on a local array | every correct program verifies; in item 8's planned order a null pointer is two errors | **"If not": the shape row first**; one two-error twin (a forwarded `(p, n + 1)`) expected; an extra order outside the table recorded, not built; F-b1 the base in a local | 8 |
 | S44 (c) `reads_range` amounts | the first-slot amount suffices with no split or sum row; the unequal-fractions twin one error | Expected | 6, 8 |
 | S44 (d) a range beside a cell | the separation row alone fails the `owns` twin; a `reads` cell inside a read range verifies | Expected | 8 |

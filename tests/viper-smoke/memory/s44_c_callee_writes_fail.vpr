@@ -1,4 +1,4 @@
-// expect: error assert:assertion.false @ L77
+// expect: error assert:assertion.false @ L78
 // S44 (c) twin: a callee with reads_range(p, n) writes p[0]: the write-permission row fails alone (the assumed row contradicts amt < write).
 // S44 hand-written fixture of the target shapes of record 0060 (draft; plan .claude/plans/m4-5e1b-ranges-in-contracts.md section 5/6), written from the emitted shapes in build/m4.5e1b/baseline/vpr and the S43 fixtures. No inhale or assume.
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
@@ -72,6 +72,7 @@ method peek_w(p: Ref, n: Int, amt: Perm)
   ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647))
   ensures acc(lvloc(block_of(p)).lv, amt)
 {
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
   assert !((perm(loc(block_of(p), offset_of(p) + 0).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 0).d_int) != write)) //WPERM // <- expected failure

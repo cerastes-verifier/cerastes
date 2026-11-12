@@ -87,11 +87,11 @@ method main()
   var t: Int
   v_a := alloc_arr_int(3)
   ra1 := loc(block_of(v_a), offset_of(v_a) + 0)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   l1 := perm(lvloc(block_of(ra1)).lv) / 2
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).d_int) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> loc(block_of(ra1), k).d_int //FLAGS // <- expected failure
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 //LIVESUM

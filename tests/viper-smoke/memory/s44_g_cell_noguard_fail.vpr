@@ -118,6 +118,7 @@ method range_cell_noguard(p: Ref, n: Int, q: Ref, a_p: Perm, a_q: Perm)
   {
     var t: Int
     var u: Int
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int

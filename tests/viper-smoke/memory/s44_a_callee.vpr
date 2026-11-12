@@ -73,11 +73,13 @@ method get_set(p: Ref, n: Int, i: Int, v: Int, l_p: Perm) returns (r: Int)
   ensures acc(lvloc(block_of(p)).lv, l_p)
   ensures r == v
 {
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
   assert !((perm(loc(block_of(p), offset_of(p) + i).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + i).d_int) != write)) //WPERM
   loc(block_of(p), offset_of(p) + i).v_int := v
   loc(block_of(p), offset_of(p) + i).d_int := true
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
   assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
@@ -107,6 +109,7 @@ method rd(p: Ref, n: Int, i: Int, amt: Perm) returns (r: Int)
   ensures acc(lvloc(block_of(p)).lv, amt)
   ensures r == loc(block_of(p), offset_of(p) + i).v_int
 {
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
   assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
@@ -136,6 +139,7 @@ method set_guard_n(p: Ref, n: Int, l_p: Perm)
   ensures (n != 0) ==> acc(lvloc(block_of(p)).lv, l_p)
 {
   if (n != 0) {
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
     assert !((perm(loc(block_of(p), offset_of(p) + 0).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 0).d_int) != write)) //WPERM
@@ -169,6 +173,7 @@ method set_guard_p(p: Ref, n: Int, l_p: Perm)
   ensures (p != null) ==> acc(lvloc(block_of(p)).lv, l_p)
 {
   if (p != null) {
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
     assert !((perm(loc(block_of(p), offset_of(p) + 0).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 0).d_int) != write)) //WPERM
@@ -203,6 +208,7 @@ method rd_guard_p(p: Ref, n: Int, amt: Perm) returns (r: Int)
 {
   r := 0
   if (p != null) {
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
     assert perm(loc(block_of(p), offset_of(p) + 0).v_int) > none && perm(loc(block_of(p), offset_of(p) + 0).d_int) > none && loc(block_of(p), offset_of(p) + 0).d_int

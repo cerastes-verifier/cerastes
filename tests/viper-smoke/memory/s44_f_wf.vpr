@@ -77,10 +77,12 @@ method rd2(p: Ref, n: Int, i: Int, j: Int, amt: Perm) returns (r: Int)
 {
   var t1: Int
   var t2: Int
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
   assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
   t1 := loc(block_of(p), offset_of(p) + i).v_int
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + j < 0) || (len(block_of(p)) <= offset_of(p) + j)) //BOUND
   assert perm(loc(block_of(p), offset_of(p) + j).v_int) > none && perm(loc(block_of(p), offset_of(p) + j).d_int) > none && loc(block_of(p), offset_of(p) + j).d_int

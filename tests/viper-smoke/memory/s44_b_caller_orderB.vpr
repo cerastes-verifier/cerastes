@@ -95,6 +95,7 @@ method bump(p: Ref, n: Int, l_p: Perm)
   ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647))
   ensures acc(lvloc(block_of(p)).lv, l_p)
 {
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
   assert !((perm(loc(block_of(p), offset_of(p) + 0).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + 0).d_int) != write)) //WPERM

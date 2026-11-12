@@ -87,6 +87,7 @@ method fill(p: Ref, n: Int, l_p: Perm)
     invariant forall k: Int :: { loc(block_of(p), k) } (((offset_of(p) <= k) && (k < offset_of(p) + n)) && loc(block_of(p), k).d_int) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647))
     invariant acc(lvloc(block_of(p)).lv, kl_p)
   {
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert !((perm(loc(block_of(p), offset_of(p) + i).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + i).d_int) != write)) //WPERM
@@ -141,6 +142,7 @@ method search(p: Ref, n: Int, x: Int, amt: Perm) returns (r: Int)
     invariant forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + i)) ==> (loc(block_of(p), k).v_int != x)
   {
     var t: Int
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
@@ -228,10 +230,12 @@ method copy(p: Ref, n: Int, q: Ref, m: Int, l_p: Perm, a_q: Perm)
     invariant ((lvloc(block_of(q)) != lvloc(block_of(p)))) ==> acc(lvloc(block_of(q)).lv, kl_q)
   {
     var t: Int
+    assert q != null //NULL
     assert q != null ==> perm(lvloc(block_of(q)).lv) > none //LIFETIME
     assert !((offset_of(q) + i < 0) || (len(block_of(q)) <= offset_of(q) + i)) //BOUND
     assert perm(loc(block_of(q), offset_of(q) + i).v_int) > none && perm(loc(block_of(q), offset_of(q) + i).d_int) > none && loc(block_of(q), offset_of(q) + i).d_int
     t := loc(block_of(q), offset_of(q) + i).v_int
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert !((perm(loc(block_of(p), offset_of(p) + i).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + i).d_int) != write)) //WPERM
@@ -292,6 +296,7 @@ method fill_g(p: Ref, n: Int, l_p: Perm)
     invariant (n != 0) ==> (forall k: Int :: { loc(block_of(p), k) } (((offset_of(p) <= k) && (k < offset_of(p) + n)) && loc(block_of(p), k).d_int) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647)))
     invariant ((n != 0)) ==> acc(lvloc(block_of(p)).lv, kl_p)
   {
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert !((perm(loc(block_of(p), offset_of(p) + i).v_int) != write) || (perm(loc(block_of(p), offset_of(p) + i).d_int) != write)) //WPERM
@@ -372,10 +377,12 @@ method two_reads(p: Ref, n: Int, q: Ref, m: Int, a1: Perm, a2: Perm)
   {
     var t: Int
     var u: Int
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
     t := loc(block_of(p), offset_of(p) + i).v_int
+    assert q != null //NULL
     assert q != null ==> perm(lvloc(block_of(q)).lv) > none //LIFETIME
     assert !((offset_of(q) + i < 0) || (len(block_of(q)) <= offset_of(q) + i)) //BOUND
     assert perm(loc(block_of(q), offset_of(q) + i).v_int) > none && perm(loc(block_of(q), offset_of(q) + i).d_int) > none && loc(block_of(q), offset_of(q) + i).d_int
@@ -464,6 +471,7 @@ method range_cell(p: Ref, n: Int, q: Ref, a_p: Perm, a_q: Perm)
   {
     var t: Int
     var u: Int
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int

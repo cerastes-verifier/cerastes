@@ -1,4 +1,4 @@
-// expect: error assert:assertion.false @ L116
+// expect: error assert:assertion.false @ L117
 // S44 (i) twin: x = a[1] + sumo(&a[1], 2): the access is inside the callee's owned range: the unsequenced row fails alone.
 // S44 hand-written fixture of the target shapes of record 0060 (draft; plan .claude/plans/m4-5e1b-ranges-in-contracts.md section 5/6), written from the emitted shapes in build/m4.5e1b/baseline/vpr and the S43 fixtures. No inhale or assume.
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
@@ -113,12 +113,12 @@ method main()
   assert perm(loc(block_of(v_a), offset_of(v_a) + 1).v_int) > none && perm(loc(block_of(v_a), offset_of(v_a) + 1).d_int) > none && loc(block_of(v_a), offset_of(v_a) + 1).d_int
   t0 := loc(block_of(v_a), offset_of(v_a) + 1).v_int
   ra1 := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (2 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 2)) //SHAPE
   assert !((block_of(loc(block_of(v_a), offset_of(v_a) + 1)) == block_of(ra1)) && (offset_of(ra1) <= offset_of(loc(block_of(v_a), offset_of(v_a) + 1))) && (offset_of(loc(block_of(v_a), offset_of(v_a) + 1)) < offset_of(ra1) + 2)) //UNSEQ // <- expected failure
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   l1 := perm(lvloc(block_of(ra1)).lv) / 2
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> acc(loc(block_of(ra1), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> acc(loc(block_of(ra1), k).d_int) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (2 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 2)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> loc(block_of(ra1), k).d_int //FLAGS
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 2)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 //LIVESUM

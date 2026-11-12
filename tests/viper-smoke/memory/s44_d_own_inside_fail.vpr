@@ -1,4 +1,4 @@
-// expect: error assert:assertion.false @ L124
+// expect: error assert:assertion.false @ L125
 // S44 (d) twin: owns_range(&a[0], 3) with owns(*&a[1]): the separation row (range/cell) fails alone.
 // S44 hand-written fixture of the target shapes of record 0060 (draft; plan .claude/plans/m4-5e1b-ranges-in-contracts.md section 5/6), written from the emitted shapes in build/m4.5e1b/baseline/vpr and the S43 fixtures. No inhale or assume.
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
@@ -115,6 +115,7 @@ method main()
   loc(block_of(v_a), offset_of(v_a) + 3).d_int := true
   ra1 := loc(block_of(v_a), offset_of(v_a) + 0)
   rq := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   assert rq != null //CNULL
   assert offset_of(rq) < len(block_of(rq)) //CBOUND
@@ -126,7 +127,6 @@ method main()
   l2 := perm(lvloc(block_of(rq)).lv) / 3
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).v_int) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> acc(loc(block_of(ra1), k).d_int) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (3 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 3)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> loc(block_of(ra1), k).d_int //FLAGS
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 3)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 + (lvloc(block_of(rq)) == lvloc(block_of(ra1)) ? l2 : none) //LIVESUM

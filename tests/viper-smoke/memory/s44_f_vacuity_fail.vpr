@@ -1,5 +1,5 @@
-// expect: error assert:assertion.false @ L97
-// expect: error assert:assertion.false @ L117
+// expect: error assert:assertion.false @ L99
+// expect: error assert:assertion.false @ L119
 // S44 (f) vacuity: rd2 and rd2__wf each ending assert false (2 of 2).
 // S44 hand-written fixture of the target shapes of record 0060 (draft; plan .claude/plans/m4-5e1b-ranges-in-contracts.md section 5/6), written from the emitted shapes in build/m4.5e1b/baseline/vpr and the S43 fixtures. No inhale or assume.
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
@@ -78,10 +78,12 @@ method rd2(p: Ref, n: Int, i: Int, j: Int, amt: Perm) returns (r: Int)
 {
   var t1: Int
   var t2: Int
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
   assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
   t1 := loc(block_of(p), offset_of(p) + i).v_int
+  assert p != null //NULL
   assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
   assert !((offset_of(p) + j < 0) || (len(block_of(p)) <= offset_of(p) + j)) //BOUND
   assert perm(loc(block_of(p), offset_of(p) + j).v_int) > none && perm(loc(block_of(p), offset_of(p) + j).d_int) > none && loc(block_of(p), offset_of(p) + j).d_int

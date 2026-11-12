@@ -115,6 +115,7 @@ method main()
   loc(block_of(v_a), offset_of(v_a) + 3).d_int := true
   ra1 := loc(block_of(v_a), offset_of(v_a) + 0)
   rq := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (4 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 4)) //SHAPE
   assert !((4 > 0) && ((perm(loc(block_of(ra1), offset_of(ra1)).v_int) == none) || (perm(loc(block_of(ra1), offset_of(ra1)).d_int) == none))) //RDROW
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   assert rq != null //CNULL
@@ -125,7 +126,6 @@ method main()
   l2 := (perm(rq.v_int) < perm(lvloc(block_of(rq)).lv) ? perm(rq.v_int) : perm(lvloc(block_of(rq)).lv)) / 1
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 4)) ==> acc(loc(block_of(ra1), k).v_int, l1) //MARKED
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 4)) ==> acc(loc(block_of(ra1), k).d_int, l1) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (4 < 0) || (len(block_of(ra1)) < offset_of(ra1) + 4)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 4)) ==> loc(block_of(ra1), k).d_int //FLAGS
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + 4)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(rq.v_int) >= l2 + (((block_of(rq) == block_of(ra1)) && (offset_of(ra1) <= offset_of(rq)) && (offset_of(rq) < offset_of(ra1) + 4)) ? l1 : none) && perm(rq.d_int) >= l2 + (((block_of(rq) == block_of(ra1)) && (offset_of(ra1) <= offset_of(rq)) && (offset_of(rq) < offset_of(ra1) + 4)) ? l1 : none) //CSUM // <- expected failure

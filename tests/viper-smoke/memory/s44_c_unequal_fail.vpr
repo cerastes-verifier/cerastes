@@ -1,4 +1,4 @@
-// expect: error assert:insufficient.permission @ L119
+// expect: error assert:insufficient.permission @ L120
 // S44 (c) twin, the listed limit of record 0060 item 6 (question 238): a function holding reads_range(p, n) and reads_range(q, m) passes (p, n) on; q may alias p, so the first slot of p may hold a1 + a2 while the others hold a1: the amount taken from the first slot may exceed what the other slots hold, and the first marked row fails with insufficient.permission (a false alarm, pinned).
 // S44 hand-written fixture of the target shapes of record 0060 (draft; plan .claude/plans/m4-5e1b-ranges-in-contracts.md section 5/6), written from the emitted shapes in build/m4.5e1b/baseline/vpr and the S43 fixtures. No inhale or assume.
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
@@ -113,12 +113,12 @@ method unequal(p: Ref, n: Int, q: Ref, m: Int, a1: Perm, a2: Perm)
   var ra1: Ref
   var ra2: Ref
   ra1 := p
+  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (n < 0) || (len(block_of(ra1)) < offset_of(ra1) + n)) //SHAPE
   assert !((n > 0) && ((perm(loc(block_of(ra1), offset_of(ra1)).v_int) == none) || (perm(loc(block_of(ra1), offset_of(ra1)).d_int) == none))) //RDROW
   assert perm(lvloc(block_of(ra1)).lv) > none //LIVEROW
   l1 := ((n > 0) ? ((perm(loc(block_of(ra1), offset_of(ra1)).v_int) < perm(loc(block_of(ra1), offset_of(ra1)).d_int) ? perm(loc(block_of(ra1), offset_of(ra1)).v_int) : perm(loc(block_of(ra1), offset_of(ra1)).d_int)) < perm(lvloc(block_of(ra1)).lv) ? (perm(loc(block_of(ra1), offset_of(ra1)).v_int) < perm(loc(block_of(ra1), offset_of(ra1)).d_int) ? perm(loc(block_of(ra1), offset_of(ra1)).v_int) : perm(loc(block_of(ra1), offset_of(ra1)).d_int)) : perm(lvloc(block_of(ra1)).lv)) : perm(lvloc(block_of(ra1)).lv)) / 2
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + n)) ==> acc(loc(block_of(ra1), k).v_int, l1) //MARKED // <- expected failure
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + n)) ==> acc(loc(block_of(ra1), k).d_int, l1) //MARKED
-  assert !((ra1 == null) || !((ra1 == loc(block_of(ra1), offset_of(ra1))) && (0 <= offset_of(ra1)) && (offset_of(ra1) <= len(block_of(ra1)))) || (n < 0) || (len(block_of(ra1)) < offset_of(ra1) + n)) //SHAPE
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + n)) ==> loc(block_of(ra1), k).d_int //FLAGS
   assert forall k: Int :: { loc(block_of(ra1), k) } ((offset_of(ra1) <= k) && (k < offset_of(ra1) + n)) ==> (loc(block_of(ra1), k).d_int ==> ((-2147483648 <= loc(block_of(ra1), k).v_int) && (loc(block_of(ra1), k).v_int <= 2147483647))) //RANGE
   assert perm(lvloc(block_of(ra1)).lv) >= l1 //LIVESUM

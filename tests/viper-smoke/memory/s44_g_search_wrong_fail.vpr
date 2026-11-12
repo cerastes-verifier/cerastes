@@ -92,6 +92,7 @@ method search_wrong(p: Ref, n: Int, x: Int, amt: Perm) returns (r: Int)
     invariant forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + i)) ==> (loc(block_of(p), k).v_int != x)
   {
     var t: Int
+    assert p != null //NULL
     assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
     assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
     assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
