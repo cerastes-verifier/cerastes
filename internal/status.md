@@ -19,14 +19,14 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 
 Plan: `.claude/plans/m4-5e1b-ranges-in-contracts.md` (approved 2026-11-11; executed without re-planning). Record 0060
 (amends 0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059). Read `internal/handoff.md` next: §1, §2, the rules of §4,
-§6, §8 (questions 238–242 and the answers built overnight). Branched from `origin/main` = `685034b` (the owner had
+§6, §8 (questions 238–246; 243–246 the answers built overnight). Branched from `origin/main` = `685034b` (the owner had
 pushed the planning). Session from 2026-11-11 18:45 to 2026-11-12 (about 7 h before the box run).
 
 **Owner decisions in the session:** the split point at Commit 2 (Parts A+B at +1,602 `src/` lines, over the plan's
 1,600, about 250 of them staging code Parts C and D deleted): "Continue (Recommended)". At 2026-11-11 evening the owner
 logged off with: "You continue but if you have any questions use the same process you have now, but automatically
 accept the recommended answer for the remainder of this session and this session only". **Answers built that way**
-(each in handoff §8, for confirmation): Part E kept whole, no pre-agreed cut (the owner's completeness preference; the
+(each in handoff §8, numbered 243–246, for confirmation): Part E kept whole, no pre-agreed cut (the owner's completeness preference; the
 session stayed under 12 h); a local array's place frames `q[i]` read through a pointer in an invariant (record 0060
 item 11); the back-edge rows of read range places in the sum form; audit round 4's S1 (an exit 3 after a wrong
 program's correct error) not fixed, listed for M4.8.
@@ -67,6 +67,8 @@ plan's checkpoints 1, 3 and 5 and at Step 0; at most three Sonnet agents alive a
   cut from its audited snapshot plus its fixes).
 - The staging S2 rejection was widened to the lowering's gate (loops with a `return` or outward `goto` too).
 - `range_owning_reject_arguments.c` was dropped: EDG's registration refuses `owning(n, m)` before cerastes.
+- The session's tools (`build/m4.5e1b/s0/r3.sh`, `r3_collect.py`, `widen.sh`) were not committed (handoff §3,
+  "Process"; §4's rule, question 193).
 - Record item 8's planned order (marked rows first) became the shape row first (S44 (b)'s table); item 8's argument that
   no range sum row is needed at a call (audit round 1, S5) was broken by audit round 3 and replaced by sum-form rows.
 
@@ -109,15 +111,15 @@ pre-existing exit 3 found on the baseline (a pass-through of `owns(*pp) && owns(
   1,221, `test_walker_oracle.py` 79, `test_lint_viper.py` 809; `--check-headers` 5,420; format 87 files; the doc
   examples (355) and docs; vlibc's headers). Nothing in `src/`, `include/`, `scripts/` or `tests/` changed after it.
 
-**First step for the next session:** the owner merges `m4.5e1b-ranges-in-contracts` and answers questions 238–242 and
-the overnight answers inline (handoff §2, §8); then M4.5e1c (quantifiers) from `.claude/plans/m4-5e1-arrays.md`
+**First step for the next session:** the owner merges `m4.5e1b-ranges-in-contracts` and answers questions 238–246 inline (243–246
+are the overnight answers) (handoff §2, §8); then M4.5e1c (quantifiers) from `.claude/plans/m4-5e1-arrays.md`
 section 5: its Step 0, P80 and S45 (they change no `src/`), then plan again (handoff §2 has the opening prompt).
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
-| M4.5e1b Ranges in contracts | 2026-11-11/12 | `m4.5e1b-ranges-in-contracts` | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range`/`reads_range` in contracts, element reads in contracts, calls and returns over ranges, loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (two new tags), the carrays port; questions 238–242 |
+| M4.5e1b Ranges in contracts | 2026-11-11/12 | `m4.5e1b-ranges-in-contracts` | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range`/`reads_range` in contracts, element reads in contracts, calls and returns over ranges, loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (two new tags), the carrays port; questions 238–246 |
 | M4.5e1a Arrays inside one function | 2026-11-11 | `m4.5e1a-arrays-in-functions` | 0059 (0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043, 0054 amended) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers with C's zero fill, `out-of-bounds`, the marked range rows in the driver, loops carrying arrays, sequencing, `sizeof(a)`, `uninit` on arrays; #175, #1162, #138 as errors; array designators rejected (234); the `offset_of == 0` backstops (235) |
 | M4.5d2b2d `not_invalidating`, `--strict-owner`, marked fields | 2026-11-10 | `m4.5d2b2d-invalidation-profile` | 0058 (0029, 0042, 0052, 0054, 0055 amended) | `cerastes::not_invalidating` checked at the definition (taken implies returned; `p->q == old(p->q)` spliced, a bodiless borrow's tie implied); `--strict-owner` (P4417R0's p4 and p6); `ref_to_uninit` on fields (marked closures keep flags only where tied) and on pointers to structures with owning fields (closing nothing); N1; two older exit 3s fixed (0054's kept row, the return rows' order), a third to M4.8 |
 | M4.5d2b2c Loop limits, long-running tests | 2026-11-10 | `m4.5d2b2c-loop-limits` | 0056, 0057 (0016 amended) | six of d2b2b's loop false alarms lifted (a site the loop cannot fill keeps its flags, the value set of a lone owner, a leaf's ghost through an alias, `main`'s global leaf under an entry snapshot, a site's cells as places, chains at any depth), the escape scan, two exit 3s fixed; five pins kept under the written-invariant rule; the long-running tier (`tests/long/`, `CERASTES_LONG=1`); question 196's two programs past 1800 s, to M4.8 |

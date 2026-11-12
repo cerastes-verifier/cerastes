@@ -8,7 +8,7 @@
   rule of 0039 item 7 missing for ranges, a false proof through a trusted contract, item 3; seven should-fix items, all
   taken: S1 the return shape row `permission` (item 9), S2 the caller's own read amounts in item 6's minimum and
   question 238 restated, S3 the count's and the base's conversions (item 3), S4 the count bound to a local (item 8),
-  S5 the argument that no range sum row is needed at a call (item 8), S6 the cell's return sum (item 9), S7 the
+  S5 the argument that no range sum row is needed at a call (item 8; broken by audit round 3, B1), S6 the cell's return sum (item 9), S7 the
   multi-error twins (item 8); notes N2, N4, N5, N10 and N11 taken in items 1, 5, 15 and the tests;
   `build/m4.5e1b/auditor-report-1.md`), and by audit round 2 on Parts A and B (no blocking item; five should-fix items,
   all taken: diagnostics in source terms, four pins, one of them a rejection item 1 now lists, the guard-true vacuity
@@ -166,10 +166,12 @@ outcome to the branch of the plan's decision table it took.
    two calls of `void keep_slot(int *x) requires(reads(*x)) ensures(live(x)) { … }` on `&p[1]` leave slot 1 below the
    amount the minimum then takes for `peek(p, n)` (`range_call_reads_unequal_pin.c`); its two-atom form, one call of
    `peek2(p, n, p, n)` after one `keep_slot`, is the same limit through item 8's sum-form rows (audit round 3, B1). S44
-   (c): this amount needs no
-   case split and no sum row at the call; `(a, a)` to a `reads_range` pair, overlapping and disjoint read ranges, a
-   caller holding the range whole or borrowing it, and a write after the call all verify; the unequal-fractions twin
-   is one error.
+   (c) found that this amount needs no case split and, in its programs, no sum row at the call (`(a, a)` to a
+   `reads_range` pair, overlapping and disjoint read ranges, a caller holding the range whole or borrowing it, and a
+   write after the call all verify; its unequal-fractions twin is one error); audit round 3 then found a program that
+   needs the sum row, which item 8 now builds (its fixtures `s44_c_*` predate both the own-amount minimum and the sum
+   form: the auditor's `abl/E1_unequal_own_amounts.vpr` shows `s44_c_unequal_fail`'s program verifies with the
+   minimum).
 
 7. **Entry.** The liveness case splits of 0037 item 9 include range atoms. No separation is asserted for ranges (0028
    item 11).
@@ -215,7 +217,8 @@ outcome to the branch of the plan's decision table it took.
      row). A failed marked row ends its path (S43 G2), so an unowned range is one error.
    - **Sums:** the liveness sums include range atoms; a `reads` cell's sum gains `(g_r && x in range r ? amt_r : none)`
      per read range (S44 (d): the cell inside the range verifies, and an `owns` cell inside an owned range fails the
-     separation row alone); no range sum row at a call (S44 (c)).
+     separation row alone); a range's own sum form where two read ranges of one call may meet (below; S44 (c) found
+     none needed in its programs, audit round 3 a program that needs it).
    - The explicit rows cover every conjunct of item 4, so Silicon's own precondition check never fails first. **Two
      read ranges of one call that may meet** (audit round 1, S5, and round 3, B1): per-atom marked rows bound each
      amount, not their sum at a slot both cover. Round 1 argued that no sum row is needed (every taker of a slot removes
@@ -382,7 +385,7 @@ its decision table, and the item it revised. An outcome outside its table stops 
 | P79 (f) a marker on `int a[]` | leading or after the declarator-id: a marked `int *` parameter; after the bound EDG's #1835 | Expected | 12 |
 | S44 (a) the callee | the guard outside each quantifier verifies, marked rows in `if (g) { }`; `p[n]` two errors (N1); a write under a false guard two (`null-dereference`, then `lifetime`: 0059 item 4's rows on a pointer nothing is known of; the addendum added the null row the first fixtures lacked) | Expected | 4 |
 | S44 (b) the caller on a local array | every correct program verifies; in item 8's planned order a null pointer is two errors | **"If not": the shape row first**; one two-error twin (a forwarded `(p, n + 1)`) expected; an extra order outside the table recorded, not built; F-b1 the base in a local | 8 |
-| S44 (c) `reads_range` amounts | the first-slot amount suffices with no split or sum row; the unequal-fractions twin one error | Expected | 6, 8 |
+| S44 (c) `reads_range` amounts | the first-slot amount suffices with no split or sum row in its programs; the unequal-fractions twin one error (superseded in part: the own-amount minimum, audit round 1 S2, and sum-form rows at calls, audit round 3 B1) | Expected | 6, 8 |
 | S44 (d) a range beside a cell | the separation row alone fails the `owns` twin; a `reads` cell inside a read range verifies | Expected | 8 |
 | S44 (e) sum rows | the sum row at returns verifies; the kept-fraction twin fails on it alone | Expected | 9 |
 | S44 (f) `f__wf` and the contract's reads | item 5 verifies as written; the twins fail at the framing assert | Expected | 5 |

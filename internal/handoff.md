@@ -22,7 +22,7 @@ origin in brackets, so its full wording can be found there. Session plans approv
 ## 1. State
 
 - **M4.5e1b** (2026-11-12; record 0060) is done on branch `m4.5e1b-ranges-in-contracts` (worktree
-  `.claude/worktrees/m4.5e1b`), not merged and not pushed: `42d4832` to `c58060e` and this handoff's commit, from
+  `.claude/worktrees/m4.5e1b`), not merged and not pushed: `42d4832` to `c58060e` (the box ran there) and the `internal/` and `plan.md` commits after it, from
   `origin/main` = `685034b`. Its result is in `internal/status.md`; the box's `CERASTES_LONG=1 scripts/check.sh` on
   `c58060e` was all green (14,871 passed, 0 failed; the long tier ran; 84 minutes at `-j32`).
 - **M4.5e1c** quantifiers is next: `.claude/plans/m4-5e1-arrays.md` section 5 (its Step 0, P80 and S45, then plan
@@ -40,7 +40,7 @@ origin in brackets, so its full wording can be found there. Session plans approv
 ## 2. Owner steps
 
 1. **Review and merge** `m4.5e1b-ranges-in-contracts` (a PR), then push `main`.
-2. **Questions 238–242 and the answers built overnight** (§8): each stands unless answered inline; the status entry's
+2. **Questions 238–246** (§8; 243–246 the answers built overnight): each stands unless answered inline; the status entry's
    deviations are listed for confirmation.
 3. **CI** (question 176): unchanged.
 4. **Optional.** The session worktree after the merge (its `build/m4.5e1b/` has the audit scratch); on the box,
@@ -157,8 +157,24 @@ the session worktree, not committed):
 - M8: VLA parameters and `[static N]` (questions 230, 241); a local array shorter than `int a[4]`'s bound passed
   (silent at the front-end tiers; GCC `-Wstringop-overflow=` at `-O2`); `int a[0]` and `int a[const 3]` parameters
   (accepted, the compilers silent).
-- Process: the session's tools that later sessions may reuse are in `build/m4.5e1b/` (not committed): `s0/r3.sh`
-  (the rejection set's rerun and diff), the frozen binaries `cerastes-base/` and `cerastes-c3/`.
+- **The three probes the notes above name** (they live only in the session worktree's `build/m4.5e1b/`, which may go;
+  each in C23):
+  - audit round 4's S1 (`audit4-scratch/c/d1.c`; the `permission` at the write, then an exit 3):
+    `void f(int *p, int n, int *q, int m) requires(cerastes_reads_range(p, n) && cerastes_reads_range(q, m) && n > 0
+    && m > 0) { int i = 0; invariant(0 <= i && i <= 1) decreases(1 - i) while (i < 1) { p[0] = 1; i = i + 1; } }`
+    (the `CERASTES_` macro spellings);
+  - question 237's copy (`audit4-scratch/c/d2c.c`; a false `permission` at the call): `peek` taking and returning
+    `reads_range(p, n)`, and `int f(const int *p, int n) requires(cerastes_reads_range(p, n) && n > 2) { const int
+    *q = p; p = &p[1]; int i = 0; invariant(0 <= i && i <= 1) decreases(1 - i) while (i < 1) { peek(q, n); i = i + 1;
+    } return 0; }`;
+  - the pre-existing exit 3 (`t4/sep/d1.c`): `void f2(int **pp)` with `requires(cerastes_owns(*pp) &&
+    cerastes_owns(**pp))` and the same `ensures`, body `(void)pp;`, and `void ok2(int **pp)` with the same contract
+    calling `f2(pp)`; adding `*pp == cerastes_old(*pp)` to both `ensures` (0045 item 10) verifies.
+- Process (a deviation from §4's rule on session tools, question 193): the tools later sessions may reuse stay in
+  `build/m4.5e1b/`, not committed (a new script in `scripts/` after the box run would have needed another check):
+  `s0/r3.sh` and `s0/r3_collect.py` (the rejection set's rerun and diff against a base), `s0/widen.sh` (the golden,
+  `rejected` and `frontend-refused` tests outside R3's set), the frozen binaries `cerastes-base/` and `cerastes-c3/`.
+  A later session that wants them copies them before the worktree goes.
 
 **From M4.5e1a, for later sessions:**
 - e1c: a fill loop over an array declared without an initializer, then a read, is `uninitialized`
@@ -939,14 +955,18 @@ unless the owner says otherwise.
 about 250 of them staging): "Continue (Recommended)".
 
 **Built overnight under the owner's instruction** (2026-11-11, logging off: "automatically accept the recommended answer
-for the remainder of this session and this session only"), each for confirmation: Part E kept whole, no pre-agreed cut
-(the owner's completeness preference; the session stayed under 12 h); a local array's place frames `q[i]` read through
-a pointer in a loop invariant (sound; without it a false `permission`; record 0060 item 11); the back-edge rows of read
-range places in the sum form (they cost time only on failing twins; per-place rows can exit 3); audit round 4's S1
-(an exit 3 after a wrong program's correct `permission`) not fixed and listed for M4.8 (its fix would change every
-existing program's write rows).
+for the remainder of this session and this session only"), each for confirmation, numbered so it can be answered:
+- **243** Part E kept whole, no pre-agreed cut (the owner's completeness preference; the session stayed under 12 h).
+- **244** A local array's place frames `q[i]` read through a pointer in a loop invariant (sound; without it a false
+  `permission`; record 0060 item 11).
+- **245** The back-edge rows of read range places in the sum form (they cost time only on failing twins; per-place rows
+  can exit 3).
+- **246** Audit round 4's S1 not fixed: a wrong program (a write through a `reads_range` element in a loop beside a
+  second, overlapping read range) reports its `permission` at the write and then exits 3 (the plan's section 11 stops on
+  an exit 3 not fixed within its part; this one is fail-closed and needs a wrong program). The fix, a marked write row,
+  would change every existing program's write rows. **Recommended:** list it for M4.8 (§3), as built.
 
-**Open** (each is built as its recommendation unless answered inline; the next handoff's questions start at 243):
+**Open** (each is built as its recommendation unless answered inline; the next handoff's questions start at 247):
 - **238** (restated by audit rounds 1–3) `cerastes_reads_range`'s ghost amount at a call is taken from the range's first
   cell, lowered by the caller's own read amounts (record 0060 item 6), and the marked rows check the whole range at
   that amount (in the sum form where two read ranges of one call meet). A caller whose holding over the range is
