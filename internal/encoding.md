@@ -90,6 +90,8 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `sequence_problems` treats `Store(addr, value)` as two unsequenced operands.
 - **Arrays (M4.5e1a, decision 0059).** `Type::Kind::Array`, `Expr::Kind::ElemAddr`, `Var::zero_filled` and `Stmt::keyword_loc` (§3, "Arrays"): the
   array local, the element address and the zero fill, and a loop's keyword position for the rows that must report one line in both modes.
+- **Ranges (M4.5e1b, decision 0060).** `AtomKind::OwnsRange`/`ReadsRange` (count in `Expr::b`), `Builder::range_atom`, `same_pure_expr`, `atom_partners` and the contract read
+  `Deref(ElemAddr(Formal, index))` (§3, "Ranges in contracts").
 - **Contracts over memory (M4.5b1b, decision 0037).** Pointer `Param`s and a pointer `Function::ret` (P58: no
   separate copy in the IL; `Param::is_restrict` from the parameter variable's type, C only). `Expr::Kind::Atom`
   (`AtomKind` `Owns`/`Reads`/`Live`, `a` = the pointer `Formal`, `amount` = the index of the `requires` atom, 0..N-1 in
@@ -954,6 +956,73 @@ object type, `N >= 1`) is one block of `len` N whose element `k` is `loc(b, k)`,
   `&` of a `register` variable). New encoder diagnostics: `char_subscripts` (`-Wchar-subscripts`), `array_address_null_test` (`-Wpointer-bool-conversion`,
   `-Wtautological-pointer-compare`, `-Waddress`) and `c99_designator` (C++).
 
+**Ranges in contracts (M4.5e1b, decision 0060; Parts A to C).** `owns_range(p, n)` and `reads_range(p, n)` are atoms on the elements `p[0..n)` of a pointer
+parameter, `p[e]` is readable in a contract, and a call can pass a whole array or a sub-range. Parts D (loops over a parameter's range) and E (markers, `owning(n)`,
+`restrict`, array parameters) are not built; until Part D a loop that carries places in a function whose contract holds a range atom is refused (staging pin S2,
+below). Cases: `selftest_cases30.inc` (`rng_*` lowering cases, `range_rej_*` and `rh` rejections); the Viper spikes are `tests/viper-smoke/memory/s44_*` (S44 and its
+addendum in `internal/il-inventory.md`, chapter M4.5e1b, with P79's IL facts).
+
+- **VIR (Part A, plumbing).** `AtomKind::OwnsRange`, `ReadsRange` (`is_range_atom`) on `Expr::Kind::Atom`: `a` is the pointer's `Formal` (in an `ensures` its entry value),
+  **`b` the count**; `Builder::range_atom(kind, ptr, count, amount, loc)`; the atom's `c_text` is `owns_range(p, n)` from the two operands' spellings. `same_pure_expr`
+  compares two pure expressions structurally (Const, Local, Formal, Unary, Binary, Cond, Convert, ToBool, BoolToInt, Old, with their types; anything else, or an
+  `Old(Formal)` against a `Formal`, is "not equal", so the partner rule fails closed). `atom_place` of a range atom is valid: root = the parameter's index, no steps, no
+  member path, the count NOT in the key (two atoms of one kind on one parameter are duplicates whatever their counts); `atom_partners(ensures, requires)` is the
+  one partner test (same kind, same place and, for a range, `same_pure_expr` counts). `range_perm(ref, lo, hi, field, amount)` in lowering takes expression bounds and
+  an optional amount (the old literal-bound form delegates to it).
+- **`check.cpp` (Part B).** A range atom is accepted in `requires` and `ensures` only. `range_atom_operands`: the base a bare pointer `Formal` to a bool, an integer, an
+  enumeration or a pointer (a structure pointee is refused), the count an integer (not a bool, an enumeration or a pointer) that reads no memory, names no `Result` and
+  is not under `Old`. `range_sites` backstops the encoder: a guard that reads memory, a range atom beside a cell atom or `owns_block` of the same parameter, two range
+  atoms of one parameter in one clause list, a partnerless or other-count `ensures` range atom, a marker on a parameter that holds one. `Deref(ElemAddr(Formal, index))` is
+  accepted as a READ in `requires`, `ensures`, `decreases` and under `Old` (the index reads no memory and may name the result); `ElemAddr` as a value in a contract is
+  refused. `sequence_problems` and the loop rules are untouched.
+- **Encoder (Part B, `encode.cpp`).** `<cerastes.h>` declares `cerastes_owns_range(...)`, `cerastes_reads_range(...)` (C23 variadic, `noexcept` in `extern "C"`) and
+  `cerastes::reads_range` (owns_range's signature); the names are in the six lists (`SpecFn`, `il_query.cpp`, `annotation_checks.cpp`, `edg_args.cpp`) and in
+  `spec_fn`'s declared-in-the-header test. `spec_range_atom` reads a call of either: exactly ONE top-level generated conversion is peeled on the base (C++'s `const T*`)
+  and on the count (the `unsigned long` of C++'s parameter, C's argument promotion), never one inside a written count (`n + 1u` keeps its conversion) and never a written
+  cast (a written cast on the base is rejected; on the count it keeps its meaning, but a conversion to the same type vanishes in VIR). The base must be a parameter
+  (`Formal`) of a bool, integer, enumeration or pointer pointee, not `const` for `owns_range`; the count's IL type an integer other than a bool, an enumeration, a
+  float or a pointer, and its VIR an expression over `Const`, `Formal` and the pure operators (a memory read, the result, `old` and calls each have a message).
+  `finish_atoms` numbers `requires` range atoms with the cell atoms, pairs an `ensures` range atom by `same_pure_expr` of the counts (a missing or another-count partner, the
+  same kind twice, a guard that reads memory, and a range beside a cell atom, a block site or the other kind of range of its parameter, through loads included, are rejected,
+  each with a message naming where it is lifted; when another clause of the contract was already rejected the partner message is not repeated). `spell_formals` gives the
+  `Formal`s of a count and an index their parameter's name (and a `Result` its binder's), so the lowering's messages print `p[0..len + 1)` and `p[i - 1]`.
+  *Element reads:* `contract_element_address` (from `subscript_address` in a contract, `old_call` and `old_c`) builds `ElemAddr(Formal, index)`; the read is its `Deref`,
+  under `Old` for `cerastes_old(p[e])` (C: `address_of(subscript(p, e))`, never folded; C++: a reference bound to the subscript; P79 (d)); a marked parameter is refused as `*p` is;
+  `&p[e]` and `p + i` in a contract stay rejected (M4.5e2). In code, a loop invariant or a `check` an element is read as before (Part D lifts the loop clauses).
+- **Lowering of the callee (Part B).** `range_atom_value`: in `f__wf` the pure line `p != null && WF(p) && 0 <= n && offset_of(p) + n <= len(block_of(p))` (the count's
+  obligations in the same assert); in the method's contract that line, then per field one quantifier `forall k :: { loc(block_of(p), k) } offset_of(p) <= k && k <
+  offset_of(p) + n ==> acc(loc(block_of(p), k).f[, amount])` (full for `owns_range`, the atom's ghost amount for `reads_range`), the flags, the type's range (`WF` for a
+  pointer element, none for a bool) and the liveness at the amount; the guard stands outside each quantifier, one conjunct per line (`push_clauses`, `split_conjuncts`: nested
+  guards conjoined, `?:` split into two implications). A contract element read has an `elem_key` (one per function, parameter and structurally equal index), ghost
+  formals `hv_e<n>_pre|_post`, and in `f__wf` the framing assertion: the read's address lies in a cell atom's place or in a range atom's interval (`permission`, "the
+  contract of `f` reads `p[i]` without owning it"), the address-equality facts (also between an element read and a cell read), and a `reads` place's post value equal to
+  its pre value. The partners-by-path assertion of 0039 item 7 covers ranges (B1: "returns `p[0..n)` on a path where its `requires` did not take it"). Returns
+  (`range_returns`): marked rows (value then flag, inside `if (g) { }`, in the sum form where two read atoms of one field may overlap), the shape row as `permission`,
+  the flags, the type's range and the liveness sum; a `reads` cell's return sum gains `(g_r && x in range r ? amt_r : none)`.
+- **The caller (Part C).** *The encoder's part.* A call's arguments are spelled as written for the messages: `spell_range_arguments` (in `call()`, for a callee whose contract holds a
+  range atom) gives an integer argument the text of its expression (`n`, `n + 1`, `3`) and the decay of a local array its name (`a`); `&a[1]` and a pointer variable already carry
+  theirs. The encoder classifies nothing about placement; it forwards lowering's `unsequenced_calls` rejections. The earlier staging pin S1 is gone.
+  *Lowering (`call_atoms`, record items 6, 8 and 10; every row atomic, under the atom's guard).* Per range atom the base and the count are first **bound to locals** (`bind`:
+  an item of the call's rows that assigns a fresh temp; the base argument the call passes for that parameter is the bound local, `bound_args`, so the callee's quantifiers are
+  instantiated at a variable and no row's base, bounds, count or amount reads the heap). The rows, in the built order: per atom the **shape row** first (`range_shape`: not null, `WF`,
+  `0 <= n`, `offset_of(p) + n <= len(block_of(p))`, `permission`: "calls `f`, which needs to own `a[0..3)`, without owning it"; "... to read ..." for `reads_range`), then a
+  `reads_range`'s first-slot row (`!(n > 0 && (perm(F.v) == none || perm(F.d) == none))`), then the liveness row; no case split involves a range. **Separation** follows every atom's
+  rows, only where one side owns and the two share a field: a range and a cell (`!(block_of(x) == block_of(p) && offset_of(p) <= offset_of(x) < offset_of(p) + n)`; audit round 3, S1: the row is also built against a global's cell and against every cell of a place reached through a load, from the same `recv` the cell rows read; `rngc_global_*` and `rngc_loaded_*`), two ranges
+  (`range_disjoint`). **Amounts:** `owns_range` takes `perm(L)` (the liveness cell); `reads_range` takes `n > 0 ? min(min(perm(F.v), perm(F.d)), perm(L), <the caller's own ghost
+  amounts of the field>) : perm(L)` with `F` the first slot; `amt = (g ? m : write) / (N + 1)` is bound to a `Perm` local (`perm` cannot stand under a quantifier) and the rows
+  after it name the local. **Per atom after the amounts:** the two marked rows (value then flag) inside `if (g) { }`, then the flags (`uninitialized`: "passes `a` to `f`, whose
+  parameter `p` needs every element of `p[0..n)` to have a value"), then the type's range under the flag. The liveness sums include range atoms, and a `reads` cell's sum gains
+  `(g_r && x in range r ? amt_r : none)`; **the marked rows of a `reads_range` at a call carry the sum** (audit round 3, B1; `call_atoms` step 4b): `acc(loc(B, k).f, amt_i + Σ_j (g_j && in_j(k) ? amt_j : none))` over the OTHER `reads_range` atoms `j` of the same field in the same call, `in_j(k)` being `block_of(q_j) == block_of(p_i) && offset_of(q_j) <= k < offset_of(q_j) + n_j` over the row's binder, exactly the form `range_returns` uses; with no other read range of the field in the call the rows are the plain ones. Item 8's earlier argument that no range sum row is needed fails once a callee keeps a fraction of a slot and gives the liveness cell back (question 238's shape): each amount is then within the slot's holding but the sum of two is not, and Silicon's own precondition check would fail (an exit 3); the sum form reports a `permission` error at the first such row instead, the limit question 238 lists (`rngc_reads_meet_kept`, `rngc_reads_meet_kept_local`). The sum is never smaller than one amount, so a caller that verified keeps verifying. A count argument that is exactly a bare parameter of the callee passes the bound count local too, like the base (N2). Messages name the range as the call wrote it (`range_call_text`:
+  `a[0..3)` for `&a[0]` and a count that is a bare parameter or a constant, `a[i..i + n)` for numbers, `(base)[0..n)` otherwise; a generic phrase when an argument or a count
+  has no spelling). *Item 10:* a range atom is a **memory call on its element field** (`memory_fields`), registered as an access atom with a count; the pair rows (`place_disjoint`:
+  cell-cell, cell-range, range-range) cover access against call and call against call (`unsequenced`, 0039 item 4); a callee's `owns_range` reaches its field in `LoopWrites`
+  (`writes_in`), and a loop in a function with no range contract that calls a range callee carries its array and has its values havoced. No program without a range atom
+  changes: a range call's Viper differs from a cell call's by its temps only. Cases: `rngc_*` in `selftest_cases30.inc` (59), each positive with a vacuity twin; the pin of
+  question 238's unequal fractions is covered end to end by `range_call_reads_unequal_pin.c`, not by a VIR case.
+- **Staging pin S2 (until Part D).** `reject_range_loop`: a loop in a function whose contract holds a range atom is rejected (`unsupported_annotation`) when it carries
+  places in lowering's reading, repeated in `loop_carries_places` (ports of `expr_touches`, `stmt_touches` and `exits_of`: it touches memory, or its body or step has a
+  `return` or a `goto` to a label outside it); lowering's `loop` gate fails closed on the same set (an internal error). It is deleted with Part D.
+
 ## 4. Viper shape
 
 ```
@@ -1262,7 +1331,7 @@ in statement position) read every source leaf into temporaries before storing th
 atoms take member paths, overlapping atoms on one root are rejected; `vir::restrict_hazard` rejects `restrict` beside
 any place that can hold a pointer of the same pointee type (audit B2). `spec_atom`/`invariant_atom` accept atoms
 in a loop's invariants (not in a `do … while (0)` invariant or a measure) on a pointer variable that is not a cell, and
-`check_invariant_atoms` checks their positions. `read_owning` collects `[[cerastes::owning]]` from every declaration's
+`check_invariant_atoms` checks their positions. `spec_range_atom`, `contract_element_address` and the range rules of `finish_atoms` (record 0060) are described in §3, "Ranges in contracts". `read_owning` collects `[[cerastes::owning]]` from every declaration's
 parameter types (the definition's `assoc_param_type`, a typedef'd function type merged by the front end), matches the
 declarations (`annotation_mismatch`) and rejects the other shapes; `apply_owning` inserts `p == NULL || owns(*p)` first
 in `requires_` and `ensures_`, merged with an explicit `owns(*p)` or `p == NULL || owns(*p)`, before `restrict_backed`

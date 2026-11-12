@@ -9673,15 +9673,6 @@ private:
         {
             return nullptr;
         }
-        if (contract_has_atom(*f, true))
-        {
-            // S1 (staging, until Part C): the rows of a call over a range are not built yet
-            reject(
-                Diag::unsupported_expression, e->position,
-                "a call of \"" + name +
-                    "\", whose contract holds a range atom (`owns_range`, `reads_range`): calls over ranges are not supported yet (record 0060 items 6 and 8, M4.5e1b Part C)");
-            return nullptr;
-        }
         if (f->ret.is_struct() && cx_.struct_call_ok.count(e) == 0U)
         { // decision 0044 item 2: only a consumer that takes a struct value may call it
             reject(
@@ -9780,6 +9771,11 @@ private:
         {
             reject_strict_uninit_result(f, e->position);
             return nullptr;
+        }
+        if (contract_has_atom(*f, true))
+        {
+            spell_range_arguments(
+                args); // record 0060 item 8: the messages of the call's rows print the written arguments
         }
         const Expr* c {b_.call(f, std::move(args), loc_of(e->position))};
         VType nt {signature_vtype(e->type)};
@@ -13909,7 +13905,41 @@ private:
         return has_contract;
     }
 
-    // ---- staging between the parts of M4.5e1b (record 0060; the plan's S1 and S2: written and deleted inside the session) ----
+    // The arguments of a call of a function that holds a range atom, spelled as written (record 0060 item 8): an integer argument (a count) gets the text of its
+    // expression (`n`, `n + 1`, `3`), the decay of a local array its name (`a`, as a pointer variable's own spelling is `p`); `&a[1]` and a pointer variable
+    // carry theirs already.  Only these nodes are touched, so no message of another call changes.
+    void spell_range_arguments(const std::vector<const Expr*>& args)
+    {
+        for (const Expr* a : args)
+        {
+            const Expr* x {a};
+            while (x != nullptr && x->kind == Expr::Kind::ReportAt)
+            {
+                x = x->a;
+            }
+            if (x == nullptr)
+            {
+                continue;
+            }
+            // the decay of a local array keeps the spelling the user wrote (`a`), whatever the builder printed for the element address (`&a[0]`); a written `&a[0]`
+            // is `user_spelling` and stays
+            if (x->kind == Expr::Kind::ElemAddr && !x->user_spelling && x->a != nullptr &&
+                x->a->kind == Expr::Kind::AddrOf && x->a->var != nullptr && x->a->var->type.is_array() &&
+                x->b != nullptr && x->b->kind == Expr::Kind::Const && x->b->value == "0")
+            {
+                b_.text(x, x->a->var->name);
+            }
+            else if (x->c_text.empty() && x->type.is_int())
+            {
+                if (const std::string t {count_text(x)}; !t.empty())
+                {
+                    b_.text(x, t);
+                }
+            }
+        }
+    }
+
+    // ---- staging between the parts of M4.5e1b (record 0060; S2 is written and deleted inside the session; S1 went with Part C) ----
     // Whether a contract clause holds a permission atom of any kind, or a range atom only.
     static bool clause_has_atom(const Expr* x, bool ranges_only)
     {

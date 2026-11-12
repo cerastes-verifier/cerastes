@@ -109,6 +109,12 @@ A check of the permission to a whole range of array elements is a _marked range 
 `insufficient.permission`, and `report.cpp` accepts exactly that reason on it (and the failed assertion on every other row), so a
 missing permission is told apart from a failure Silicon should never report.
 
+The permission atoms over a range of elements (`owns_range` and `reads_range`, decision
+{gh}/internal/decisions/0060-ranges-in-contracts.md[0060]) are the one place a contract holds a quantifier: each atom is one
+`forall k` per field over the slots of the pointer's block (`+offset_of(p) <= k < offset_of(p) + n+`, guarded by the atom's own
+guard), and a call, a return and a framed element read have their own explicit rows, so Silicon's check of the quantified
+permission never fails first. The lint admits exactly these shapes and no other `forall` in a contract.
+
 To keep the Viper of a run:
 
 [source,sh]

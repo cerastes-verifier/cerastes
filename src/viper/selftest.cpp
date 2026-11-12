@@ -84,6 +84,9 @@ public:
     };
     std::vector<RowCount> row_counts;
     LowerOptions lower_options;
+    // A vacuity twin (record 0060 Part C): the builders of the range-call cases end their caller with `check(false)` and record its position here
+    bool vac_tail {false};
+    SrcLoc vac_loc;
 
     SrcLoc at()
     {
@@ -1499,6 +1502,7 @@ void define_marked_fields();
 void define_arrays_rejected_until_part_b();
 void define_arrays_lowering();
 void define_ranges_lowering();
+void define_range_calls();
 } // namespace
 
 #include "selftest_cases2.inc"
@@ -1816,6 +1820,7 @@ int main(int argc, char** argv)
     define_arrays_rejected_until_part_b();
     define_arrays_lowering();
     define_ranges_lowering();
+    define_range_calls();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

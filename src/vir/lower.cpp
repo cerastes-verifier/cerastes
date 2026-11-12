@@ -5950,8 +5950,58 @@ private:
         return quoted_text;
     }
     // The same, from the argument a call passes: `x` for `&x`, `*q` for `q`.
+    // A range atom as the call spells it (record 0060 item 8): the argument the pointer parameter receives and the argument the count is (a count that is a bare parameter, a
+    // constant), `a[0..3)`; empty when either has no spelling, so that no spelling the user did not write is printed.
+    std::string range_call_text(const AtomSite& s, const Expr& call) const
+    {
+        const Expr& base {site_arg(s, call)};
+        const Expr* c {s.atom->b};
+        while (c != nullptr && c->kind == Expr::Kind::Convert && c->a != nullptr)
+        {
+            c = c->a;
+        }
+        std::string count;
+        if (c != nullptr && c->kind == Expr::Kind::Formal && c->index >= 0 &&
+            static_cast<size_t>(c->index) < call.args.size())
+        {
+            count = call.args[static_cast<size_t>(c->index)]->c_text;
+        }
+        else if (c != nullptr && c->kind == Expr::Kind::Const)
+        {
+            count = c->c_text.empty() ? c->value : c->c_text;
+        }
+        if (base.c_text.empty() || count.empty())
+        {
+            return std::string();
+        }
+        // `&a[i]` over `n` elements is `a[i..i + n)` when both are numbers, `a[0..n)` when `i` is 0
+        const std::string& bt {base.c_text};
+        const size_t open {bt.rfind('[')};
+        if (bt.size() > 3U && bt[0U] == '&' && bt.back() == ']' && open != std::string::npos && open > 1U)
+        {
+            const std::string name {bt.substr(1U, open - 1U)};
+            const std::string idx {bt.substr(open + 1U, bt.size() - open - 2U)};
+            const auto digits = [](const std::string& t)
+            {
+                return !t.empty() && t.find_first_not_of("0123456789") == std::string::npos && t.size() < 9U;
+            };
+            if (postfix_operand_text(name) == name && idx == "0")
+            {
+                return name + "[0.." + count + ")";
+            }
+            if (postfix_operand_text(name) == name && digits(idx) && digits(count))
+            {
+                return name + "[" + idx + ".." + std::to_string(std::stol(idx) + std::stol(count)) + ")";
+            }
+        }
+        return postfix_operand_text(bt) + "[0.." + count + ")";
+    }
     std::string site_call_text(const AtomSite& s, const Expr& call) const
     {
+        if (site_is_range(s))
+        {
+            return range_call_text(s, call);
+        }
         if (site_is_global(s) || !s.via.empty())
         {
             // a global's call text is its own name, a place reached through steps is the callee's spelling (decision
@@ -7075,6 +7125,7 @@ private:
             std::string field;
             std::string text;
             bool loads {false};
+            E count; // a range atom (record 0060 item 10): the place is the range's first element and `count` its length; null for a cell
         }; // `loads`: the place is reached through a heap read (decision 0045)
         std::string callee;
         std::vector<Atom> atoms; // a memory call's atoms
@@ -7235,6 +7286,11 @@ private:
         std::set<std::string> r;
         for (const AtomSite& s : atoms_of(callee).sites)
         {
+            if (!s.in_ensures && site_is_range(s))
+            {
+                r.insert(
+                    fkey(site_pointee(s))); // record 0060 item 10: a range atom is a memory call on its element field
+            }
             if (!s.in_ensures && site_takes_cell(s))
             {
                 // every leaf field of a struct atom (decision 0043 item 12, audit B3: a memory call on each of them, not on one field `struct_S`)
@@ -7481,6 +7537,38 @@ private:
     // Record an access and make the obligations of decision 0039 items 3 and 4 against every earlier access of the field that C does not order with
     // it: `g_a && g_b ==> place_a != place_b`, category `unsequenced`, at this (the later-created) access.  An earlier access recorded in an enclosing
     // full expression is named in a branch's set (audit S5): the branch follows what its places use.
+    // The condition that two places do not overlap (0039 item 4's pair rows, record 0060 item 10): two cells differ; a cell is outside a range; two ranges (a null `count_*` is a
+    // cell) share no slot, item 8's formulas.
+    E place_disjoint(const E& pa, const E& count_a, const E& pb, const E& count_b)
+    {
+        using low::BinOp;
+        if (count_a == nullptr && count_b == nullptr)
+        {
+            return low::bin(BinOp::Ne, pa, pb);
+        }
+        if (count_a != nullptr && count_b == nullptr)
+        {
+            return low::not_(in_range(pb, pa, count_a));
+        }
+        if (count_a == nullptr)
+        {
+            return low::not_(in_range(pa, pb, count_b));
+        }
+        return range_disjoint(pa, count_a, pb, count_b);
+    }
+    // `!(block_of(p) == block_of(q) && 0 < n && 0 < m && offset_of(p) < offset_of(q) + m && offset_of(q) < offset_of(p) + n)` (record 0060 item 8)
+    E range_disjoint(const E& p, const E& n, const E& q, const E& m)
+    {
+        using low::BinOp;
+        const E op {low::dom("offset_of", {p})};
+        const E oq {low::dom("offset_of", {q})};
+        E r {low::bin(BinOp::Eq, block_of(p), block_of(q))};
+        r = low::and_(r, low::bin(BinOp::Lt, low::int_lit("0"), n));
+        r = low::and_(r, low::bin(BinOp::Lt, low::int_lit("0"), m));
+        r = low::and_(r, low::bin(BinOp::Lt, op, low::bin(BinOp::Add, oq, m)));
+        r = low::and_(r, low::bin(BinOp::Lt, oq, low::bin(BinOp::Add, op, n)));
+        return low::not_(r);
+    }
     void register_access(Acc a, Full& full, const E& pure_guard)
     {
         a.guard = and_guard(pure_guard);
@@ -7564,8 +7652,9 @@ private:
                         what = "uses " + quoted(x.text, "a pointer") + ", whose object the call to " + callee +
                                " may end, ";
                     }
-                    emit(low::bin(low::BinOp::Ne, x.place, k.place), low::and_(low::and_(x.guard, k.guard), c.guard),
-                         what + "in an order C leaves unspecified", b, &x.loc); // at the access
+                    emit(place_disjoint(x.place, nullptr, k.place, k.count),
+                         low::and_(low::and_(x.guard, k.guard), c.guard), what + "in an order C leaves unspecified", b,
+                         &x.loc); // at the access
                 }
             }
             else
@@ -7578,7 +7667,7 @@ private:
                         {
                             continue;
                         }
-                        emit(low::bin(low::BinOp::Ne, k1.place, k2.place),
+                        emit(place_disjoint(k1.place, k1.count, k2.place, k2.count),
                              low::and_(low::and_(k1.guard, k2.guard), g_ab),
                              "the calls to " + quoted(b.callee, "a function") + " and " +
                                  quoted(a.callee, "a function") + " may both " +
@@ -8740,7 +8829,7 @@ private:
     // They are obligations of the call with the exact set PRE(c), in the order they are created.  Returns the ghost amounts, one per `requires`
     // atom, `(g ? m : write) / (N + 1)` (decision 0037 item 6).
     std::vector<E> call_atoms(const Expr& e, const Function& callee, const std::vector<LV>& args, const Env& cenv,
-                              const Deps& pre, Full& full)
+                              const Deps& pre, Full& full, std::vector<E>* bound_args = nullptr)
     {
         using low::BinOp;
         std::vector<E> amounts;
@@ -8750,17 +8839,9 @@ private:
         {
             return amounts;
         }
-        for (const AtomSite& rs : fa.sites)
+        if (bound_args != nullptr)
         {
-            if (site_is_range(rs))
-            {
-                // record 0060, staging pin S1: the rows of a call of a function that holds a range atom are Part C's; fail closed with no row built
-                internal_error(
-                    e.loc,
-                    "a call of a function whose contract holds a range permission atom reached lowering before Part C of record 0060 reads them");
-                amounts.assign(n, low::no_perm());
-                return amounts;
-            }
+            bound_args->assign(args.size(), nullptr);
         }
         Deps adep;
         for (const LV& a : args)
@@ -8777,8 +8858,20 @@ private:
             const Type* t {nullptr};
             std::string place;
             std::vector<Cell> cells; // the leaf cells of a struct place, or the one cell (decision 0043 item 9)
+            // a range atom (record 0060 item 8): `root` is the base bound to a local and `count` the count bound to another, so no row reads the heap for them
+            bool range {false};
+            E count;
         };
         std::vector<S> ss;
+        // Record 0060 item 8 (S44 F-b1, audit round 1 S4): a local, assigned in the place of an item of the call's rows (before the rows that name it).
+        auto bind = [&](const E& v, low::LType t) -> E
+        {
+            const std::string name {new_temp(t)};
+            obl(full, nullptr, adep, low::bool_lit(true), {},
+                meta("internal", e.loc, "internal check: an operand of a call's range rows bound to a local"), &pre.ex);
+            assign(full.obls.back().stmts, name, v);
+            return low::var(name);
+        };
         // The callee's places reached through loads are read in the caller's current heap (decision 0045 item 6): the contract mode of a call, over the arguments.
         CtxSave call_ctx(*this);
         cmode_ = CMode::Call;
@@ -8796,16 +8889,40 @@ private:
             x.t = &site_pointee(*x.site);
             x.place = site_call_text(*x.site, e);
             x.cells = site_cells(*x.site, x.p);
+            if (site_is_range(*x.site))
+            {
+                x.range = true;
+                Full scratch;
+                const LV cnt {lower(*x.site->atom->b, cenv, nullptr, Deps {}, scratch)};
+                x.root = bind(x.root, low::LType::Ref);
+                x.count = bind(cnt.e, low::LType::Int);
+                x.p = x.root;
+                const int k {site_key(*x.site)};
+                if (bound_args != nullptr && k >= 0 && static_cast<size_t>(k) < args.size() && args[k].leaves.empty())
+                {
+                    (*bound_args)[static_cast<size_t>(k)] = x.root;
+                }
+                // a count that is exactly a parameter passes its bound local too (audit round 3, N2): the value is the argument's own
+                const Expr* cn {x.site->atom->b};
+                if (bound_args != nullptr && cn != nullptr && cn->kind == Expr::Kind::Formal && cn->index >= 0 &&
+                    static_cast<size_t>(cn->index) < args.size() && args[static_cast<size_t>(cn->index)].leaves.empty())
+                {
+                    (*bound_args)[static_cast<size_t>(cn->index)] = x.count;
+                }
+            }
             ss.push_back(std::move(x));
         }
         auto text_of = [&](const S& x)
         {
-            const std::string pl {site_phrase(*x.site, quoted(x.place, "the object the pointer points to"))};
+            const std::string pl {site_phrase(*x.site, quoted(x.place, x.range ? "the range the pointer points to"
+                                                                               : "the object the pointer points to"))};
             switch (x.site->atom->atom)
             {
                 case AtomKind::Owns:
+                case AtomKind::OwnsRange:
                     return "calls `" + callee.c_name + "`, which needs to own " + pl + ", without owning it";
                 case AtomKind::Reads:
+                case AtomKind::ReadsRange:
                     return "calls `" + callee.c_name + "`, which needs to read " + pl +
                            ", without the permission to read it";
                 case AtomKind::Live:
@@ -8823,12 +8940,6 @@ private:
                 }
                 case AtomKind::OwnsBlock:
                     break; // never a site of contract_atoms (decision 0047 item 4: contract_block_atoms lists it)
-                case AtomKind::OwnsRange:
-                case AtomKind::ReadsRange:
-                    internal_error(
-                        x.site->atom->loc,
-                        "a range permission atom at a call reached lowering before the lowering reads them (record 0060 item 8)");
-                    break;
             }
             return std::string();
         };
@@ -8889,6 +9000,23 @@ private:
         for (const S& x : ss)
         {
             const std::string m {text_of(x)};
+            if (x.range)
+            {
+                // record 0060 item 8: the shape row first (a null pointer, a negative count and a range too long for its object end the path here, one error), then for a
+                // `reads_range` the first slot's two permissions, then the liveness row; the marked rows follow the amounts
+                add(x.g, range_shape(x.root, x.root_ptr, x.count), m);
+                if (x.site->atom->atom == AtomKind::ReadsRange)
+                {
+                    const E first {low::dom("loc", {block_of(x.root), low::dom("offset_of", {x.root})})};
+                    add(x.g,
+                        low::not_(low::and_(low::bin(BinOp::Gt, x.count, low::int_lit("0")),
+                                            low::bin(BinOp::Or, low::bin(BinOp::Eq, value_perm(first, *x.t), none),
+                                                     low::bin(BinOp::Eq, flag_perm(first, *x.t), none)))),
+                        m);
+                }
+                add(x.g, low::bin(BinOp::Gt, live_perm(x.root), none), m);
+                continue;
+            }
             add(x.g, low::bin(BinOp::Ne, x.root, low::null_()), m);
             add(x.g, wf_expr(x.root, &x.root_ptr), m);
             if (needs_root_block(*x.site))
@@ -8958,11 +9086,54 @@ private:
                 }
             }
         }
+        // 2b. record 0060 item 8: the separation of a range and a cell, and of two ranges, of one field with at least one owner among the two: a cell outside the range, two
+        // ranges that share no slot (empty ranges share none)
+        for (size_t i {0U}; i < ss.size(); ++i)
+        {
+            for (size_t j {i + 1U}; j < ss.size(); ++j)
+            {
+                const S& a {ss[i]};
+                const S& b {ss[j]};
+                if (!a.range && !b.range)
+                {
+                    continue;
+                }
+                auto owning = [](const S& x)
+                {
+                    return x.site->atom->atom == AtomKind::Owns || x.site->atom->atom == AtomKind::OwnsRange;
+                };
+                // a global's cell and a cell reached through a load are cells like any other here (audit round 3, S1): their `recv` is what the cell rows read
+                if ((!owning(a) && !owning(b)) || !shares_field(*a.site, *b.site))
+                {
+                    continue;
+                }
+                const E both {low::and_(a.g, b.g)};
+                const std::string msg_tail {" to `" + callee.c_name + "`, which may be one object, once to own it"};
+                const std::string na {quoted(a.place, a.range ? "a range" : "an object")};
+                const std::string nb {quoted(b.place, b.range ? "a range" : "an object")};
+                if (a.range && b.range)
+                {
+                    add(both, range_disjoint(a.root, a.count, b.root, b.count),
+                        "passes " + na + " and " + nb + msg_tail);
+                    continue;
+                }
+                const S& r {a.range ? a : b};
+                const S& c {a.range ? b : a};
+                for (const Cell& cl : c.cells)
+                {
+                    add(both, low::not_(in_range(cl.recv, r.root, r.count)), "passes " + na + " and " + nb + msg_tail);
+                }
+            }
+        }
         // 3. the case splits: on the liveness cells of every pair of atoms, on the cells of every pair of `reads`
         for (size_t i {0U}; i < ss.size(); ++i)
         {
             for (size_t j {i + 1U}; j < ss.size(); ++j)
             {
+                if (ss[i].range || ss[j].range)
+                {
+                    continue; // S44 (c), (d): a range needs no case split
+                }
                 if (!same_expr(ss[i].root, ss[j].root) && !(site_is_global(*ss[i].site) && site_is_global(*ss[j].site)))
                 {
                     split(low::bin(BinOp::Eq, live_cell(ss[i].root), live_cell(ss[j].root)));
@@ -9057,6 +9228,32 @@ private:
         // 4. the amounts: a `reads` atom's is a fraction of the least the caller holds of every value and flag cell the atom takes, and of the liveness cell
         for (const S& x : ss)
         {
+            if (x.range)
+            {
+                // record 0060 item 6: `owns_range`: the liveness cell's; `reads_range`: where the range is not empty the least of the first slot's two cells, the liveness cell
+                // and the caller's own read amounts of the field (audit round 1, S2), else the liveness cell's.  `perm` cannot stand under a quantifier, so the amount is
+                // bound to a `Perm` local, and every row after it names the local.
+                E m {live_perm(x.root)};
+                if (x.site->atom->atom == AtomKind::ReadsRange)
+                {
+                    const E first {low::dom("loc", {block_of(x.root), low::dom("offset_of", {x.root})})};
+                    E least {min_perm(min_perm(value_perm(first, *x.t), flag_perm(first, *x.t)), m)};
+                    const FnAtoms& caller {atoms_of(*fn_.f)};
+                    for (int j {0}; j < caller.nreq; ++j)
+                    {
+                        const AtomSite& cs {caller.sites[static_cast<size_t>(j)]};
+                        if ((cs.atom->atom == AtomKind::Reads || cs.atom->atom == AtomKind::ReadsRange) &&
+                            site_fields(cs).count(cell_suffix(*x.t)) != 0U)
+                        {
+                            least = min_perm(least, low::var(amount_name(j)));
+                        }
+                    }
+                    m = low::ite(low::bin(BinOp::Gt, x.count, low::int_lit("0")), least, m);
+                }
+                amounts.push_back(
+                    bind(low::perm_div(x.g ? low::ite(x.g, m, write) : m, static_cast<int>(n) + 1), low::LType::Perm));
+                continue;
+            }
             E m {live_perm(x.root)};
             if (x.site->atom->atom == AtomKind::Reads)
             {
@@ -9079,6 +9276,92 @@ private:
             const std::string m {text_of(ss[i])};
             add(nullptr, low::bin(BinOp::Lt, none, amounts[i]), m);
             add(nullptr, low::bin(BinOp::Lt, amounts[i], write), m);
+        }
+        // 4b. record 0060 item 8, per range atom after the amounts: the two marked rows (value then flag, at `write` or the atom's amount, inside `if (g) { }`; a failed one
+        // ends its path, S43 G2), the flags over the range (`uninitialized`), the type's range under the flag
+        for (size_t i {0U}; i < ss.size(); ++i)
+        {
+            const S& x {ss[i]};
+            if (!x.range)
+            {
+                continue;
+            }
+            const std::string m {text_of(x)};
+            const bool owns {x.site->atom->atom == AtomKind::OwnsRange};
+            const std::string sfx {use_cell_type(*x.t)};
+            const E lo {low::dom("offset_of", {x.root})};
+            const E hi {low::bin(BinOp::Add, lo, x.count)};
+            obl(full, nullptr, adep, low::bool_lit(true), {},
+                meta("internal", e.loc, "internal check: the marked rows of a call's range atom"), &pre.ex);
+            // Audit round 3, B1: where another `reads_range` of the field in this call may cover a slot of this one, the row asks for the sum of the two amounts there, as a return's
+            // does (`range_returns`, S44 (e)): each atom's own amount would pass where the callee kept a fraction of a slot that two of them meet at, and Silicon's own check of the
+            // precondition, which takes the sum, would fail.  Elsewhere the row is the atom's amount alone.
+            E marked_amount {owns ? E() : amounts[i]};
+            if (!owns)
+            {
+                const E kv {low::var("k")};
+                for (size_t j {0U}; j < ss.size(); ++j)
+                {
+                    if (j == i || ss[j].site->atom->atom != AtomKind::ReadsRange ||
+                        cell_suffix(*ss[j].t) != cell_suffix(*x.t))
+                    {
+                        continue;
+                    }
+                    const E loj {low::dom("offset_of", {ss[j].root})};
+                    const E inside {
+                        low::bin(BinOp::And,
+                                 low::bin(BinOp::And, low::bin(BinOp::Eq, block_of(ss[j].root), block_of(x.root)),
+                                          low::bin(BinOp::Le, loj, kv)),
+                                 low::bin(BinOp::Lt, kv, low::bin(BinOp::Add, loj, ss[j].count)))};
+                    marked_amount =
+                        low::bin(BinOp::Add, marked_amount, low::ite(low::and_(ss[j].g, inside), amounts[j], none));
+                }
+            }
+            {
+                low::LStmt ifs;
+                std::vector<low::LStmt> rows;
+                for (const char* field : {"v_", "d_"})
+                {
+                    emit_marked_row(x.g ? ifs.then_body : rows,
+                                    range_perm(x.root, lo, hi, std::string(field) + sfx, marked_amount),
+                                    meta("permission", e.loc, m));
+                }
+                if (x.g)
+                {
+                    ifs.kind = low::LStmt::Kind::If;
+                    ifs.expr = x.g;
+                    rows.push_back(std::move(ifs));
+                }
+                full.obls.back().stmts = std::move(rows);
+            }
+            {
+                const Expr& arg {site_arg(*x.site, e)};
+                const std::string who {arg.kind == Expr::Kind::Null ? std::string("the null pointer")
+                                       : arg.c_text.empty()         ? std::string("a pointer")
+                                                                    : "`" + arg.c_text + "`"};
+                const std::string& pname {callee.params[static_cast<size_t>(site_key(*x.site))].name};
+                add_as("uninitialized", x.g,
+                       range_quant(x.root, x.count,
+                                   [&](const E& slot)
+                                   {
+                                       return cell_flag(slot, *x.t);
+                                   }),
+                       "passes " + who + " to `" + callee.c_name + "`, whose parameter " +
+                           (pname.empty() ? std::string() : "`" + pname + "` ") + "needs every element of " +
+                           quoted(site_text(*x.site), "the range it points to") +
+                           " to have a value; it may not have one here");
+            }
+            if (!x.t->is_bool())
+            {
+                add(x.g,
+                    range_quant(x.root, x.count,
+                                [&](const E& slot)
+                                {
+                                    return low::implies(cell_flag(slot, *x.t),
+                                                        element_range(cell_value(slot, *x.t), *x.t));
+                                }),
+                    m);
+            }
         }
         // 5. the sums over each cell an atom takes a fraction of (decision 0037 item 8, audit round 1 S3), per leaf cell
         auto term = [&](const E& cond, const E& amount)
@@ -9115,6 +9398,17 @@ private:
                                 }
                                 E same {same_expr(ci.recv, cj.recv) ? nullptr : low::bin(BinOp::Eq, ci.recv, cj.recv)};
                                 total = low::bin(BinOp::Add, total, term(low::and_(ss[j].g, same), amounts[j]));
+                            }
+                        }
+                        // record 0060 item 8: a `reads_range` of the field adds its amount where the cell lies in it
+                        for (size_t j {0U}; j < ss.size(); ++j)
+                        {
+                            if (ss[j].site->atom->atom == AtomKind::ReadsRange &&
+                                cell_suffix(*ss[j].t) == cell_suffix(ci.type))
+                            {
+                                total = low::bin(
+                                    BinOp::Add, total,
+                                    term(low::and_(ss[j].g, in_range(ci.recv, ss[j].root, ss[j].count)), amounts[j]));
                             }
                         }
                         add(ss[i].g,
@@ -9193,7 +9487,9 @@ private:
         const bool saved_both {call_pre_both_};
         // audit S3: the arguments write a cell, so the checks of the call follow the write in both halves
         call_pre_both_ = args_write_cell;
-        std::vector<E> amounts {call_atoms(e, callee, args, cenv, pre, full)};
+        // the base of a range atom, bound to a local, is what the call passes for that parameter (record 0060 item 8: the callee's quantifiers are then instantiated at a variable)
+        std::vector<E> bound_args;
+        std::vector<E> amounts {call_atoms(e, callee, args, cenv, pre, full, &bound_args)};
         // decision 0047 item 6: the free rows, or the rows of the `owns_block` sites the callee takes
         block_call_rows(e, callee, cenv, args, pre, full);
         for (size_t k {0U}; k < e.args.size(); ++k)
@@ -9246,8 +9542,9 @@ private:
         call_pre_both_ = saved_both;
         CallItem item;
         item.method = method_name(callee);
-        for (const LV& a : args)
+        for (size_t ai {0U}; ai < args.size(); ++ai)
         {
+            const LV& a {args[ai]};
             if (!a.leaves.empty())
             { // a struct argument passes its leaves (decision 0044 item 5)
                 for (const E& l : a.leaves)
@@ -9257,7 +9554,7 @@ private:
             }
             else
             {
-                item.args.push_back(a.e);
+                item.args.push_back(ai < bound_args.size() && bound_args[ai] != nullptr ? bound_args[ai] : a.e);
             }
         }
         for (const E& a : amounts)
@@ -9452,6 +9749,32 @@ private:
                     fx.tags.push_back(MemTag {0, k.field, true, k.owns, path_, {}});
                     ca.atoms.push_back(std::move(k));
                 }
+            }
+            // record 0060 item 10: a range atom is an access to the slots of its range: its place is the range's first element, its count the length
+            for (int i {0}; i < fa.nreq; ++i)
+            {
+                const AtomSite& site {fa.sites[static_cast<size_t>(i)]};
+                if (!site_is_range(site))
+                {
+                    continue;
+                }
+                Acc::Atom k;
+                {
+                    CtxSave call_ctx(*this);
+                    cmode_ = CMode::Call;
+                    cf_ = &callee;
+                    cens_ = false;
+                    cold_ = false;
+                    k.guard = site_guard(site, cenv);
+                    k.place = site_ref(site, cenv);
+                    Full scratch;
+                    k.count = lower(*site.atom->b, cenv, nullptr, Deps {}, scratch).e;
+                }
+                k.owns = site.atom->atom == AtomKind::OwnsRange;
+                k.field = fkey(site_pointee(site));
+                k.text = site_call_text(site, e);
+                fx.tags.push_back(MemTag {0, k.field, true, k.owns, path_, {}});
+                ca.atoms.push_back(std::move(k));
             }
             // decision 0047 item 9: a `requires` block site is full permission to every leaf cell of its block (the pair checks of 0039 item 4 compare the cells), and a
             // consuming one also writes its liveness cell (a use of any pointer beside it reads it)
@@ -13108,9 +13431,9 @@ private:
         {
             for (const AtomSite& site : atoms_of(*e->callee).sites)
             {
-                if (site.in_ensures || site.atom->atom != AtomKind::Owns)
+                if (site.in_ensures || (site.atom->atom != AtomKind::Owns && site.atom->atom != AtomKind::OwnsRange))
                 {
-                    continue;
+                    continue; // record 0060 item 10: a callee's `owns_range` reaches its element field like an `owns` (0038 item 3's havoc rule)
                 }
                 if (site_is_global(site))
                 {

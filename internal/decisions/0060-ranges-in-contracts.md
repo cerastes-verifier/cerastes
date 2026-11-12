@@ -13,7 +13,9 @@
   `build/m4.5e1b/auditor-report-1.md`), and by audit round 2 on Parts A and B (no blocking item; five should-fix items,
   all taken: diagnostics in source terms, four pins, one of them a rejection item 1 now lists, the guard-true vacuity
   form and two twins in the VIR cases, the lint's amount rule for item 6's minimum; N3 corrected item 6's example;
-  `build/m4.5e1b/auditor-report-2.md`). Owner
+  `build/m4.5e1b/auditor-report-2.md`), and by audit round 3 on Part C (one blocking item, B1, an exit 3 on a correct
+  program where two read ranges of one call meet at a slot a callee lowered: item 8's sum-form rows at calls; one
+  should-fix, S1, separation against global and loaded cells, item 8; `build/m4.5e1b/auditor-report-3.md`). Owner
   decisions:
   - At M4.5e1's planning and before e1a (2026-11-11): **228** `cerastes_reads_range(p, n)` beside `owns_range`;
     **230** `int a[static N]` stays rejected (M8); **231** `owns_range(p, n)` and `reads_range(p, n)` imply `p !=
@@ -156,8 +158,12 @@ outcome to the branch of the plan's decision table it took.
    verify with it). **Listed limit:** a caller whose holding over the range is unequal for another reason gets a false
    `permission` (pinned; question 238, restated with this scope). A callee that kept a fraction of one element of a
    local array is not such a case (audit round 2, N3): every taker of a slot takes the same fraction of the liveness
-   cell, which is in the minimum. A callee that keeps a slot's fraction but gives the liveness back (a partnerless
-   `ensures(live(p))`) is. S44 (c): this amount needs no
+   cell, which is in the minimum, and a fraction kept of a local array is a real `lifetime` error at its scope exit. A
+   callee that keeps a slot's fraction but gives the liveness back is: in a function that borrows `reads_range(p, n)`,
+   two calls of `void keep_slot(int *x) requires(reads(*x)) ensures(live(x)) { … }` on `&p[1]` leave slot 1 below the
+   amount the minimum then takes for `peek(p, n)` (`range_call_reads_unequal_pin.c`); its two-atom form, one call of
+   `peek2(p, n, p, n)` after one `keep_slot`, is the same limit through item 8's sum-form rows (audit round 3, B1). S44
+   (c): this amount needs no
    case split and no sum row at the call; `(a, a)` to a `reads_range` pair, overlapping and disjoint read ranges, a
    caller holding the range whole or borrowing it, and a write after the call all verify; the unequal-fractions twin
    is one error.
@@ -207,17 +213,21 @@ outcome to the branch of the plan's decision table it took.
    - **Sums:** the liveness sums include range atoms; a `reads` cell's sum gains `(g_r && x in range r ? amt_r : none)`
      per read range (S44 (d): the cell inside the range verifies, and an `owns` cell inside an owned range fails the
      separation row alone); no range sum row at a call (S44 (c)).
-   - The explicit rows cover every conjunct of item 4, so Silicon's own precondition check never fails first. **Why no
-     range sum row is needed at a call** (audit round 1, S5: the marked rows bound each amount, not the sum of two read
-     atoms at a slot they share). Every read amount of a call is at most `M / (N + 1)`, with `M` at most `perm(L)` and
-     at most each of the caller's own read amounts of the field (item 6). For a slot the caller holds, `perm(slot) >=
-     M`: in a block the caller holds through its liveness cell at write strength (a local array, an allocation), every
-     taker removes from a slot at least what it removes from `L` (a `reads` or `reads_range` taker the same fraction
-     from both, an `owns` taker the whole slot), so `perm(slot) >= perm(L)` wherever the slot is held at all; in a block
-     the caller holds only through its own atoms, every held slot holds at least one of its own amounts. The `N` amounts
-     of one call that meet at a slot then sum to at most `N · M / (N + 1) < perm(slot)`, and Silicon's exhale of the
-     callee's quantified `requires` succeeds wherever the marked rows passed. A cell atom of an `owns` kind inside a
-     range is refused by the separation row before.
+   - The explicit rows cover every conjunct of item 4, so Silicon's own precondition check never fails first. **Two
+     read ranges of one call that may meet** (audit round 1, S5, and round 3, B1): per-atom marked rows bound each
+     amount, not their sum at a slot both cover. Round 1 argued that no sum row is needed (every taker of a slot removes
+     at least as much from the liveness cell `L`, which is in the minimum); round 3 broke the argument with a callee
+     that keeps a slot's fraction and gives the liveness back (question 238's shape): in `keep_slot(&p[1]); peek2(p, n,
+     p, n);` each amount passes slot 1 alone, their sum does not, and Silicon's own check failed (exit 3 on a correct
+     program, `audit3-scratch/c/x1.c`). So where two `reads_range` atoms of one field may meet, each range's marked
+     rows at the call take the **sum form** returns use (item 9): `acc(loc(B, k).f, amt_i + Σ_j (g_j && in_j(k) ? amt_j
+     : none))` over the call's other `reads_range` atoms `j` of the field. The sum is never below one amount, so a call
+     that passed before still passes; where it fails, the error is item 6's limit as one `permission` at the call
+     (`abl/x1_sumform.vpr`), pinned. A `reads` cell inside a read range is covered by the cell's sum term (above); an
+     `owns` cell or `owns_range` beside a range is refused by the separation rows.
+   - **Separation reaches every cell** (audit round 3, S1): the range/cell row is built against a global's cell and a
+     cell reached through a load as against a parameter's (as the cell pairs do), so `f(&g, 1)` to `owns_range(p, n) &&
+     owns(g)` is `permission` at the call, not an exit 3.
 
 9. **Returns** (`atom_returns`), for each `ensures` range atom under its guard, after the separation rows of the
    `ensures` pairs: the marked rows (`permission`: "returns without owning `p[0..n)`, which its contract promises";
