@@ -98,7 +98,12 @@ pre-existing exit 3 found on the baseline (a pass-through of `owns(*pp) && owns(
   `check_doc_examples.py --html` (26 pages, 379 blocks).
 - `src/` and `include/` against `685034b` (measured): +2,754/−155 without the self-tests (the plan's 2,050–3,050), +6,289/−173
   with them; at the split points Parts A+B were +1,602 (about 250 staging lines, deleted later) and Parts A–C +2,039.
-- The box: BOX-FILL.
+- Before the box: a widened run of the existing tests no earlier run covered (183 golden, `rejected` and
+  `frontend-refused` files in `tests/` and the doc examples: 399 runs passed) and `test_walker_oracle.py` (79, OK).
+- The box (`ubuntu-26.04` container, the branch at `c58060e` as a bundle from `3ceb13c`; a fresh bootstrap build): a
+  pre-check — regeneration 6,033 files, 0 missing (the new array-parameter rules reach no glibc declaration the tests
+  use), lint clean; 677 runs of the session's tests and the seven Linux-only tests passed (native-ok clang 114, GCC 114:
+  the box's compilers warn on no positive) — then `CERASTES_LONG=1 scripts/check.sh` (`-j32`): CHECK-RESULT.
 
 **First step for the next session:** the owner merges `m4.5e1b-ranges-in-contracts` and answers questions 238–242 and
 the overnight answers inline (handoff §2, §8); then M4.5e1c (quantifiers) from `.claude/plans/m4-5e1-arrays.md`

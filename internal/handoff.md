@@ -1,13 +1,13 @@
 # Handoff after M4.5e1b (2026-11-12) — M4.5e1c (quantifiers) next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
-`internal/decisions/`, then its plan: **`.claude/plans/m4-5e1b-ranges-in-contracts.md`**, which is complete (M4.5e1b
-does not plan again: its probes and spikes have decision tables). `status.md` has the formal entry of the last
-finished session (M4.5e1a). This file adds what a cold start would otherwise have to rediscover, and holds only
-what is live (owner, 2026-10-26).
+`internal/decisions/`, then its plan: for M4.5e1c, section 5 of **`.claude/plans/m4-5e1-arrays.md`**, which runs its
+probes and spikes and then plans again. `status.md` has the formal entry of the last finished session (M4.5e1b).
+This file adds what a cold start would otherwise have to rediscover, and holds only what is live (owner,
+2026-10-26).
 
-**What M4.5e1b's orchestrator needs here:** §1, §2, the rules of §4, §6 and §8. §3's notes belong to later
-sessions (e1b's own inputs moved into its plan, section 12), and §4.1, §4.3, §4.4 and §5 are other sessions'.
+**What M4.5e1c's orchestrator needs here:** §1, §2, §3's e1a and e1b notes, the rules of §4, §6 and §8; §4.1, §4.3,
+§4.4 and §5 are other sessions'.
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
 M4.5e1b's (both 2026-11-11), each at the owner's request. The history of finished sessions, the notes that had
@@ -21,40 +21,39 @@ origin in brackets, so its full wording can be found there. Session plans approv
 
 ## 1. State
 
-- **M4.5e1a** (2026-11-11; record 0059) is done, merged (PR #34) and pushed: `origin/main` = `dc40377`. Local
-  `main` is ahead of it, not pushed: `825a9ee` (the owner's answers to 234 and 235), then this planning's
-  commits. Its result is in `internal/status.md`; the box's full `check.sh` with
-  `CERASTES_LONG=1` on `3ceb13c` was all green (14,208 passed, 0 failed; the long tier ran; 78 minutes at `-j32`).
-- **M4.5e1b** ranges in contracts is next, planned in full on 2026-11-11 (record 0060 is its number). Against the
-  earlier sketch, two things moved to M4.5e2 (questions 236 and 237, §8). e1c, e1d and e1e as before
-  (`.claude/plans/m4-5e1-arrays.md`, trimmed to what they need).
-- **CI:** unchanged (record 0053; question 176 the owner's). No `profiles=all` dispatch has run (question 172).
+- **M4.5e1b** (2026-11-12; record 0060) is done on branch `m4.5e1b-ranges-in-contracts` (worktree
+  `.claude/worktrees/m4.5e1b`), not merged and not pushed: `42d4832` to `c58060e` and this handoff's commit, from
+  `origin/main` = `685034b`. Its result is in `internal/status.md`; the box's `CERASTES_LONG=1 scripts/check.sh`:
+  BOX-RESULT.
+- **M4.5e1c** quantifiers is next: `.claude/plans/m4-5e1-arrays.md` section 5 (its Step 0, P80 and S45, then plan
+  again), with §3's notes from e1a and e1b.
+- **CI:** unchanged (record 0053; question 176 the owner's). The 2026-11-11 nightly (`f57ee43`) failed on the Linux jobs
+  at apt (DNS on the runners) and macOS was cancelled at 6 h; no `profiles=all` dispatch has run (question 172).
 - **The Linux host** `matt@clang4.cpp.al`: container `cerastes-s8-ubuntu-26.04`, checkout `/work/cerastes`
-  (`~/cerastes-s8/p-ubuntu-26.04`), detached at `3ceb13c` with `e1a-check.log`; the bundles `/tmp/e1a.bundle` and
-  `/tmp/e1a-final.bundle` on the host (and in the container's `/tmp`) can go.
-- **The main checkout** has no session worktree and no side branch left (e1a's were removed).
+  (`~/cerastes-s8/p-ubuntu-26.04`), detached at the box run's commit with `e1b-check.log`; the bundle `/tmp/e1b.bundle`
+  can go (e1a's were removed).
+- **The main checkout** holds the session worktree `.claude/worktrees/m4.5e1b`, whose `build/m4.5e1b/` keeps the
+  agents' reports, the four audit reports and their scratch, `orchestrator-notes.md` and the tools (`s0/r3.sh`,
+  `s0/widen.sh`, the frozen binaries); the audit worktree is removed.
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Push** `main` (the commits after `dc40377`: `825a9ee`, then this planning's with the plan, the trimmed
-   umbrella plan and this file), so that M4.5e1b branches from `origin/main`.
-2. **Questions 238–240** (§8): each is built as its recommendation unless answered inline.
-3. **CI** (question 176): unchanged from the last handoff (the nightly does not fit 360 minutes; the `profiles=all`
-   dispatch is pending, question 172).
-4. **Optional.** On the box, e1a's bundles in `/tmp` and `~`.
-5. **Start M4.5e1b** with this opening prompt. It replaces `plan.md`'s general one for this session: no plan mode
-   (the plan is approved and complete), and only the records the plan rests on (reading all of
-   `internal/decisions/` would spend the context that the split point at Part C's commit depends on):
+1. **Review and merge** `m4.5e1b-ranges-in-contracts` (a PR), then push `main`.
+2. **Questions 238–242 and the answers built overnight** (§8): each stands unless answered inline; the status entry's
+   deviations are listed for confirmation.
+3. **CI** (question 176): unchanged.
+4. **Optional.** The session worktree after the merge (its `build/m4.5e1b/` has the audit scratch); on the box,
+   `/tmp/e1b.bundle`.
+5. **Start M4.5e1c** with this opening prompt (a "plan again" sub-session: its spikes first, outside plan mode):
 
    ```
-   You are the orchestrator of M4.5e1b (ranges in contracts). Do not use plan mode: the plan is approved and
-   complete. Read CLAUDE.md, .claude/plans/m4-5e1b-ranges-in-contracts.md (all of it), the M4.5e1a entry of
-   internal/status.md, internal/handoff.md §1, §2, the rules of §4, §6 and §8, and decision records 0059, 0037,
-   0028, 0029, 0038, 0039, 0040 and 0042 (not the rest of internal/decisions/). Then execute the plan from its
-   section 4. Use the ensemble exactly as its section 2 assigns it: edg-backend, il-analyst and test-mutator
-   (Sonnet) and the soundness-auditor (Opus) from .claude/agents/, and the Fable advisor at the plan's five
-   checkpoints. Stop and ask me at every stop rule of the plan's sections 5, 7 and 11.
+   You are the orchestrator of M4.5e1c (quantifiers). Read CLAUDE.md, .claude/plans/m4-5e1-arrays.md sections 1,
+   2 and 5, the M4.5e1b entry of internal/status.md, internal/handoff.md §1, §2, §3's e1a and e1b notes, the rules
+   of §4, §6 and §8, and decision records 0059, 0060 and 0029. Run section 5's Step 0, P80 and S45 outside plan
+   mode (they change no src/) and commit their results to internal/il-inventory.md; then enter plan mode and plan
+   the encoding from them, with decision tables and the ensemble assigned as .claude/plans/m4-5e1b-ranges-in-
+   contracts.md does. Do not modify src/ until I approve the plan.
    ```
 
 ## 3. Open notes, by the session that consumes them
