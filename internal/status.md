@@ -100,7 +100,9 @@ pre-existing exit 3 found on the baseline (a pass-through of `owns(*pp) && owns(
   with them; at the split points Parts A+B were +1,602 (about 250 staging lines, deleted later) and Parts A–C +2,039.
 - The box: BOX-FILL.
 
-**First step for the next session:** FILL.
+**First step for the next session:** the owner merges `m4.5e1b-ranges-in-contracts` and answers questions 238–242 and
+the overnight answers inline (handoff §2, §8); then M4.5e1c (quantifiers) from `.claude/plans/m4-5e1-arrays.md`
+section 5: its Step 0, P80 and S45 (they change no `src/`), then plan again (handoff §2 has the opening prompt).
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
