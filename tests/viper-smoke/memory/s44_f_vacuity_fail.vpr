@@ -1,0 +1,118 @@
+// expect: error assert:assertion.false @ L97
+// expect: error assert:assertion.false @ L117
+// S44 (f) vacuity: rd2 and rd2__wf each ending assert false (2 of 2).
+// S44 hand-written fixture of the target shapes of record 0060 (draft; plan .claude/plans/m4-5e1b-ranges-in-contracts.md section 5/6), written from the emitted shapes in build/m4.5e1b/baseline/vpr and the S43 fixtures. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1): a fresh block of n slots, every element uninitialized, the block's liveness token; full permission to both fields of every slot in [0, n), each its own quantifier over the absolute slot (record 0059 item 3, draft)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+// cerastes:trusted-contract the static-object part of an array initializer: it takes and returns the same permissions and ensures every element zero and initialized (record 0059 item 3, draft)
+method zero_arr_int(r: Ref, n: Int)
+  requires (1 <= n) && (r == loc(block_of(r), 0)) && (len(block_of(r)) == n)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(r), k).v_int == 0)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> loc(block_of(r), k).d_int
+  decreases _
+
+method rd2(p: Ref, n: Int, i: Int, j: Int, amt: Perm) returns (r: Int)
+  requires none < amt && amt < write
+  requires ((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p))))
+  requires forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> acc(loc(block_of(p), k).v_int, amt)
+  requires forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> acc(loc(block_of(p), k).d_int, amt)
+  requires forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> loc(block_of(p), k).d_int
+  requires forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647))
+  requires acc(lvloc(block_of(p)).lv, amt)
+  requires (0 <= i) && (i < n) && (0 <= j) && (j < n)
+  requires ((((block_of(loc(block_of(p), offset_of(p) + i)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + i))) && (offset_of(loc(block_of(p), offset_of(p) + i)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + i).v_int : 0) >= 0) && ((((block_of(loc(block_of(p), offset_of(p) + i)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + i))) && (offset_of(loc(block_of(p), offset_of(p) + i)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + i).v_int : 0) <= 1000) && ((((block_of(loc(block_of(p), offset_of(p) + j)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + j))) && (offset_of(loc(block_of(p), offset_of(p) + j)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + j).v_int : 0) >= 0) && ((((block_of(loc(block_of(p), offset_of(p) + j)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + j))) && (offset_of(loc(block_of(p), offset_of(p) + j)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + j).v_int : 0) <= 1000)
+  ensures ((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p))))
+  ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> acc(loc(block_of(p), k).v_int, amt)
+  ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> acc(loc(block_of(p), k).d_int, amt)
+  ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> loc(block_of(p), k).d_int
+  ensures forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647))
+  ensures acc(lvloc(block_of(p)).lv, amt)
+  ensures r == (((block_of(loc(block_of(p), offset_of(p) + i)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + i))) && (offset_of(loc(block_of(p), offset_of(p) + i)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + i).v_int : 0) + (((block_of(loc(block_of(p), offset_of(p) + j)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + j))) && (offset_of(loc(block_of(p), offset_of(p) + j)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + j).v_int : 0)
+  ensures (((block_of(loc(block_of(p), offset_of(p) + j)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + j))) && (offset_of(loc(block_of(p), offset_of(p) + j)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + j).v_int : 0) == old((((block_of(loc(block_of(p), offset_of(p) + j)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + j))) && (offset_of(loc(block_of(p), offset_of(p) + j)) < offset_of(p) + n)) ? loc(block_of(p), offset_of(p) + j).v_int : 0))
+{
+  var t1: Int
+  var t2: Int
+  assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
+  assert !((offset_of(p) + i < 0) || (len(block_of(p)) <= offset_of(p) + i)) //BOUND
+  assert perm(loc(block_of(p), offset_of(p) + i).v_int) > none && perm(loc(block_of(p), offset_of(p) + i).d_int) > none && loc(block_of(p), offset_of(p) + i).d_int
+  t1 := loc(block_of(p), offset_of(p) + i).v_int
+  assert p != null ==> perm(lvloc(block_of(p)).lv) > none //LIFETIME
+  assert !((offset_of(p) + j < 0) || (len(block_of(p)) <= offset_of(p) + j)) //BOUND
+  assert perm(loc(block_of(p), offset_of(p) + j).v_int) > none && perm(loc(block_of(p), offset_of(p) + j).d_int) > none && loc(block_of(p), offset_of(p) + j).d_int
+  t2 := loc(block_of(p), offset_of(p) + j).v_int
+  assert !(((t1 + t2) < (-2147483648)) || (2147483647 < (t1 + t2))) //ARITH
+  r := t1 + t2
+  assert forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> acc(loc(block_of(p), k).v_int, amt) //MARKED
+  assert forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> acc(loc(block_of(p), k).d_int, amt) //MARKED
+  assert !((p == null) || !((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) || (n < 0) || (len(block_of(p)) < offset_of(p) + n)) //SHAPE
+  assert (forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> loc(block_of(p), k).d_int) //FLAGS
+  assert (forall k: Int :: { loc(block_of(p), k) } ((offset_of(p) <= k) && (k < offset_of(p) + n)) ==> ((-2147483648 <= loc(block_of(p), k).v_int) && (loc(block_of(p), k).v_int <= 2147483647))) //RANGE
+  assert perm(lvloc(block_of(p)).lv) >= amt //LIVE
+  assert false // <- expected failure
+}
+
+method rd2__wf(p: Ref, n: Int, i: Int, j: Int, amt: Perm, res: Int, hv_0_pre: Int, hv_1_pre: Int, hv_0_post: Int, hv_1_post: Int)
+  requires none < amt && amt < write
+  requires ((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p))))
+  requires (0 <= i) && (i < n) && (0 <= j) && (j < n)
+  requires (-2147483648 <= res) && (res <= 2147483647)
+  requires (-2147483648 <= hv_0_pre) && (hv_0_pre <= 2147483647)
+  requires (-2147483648 <= hv_1_pre) && (hv_1_pre <= 2147483647)
+  requires (-2147483648 <= hv_0_post) && (hv_0_post <= 2147483647)
+  requires (-2147483648 <= hv_1_post) && (hv_1_post <= 2147483647)
+  requires (loc(block_of(p), offset_of(p) + i) == loc(block_of(p), offset_of(p) + j)) ==> (hv_0_pre == hv_1_pre)
+  requires (loc(block_of(p), offset_of(p) + i) == loc(block_of(p), offset_of(p) + j)) ==> (hv_0_post == hv_1_post)
+  requires (((block_of(loc(block_of(p), offset_of(p) + i)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + i))) && (offset_of(loc(block_of(p), offset_of(p) + i)) < offset_of(p) + n))) ==> (hv_0_post == hv_0_pre)
+  requires (((block_of(loc(block_of(p), offset_of(p) + j)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + j))) && (offset_of(loc(block_of(p), offset_of(p) + j)) < offset_of(p) + n))) ==> (hv_1_post == hv_1_pre)
+{
+  assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p))))) && (0 <= i) && (i < n) && (0 <= j) && (j < n)) ==> ((block_of(loc(block_of(p), offset_of(p) + i)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + i))) && (offset_of(loc(block_of(p), offset_of(p) + i)) < offset_of(p) + n)) //WFRAME
+  assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p))))) && (0 <= i) && (i < n) && (0 <= j) && (j < n)) ==> ((block_of(loc(block_of(p), offset_of(p) + j)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + j))) && (offset_of(loc(block_of(p), offset_of(p) + j)) < offset_of(p) + n)) //WFRAME
+  assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p))))) && (0 <= i) && (i < n) && (0 <= j) && (j < n) && (hv_0_pre >= 0) && (hv_0_pre <= 1000) && (hv_1_pre >= 0) && (hv_1_pre <= 1000)) ==> (!(((hv_0_post + hv_1_post) < (-2147483648)) || (2147483647 < (hv_0_post + hv_1_post)))) //WARITH
+  assert false // <- expected failure
+}
