@@ -974,18 +974,32 @@ for the remainder of this session and this session only"), each for confirmation
   back, `requires(reads(*x)) ensures(live(x))`) gets a false `permission` at a later call that reads the whole range,
   passed once or twice (`range_call_reads_unequal_pin.c`, `range_call_reads_two_atoms_pin.c`). A local array cannot
   reach it (a fraction kept there is a real `lifetime` error). **Recommended:** accept it as a pinned, listed limit.
+
+This sounds like unsoundness, so we need to relook this case and how we can fix it.
+
 - **239** A `cerastes::must_init` filler over a range that fills with a loop cannot state its invariant before e1c's
   quantified invariants, so it is a pinned false alarm (a straight-line filler verifies). **Recommended:** accept; e1c
   gives the pin its verifying twin.
+
+Follow recommendation.
+
 - **240** Array parameters (`T a[]`, `T a[N]`) are pointer parameters; the shapes the compilers warn about are rejected
   with a tag each (`sizeof_array_argument`; `array_parameter_mismatch` for different bounds, a bound against none, a
   bounded array against a pointer), in both modes, though `int a[3]` against `int *a` warns only in GCC's C (the union
   rule, as 0039 item 3); a shorter array argument warns at no front-end tier and is accepted. **Recommended:** follow the
   matrix, as built.
+
+Follow recommendation.
+
 - **241** VLA parameters on a declaration without a body (`void f(int n, int a[n]);`, `int a[*]`) verified before e1b
   (R2); e1b rejects them as a definition's are, at the `[static N]` rejection's site (no existing test held one).
   **Recommended:** reject until M8, which lifts them with `[static N]`.
+
+Follow recommendation.
+
 - **242** S44 (b): with the plan's table branch built (the shape row first at a call), a callee forwarding `(p, n + 1)` of
   its own range fails two Silicon rows (shown as one error: the driver prints one per line, category and message). An
   order outside the table, the marked rows before the shape row for `owns_range`, gave one row everywhere
   (`s44_b_caller_orderD.vpr`). **Recommended:** keep the built order.
+
+Follow recommendation, but add where we are going to address this, because it seems incorrect.
