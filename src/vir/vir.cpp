@@ -1836,14 +1836,16 @@ bool restrict_backed(const Function& f, int param, int* offender)
     bool own {block_of(param, false) && block_of(param, true)};
     for (const AtomSite& r : sites)
     {
-        if (r.in_ensures || r.atom->atom != AtomKind::Owns || r.atom->a == nullptr ||
-            r.atom->a->kind != Expr::Kind::Formal || r.atom->a->index != param || !null_guard(r, param))
+        // record 0060 item 14: an `owns_range(p, n)` backs `restrict` as `owns(*p)` does (unguarded, or after `p == NULL ||`), its `ensures` partner of the same kind
+        if (r.in_ensures || (r.atom->atom != AtomKind::Owns && r.atom->atom != AtomKind::OwnsRange) ||
+            r.atom->a == nullptr || r.atom->a->kind != Expr::Kind::Formal || r.atom->a->index != param ||
+            !null_guard(r, param))
         {
             continue;
         }
         for (const AtomSite& e : sites)
         {
-            if (e.in_ensures && e.atom->atom == AtomKind::Owns && e.atom->amount == r.atom->amount &&
+            if (e.in_ensures && e.atom->atom == r.atom->atom && e.atom->amount == r.atom->amount &&
                 null_guard(e, param))
             {
                 own = true;
@@ -1891,7 +1893,9 @@ bool restrict_backed(const Function& f, int param, int* offender)
         bool covered {block_of(static_cast<int>(q), false)};
         for (const AtomSite& r : sites)
         {
-            if (!r.in_ensures && (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads) &&
+            if (!r.in_ensures &&
+                (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads ||
+                 r.atom->atom == AtomKind::OwnsRange || r.atom->atom == AtomKind::ReadsRange) &&
                 r.atom->a != nullptr && r.atom->a->kind == Expr::Kind::Formal &&
                 r.atom->a->index == static_cast<int>(q) && null_guard(r, static_cast<int>(q)))
             {

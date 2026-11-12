@@ -261,6 +261,13 @@ CERASTES_DIAG(c99_designator, error,
 CERASTES_DIAG(array_address_null_test, error,
               "the address of the array \"%s\" is never null, so %s is always true or always false (-Wpointer-bool-conversion, "
               "-Wtautological-pointer-compare, -Waddress): test something else (decision 0059)")
+// An array parameter (decision 0060 item 15): the shapes clang and GCC warn about by default or at -Wall are rejected like errors.
+CERASTES_DIAG(sizeof_array_argument, error,
+              "\"sizeof\" of the array parameter \"%s\" is the size of a pointer, not of the array (-Wsizeof-array-argument, "
+              "-Wsizeof-pointer-div): pass the length as a parameter (decision 0060)")
+CERASTES_DIAG(array_parameter_mismatch, error,
+              "the declarations of \"%s\" give the array parameter \"%s\" different bounds (%s) (-Warray-parameter): write the same bound, "
+              "or none, in every declaration (decision 0060)")
 CERASTES_DIAG(char_subscripts, error,
               "the index of \"%s\" has type \"char\" (-Wchar-subscripts): where plain char is signed a negative value indexes before the array; "
               "use \"unsigned char\" or \"signed char\", or cast the index (decision 0059)")

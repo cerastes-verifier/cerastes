@@ -1041,7 +1041,8 @@ int requires_atom_count(const Function& f);
 // Whether `f`'s contract backs `restrict` on parameter `param` (decision 0037 item 2): an `Owns` atom of that parameter in the `requires`, the `Owns`
 // atom with the same `amount` in the `ensures`, and, for EVERY OTHER pointer parameter of the same pointee type, an `Owns` or `Reads` atom of its own
 // in the `requires` (permissions follow cells, not provenance: without it a second pointer to the same cell could be written through).  Each atom is
-// unguarded or guarded by exactly `q == NULL` being false (`q == NULL || owns(*q)`).  The atoms must already be numbered.  When it is false,
+// unguarded or guarded by exactly `q == NULL` being false (`q == NULL || owns(*q)`).  Record 0060 item 14: an `OwnsRange` atom of the parameter (and its `ensures` partner of the
+// same kind) backs `restrict` like the `Owns`, and a range atom of another parameter covers it like an `Owns` or `Reads` atom does.  The atoms must already be numbered.  When it is false,
 // `*offender` (if given) is the other parameter that has no atom, or -1 when `param`'s own `owns` is the missing part.
 bool restrict_backed(const Function& f, int param, int* offender = nullptr);
 // Why `restrict` on pointer parameter `param` is refused whatever its contract owns (decision 0043 item 10, audit B2): empty when nothing is in the way.

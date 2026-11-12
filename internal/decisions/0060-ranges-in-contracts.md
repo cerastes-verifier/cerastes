@@ -1,6 +1,6 @@
 # 0060 — Ranges in contracts (M4.5e1b)
 
-- **Status:** draft (2026-11-11, M4.5e1b), written before code (invariant 6) from the plan's section 6
+- **Status:** accepted (2026-11-12, M4.5e1b), written before code (invariant 6) from the plan's section 6
   (`.claude/plans/m4-5e1b-ranges-in-contracts.md`, approved 2026-11-11), revised by P79's and S44's decision tables
   (the plan's section 5; `internal/il-inventory.md`, chapter M4.5e1b; 52 fixtures `tests/viper-smoke/memory/s44_*.vpr`)
   and Step 0's runs (the table at the end: every outcome inside its table, S44 (b) on its "If not" branch), and by
@@ -15,7 +15,10 @@
   form and two twins in the VIR cases, the lint's amount rule for item 6's minimum; N3 corrected item 6's example;
   `build/m4.5e1b/auditor-report-2.md`), and by audit round 3 on Part C (one blocking item, B1, an exit 3 on a correct
   program where two read ranges of one call meet at a slot a callee lowered: item 8's sum-form rows at calls; one
-  should-fix, S1, separation against global and loaded cells, item 8; `build/m4.5e1b/auditor-report-3.md`). Owner
+  should-fix, S1, separation against global and loaded cells, item 8; `build/m4.5e1b/auditor-report-3.md`), and by
+  audit round 4 on Parts D and E, the pages and the port (no blocking item; round 3's B1 and S1 re-checked fixed; S2
+  `sizeof` in contracts, item 15; S3 three doc statements; S4 a pin; S1, an exit 3 after a wrong program's correct
+  error, not taken and listed, item 11; `build/m4.5e1b/auditor-report-4.md`). Owner
   decisions:
   - At M4.5e1's planning and before e1a (2026-11-11): **228** `cerastes_reads_range(p, n)` beside `owns_range`;
     **230** `int a[static N]` stays rejected (M8); **231** `owns_range(p, n)` and `reads_range(p, n)` imply `p !=
@@ -270,9 +273,29 @@ outcome to the branch of the plan's decision table it took.
       (S44 (g)); lowering already writes every integer parameter's range as a `requires` of its method (0010), so
       nothing is added.
     - **Reads in invariants and measures:** `p[e]` of any pointer and `a` used as a pointer (`q == a`) are accepted. A
-      read is framed by a range place (the interval test of item 5) or a cell place; unframed, it is `permission`
-      ("this loop invariant reads `p[e]`, which this loop does not hold"); a named array keeps e1a's `out-of-bounds`
-      row; the flag obligation is 0038 item 6's.
+      read is framed by a range place (the interval test of item 5), a local array's range place (the same test
+      against the array's block, so `int *q = a;` then `q[0]` in an invariant verifies; as built) or a cell place;
+      unframed, it is `permission` ("this loop invariant reads `p[e]`, which this loop does not hold"); a named array
+      keeps e1a's `out-of-bounds` row; the flag obligation is 0038 item 6's.
+    - **Two read places that may share a slot** (as built: the sum form of items 8 and 9 at loops). With per-place
+      marked rows a correct program reached Silicon's own invariant check on entry (`invariant.not.established`, an
+      exit 3: two `reads_range` places with `p == q` after a callee kept a fraction of every slot,
+      `rngd_two_reads_eat_entry`), so the entry and back-edge marked rows of a read place take the other read places
+      of the field in the sum form; the case is then one `permission` at the loop.
+    - **Rows' positions** (as built): the entry rows at the loop keyword, the back-edge rows at the body's closing
+      brace (0038 item 4); when a callee in the body kept an element, the first row to fail is the liveness row, with
+      the range's message.
+    - **The assigned range parameter** (question 237's pinned false alarm, as built): a loop that reads through the
+      reassigned parameter within its range (`p = &p[1];` then `p[i]`) reports `lifetime` at the read; a loop that
+      does not read through it verifies, the range staying in the frame, and a call through a copy of the original
+      pointer inside such a loop is a false `permission` (audit round 4, `c/d2c.c`).
+    - **Why a read-only place keeps its values** (audit round 4, S1): a write through a pointer needs the field's full
+      permission, which a place held at `amt_k < write` never gives. The one exception is a wrong program: after a
+      write row fails (a write through a `reads_range` element), Silicon assumes it, and with two read places that may
+      overlap `amt_1 + amt_2 == write` is satisfiable, so the write happens and the read-only place's values-kept
+      conjunct fails as Silicon's own invariant check: the program's `permission` at the write is reported, then an
+      exit 3 (`audit4-scratch/c/d1.c`; one read place ends the path, `c/d1b.c`). Fail closed, never a proof; not
+      changed here (a marked write row would change every existing program's Viper), listed for M4.8.
     - **Not built** (question 237): a range atom in an invariant is rejected; a loop in a function that assigns its
       range parameter has no range place (a pinned false alarm).
     - **S44 (g)**, the table's "Expected" branch: a fill loop over an `owns_range` parameter, a search over
@@ -323,6 +346,8 @@ outcome to the branch of the plan's decision table it took.
       - A local array shorter than the bound passed to `int a[4]` warns at no front-end tier (GCC's C only at `-O2`,
         `-Wstringop-overflow=`): accepted, no tag, listed for M8's sweep. `int a[0]` and `int a[const 3]` parameters
         are silent: accepted (the bound is ignored), listed for M8.
+    - **`sizeof` of an array parameter in a contract** is rejected as in code (`sizeof_array_argument`; audit round 4,
+      S2: `owns_range(a, sizeof(a) / sizeof(a[0]))` of an `int a[4]` meant 2).
     - **VLA parameters on a declaration without a body** (`void f(int n, int a[n]);`, `int a[*]`) verify today (R2;
       only definitions were rejected, by C's VLA error or EDG's #411/#890): the plan's scope rejects them, so item 15's
       rule covers every declaration, at the site and with the reach of the `[static N]` rejection, with a pin. It

@@ -309,3 +309,5 @@ pointers into arrays. Ranges in contracts (`owns_range`, `reads_range`, array pa
   invariants (a pinned false alarm).
 - The driver accepts a second Silicon reason, on marked rows only; every other row is gated as before.
 - Every program with a heap owner changes its Viper in the token rows (`offset_of == 0`), outcomes unchanged.
+
+*2026-11-12, amended by 0060 (M4.5e1b): item 1 — `owns_range`, `reads_range`, element reads in contracts, array parameters, `p[i]` of a pointer and an array used as a pointer in loop invariants and measures, and `owning(n)` on a parameter are lifted; atoms on one element go to M4.5e2 (question 236). Item 8 — loops carry the ranges of parameters as range places and read through pointers into local arrays (0060 item 11). Item 10 — `p[i]` under a range atom takes its bound from the atom (0060 item 10).*

@@ -256,7 +256,7 @@ P4417R0's owners) and
 xref:memory.adoc#vlibc-allocator[vlibc's own allocator] (`vlibc_malloc` and
 `vlibc_free`, a heap of its own whose blocks only `vlibc_free` frees), and
 xref:memory.adoc#not-yet[What is not supported yet] says what is still
-rejected: arrays and pointer arithmetic among it.
+rejected: pointer arithmetic and statements about every element of an array among it.
 
 == Where to read more
 

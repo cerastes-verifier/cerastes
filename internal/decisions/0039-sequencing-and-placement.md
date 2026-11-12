@@ -267,3 +267,5 @@ matrix of unsequenced accesses and returned addresses) and S29 (Silicon), in `in
 - `return &x;` is rejected; returning a copy of a local's address is still found at the caller's first use.
 
 *2026-11-11, amended by 0059 (M4.5e1a): item 3 — two unsequenced accesses to elements get the `unsequenced` row that their addresses differ, whatever the index; same-element shapes the compilers warn about are `unsequenced_modification` (0059 item 9).*
+
+*2026-11-12, amended by 0060 (M4.5e1b): item 4 — a call whose callee holds a range is a memory call on its field, checked against accesses and other calls with the range forms of separation (0060 item 10). Item 7 — partners by path apply to range atoms (0060 item 3).*

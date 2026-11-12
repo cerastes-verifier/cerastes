@@ -13,119 +13,100 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, S6's `git show 9255b93:internal/status.md`, M4.5d2v's `git show c2bc48d:internal/status.md`, S7's `git show a660abc:internal/status.md`, M4.5d2b1's
 `git show c1b691d:internal/status.md`, S8's `git show 15bcdc6:internal/status.md`, M4.5d2b2a's
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
-`git show 023ea50:internal/status.md`, and M4.5d2b2d's `git show d88a457:internal/status.md`.
+`git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, and M4.5e1a's `git show 685034b:internal/status.md`.
 
-## M4.5e1a — Arrays inside one function (2026-11-11): done on branch `m4.5e1a-arrays-in-functions`
+## M4.5e1b — Ranges in contracts (2026-11-11/12): done on branch `m4.5e1b-ranges-in-contracts`
 
-Plan: section 3 of `git show dc40377:.claude/plans/m4-5e1-arrays.md` (there is no `m4-5e1a-*.md`; the file in the
-tree was trimmed at M4.5e1b's planning). Record 0059 (amends 0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043,
-0054). Read `internal/handoff.md` next: §1, §2, the rules of §4, §6, §8 (questions 238 on). Merged as PR #34
-(`dc40377`).
+Plan: `.claude/plans/m4-5e1b-ranges-in-contracts.md` (approved 2026-11-11; executed without re-planning). Record 0060
+(amends 0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059). Read `internal/handoff.md` next: §1, §2, the rules of §4,
+§6, §8 (questions 238–242 and the answers built overnight). Branched from `origin/main` = `685034b` (the owner had
+pushed the planning). Session from 2026-11-11 18:45 to 2026-11-12 (about 7 h before the box run).
 
-**Owner decisions:** 229–233 answered inline before the session ("Follow recommendation" each), committed to local
-`main` as `1c5f9bd`; the branch is from it (not from `origin/main` = `d88a457`, which lacks only that commit). Open,
-each built as its recommendation: **234** array designators rejected in C too (audit round 1, B1); **235** the 1,080
-`.vpr` files of Flips D, where the pre-build allow-list predicted 849.
+**Owner decisions in the session:** the split point at Commit 2 (Parts A+B at +1,602 `src/` lines, over the plan's
+1,600, about 250 of them staging code Parts C and D deleted): "Continue (Recommended)". At 2026-11-11 evening the owner
+logged off with: "You continue but if you have any questions use the same process you have now, but automatically
+accept the recommended answer for the remainder of this session and this session only". **Answers built that way**
+(each in handoff §8, for confirmation): Part E kept whole, no pre-agreed cut (the owner's completeness preference; the
+session stayed under 12 h); a local array's place frames `q[i]` read through a pointer in an invariant (record 0060
+item 11); the back-edge rows of read range places in the sum form; audit round 4's S1 (an exit 3 after a wrong
+program's correct error) not fixed, listed for M4.8.
 
-**Step 0.** CI recorded only: no `workflow_dispatch` run; the 2026-11-10 nightly cancelled at 6 h 01 min; the
-2026-11-11 one running. Baseline: 5,412 `.vpr`/`.map`, the VIR self-test's 1,765 cases, frozen binaries in
-`build/m4.5e1a/cerastes-base/`. R1: `int a[static 3]` verified in C (question 230: now rejected); R2's messages kept;
-R3: 1,875 runs of the `rejected` tests, 0 mismatches on the base.
+**Step 0.** CI recorded only: the 2026-11-11 nightly (`f57ee43`) failed on the Linux jobs at apt (DNS: "Temporary failure
+resolving archive.ubuntu.com"), macOS cancelled at 6 h; the 2026-11-10 and 2026-11-09 nightlies cancelled (question 176).
+Baseline: 5,743 `.vpr`/`.map`, VIR self-test 1,825 lowering and 303 rejection cases, frozen binaries in
+`build/m4.5e1b/cerastes-base/`. R1: the eight array-parameter forms verify, native-ok. R2: every range construct failed
+at the atom; twenty messages named M4.5e1b or "M4.5e1"; VLA parameters on a bodiless declaration verified (question
+241). R3: 1,125 `rejected` files, 1,974 runs pass (7 Linux-only skips), `build/m4.5e1b/s0/r3.sh`. M: two tags
+(`sizeof_array_argument`, `array_parameter_mismatch`); a shorter array argument is silent (no tag).
 
-**Done** (the three Sonnet roles and the Opus reviewer from `.claude/agents/`; the il-analyst was replaced once, after
-S43; the orchestrator consulted the Fable advisor before audit round 1, at the split point, at Part D's stop and
-before the box run):
-- **Record, P78, S43** (`05b4075`, `d09c3fc`): P78 (F1 a bound naming a local constant, F2 `int a[0]`, F3 C's silent
-  excess initializers, F4 `address_taken`); S43's 49 fixtures (G2–G4 pass; the draft's `p[0]` concern refuted), with
-  G2's probe and the element-type loop addendum (56 fixtures `s43_*`). The Step-0 matrix (#175, #1162 and the
-  compilers' shapes) and audit round 1 (B1, B2: array designators rejected) in the record.
-- **Parts A and B** (`0209647`): VIR's `Array`/`ElemAddr`, the lowered `Forall` and labelled `Old`, the marked map
-  column and the driver's exact-reason gate; local arrays as blocks (`alloc_arr_<t>`, `zero_arr_<t>`), `a[i]`/`&a[i]`,
-  initializers with C's zero fill, `out-of-bounds`, scope exits as marked range rows, sequencing between elements;
-  #175, #1162 and #138 errors; `array_address_null_test`, `c99_designator`, `char_subscripts`; audit round 2's B1
-  (`register`) and the VIR self-test's reasons.
-- **Parts C, D and E** (`ccb5910`): loops carrying arrays (range places, marked entry and back-edge rows at the loop
-  keyword, quantified conjuncts, the reach rule), the decay and `p[i]` on any pointer, the `offset_of == 0` backstops
-  (1,080 `.vpr` files, each changed line classified), `sizeof(a)`, `uninit` on arrays; audit round 3's fixes.
-- **Tests.** 217 new test files in `tests/memory` (positives and twins, pins), 56 S43 fixtures, 6 doc examples (counted
-  by `git diff --diff-filter=A 1c5f9bd`); the staging pins written and deleted inside the session; Flip A's
-  `reject_array.c` retired, Flip B's line, Flip C's `Pins:` comments. VIR self-test 1,825
-  cases (was 1,765; 303 rejection cases), every expect line now naming Silicon's reason; `test_lint_viper.py` 782 (was
-  736); `test_run_tests.py` 1,221.
-- **`src/` sizes** (`git diff --numstat 1c5f9bd`, measured): without self-tests, Parts A and B +1,575/−67, Parts C–E
-  with audit round 3's fixes +480/−138, +1,943/−93 in all (the plan's 2,200–3,450 with Parts A–E); with self-tests
-  +3,457/−96.
-- **Docs:** Memory and ownership "Arrays", Error messages `out-of-bounds`, Verifying (the compilers' shapes,
-  `--strict-init`, not-supported), Annotations (`uninit`), the developer guide's map description, `tests/README.md`,
-  `internal/encoding.md` §3 "Arrays", `internal/il-inventory.md` chapter M4.5e1a, ten records amended. No tutorial
-  chapter (e1c, 0049 item 4).
-- **Audits** (one Opus reviewer, resumed per round): round 1 on the draft (B1, B2), round 2 on Parts A+B (B1
-  `register`, five should-fix), round 3 on Parts C–E (no blocking item), the re-audit of round 3's fixes (no blocking
-  item; its lint should-fix taken in `d507551`). No false proof in any round; round 1's B1 (a wrapping designator unchecked) and round 2's B1 (a `register`
-  array, and `&` of a `register` scalar since M4.5b1a) were holes, closed.
+**Done** (edg-backend, three il-analysts and the test-mutator, Sonnet; the soundness-auditor, Opus; the advisor at the
+plan's checkpoints 1, 3 and 5 and at Step 0; at most three Sonnet agents alive at once):
+- **P79, S44, record** (`42d4832`, `0d2b9e0`, `b033296`): P79 all "Expected" (F2 C++'s parameter bound under a
+  generated cast, F3 an earlier declaration's bound through its secondary declaration, F4 `owning(n)`'s argument by
+  position); S44's 55 fixtures (`s44_*`), every spike on its "Expected" branch except (b), which took its table's "If not"
+  branch (the shape row first at a call); the addendum after advisor checkpoint 1 (the built order in every caller
+  fixture, the null row in the accesses).
+- **Parts A and B** (`cb23a33`): the atoms, element reads in contracts, `f__wf`, partners (kind, parameter, count) and by
+  path, the callee's returns; staging pins S1, S2.
+- **Part C** (`a2c8d54`): calls over ranges (the shape row first, separation against every cell, item 6's amount with
+  the caller's own read amounts, sum-form marked rows where two read ranges meet), placement, `LoopWrites`.
+- **Parts D and E** (Commit 4): loops over parameters' ranges (sum form at entry and back edge; framing of reads through
+  range, local-array and cell places); markers over ranges; `owning(n)` on a parameter and `CERASTES_OWNING_N`;
+  `restrict` backed by a range; array parameters, VLA declarations, `int a[][3]`, the two new tags; the carrays port;
+  the user pages; `internal/encoding.md` §3; the developer guide's paragraph.
+- **Audits:** round 1 on the record (B1: the partners-by-path rule missing for ranges, a false proof through a trusted
+  contract; seven should-fix, all taken); round 2 on A+B (no blocking; five should-fix, taken); round 3 on C (B1: an exit
+  3 on a correct program, two read ranges meeting at a lowered slot, fixed by sum-form rows at calls; S1 taken); round 4
+  on D+E, the pages and the port (no blocking; round 3's B1/S1 re-checked; S2–S4 taken; S1 not taken, listed). The plan's
+  one re-audit was not needed: round 4 had no blocking item and checked round 3's fixes as named items. Reports
+  `build/m4.5e1b/auditor-report-{1..4}.md`.
 
 **Deviations from the plan, for confirmation:**
-- edg-backend built all of Part A (the plan split it with the il-analyst, then on S43) and Part B's `check.cpp`.
-- Part B's encoder half started before audit round 1 returned (the record draft existed).
-- Parts A and B were committed together from the audited snapshot plus round 2's separable fixes; Parts C, D and E were
-  audited in one round and committed together (Part D's encoder began in the shared tree while Part C's lowering
-  finished, so no Part C-only build existed).
-- The plan's constant-index twins became rejections (EDG's #175 an error in both modes, also inside `if (0)`, where only
-  EDG warns); C's excess initializers are #1162 made an error.
-- The array loop rows are positioned at the loop keyword (`Stmt::keyword_loc`, new), so both modes report one line.
-- VIR self-test expect lines name Silicon's reason (audit round 2): every existing case's header changed.
-- The lint exempts three exact loop-carry shapes from the `offset_of == 0` rule (records 0050, 0056: not restated).
-- Audit round 1 item 15's predicted `pk[0]` false alarm did not reproduce; its pin became a positive with twins.
-- `internal/encoding.md` and the developer guide's paragraph were delegated to edg-backend; the orchestrator wrote the
-  user pages and the six doc examples itself (the plan has the test-mutator write examples).
-- Four Sonnet agents were spawned in all, never more than three alive at once (the il-analyst was replaced after S43).
+- il-analyst-1 was resumed after Commit 1 for the S44 addendum (advisor checkpoint 1), the runner lent back to it.
+- Part C's and Part D's tests were pre-registered while the previous part was audited (new files only; each commit was
+  cut from its audited snapshot plus its fixes).
+- The staging S2 rejection was widened to the lowering's gate (loops with a `return` or outward `goto` too).
+- `range_owning_reject_arguments.c` was dropped: EDG's registration refuses `owning(n, m)` before cerastes.
+- Record item 8's planned order (marked rows first) became the shape row first (S44 (b)'s table); item 8's argument that
+  no range sum row is needed at a call (audit round 1, S5) was broken by audit round 3 and replaced by sum-form rows.
 
-**Corrections of new tests after their first run** (question 160): `array_reject_self_reading_init.c` lost an unrun
-`frontend-warning` line; the `p[1]` twin on a parameter with only `owns(*p)` expects two errors (S43 N1); Flip A's twin
-`r == a + 1` overflowed in its own `ensures`; four Part C tests whose own invariants or bodies were wrong;
-`array_ptr_walk_far.c` and `array_sizeof_bound_bytes.c` widened their `ensures` (a second error);
-`array_loop_clauses_above_keep.c` L21 → L22; `array_ptr_loop_reassigned_false_alarm.c` replaced (above).
+**Corrections of new tests after their first run** (question 160, or a new test's program before its first commit):
+the S1 pin's tag (`unsupported_expression`); `range_reject_count_double.c` (a literal `2.0`); `range_reject_partner_cast_one_side.c`
+replaced by `range_partner_noop_cast.c` and `range_reject_partner_value_cast.c` (a written no-op cast is one VIR count);
+`range_framing_alias_cell.c` (`cerastes_live(q)` added), `range_framing_ensures_no_atom.c` (+`postcondition`, 0040 item
+4), `range_guards_unchecked.c` (`null-dereference` and `lifetime`), `range_partner_guard_mismatch.c` (one return error),
+the three S2 loop pins (one line); `range_reject_cell_through_range_load.c` (+the `ensures` site); `range_call_separation.c`
+(`ok2` as a `T**` parameter with 0045 item 10's tie); `range_call_reads_unequal_pin.c` (reworked twice to reach question
+238's limit); `range_loop_callee_kept.c` (the body's closing brace), `range_loop_pin_assigned_param.c` (rewritten to read
+through the parameter), `range_loop_element_unframed.c` (two errors: no inductive form exists),
+`range_loop_pointer_into_array_elsewhere.c` (`live(r)`); `range_marker_reject_reads_range.c`,
+`range_owning_reject_count_beside.c`, `range_owning_reject_owns_beside.c` (L9); `array_param_reject_array_of_arrays.c`
+(+`unsupported_type`); `array_param_owns_range.c` and its twin (`old` in the callee's `ensures`).
 
-**Not done.** Nothing of the plan's scope was cut. Pinned limits: a fill loop over an uninitialized array followed by a
-read (`uninitialized`, e1c); a loop that writes an array loses its values (`array_loop_self_write_false_alarm.c`, e1c);
-handoff §3 has the rest.
+**Not done / limits** (handoff §3): question 237's assigned-parameter false alarms; question 238's limit (one- and two-atom
+pins); question 239's loop-filler pin; audit round 4's S1 (an exit 3 after a wrong program's correct error); a
+pre-existing exit 3 found on the baseline (a pass-through of `owns(*pp) && owns(**pp)` without 0045 item 10's tie,
+`build/m4.5e1b/t4/sep/d1.c`).
 
-**Surprises.**
-- **Front-end facts the plan could not see:** C silently drops excess initializers; a designator keeps only its folded
-  index; `register` arrays verified; C++ positions an attributed statement at its first attribute.
-- **The Flips D allow-list was short** (849 against 1,080): the search missed the token's `.tok` spelling; every changed
-  line was then classified by exact inverse rules.
+**Checks** (the Mac, on the final build, every build held):
+- The session's tests: 684 runs of 200 test files, the 55 S44 fixtures, the carrays port and the four doc examples
+  passed (native-ok clang 114, GCC 114); R3 2,060 runs, only Flips A1–A4 removed and 47 new pins added; vprdiff 5,743
+  of 5,743 existing `.vpr`/`.map` identical (6,029 regenerated, none missing); VIR self-test 2,044 lowering and 324
+  rejection cases, 0 problems, the 1,825 baseline cases byte-identical (`VIR_CASES_MIN` 2044), every session case
+  through Silicon (the slowest a failing twin, 19.5 s); lint clean on 6,029 + 2,044 files; `test_lint_viper.py` 809
+  (was 782); `test_run_tests.py` 1,221, OK (6 min 25 s); `--check-headers` 5,420; format 87 files; `build_docs.sh` and
+  `check_doc_examples.py --html` (26 pages, 379 blocks).
+- `src/` and `include/` against `685034b` (measured): +2,754/−155 without the self-tests (the plan's 2,050–3,050), +6,289/−173
+  with them; at the split points Parts A+B were +1,602 (about 250 staging lines, deleted later) and Parts A–C +2,039.
+- The box: BOX-FILL.
 
-**Checks.**
-- The Mac, on the final build (`ccb5910`): 787 runs of the session's tests, S43 fixtures and doc examples passed
-  (native-ok clang 150, GCC 150); VIR self-test 1,825 cases, the 60 array cases through Silicon (1,816 with reasons
-  earlier, and the 156 changed bodies); R3 1,968 runs, only the flips and 95 new pin runs differ; vprdiff 4,332
-  identical, 1,080 allowed, 0 unexpected, no `.map`; lint clean on 5,743 + 1,825 files; `test_lint_viper.py` 781,
-  `test_run_tests.py` 1,221, `--check-headers` 5,164, format 86 files, docs; after the re-audit's lint fix
-  (`d507551`) 5,743 + 1,825 files lint clean and `test_lint_viper.py` 782.
-- The box (`ubuntu-26.04` container, `-j32`), before `check.sh`, on `ccb5910`: the 552 tests behind the 1,080 Flips D
-  files (6 in `tests/long`), 2,042 runs passed (native-ok clang 479, GCC 479; 837 s); the six slowest default-tier tests
-  before and after the backstops, one at a time: 794 s against 803 s in all (ratio 1.01, the slowest 74.9 s, none
-  doubled); the `tests/long` ones 111–over 300 s (within their `timeout:` headers).
-- `CERASTES_LONG=1 scripts/check.sh` on the box (`ubuntu-26.04` container, `-j32`) on `3ceb13c`, the branch's last
-  change before this status commit: **all green** in 78 minutes (14,208 passed, 0 failed, 10 skipped; native-ok clang
-  2,722 and GCC 2,722; the long tier ran; lint 5,747 files clean; VIR self-test 1,825 cases, 0 problems, 1,825 passed
-  through Silicon, lint clean; the walker oracle; `test_run_tests.py` 1,221, `test_lint_viper.py` 782; format 86 files;
-  docs). Before it, a Linux pre-check: regeneration 5,747 files, lint clean, R3 1,960 runs with 0 mismatches.
-- **After `check.sh`** (the closing review): three pins the Parts C and D rejections lacked
-  (`array_reject_contract_element.c`, `array_reject_invariant_pointer_element.c`, `array_reject_invariant_decay.c`),
-  6 runs passed on the Mac and on the box, `--check-headers` 5,167; doc sentences (`realloc`, `owning(n)`, the
-  overview, the tutorial's index), the record's items 1, 8 and 10, `plan.md`'s M8 entries and the handoff corrected;
-  `build_docs.sh` and the doc-tree self-tests (30) green. No code changed after `3ceb13c`.
-
-**First step for the next session** (as of M4.5e1b's planning, 2026-11-11, which planned it in full): M4.5e1b from
-`.claude/plans/m4-5e1b-ranges-in-contracts.md`: its Step 0 (section 4), then P79 and S44 with their decision tables
-(section 5); it does not plan again.
+**First step for the next session:** FILL.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5e1b Ranges in contracts | 2026-11-11/12 | `m4.5e1b-ranges-in-contracts` | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range`/`reads_range` in contracts, element reads in contracts, calls and returns over ranges, loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (two new tags), the carrays port; questions 238–242 |
 | M4.5e1a Arrays inside one function | 2026-11-11 | `m4.5e1a-arrays-in-functions` | 0059 (0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043, 0054 amended) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers with C's zero fill, `out-of-bounds`, the marked range rows in the driver, loops carrying arrays, sequencing, `sizeof(a)`, `uninit` on arrays; #175, #1162, #138 as errors; array designators rejected (234); the `offset_of == 0` backstops (235) |
 | M4.5d2b2d `not_invalidating`, `--strict-owner`, marked fields | 2026-11-10 | `m4.5d2b2d-invalidation-profile` | 0058 (0029, 0042, 0052, 0054, 0055 amended) | `cerastes::not_invalidating` checked at the definition (taken implies returned; `p->q == old(p->q)` spliced, a bodiless borrow's tie implied); `--strict-owner` (P4417R0's p4 and p6); `ref_to_uninit` on fields (marked closures keep flags only where tied) and on pointers to structures with owning fields (closing nothing); N1; two older exit 3s fixed (0054's kept row, the return rows' order), a third to M4.8 |
 | M4.5d2b2c Loop limits, long-running tests | 2026-11-10 | `m4.5d2b2c-loop-limits` | 0056, 0057 (0016 amended) | six of d2b2b's loop false alarms lifted (a site the loop cannot fill keeps its flags, the value set of a lone owner, a leaf's ghost through an alias, `main`'s global leaf under an entry snapshot, a site's cells as places, chains at any depth), the escape scan, two exit 3s fixed; five pins kept under the written-invariant rule; the long-running tier (`tests/long/`, `CERASTES_LONG=1`); question 196's two programs past 1800 s, to M4.8 |

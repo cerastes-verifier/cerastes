@@ -243,6 +243,8 @@ private:
         // the name of the result in the `ensures` being encoded ("" when it has none), for the messages of `*result`
         std::string binder_name;
         Annot annot {Annot::none};
+        // reading the count of a parameter's `owning(n)` (decision 0060 item 13): its parameter references are `{k, levels_up 1}`
+        bool owning_count {false};
         bool binder_present {false};
         int old_depth {0};
         bool use_own {false};  // building a node of a user macro body: positions are the definition's
@@ -563,7 +565,33 @@ private:
     // expression, and `int a[] = {...}` has no bound: nothing to check.  False when rejected.
     bool check_array_bound(a_variable_ptr v, const a_source_position& at)
     {
-        a_constant_ptr c {skip_typerefs(v->type)->variant.array.bound_constant};
+        return check_array_bound_constant(skip_typerefs(v->type)->variant.array.bound_constant, v->source_corresp.name,
+                                          at);
+    }
+    // The same for the bound of an array PARAMETER (decision 0060 item 15): `v->declared_type` keeps the array type of `int a[N]`; in C++ the bound is typed
+    // `unsigned long` under a generated cast over the written tree, a literal included (P79 F2), so a bound that is only a literal under that cast has nothing to check.
+    bool check_array_parameter_bound(a_variable_ptr v, const a_source_position& at)
+    {
+        a_type_ptr dt {v->declared_type != nullptr ? skip_typerefs(v->declared_type) : nullptr};
+        if (dt == nullptr || dt->kind != tk_array || dt->variant.array.is_vla ||
+            dt->variant.array.is_variable_size_array)
+        {
+            return true;
+        }
+        a_constant_ptr c {dt->variant.array.bound_constant};
+        if (c != nullptr && c->expr != nullptr)
+        {
+            an_expr_node_ptr inner {peel_one_generated_cast(c->expr)};
+            if (inner != nullptr && inner->kind == enk_constant && inner->variant.constant.ptr != nullptr &&
+                inner->variant.constant.ptr->expr == nullptr && !inner->variant.constant.ptr->local_expr_ref)
+            {
+                return true; // a literal, a macro's literal or an enumerator
+            }
+        }
+        return check_array_bound_constant(c, v->source_corresp.name, at);
+    }
+    bool check_array_bound_constant(a_constant_ptr c, const char* nm, const a_source_position& at)
+    {
         if (c == nullptr || (c->expr == nullptr && !c->local_expr_ref))
         {
             return true;
@@ -578,7 +606,6 @@ private:
         {
             return false;
         }
-        const char* nm {v->source_corresp.name};
         cx_.fn->add_local_const(std::string("the bound of `") + (nm ? nm : "?") + "`", bt.t, loc_of(at), x,
                                 maybe_perturb(bt.t, constant_text(c, bt.t)));
         return true;
@@ -756,6 +783,34 @@ private:
         return r;
     }
 
+    // Whether an index reads memory: a dereference or an atom, or a cell read by name.
+    static bool index_reads_memory(const Expr* x)
+    {
+        if (x == nullptr)
+        {
+            return false;
+        }
+        if (x->kind == Expr::Kind::Deref || x->kind == Expr::Kind::Atom ||
+            (x->kind == Expr::Kind::Local && x->var != nullptr && x->var->address_taken))
+        {
+            return true;
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (index_reads_memory(y))
+            {
+                return true;
+            }
+        }
+        for (const Expr* y : x->args)
+        {
+            if (index_reads_memory(y))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
     // The address of the element `a[i]` (or `i[a]`) of a local array (decision 0059 item 4): `ElemAddr(AddrOf(a), i)`, reported when the shape is not one this
     // part reads.  Null (reported) otherwise.
     const Expr* subscript_address(an_expr_node_ptr e)
@@ -841,13 +896,6 @@ private:
         else
         {
             // `p[i]` of a pointer value (a parameter, a local, a loaded pointer, a call's result): the element address after the pointer's own
-            if (cx_.loop_clause)
-            {
-                reject(
-                    Diag::unsupported_expression, e->position,
-                    "an element of a pointer in a loop invariant or measure (places through a pointer's range are M4.5e1b, decision 0059 item 8)");
-                return nullptr;
-            }
             base_expr = expr(base);
             if (base_expr == nullptr)
             {
@@ -891,6 +939,14 @@ private:
                                           : "an array index that is not an integer");
             return nullptr;
         }
+        if (cx_.loop_clause && av == nullptr && index_reads_memory(ix))
+        {
+            // decision 0060 item 11: the index of `p[e]` in a loop invariant or measure reads no memory (the element's framing is by its interval)
+            reject(
+                Diag::unsupported_expression, index->position,
+                "an index that reads memory in the element of a pointer in a loop invariant or measure (decision 0060 item 11)");
+            return nullptr;
+        }
         const Expr* r {b_.elem_addr(base_expr, ix, l)};
         const std::string t {index_text(ix)};
         if (!t.empty() && (av != nullptr || !base_expr->c_text.empty()))
@@ -906,13 +962,14 @@ private:
     // element type (`*a` is then a read of `a[0]`'s place, as the decayed pointer's `*`).  The own-initializer test and the null-test rejections come before.
     const Expr* array_decay(an_expr_node_ptr e, a_variable_ptr av)
     {
-        if (cx_.contract || (cx_.annotation && !cx_.check_clause))
+        // a `check` clause, a loop invariant and a loop measure read an array used as a pointer like code does (decision 0060 item 11)
+        if (cx_.contract || (cx_.annotation && !cx_.check_clause && !cx_.loop_clause))
         {
             reject(
                 Diag::unsupported_expression, e->position,
                 cx_.contract
                     ? "an array used as a pointer in a contract (only a global array can be named there: M4.5e1e, decisions 0059 item 1, 0060 item 1)"
-                    : "an array used as a pointer in an invariant or a measure (decision 0059 item 8)");
+                    : "an array used as a pointer in an annotation other than a `check`, a loop invariant or a loop measure (decision 0060 item 11)");
             return nullptr;
         }
         if (cx_.rejected_vars.count(av) != 0U || rejected_globals_.count(av) != 0U)
@@ -1932,6 +1989,134 @@ private:
     }
 
     // Rejects what the signature cannot say in VIR; true when it can be encoded.
+    // Two declarations of one function whose array parameter has different bounds, a bound against none, or an array against a pointer (`int a[3]` against
+    // `int *a`) are rejected in both modes (decision 0060 item 15, the matrix's -Warray-parameter, question 240).  P79 F3: the routine's declared type is the
+    // last defining declaration's; an earlier declaration's is its secondary declaration's.  True when nothing was rejected.
+    bool check_array_parameter_declarations(a_routine_ptr r)
+    {
+        struct Seen
+        {
+            a_source_position pos;
+            a_type_ptr type {nullptr};
+        };
+        std::vector<Seen> decls;
+        a_type_ptr primary {r->declared_type != nullptr ? r->declared_type : r->type};
+        if (primary != nullptr)
+        {
+            decls.push_back(Seen {r->source_corresp.decl_position, primary});
+        }
+        if (ents_ != nullptr)
+        {
+            auto sd {ents_->secondary_decls.find(r)};
+            if (sd != ents_->secondary_decls.end())
+            {
+                for (const IlEntities::SecondaryDecl& q : sd->second)
+                {
+                    if (q.position.seq == 0U || q.declared_type == nullptr)
+                    {
+                        continue;
+                    }
+                    bool same {false};
+                    for (const Seen& o : decls)
+                    {
+                        same = same || (o.pos.seq == q.position.seq && o.pos.column == q.position.column);
+                    }
+                    if (!same)
+                    {
+                        decls.push_back(Seen {q.position, q.declared_type});
+                    }
+                }
+            }
+        }
+        if (decls.size() < 2U)
+        {
+            return true;
+        }
+        // per declaration, per parameter: -2 not an array, -1 an array with no bound, otherwise the bound
+        auto shapes = [](a_type_ptr ft)
+        {
+            std::vector<long long> out;
+            a_type_ptr t {ft != nullptr ? skip_typerefs(ft) : nullptr};
+            if (t == nullptr || t->kind != tk_routine || t->variant.routine.extra_info == nullptr)
+            {
+                return out;
+            }
+            for (a_param_type_ptr p {t->variant.routine.extra_info->param_type_list}; p != nullptr; p = p->next)
+            {
+                a_type_ptr dt {p->declared_type != nullptr ? skip_typerefs(p->declared_type) : nullptr};
+                if (dt == nullptr || dt->kind != tk_array || dt->variant.array.is_vla ||
+                    dt->variant.array.is_variable_size_array || dt->variant.array.is_static)
+                {
+                    out.push_back(-2);
+                }
+                else
+                {
+                    out.push_back(
+                        dt->incomplete ? -1 : static_cast<long long>(dt->variant.array.variant.number_of_elements));
+                }
+            }
+            return out;
+        };
+        auto text = [](long long v)
+        {
+            return v == -2   ? std::string("a pointer")
+                   : v == -1 ? std::string("no bound")
+                             : "bound " + std::to_string(v);
+        };
+        std::vector<std::vector<long long>> sh;
+        for (const Seen& d : decls)
+        {
+            sh.push_back(shapes(d.type));
+        }
+        // a bound that cannot be read (a typedef'd function type with a shape this reading cannot see) is compared as it is: both sides have the same shape
+        std::vector<std::string> names;
+        if (a_scope_ptr bs = body_scope(r))
+        {
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
+            {
+                names.push_back(v->source_corresp.name != nullptr ? v->source_corresp.name : "");
+            }
+        }
+        bool ok {true};
+        const size_t np {sh[0U].size()};
+        for (size_t k {0U}; k < np; ++k)
+        {
+            for (size_t i {1U}; i < sh.size(); ++i)
+            {
+                if (sh[i].size() != np || sh[i][k] == sh[0U][k])
+                {
+                    continue;
+                }
+                // `int a[]` against `int *a` is no warning of the compilers; an array with a bound or without one against another bound, or a bound against a pointer, is
+                const bool a_arr {sh[0U][k] != -2};
+                const bool b_arr {sh[i][k] != -2};
+                if (!a_arr && !b_arr)
+                {
+                    continue;
+                }
+                if ((a_arr != b_arr) && (a_arr ? sh[0U][k] : sh[i][k]) == -1)
+                {
+                    continue; // `int a[]` against `int *a`
+                }
+                const size_t later {before_pos(decls[0U].pos, decls[i].pos) ? i : 0U};
+                const size_t earlier {later == i ? 0U : i};
+                const DiagPos de {diag_position(decls[earlier].pos)};
+                reject_args(
+                    Diag::array_parameter_mismatch, decls[later].pos,
+                    {rname(r), k < names.size() && !names[k].empty() ? names[k] : "arg" + std::to_string(k + 1U),
+                     text(sh[later][k]) + " here, " + text(sh[earlier][k]) + " at " +
+                         (de.known ? de.file + ":" + std::to_string(de.line) : std::string("an earlier declaration"))});
+                ok = false;
+                break;
+            }
+        }
+        return ok;
+    }
+    static bool before_pos(const a_source_position& a, const a_source_position& b)
+    {
+        return a.seq != b.seq ? a.seq < b.seq : a.column < b.column;
+    }
+
     bool check_signature(a_routine_ptr r, const a_source_position& at)
     {
         if (!signature_checked_.insert(r).second)
@@ -1971,6 +2156,10 @@ private:
         if (!ret.ok)
         {
             reject_type(ret, at);
+            ok = false;
+        }
+        if (ours && !check_array_parameter_declarations(r))
+        {
             ok = false;
         }
         std::vector<a_type_qualifier_set> var_quals; // as in function_of
@@ -2031,6 +2220,26 @@ private:
                     "an `[static N]` array parameter (M8: C makes a shorter argument undefined and no contract states it, decision 0059 item 1)");
                 ok = false;
             }
+            // decision 0060 item 15: a variable length array parameter (`int a[n]`, `int a[*]`) is rejected on every declaration (question 241), and an array of
+            // arrays (`int a[][3]`, adjusted to a pointer to an array) names e1e (audit round 1, N11)
+            if (a_type_ptr dt {p->declared_type != nullptr ? skip_typerefs(p->declared_type) : nullptr};
+                dt != nullptr && dt->kind == tk_array)
+            {
+                if (dt->variant.array.is_vla || dt->variant.array.is_variable_size_array)
+                {
+                    reject(
+                        Diag::unsupported_declaration, at,
+                        "a variable length array parameter (`int a[n]`, `int a[*]`: M8, decision 0060 item 15, question 241)");
+                    ok = false;
+                }
+                else if (dt->variant.array.element_type != nullptr &&
+                         skip_typerefs(dt->variant.array.element_type)->kind == tk_array)
+                {
+                    reject(Diag::unsupported_declaration, at,
+                           "an array parameter of arrays (`int a[][3]`: M4.5e1e, decision 0060 item 15)");
+                    ok = false;
+                }
+            }
             if (!pt.ok || pt.t.is_void())
             {
                 if (pt.ok)
@@ -2064,6 +2273,9 @@ private:
     {
         int index {0};         // the parameter (0-based)
         a_source_position pos; // the attribute (its first node, in source order)
+        // `owning(n)` (decision 0060 item 13): the argument of the first node, an expression over the earlier parameters (null for a plain `owning`); every declaration's
+        // is the same (read_marker compares them)
+        an_expr_node_ptr count {nullptr};
     };
     // the owning parameters of the routines whose signatures were read
     std::map<a_routine_ptr, std::vector<OwningParam>> owning_;
@@ -2120,6 +2332,51 @@ private:
     static bool same_spelling(const a_source_position& a, const a_source_position& b)
     {
         return a.seq == b.seq && a.column == b.column && a.orig_seq == b.orig_seq && a.orig_column == b.orig_column;
+    }
+    // Whether two `owning(n)` arguments are the same expression: the same shape, the same parameter positions (a reference is `{param_num, levels_up}`, whatever the
+    // parameter is called) and the same constants.  Any shape not listed is "different" (fail closed).
+    bool same_count_node(an_expr_node_ptr a, an_expr_node_ptr b)
+    {
+        a = peel_one_generated_cast(a);
+        b = peel_one_generated_cast(b);
+        if (a == nullptr || b == nullptr)
+        {
+            return a == b;
+        }
+        if (a->kind != b->kind)
+        {
+            return false;
+        }
+        if (a->kind == enk_param_ref)
+        {
+            return a->variant.param_ref.param_num == b->variant.param_ref.param_num &&
+                   a->variant.param_ref.levels_up == b->variant.param_ref.levels_up;
+        }
+        if (a->kind == enk_constant)
+        {
+            const Expr* x {constant_value(a->variant.constant.ptr, a->position)};
+            const Expr* y {constant_value(b->variant.constant.ptr, b->position)};
+            return x != nullptr && y != nullptr && x->type == y->type && x->value == y->value;
+        }
+        if (a->kind == enk_operation && b->kind == enk_operation &&
+            a->variant.operation.kind == b->variant.operation.kind)
+        {
+            const auto x {operands_of(a)};
+            const auto y {operands_of(b)};
+            if (x.size() != y.size())
+            {
+                return false;
+            }
+            for (size_t i {0U}; i < x.size(); ++i)
+            {
+                if (!same_count_node(x[i], y[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
     }
     bool read_marker(a_routine_ptr r, a_routine_type_supplement_ptr x, Annot kind, std::set<size_t>* reported_types)
     {
@@ -2385,14 +2642,48 @@ private:
                     }
                 }
             }
+            // `owning(n)` (decision 0060 item 13): one expression argument, the count; every declaration gives the same one.  A marker other than `owning` takes none.
+            an_expr_node_ptr count_node {nullptr};
             for (an_attribute_ptr a : ns)
             {
-                if (!arguments_of(a).empty())
+                const std::vector<AnnotArg> args {arguments_of(a)};
+                if (args.empty())
+                {
+                    if (kind == Annot::owning && count_node != nullptr)
+                    {
+                        reject_args(Diag::annotation_mismatch, a->position,
+                                    {rname(r), an, "parameter " + pname,
+                                     "one declaration gives a count `owning(n)`, another gives none"});
+                        bad = true;
+                    }
+                    continue;
+                }
+                if (kind != Annot::owning || args.size() != 1U || args[0U].kind != AnnotArg::Kind::expression ||
+                    args[0U].expr == nullptr)
                 {
                     reject(Diag::unsupported_annotation, a->position,
-                           "\"cerastes::owning(n)\" on parameter " + pname + " (an owned range: M4.5e1b)");
+                           "\"" + an + "\" with an argument on parameter " + pname +
+                               (kind == Annot::owning ? " (`owning(n)` takes one expression, the count)" : ""));
                     bad = true;
                     break;
+                }
+                if (count_node == nullptr && a == ns[0U])
+                {
+                    count_node = args[0U].expr;
+                }
+                else if (count_node == nullptr)
+                {
+                    reject_args(Diag::annotation_mismatch, ns[0U]->position,
+                                {rname(r), an, "parameter " + pname,
+                                 "one declaration gives a count `owning(n)`, another gives none"});
+                    bad = true;
+                }
+                else if (!same_count_node(count_node, args[0U].expr))
+                {
+                    reject_args(Diag::annotation_mismatch, a->position,
+                                {rname(r), an, "parameter " + pname,
+                                 "the declaration at " + where(ns[0U]->position) + " gives another count"});
+                    bad = true;
                 }
             }
             // Per declaration: at most one node, and all or none.  A node a typedef'd function type carries is the declaration's that names the typedef (by
@@ -2486,7 +2777,7 @@ private:
             }
             else if (kind == Annot::owning)
             {
-                owning_[r].push_back(OwningParam {static_cast<int>(k), ns[0U]->position});
+                owning_[r].push_back(OwningParam {static_cast<int>(k), ns[0U]->position, count_node});
             }
             else if (kind == Annot::ref_to_uninit || kind == Annot::must_init)
             {
@@ -2887,11 +3178,12 @@ private:
                     member_beside = true;
                     continue;
                 }
-                if (st.atom->atom == vir::AtomKind::Owns)
+                // decision 0060 item 12: `owns_range(p, n)` is the atom a marker needs too (the range's flags are the marker's); `reads_range` is refused beside it
+                if (st.atom->atom == vir::AtomKind::Owns || st.atom->atom == vir::AtomKind::OwnsRange)
                 {
                     (st.in_ensures ? owns_out : owns_in) = true;
                 }
-                else if (st.atom->atom == vir::AtomKind::Reads)
+                else if (st.atom->atom == vir::AtomKind::Reads || st.atom->atom == vir::AtomKind::ReadsRange)
                 {
                     reads_beside = true;
                 }
@@ -2920,24 +3212,26 @@ private:
             {
                 reject(
                     Diag::unsupported_annotation, m.pos,
-                    "\"" + an + "\" on `" + pname + "` beside `reads(*" + pname +
-                        ")` (a borrowed read of an object that may hold no value; the contract of a marked parameter owns it, decision 0042 item 4)");
+                    "\"" + an + "\" on `" + pname + "` beside `reads(*" + pname + ")` or `reads_range(" + pname +
+                        ", n)` (a borrowed read of an object that may hold no value; the contract of a marked parameter owns it, decisions 0042 item 4, 0060 item 12)");
                 continue;
             }
             if (!owns_in)
             {
                 reject(Diag::unsupported_annotation, m.pos,
-                       "\"" + an + "\" on `" + pname + "` without `owns(*" + pname +
-                           ")` in its `requires` (without it the function could not write `*" + pname +
+                       "\"" + an + "\" on `" + pname + "` without `owns(*" + pname + ")` or `owns_range(" + pname +
+                           ", n)` in its `requires` (without it the function could not write `*" + pname +
                            "`; ownership and initialization are separate: write `CERASTES_REQUIRES(cerastes_owns(*" +
-                           pname + "))` or mark the parameter `cerastes::owning`, decision 0042 item 4)");
+                           pname +
+                           "))` or mark the parameter `cerastes::owning`, decisions 0042 item 4, 0060 item 12)");
             }
             else if (m.kind == vir::InitMarker::MustInit && !owns_out)
             {
-                reject(Diag::unsupported_annotation, m.pos,
-                       "\"" + an + "\" on `" + pname + "` without `owns(*" + pname +
-                           ")` in its `ensures` (it promises `*" + pname +
-                           "` has a value on return, which the postcondition must hand back; decision 0042 item 4)");
+                reject(
+                    Diag::unsupported_annotation, m.pos,
+                    "\"" + an + "\" on `" + pname + "` without `owns(*" + pname + ")` or `owns_range(" + pname +
+                        ", n)` in its `ensures` (it promises `*" + pname +
+                        "` has a value on return, which the postcondition must hand back; decisions 0042 item 4, 0060 item 12)");
             }
         }
         cx_.contract = saved_contract;
@@ -3086,8 +3380,10 @@ private:
             }
             if (!arguments_of(a).empty())
             {
-                reject(Diag::unsupported_annotation, a->position,
-                       marker(a) + " with an argument on a function (an owned range: M4.5e1b)");
+                reject(
+                    Diag::unsupported_annotation, a->position,
+                    marker(a) +
+                        " with an argument on a function (an owned range beyond a parameter: M4.5e2, decision 0060 item 13)");
                 return;
             }
             if (!f->ret.is_ptr())
@@ -3426,6 +3722,80 @@ private:
     // decision 0040 item 3): decision 0052 item 2 (question 159) lets only these and a `static` local's atoms cover a
     // partnerless atom.
     std::set<const Expr*> owning_param_atoms_;
+    // The count of a parameter's `owning(n)` as the contract of `f` reads it in the `requires` (`list` 0) or the `ensures` (1): the argument is an expression over the
+    // earlier parameters (their references are `{k, levels_up 1}`, interpret_param_ref reads them by position) and constants, an integer type other than bool, an
+    // enumeration, a float or a pointer, that reads no memory (decision 0060 item 13, the rules of item 3).  Null (reported) otherwise.
+    const Expr* owning_count(vir::Function* f, const OwningParam& o, int list, const std::string& pname)
+    {
+        const bool saved_contract {cx_.contract};
+        const bool saved_annotation {cx_.annotation};
+        const Annot saved_annot {cx_.annot};
+        cx_.contract = true;
+        cx_.annotation = true;
+        cx_.annot = list == 0 ? Annot::requires_ : Annot::ensures;
+        cx_.owning_count = true;
+        struct Restore
+        {
+            Encoder* e;
+            bool c;
+            bool a;
+            Annot k;
+            ~Restore()
+            {
+                e->cx_.contract = c;
+                e->cx_.annotation = a;
+                e->cx_.annot = k;
+                e->cx_.owning_count = false;
+            }
+        } restore {this, saved_contract, saved_annotation, saved_annot};
+        const std::string head {"\"cerastes::owning(n)\" on `" + pname + "`"};
+        const vir::Type& pt {f->params[static_cast<size_t>(o.index)].type};
+        if (pt.pointee == nullptr || pt.pointee->is_struct())
+        {
+            reject(Diag::unsupported_annotation, o.pos,
+                   head + " over structures (arrays of structures and their members: M4.5e1e, decision 0060 item 1)");
+            return nullptr;
+        }
+        if (!pt.pointee->is_bool() && !pt.pointee->is_int() && !pt.pointee->is_ptr())
+        {
+            reject(Diag::unsupported_annotation, o.pos,
+                   head +
+                       " over something other than bool, integers, enumerations and pointers (decision 0060 item 3)");
+            return nullptr;
+        }
+        an_expr_node_ptr cn {peel_one_generated_cast(o.count)};
+        a_type_ptr ct {cn != nullptr && cn->type != nullptr ? skip_typerefs(cn->type) : nullptr};
+        if (ct == nullptr || ct->kind != tk_integer || ct->variant.integer.enum_type || ct->variant.integer.bool_type)
+        {
+            reject(
+                Diag::unsupported_annotation, o.pos,
+                head +
+                    " with a count that is not an integer (a bool, an enumeration, a floating-point or a pointer count is refused, decision 0060 item 3)");
+            return nullptr;
+        }
+        const Expr* cnt {expr(cn)};
+        if (cnt == nullptr)
+        {
+            return nullptr;
+        }
+        if (vir::reads_heap(*cnt) || !cnt->type.is_int() || is_enum_type(cnt->type) || !count_expr_ok(cnt))
+        {
+            reject(
+                Diag::unsupported_annotation, o.pos,
+                head +
+                    " with a count that is not an integer expression over earlier parameters and constants (it reads no memory, decision 0060 item 3)");
+            return nullptr;
+        }
+        spell_formals(cnt);
+        if (cnt->c_text.empty())
+        {
+            if (const std::string t {count_text(cnt)}; !t.empty())
+            {
+                b_.text(cnt, t);
+            }
+        }
+        return cnt;
+    }
     void apply_owning(a_routine_ptr r, vir::Function* f)
     {
         apply_function_markers(r, f);
@@ -3470,9 +3840,16 @@ private:
                 bool merge {false};
                 bool bad {false};
                 const Expr* merged_atom {nullptr};
+                // `owning(n)` (decision 0060 item 13): its count expression for this list, read as the contract reads it
+                const Expr* count {o.count != nullptr ? owning_count(f, o, list, pname) : nullptr};
+                if (o.count != nullptr && count == nullptr)
+                {
+                    continue; // reported
+                }
                 if (const vir::AtomSite* bs = block_in[list])
                 {
-                    if (block_both && vir::atom_guard_shape(*bs, o.index) != vir::GuardShape::Other)
+                    if (o.count == nullptr && block_both &&
+                        vir::atom_guard_shape(*bs, o.index) != vir::GuardShape::Other)
                     {
                         merge = true;
                     }
@@ -3501,10 +3878,18 @@ private:
                     {
                         bad = true; // an atom on a member of an owning pointee (decision 0043 item 9)
                     }
-                    else if (st.atom->atom == vir::AtomKind::Owns &&
+                    else if (o.count == nullptr && st.atom->atom == vir::AtomKind::Owns &&
                              vir::atom_guard_shape(st, o.index) != vir::GuardShape::Other)
                     {
                         merge = true;
+                        merged_atom = st.atom;
+                    }
+                    else if (o.count != nullptr && st.atom->atom == vir::AtomKind::OwnsRange && st.atom->b != nullptr &&
+                             vir::same_pure_expr(*st.atom->b, *count) &&
+                             vir::atom_guard_shape(st, o.index) != vir::GuardShape::Other)
+                    {
+                        merge =
+                            true; // an explicit `owns_range(p, n)` of the same count, as 0040 item 3 merges `owns(*p)`
                         merged_atom = st.atom;
                     }
                     else
@@ -3538,7 +3923,8 @@ private:
                 const Expr* eq {b_.binary(vir::BinaryOp::Eq, pf, b_.null_const(f->params[k].type, l), l)};
                 const Expr* pf2 {b_.formal(*f, o.index, l)};
                 b_.text(pf2, pname);
-                const Expr* atom {b_.atom(vir::AtomKind::Owns, pf2, -1, l)};
+                const Expr* atom {count != nullptr ? b_.range_atom(vir::AtomKind::OwnsRange, pf2, count, -1, l)
+                                                   : b_.atom(vir::AtomKind::Owns, pf2, -1, l)};
                 atom_pos_[atom] = o.pos;
                 owning_param_atoms_.insert(atom);
                 (list == 0 ? add_requires : add_ensures)
@@ -4313,7 +4699,7 @@ private:
             {
                 reject(Diag::unsupported_annotation, at,
                        "a `restrict` parameter `" + pname(k) + "` whose contract does not own `*" + pname(k) +
-                           "` in its `requires` and its `ensures`");
+                           "` (or `" + pname(k) + "[0..n)`, `owns_range`) in its `requires` and its `ensures`");
             }
             // permissions follow cells, not provenance: another pointer to the cell could be written through (decision
             // 0037 item 2)
@@ -4321,7 +4707,8 @@ private:
             {
                 reject(Diag::unsupported_annotation, at,
                        "a `restrict` parameter `" + pname(k) + "` beside `" + pname(other) +
-                           "`, whose contract does not own or read `*" + pname(other) + "`");
+                           "`, whose contract does not own or read `*" + pname(other) +
+                           "` (or its range, `owns_range`, `reads_range`)");
             }
         }
         return f;
@@ -4959,6 +5346,42 @@ private:
     {
         const auto& si {node->variant.sizeof_info};
         a_type_ptr t {si.is_type ? si.variant.type : (si.variant.expr != nullptr ? si.variant.expr->type : nullptr)};
+        // `sizeof(a)` of an array PARAMETER (decision 0060 item 15; P79 (b)): the constant keeps an `enk_sizeof` over the parameter, whose own type is the adjusted
+        // pointer, so the value is the pointer's size; clang and GCC warn without a flag (-Wsizeof-array-argument; `sizeof(a) / sizeof(a[0])` also -Wsizeof-pointer-div)
+        if (node->kind == enk_sizeof && !si.is_type && si.variant.expr != nullptr &&
+            si.variant.expr->kind == enk_variable && si.variant.expr->variant.variable.ptr != nullptr)
+        {
+            a_variable_ptr pv {si.variant.expr->variant.variable.ptr};
+            a_type_ptr pdt {pv->declared_type != nullptr ? skip_typerefs(pv->declared_type) : nullptr};
+            if (pv->is_parameter && pdt != nullptr && pdt->kind == tk_array)
+            {
+                reject_args(Diag::sizeof_array_argument, at,
+                            {pv->source_corresp.name != nullptr ? pv->source_corresp.name : "?"});
+                return true;
+            }
+        } // the same in a contract (audit round 4, S2): the operand is a reference to the parameter, `enk_param_ref`, whose type is the adjusted pointer
+        if (node->kind == enk_sizeof && !si.is_type && si.variant.expr != nullptr &&
+            si.variant.expr->kind == enk_param_ref && cx_.routine != nullptr && cx_.fn != nullptr)
+        {
+            const ParamRef pr {interpret_param_ref(si.variant.expr, cx_.owning_count ? Annot::owning : cx_.annot,
+                                                   cx_.binder_present, 0)};
+            if (pr.kind == ParamRef::Kind::param && pr.num >= 1U && pr.num <= cx_.fn->params.size())
+            {
+                a_routine_type_supplement_ptr rx {routine_supplement(cx_.routine)};
+                unsigned i {1U};
+                for (a_param_type_ptr q {rx != nullptr ? rx->param_type_list : nullptr}; q != nullptr; q = q->next, ++i)
+                {
+                    a_type_ptr qdt {q->declared_type != nullptr ? skip_typerefs(q->declared_type) : nullptr};
+                    if (i == pr.num && qdt != nullptr && qdt->kind == tk_array)
+                    {
+                        const std::string& nm {cx_.fn->params[pr.num - 1U].name};
+                        reject_args(Diag::sizeof_array_argument, at,
+                                    {nm.empty() ? "arg" + std::to_string(pr.num) : nm});
+                        return true;
+                    }
+                }
+            }
+        }
         // `sizeof(a)`, `sizeof a` of an array local written with an array declarator (decision 0059 item 11; `_Alignof(a)` of an array is clang's default
         // -Wgnu-alignof-expression and `__datasizeof(a)` is not in the record: both stay rejected): EDG's constant keeps its written
         // expression and its value is the checked bound's (check_array_bound) times the element's size.  A type operand, `typeof`, a typedef, a string
@@ -6991,7 +7414,7 @@ private:
             reject(Diag::unsupported_expression, e->position, "a parameter reference outside a contract");
             return nullptr;
         }
-        const ParamRef r {interpret_param_ref(e, cx_.annot, cx_.binder_present, 0)};
+        const ParamRef r {interpret_param_ref(e, cx_.owning_count ? Annot::owning : cx_.annot, cx_.binder_present, 0)};
         if (r.kind == ParamRef::Kind::param && r.num >= 1U && r.num <= cx_.fn->params.size())
         {
             const int k {static_cast<int>(r.num) - 1};
@@ -9227,7 +9650,7 @@ private:
             // partners carry the mark too (check_program compares them).
             for (const vir::AtomSite& st : sites)
             {
-                if (owning_param_atoms_.count(st.atom) != 0U)
+                if (owning_param_atoms_.count(st.atom) != 0U && !vir::is_range_atom(st.atom->atom))
                 {
                     const_cast<Expr*>(st.atom)->implicit_atom = true;
                 }
@@ -9753,6 +10176,11 @@ private:
         {
             return nullptr;
         }
+        if (contract_has_atom(*f, true))
+        {
+            // record 0060 item 8: the messages of the call's rows (and of --strict-init) print the written arguments
+            spell_range_arguments(args);
+        }
         if (verify_config().strict_init)
         {
             strict_init_arguments(f, args, name, e->position);
@@ -9771,11 +10199,6 @@ private:
         {
             reject_strict_uninit_result(f, e->position);
             return nullptr;
-        }
-        if (contract_has_atom(*f, true))
-        {
-            spell_range_arguments(
-                args); // record 0060 item 8: the messages of the call's rows print the written arguments
         }
         const Expr* c {b_.call(f, std::move(args), loc_of(e->position))};
         VType nt {signature_vtype(e->type)};
@@ -9808,6 +10231,14 @@ private:
                                                                  : callee->params[k].name};
             if (a != nullptr && a->kind == Expr::Kind::AddrOf && a->var != nullptr &&
                 cx_.uninit_marked.count(a->var) != 0U)
+            {
+                continue;
+            }
+            // decision 0060 item 12: an `uninit` local array passed (decayed, `ElemAddr(AddrOf(a), 0)`) to a marked range parameter is read as `&x` is
+            if (a != nullptr && a->kind == Expr::Kind::ElemAddr && a->a != nullptr &&
+                a->a->kind == Expr::Kind::AddrOf && a->a->var != nullptr && a->a->var->type.is_array() &&
+                cx_.uninit_marked.count(a->a->var) != 0U && a->b != nullptr && a->b->kind == Expr::Kind::Const &&
+                a->b->value == "0")
             {
                 continue;
             }
@@ -10060,7 +10491,7 @@ private:
     }
 
     // Reads and checks `owning` and `ref_to_uninit` on a variable (decision 0052 items 3 and 4; 0054 items 5, 6 and 10).  Rejects
-    // (unsupported_annotation) a non-pointer, a pointer to a function, a `void *`, twice, `owning(n)` (M4.5e1) and `owning` on a pointer to a `const` or
+    // (unsupported_annotation) a non-pointer, a pointer to a function, a `void *`, twice, `owning(n)` on a variable (M4.5e2) and `owning` on a pointer to a `const` or
     // `volatile` object; on a global or `static` local also a `const` object, a declaration without the attribute beside one with it
     // (annotation_mismatch) and an initializer that is not a null pointer constant (P75 (d)).  A marker that was rejected is not set.
     LocalMarks read_variable_markers(a_variable_ptr v, MarkSite site)
@@ -10165,7 +10596,8 @@ private:
             if (!arguments_of(first->nodes[0U]).empty())
             {
                 reject(Diag::unsupported_annotation, at,
-                       "\"cerastes::owning(n)\" on `" + name + "` (an owned range: M4.5e1b)");
+                       "\"cerastes::owning(n)\" on `" + name +
+                           "` (an owned range beyond a parameter: M4.5e2, decision 0060 item 13)");
                 r.bad = true;
             }
             else if (pointee_qualified(v->type))
@@ -13939,7 +14371,6 @@ private:
         }
     }
 
-    // ---- staging between the parts of M4.5e1b (record 0060; S2 is written and deleted inside the session; S1 went with Part C) ----
     // Whether a contract clause holds a permission atom of any kind, or a range atom only.
     static bool clause_has_atom(const Expr* x, bool ranges_only)
     {
@@ -13985,213 +14416,6 @@ private:
         }
         return false;
     }
-    // The next three functions repeat the lowering's own test of whether a loop carries places (`expr_touches`, `stmt_touches`, `exits_of` of lower.cpp, decision
-    // 0038 item 3), so that S2 refuses exactly the loops its staging gate would: a loop that touches memory, or whose body leaves the function or the loop with a
-    // `return` or a `goto`.  A pointer-typed node touches memory.
-    static bool type_has_pointer_leaf(const vir::Type& t)
-    {
-        if (!t.is_struct())
-        {
-            return t.is_ptr();
-        }
-        for (const vir::StructMember& m : t.struct_type->members)
-        {
-            if (type_has_pointer_leaf(m.type))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-    static bool expr_touches_memory(const Expr* e)
-    {
-        if (e == nullptr)
-        {
-            return false;
-        }
-        if (e->type.is_ptr() || (e->type.is_struct() && type_has_pointer_leaf(e->type)))
-        {
-            return true;
-        }
-        if (e->kind == Expr::Kind::Call && e->callee != nullptr && vir::requires_atom_count(*e->callee) > 0)
-        {
-            return true;
-        }
-        switch (e->kind)
-        {
-            case Expr::Kind::Local:
-                if (e->var != nullptr && (e->var->address_taken || e->var->type.is_ptr()))
-                {
-                    return true;
-                }
-                break;
-            case Expr::Kind::AddrOf:
-            case Expr::Kind::ElemAddr:
-            case Expr::Kind::Deref:
-            case Expr::Kind::Atom:
-            case Expr::Kind::StoreE:
-                return true;
-            case Expr::Kind::AssignE:
-                if (e->var != nullptr && e->var->address_taken)
-                {
-                    return true;
-                }
-                break;
-            default:
-                break;
-        }
-        for (const Expr* x : {e->a, e->b, e->c})
-        {
-            if (expr_touches_memory(x))
-            {
-                return true;
-            }
-        }
-        for (const Expr* x : e->args)
-        {
-            if (expr_touches_memory(x))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-    static bool stmt_touches_memory(const vir::Stmt* st)
-    {
-        if (st == nullptr)
-        {
-            return false;
-        }
-        switch (st->kind)
-        {
-            case vir::Stmt::Kind::Store:
-                return true;
-            case vir::Stmt::Kind::Decl:
-            case vir::Stmt::Kind::Assign:
-                if (st->var != nullptr && (st->var->address_taken || st->var->type.is_ptr()))
-                {
-                    return true;
-                }
-                return expr_touches_memory(st->expr);
-            case vir::Stmt::Kind::If:
-                return expr_touches_memory(st->expr) || stmt_touches_memory(st->then_body) ||
-                       stmt_touches_memory(st->else_body);
-            case vir::Stmt::Kind::While:
-            {
-                if (expr_touches_memory(st->expr) || stmt_touches_memory(st->body) || stmt_touches_memory(st->step))
-                {
-                    return true;
-                }
-                for (const vir::Clause& c : st->invariants)
-                {
-                    if (expr_touches_memory(c.expr))
-                    {
-                        return true;
-                    }
-                }
-                for (const vir::Clause& c : st->measure)
-                {
-                    if (expr_touches_memory(c.expr))
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            }
-            case vir::Stmt::Kind::Switch:
-                return expr_touches_memory(st->expr) || stmt_touches_memory(st->body);
-            case vir::Stmt::Kind::Block:
-                for (const vir::Stmt* c : st->stmts)
-                {
-                    if (stmt_touches_memory(c))
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            case vir::Stmt::Kind::Case:
-            case vir::Stmt::Kind::Break:
-            case vir::Stmt::Kind::Continue:
-            case vir::Stmt::Kind::Goto:
-            case vir::Stmt::Kind::Label:
-                return false;
-            default:
-                return expr_touches_memory(st->expr);
-        }
-    }
-    static void stmt_exits(const vir::Stmt* st, bool& has_return, std::set<int>& gotos, std::set<int>& labels)
-    {
-        if (st == nullptr)
-        {
-            return;
-        }
-        switch (st->kind)
-        {
-            case vir::Stmt::Kind::Return:
-                has_return = true;
-                break;
-            case vir::Stmt::Kind::Goto:
-                gotos.insert(st->jump_id);
-                break;
-            case vir::Stmt::Kind::Label:
-                labels.insert(st->jump_id);
-                break;
-            case vir::Stmt::Kind::If:
-                stmt_exits(st->then_body, has_return, gotos, labels);
-                stmt_exits(st->else_body, has_return, gotos, labels);
-                break;
-            case vir::Stmt::Kind::While:
-                stmt_exits(st->body, has_return, gotos, labels);
-                stmt_exits(st->step, has_return, gotos, labels);
-                break;
-            case vir::Stmt::Kind::Switch:
-                stmt_exits(st->body, has_return, gotos, labels);
-                break;
-            case vir::Stmt::Kind::Block:
-                for (const vir::Stmt* c : st->stmts)
-                {
-                    stmt_exits(c, has_return, gotos, labels);
-                }
-                break;
-            default:
-                break;
-        }
-    }
-    // Whether the loop carries places in the lowering's reading: it touches memory, or its body or step has a `return` or a `goto` to a label outside it.
-    static bool loop_carries_places(const vir::Stmt* loop)
-    {
-        if (stmt_touches_memory(loop))
-        {
-            return true;
-        }
-        bool has_return {false};
-        std::set<int> gotos;
-        std::set<int> labels;
-        stmt_exits(loop->body, has_return, gotos, labels);
-        stmt_exits(loop->step, has_return, gotos, labels);
-        for (int g : gotos)
-        {
-            if (labels.count(g) == 0U)
-            {
-                return true;
-            }
-        }
-        return has_return;
-    }
-    // S2: a loop that carries places (touches memory, or has a `return` or an outward `goto`) in a function whose contract holds a range atom is refused until
-    // Part D (loops over a parameter's range): the lowering's staging gate fails closed on the same set.  True (and reported) when refused.
-    bool reject_range_loop(const vir::Stmt* loop, const a_source_position& at)
-    {
-        if (loop == nullptr || cx_.fn == nullptr || !contract_has_atom(*cx_.fn, true) || !loop_carries_places(loop))
-        {
-            return false;
-        }
-        reject(
-            Diag::unsupported_annotation, at,
-            "a loop that carries places (it touches memory, or leaves the function or a block with a `return` or a `goto`) in a function whose contract holds a range atom (`owns_range`, `reads_range`): loops over a parameter's range are not supported yet (record 0060 item 11, M4.5e1b Part D)");
-        return true;
-    }
-
     vir::Function* callee_for_call(a_routine_ptr callee, const a_source_position& at)
     {
         if (is_main(callee))
@@ -17819,13 +18043,9 @@ private:
                 cx_.targets.pop_back();
                 if (c != nullptr && inv_ok)
                 {
-                    const Stmt* loop {b_.with_keyword_loc(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
-                                                                  vir::LoopForm::While, id, loc_of(s->position)),
-                                                          keyword_loc_of(s))};
-                    if (!reject_range_loop(loop, s->position))
-                    {
-                        out.push_back(loop);
-                    }
+                    out.push_back(b_.with_keyword_loc(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
+                                                              vir::LoopForm::While, id, loc_of(s->position)),
+                                                      keyword_loc_of(s)));
                 }
                 return;
             }
@@ -17852,14 +18072,10 @@ private:
                 cx_.targets.pop_back();
                 if (c != nullptr && inv_ok)
                 {
-                    const Stmt* loop {b_.with_keyword_loc(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
-                                                                  once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile,
-                                                                  id, loc_of(s->position)),
-                                                          keyword_loc_of(s))};
-                    if (!reject_range_loop(loop, s->position))
-                    {
-                        out.push_back(loop);
-                    }
+                    out.push_back(b_.with_keyword_loc(b_.loop(c, std::move(inv), std::move(measure), body, nullptr,
+                                                              once ? vir::LoopForm::DoOnce : vir::LoopForm::DoWhile, id,
+                                                              loc_of(s->position)),
+                                                      keyword_loc_of(s)));
                 }
                 return;
             }
@@ -17916,16 +18132,12 @@ private:
                                                            : block_of(std::move(step), fl->increment->position)};
                 if (c != nullptr && inv_ok)
                 {
-                    const Stmt* loop {b_.with_keyword_loc(
+                    whole.push_back(b_.with_keyword_loc(
                         b_.loop(c, std::move(inv), std::move(measure),
                                 cell_block(std::move(body), s->position, s->variant.for_loop.statement,
                                            /*loop_body=*/true),
                                 step_stmt, vir::LoopForm::While, id, loc_of(s->position)),
-                        keyword_loc_of(s))};
-                    if (!reject_range_loop(loop, s->position))
-                    {
-                        whole.push_back(loop);
-                    }
+                        keyword_loc_of(s)));
                 }
                 if (fl->initialization == nullptr)
                 {
@@ -18084,6 +18296,7 @@ private:
                 f->mark_address_taken(f->param_var(k));
             }
             check_attributes(p->source_corresp.attributes);
+            check_array_parameter_bound(p, r->source_corresp.decl_position); // decision 0060 item 15
         }
         if (static_cast<size_t>(k) != f->params.size())
         {
@@ -20746,7 +20959,9 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
             }
             else if (!arguments_of(own[0U]).empty())
             {
-                refuse_owning(own[0U]->position, "`owning(n)`, an owned range: M4.5e1; decision 0055 item 2");
+                refuse_owning(
+                    own[0U]->position,
+                    "`owning(n)`, an owned range: M4.5e2 (members of structures: M4.5e1e); decisions 0055 item 2, 0060 item 13");
             }
             else if (u->kind != tk_pointer || u->variant.pointer.is_reference)
             {

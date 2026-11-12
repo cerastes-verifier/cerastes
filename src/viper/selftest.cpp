@@ -1503,6 +1503,8 @@ void define_arrays_rejected_until_part_b();
 void define_arrays_lowering();
 void define_ranges_lowering();
 void define_range_calls();
+void define_range_loops();
+void define_range_markers();
 } // namespace
 
 #include "selftest_cases2.inc"
@@ -1821,6 +1823,8 @@ int main(int argc, char** argv)
     define_arrays_lowering();
     define_ranges_lowering();
     define_range_calls();
+    define_range_loops();
+    define_range_markers();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

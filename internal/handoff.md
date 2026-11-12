@@ -1,4 +1,4 @@
-# Handoff after M4.5e1a and M4.5e1b's planning (2026-11-11) — M4.5e1b (ranges in contracts) next
+# Handoff after M4.5e1b (2026-11-12) — M4.5e1c (quantifiers) next
 
 The next session reads this file after `CLAUDE.md`, its own section in `plan.md`, `internal/status.md` and
 `internal/decisions/`, then its plan: **`.claude/plans/m4-5e1b-ranges-in-contracts.md`**, which is complete (M4.5e1b
@@ -133,9 +133,33 @@ Notes that a session consumes move into its plan's "Inputs".
   - A loop that frames a struct local out still loses an `int` member's value when the loop reaches it otherwise (the
     re-audit's r3 and r5 had to return `s.data == NULL ? 1 : 0` instead of `s.n`): the same on the base. [d2b2c]
 
-**M4.5e1b Ranges in contracts** (next): its inputs (e1a's as-built names, S43's costs, N1, the `sizeof` note of
-e1a's audit round 3) are section 12 of its plan, and the survey of the tree at `dc40377` is its section 3. One
-correction to the earlier note: `int a[static N]` is **not** lifted by e1b; it stays rejected (M8, question 230).
+**From M4.5e1b, for later sessions** (record 0060; the audit reports `build/m4.5e1b/auditor-report-{1..4}.md` are in
+the session worktree, not committed):
+- M4.5e2: an atom on one element (236); a range atom written in a loop invariant (237); the assigned range parameter's
+  false alarms (`range_loop_pin_assigned_param.c`: a read through `p = &p[1]` in a loop is `lifetime`; a call through a
+  copy of the original pointer in such a loop is a false `permission`, audit round 4 `c/d2c.c`); ranges whose base is
+  not a pointer parameter (results, globals, loaded pointers; members: e1e); counts and guards of range atoms that read
+  memory; partnerless `ensures` ranges and `ensures` ranges with another count; `owning(n)` beyond parameters; `&p[e]`
+  and `p + i` in contracts. [record 0060 item 1]
+- e1c: the `must_init` loop-filler pin (question 239); the full contracts of `carrays.c` (the port has single-element
+  facts); quantified invariants over ranges (the search loop's progress clause cannot be written before `forall`).
+- M4.8: `owns_range` and `reads_range` on one parameter in one list, and a range beside a cell atom of the same
+  parameter; question 238's limit (`range_call_reads_unequal_pin.c`, `range_call_reads_two_atoms_pin.c`, `_local.c`);
+  audit round 4's S1 — a write through a `reads_range` element in a loop beside a second, overlapping read range: the
+  user's `permission` at the write, then an exit 3 (the read-only place's values-kept conjunct after the failed write
+  row is assumed; `audit4-scratch/c/d1.c`; fix: a marked write row, which changes existing Viper); a pre-existing exit
+  3 on the baseline too: a pass-through of `owns(*pp) && owns(**pp)` without 0045 item 10's tie
+  (`build/m4.5e1b/t4/sep/d1.c`); the write row's message for a `reads` place says "the object it points to may have
+  ended" (cells and ranges alike, audit round 4 (g)); the driver prints one error for rows sharing a line, category
+  and message, so a dropped row in such a test cannot show (audit round 2 (d)); no twin isolates the `reads` cell's
+  return sum term for a range (audit round 2 S4, round 3 (e): without it the range's sum-form row fails instead);
+  S44 (b)'s order D (the marked rows before the shape row for `owns_range`: one error everywhere; not built, question
+  242).
+- M8: VLA parameters and `[static N]` (questions 230, 241); a local array shorter than `int a[4]`'s bound passed
+  (silent at the front-end tiers; GCC `-Wstringop-overflow=` at `-O2`); `int a[0]` and `int a[const 3]` parameters
+  (accepted, the compilers silent).
+- Process: the session's tools that later sessions may reuse are in `build/m4.5e1b/` (not committed): `s0/r3.sh`
+  (the rejection set's rerun and diff), the frozen binaries `cerastes-base/` and `cerastes-c3/`.
 
 **From M4.5e1a, for later sessions:**
 - e1c: a fill loop over an array declared without an initializer, then a read, is `uninitialized`
@@ -527,7 +551,7 @@ each a session of its own with its record, twins, docs, audits and one box `chec
 | Sub-session | Scope | Plan |
 |---|---|---|
 | **e1a** (done 2026-11-11, record 0059) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers, scope exits, the marked range rows, `out-of-bounds`, loops over arrays, sequencing, the `offset_of == 0` backstops, `sizeof(a)` | section 3; `internal/status.md` |
-| **e1b** (next; record 0060) | `owns_range`, `reads_range`, element reads in contracts, array parameters, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, the `carrays.c` port | `.claude/plans/m4-5e1b-ranges-in-contracts.md`, complete: P79 and S44 with decision tables, no second planning |
+| **e1b** (done 2026-11-12, record 0060) | `owns_range`, `reads_range`, element reads in contracts, array parameters, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, the `carrays.c` port | `.claude/plans/m4-5e1b-ranges-in-contracts.md`, complete: P79 and S44 with decision tables, no second planning |
 | **e1c** | `cerastes_forall` with the `pure` function's body inlined, max, the fill loop, the tutorial chapter | section 5: P80 and S45, then plan again |
 | **e1d** | `pure` bodies as Viper functions, recursion, the exact sum | section 6: P81 and S46, then plan again |
 | **e1e** | array members, arrays of structures, 2-D arrays, global and `static` arrays, array compound literals, 0024 item 6 lifted for array types | section 7: P82 and S47, then plan again |
@@ -912,16 +936,37 @@ unless the owner says otherwise.
 - The owner set the ensemble for M4.5e1b: an Opus orchestrator that executes the plan without re-planning, three
   Sonnet implementers and the Opus reviewer from `.claude/agents/`, and a Fable advisor.
 
-**Open** (from M4.5e1b's planning; each is built as its recommendation unless answered inline; the next handoff's
-questions start at 241):
-- **238** `cerastes_reads_range`'s ghost amount at a call is taken from the range's first cell (`perm` cannot stand
-  under a quantifier), and marked rows then check the whole range at that amount. A caller that holds unequal
-  fractions over the range gets a false `permission`. **Recommended:** accept it as a pinned, listed limit (record
-  0060 item 6).
-- **239** A `cerastes::must_init` filler over a range that fills with a loop cannot state its invariant before
-  e1c's quantified invariants, so it is a pinned false alarm in e1b (a straight-line filler verifies).
-  **Recommended:** accept; e1c gives the pin its verifying twin.
-- **240** Array parameters (`T a[]`, `T a[N]`) are pointer parameters, accepted since before e1a with no test. e1b
-  measures their shapes in clang and GCC (the `sizeof` of one, two declarations with different bounds, a shorter
-  array argument) and rejects, with a tag and a pin each, what warns without a flag or at `-Wall` in either
-  compiler. **Recommended:** follow the matrix, as 0020 item 5's rule does.
+**Answered in M4.5e1b (2026-11-11):** the split point at Commit 2 (Parts A and B at +1,602 `src/` lines, over 1,600,
+about 250 of them staging): "Continue (Recommended)".
+
+**Built overnight under the owner's instruction** (2026-11-11, logging off: "automatically accept the recommended answer
+for the remainder of this session and this session only"), each for confirmation: Part E kept whole, no pre-agreed cut
+(the owner's completeness preference; the session stayed under 12 h); a local array's place frames `q[i]` read through
+a pointer in a loop invariant (sound; without it a false `permission`; record 0060 item 11); the back-edge rows of read
+range places in the sum form (they cost time only on failing twins; per-place rows can exit 3); audit round 4's S1
+(an exit 3 after a wrong program's correct `permission`) not fixed and listed for M4.8 (its fix would change every
+existing program's write rows).
+
+**Open** (each is built as its recommendation unless answered inline; the next handoff's questions start at 243):
+- **238** (restated by audit rounds 1–3) `cerastes_reads_range`'s ghost amount at a call is taken from the range's first
+  cell, lowered by the caller's own read amounts (record 0060 item 6), and the marked rows check the whole range at
+  that amount (in the sum form where two read ranges of one call meet). A caller whose holding over the range is
+  uneven for another reason (a function it called kept part of one element's share and gave the object's liveness
+  back, `requires(reads(*x)) ensures(live(x))`) gets a false `permission` at a later call that reads the whole range,
+  passed once or twice (`range_call_reads_unequal_pin.c`, `range_call_reads_two_atoms_pin.c`). A local array cannot
+  reach it (a fraction kept there is a real `lifetime` error). **Recommended:** accept it as a pinned, listed limit.
+- **239** A `cerastes::must_init` filler over a range that fills with a loop cannot state its invariant before e1c's
+  quantified invariants, so it is a pinned false alarm (a straight-line filler verifies). **Recommended:** accept; e1c
+  gives the pin its verifying twin.
+- **240** Array parameters (`T a[]`, `T a[N]`) are pointer parameters; the shapes the compilers warn about are rejected
+  with a tag each (`sizeof_array_argument`; `array_parameter_mismatch` for different bounds, a bound against none, a
+  bounded array against a pointer), in both modes, though `int a[3]` against `int *a` warns only in GCC's C (the union
+  rule, as 0039 item 3); a shorter array argument warns at no front-end tier and is accepted. **Recommended:** follow the
+  matrix, as built.
+- **241** VLA parameters on a declaration without a body (`void f(int n, int a[n]);`, `int a[*]`) verified before e1b
+  (R2); e1b rejects them as a definition's are, at the `[static N]` rejection's site (no existing test held one).
+  **Recommended:** reject until M8, which lifts them with `[static N]`.
+- **242** S44 (b): with the plan's table branch built (the shape row first at a call), a callee forwarding `(p, n + 1)` of
+  its own range fails two Silicon rows (shown as one error: the driver prints one per line, category and message). An
+  order outside the table, the marked rows before the shape row for `owns_range`, gave one row everywhere
+  (`s44_b_caller_orderD.vpr`). **Recommended:** keep the built order.

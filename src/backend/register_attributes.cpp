@@ -59,7 +59,7 @@ const an_attr_registration kAttributes[] {
     // carry the marker).  It reads the attributes the routine has when it is called, so a marker that is only on a
     // later redeclaration does not stop an earlier use (first-declaration gap, M5b; decision 0007).
     // owning (decisions 0029 item 1, 0040 item 3 and 0052 item 3): on a parameter, with no argument list or `owning(n)`
-    // (an unevaluated expression, M4.5e1: the encoder rejects it today).  The attribute lands on the parameter's
+    // (an unevaluated expression over the earlier parameters, decision 0060 item 13: the encoder reads it on a parameter).  The attribute lands on the parameter's
     // `param_type.attributes` (P52); registration accepts a non-pointer parameter and a duplicate, and does not honour
     // RAF_MUST_MATCH there, so the encoder checks every declaration.  A
     // function (target `r`, M4.5d2a, decision 0047 item 5; RAF_ENTITY_ATTACHED, so its position is after the parameter list or in the leading

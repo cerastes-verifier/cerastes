@@ -548,6 +548,114 @@ and the element has a value.
 include::example$memory/array_loop_sum.c[tag=source]
 ----
 
+[#ranges]
+=== Ranges in contracts
+
+A function states that it owns the elements `p[0]` to `p[n - 1]` with
+`cerastes_owns_range(p, n)` (in pass:[C++] also `cerastes::owns_range(p, n)`), and that it
+only reads them with `cerastes_reads_range(p, n)` (`cerastes::reads_range`). Each is a
+clause of a contract, like `cerastes_owns(*p)`: `p` is a pointer parameter and `n` a
+count over the parameters and constants that reads no memory. A range implies `p !=
+NULL`, so a function that also accepts a null pointer or an empty range writes `n ==
+0 || cerastes_owns_range(p, n)`. Every element of a range has a value on entry and on
+return, unless the parameter is marked (below). The contract reads an element as code does, `p[i]`, and
+`cerastes_old(p[i])` is its value on entry. Each such read must lie inside a range
+(or an object) that an earlier clause of the contract holds; otherwise it is reported
+as xref:error-messages.adoc#_permission[`permission`] ("the contract of `f` reads
+`p[i]` without owning it").
+
+[source,c]
+----
+include::example$memory/range_set.c[tag=source]
+----
+
+A caller passes a whole array (`set(a, 4, …)`), a part of one (`&a[1]` and a count),
+or a range it holds itself, and the call is checked as a call that owns one object
+is: the range lies inside the object the pointer points into, the caller holds every
+element of it, and every element has a value
+(xref:error-messages.adoc#_uninitialized[`uninitialized`] otherwise). Two ranges, or a
+range and an object, passed to one call must not overlap where one of them is owned.
+After a call that owns a range, the caller knows of its elements only what the
+callee's `ensures` says; after a call that reads one, every element keeps its value:
+
+[source,c]
+----
+include::example$memory/range_reads.c[tag=source]
+----
+
+A range one element too long for its array is reported at the call as
+xref:error-messages.adoc#_permission[`permission`] ("calls `set`, which needs to own
+`a[0..5)`, without owning it"), and so are a null pointer with a positive count and a
+negative count ("… the range the pointer points to …"):
+
+[source,c]
+----
+include::example$memory/range_too_long_error.c[tag=source]
+----
+
+An index the contract does not keep inside the range (`p[i]` with only `i <= n`) is
+reported twice at the access, as for `p[1]` under `cerastes_owns(*p)`:
+xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`] (the object may end at `p +
+n`) and xref:error-messages.adoc#_permission[`permission`] (it may go on, and the
+function does not hold the rest).
+
+A function that only reads a range lends each callee the same share of every
+element, computed from the range's first element, since a share of a whole range
+cannot be measured at once. A caller whose shares of a range's elements differ (a
+function it called kept part of one element's share and gave the rest of the object
+back) can therefore be told at a later call that it does not hold the range, though
+it holds part of every element: a known limit.
+
+In a loop, the ranges of a function's parameters are carried as its arrays are
+(<<loops>>): the loop holds every element of each range the `requires` gives a
+parameter the function never assigns, and the elements keep their values when nothing
+in the loop can write them (the range is only read, or nothing writes its element
+type). A loop invariant or measure may read an element of such a range, of a local
+array through a pointer to it, or of a pointer the loop holds, and a read outside all
+of them is reported as xref:error-messages.adoc#_permission[`permission`] ("this loop
+invariant reads `p[i]`, which this loop does not hold"):
+
+[source,c]
+----
+include::example$memory/range_fill_loop.c[tag=source]
+----
+
+A function that assigns its range parameter (`p = &p[1];`) gives its loops no range
+to carry, so a read through that parameter inside a loop is reported as
+xref:error-messages.adoc#_lifetime[`lifetime`] although the program is correct: a
+known limit, lifted with pointer arithmetic. A range written in a loop invariant
+(`CERASTES_INVARIANT(cerastes_owns_range(q, m))`) is not supported yet.
+
+The markers of <<initialization>> apply to a range as to one object:
+`cerastes::must_init` on `p` with `cerastes_owns_range(p, n)` lets the elements have no
+value on entry and promises every one a value on return
+(xref:error-messages.adoc#_postcondition[`postcondition`] otherwise: "returns without
+initializing every element of `p[0..n)`, which `cerastes::must_init` on `p`
+promises"), so a caller may pass an array declared without an initializer;
+`cerastes::ref_to_uninit` lets the elements have no value on entry and keeps every
+element that had one. A function that gives the elements their values in a loop
+cannot say yet which ones the loop has written, so its `must_init` is reported as
+not kept although it is (a known limit until invariants over every element).
+`cerastes::owning(n)` on a parameter is `p == NULL || cerastes_owns_range(p, n)`
+(xref:annotations.adoc#_owning_parameters[Owning parameters]), and `restrict` on a
+parameter is accepted when its contract owns its range, as for one object.
+
+[#array-parameters]
+=== Array parameters
+
+A parameter written as an array, `int a[]` or `int a[4]`, is a pointer parameter, as C
+says: its contract owns or reads what it points to (`+cerastes_owns(*a)+`,
+`cerastes_owns_range(a, 4)`), and a bound written there is checked as a constant and
+then ignored. `sizeof(a)` of such a parameter is the size of a pointer, not of an
+array, so it is rejected, as the compilers warn
+(`cerastes-sizeof_array_argument`), and so are two declarations of one function whose
+array parameters disagree on the bound, give a bound in one and none in the other,
+or write a bounded array in one and a pointer in the other (`int a[]` against `int *a` is
+accepted) (`cerastes-array_parameter_mismatch`;
+xref:verifying.adoc#warning-shapes[Shapes the compilers warn about]). A variable
+length (`int a[n]`, `+int a[*]+`) and `int a[static 4]` are not supported yet, nor an
+array of arrays (`int a[][3]`).
+
 What cannot be said yet is a fact about every element at once. After a loop that
 fills an array declared without an initializer, reading an element is reported
 as xref:error-messages.adoc#_uninitialized[`uninitialized`], because only an
@@ -562,8 +670,10 @@ which cerastes cannot check as written); an element of the initializer that read
 writes or takes the address of the array itself; arrays of more than one
 dimension, of structures, and of owning pointers; `const`, `static` and global
 arrays; arrays as members and in compound literals; a variable length; a bound
-that names a `const` variable (`const int n = 4; int a[n];`); a contract over a
-range of elements; and pointer arithmetic (`p + 1`).
+that names a `const` variable (`const int n = 4; int a[n];`); one element as a
+contract's object (`cerastes_owns(p[i])`), a range of elements in a loop invariant, a
+range whose pointer is not a parameter, a range of structures; and pointer arithmetic
+(`p + 1`).
 
 [#globals]
 == Global variables
@@ -1631,7 +1741,7 @@ These are rejected with a diagnostic, never approximated
   blocks, other than a pointer with `cerastes_owns(*r)` whose structure owns one
   block (<<owning-fields>>);
 * an owning or marked global, `static` local or owning member whose initializer is
-  not a null pointer, and `owning(n)`;
+  not a null pointer, and `owning(n)` anywhere but on a parameter;
 * a function that returns the address of a `static` local structure on some paths
   and a new structure whose owning member holds a block on others is reported as a
   `leak`;

@@ -148,6 +148,7 @@ Every test file starts with expectation lines that `scripts/run_tests.py` checks
 | M4.5d2b2c Loop limits, long-running tests | 2026-11-10 | 0056, 0057 | six of d2b2b's loop false alarms lifted (flags a loop cannot fill, the value set, a leaf's ghost through an alias, `main`'s global leaf, a site's cells as places, chains at any depth), the escape scan, two exit 3s fixed; five pins under the written-invariant rule; `tests/long/` opt-in by `CERASTES_LONG=1` |
 | M4.5d2b2d `not_invalidating`, `--strict-owner`, marked fields | 2026-11-10 | 0058 (0029, 0042, 0052, 0054, 0055 amended) | `cerastes::not_invalidating` checked at the definition (taken implies returned; `p->q == old(p->q)` spliced, a bodiless borrow's tie implied); `--strict-owner` (P4417R0's p4 and p6, two tags); `ref_to_uninit` on fields (marked closures keep flags only where tied) and on pointers to structures with owning fields (closing nothing); N1; two older exit 3s fixed, a third to M4.8 |
 | M4.5e1a Arrays inside one function | 2026-11-11 | 0059 (0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043, 0054 amended) | automatic local arrays as blocks (`alloc_arr`/`zero_arr`), `a[i]`, `&a[i]`, `p[i]` on any pointer, the decay, braced initializers with C's zero fill, `out-of-bounds`, marked range rows in the driver, loops carrying arrays, sequencing between elements, `sizeof(a)`, `uninit` on arrays; EDG's #175, #1162 and #138 as errors; array designators rejected (question 234); the `offset_of == 0` backstops (question 235) |
+| M4.5e1b Ranges in contracts | 2026-11-11/12 | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range` and `reads_range` (C and C++ spellings) as quantified atoms on pointer parameters, element reads in contracts with `f__wf` framing and partners by path, calls and returns over ranges (the shape row first, sum-form marked rows, the caller's own read amounts), loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (`sizeof_array_argument`, `array_parameter_mismatch`), VLA declarations rejected (241); the carrays port; questions 238–242 |
 
 The finished milestones' plans (goals, tasks, acceptance) are in the commit named above. `internal/status.md` has a
 row per session with its outcome, each record has the detail, and the approved session plans from M4.5b1a on are in
@@ -185,18 +186,16 @@ session by session, as each planning's survey measured the work (b1c, c, c2, d2,
 2026-11-11; plan `.claude/plans/m4-5e1-arrays.md`): M4.5e1 is five sub-sessions, e1a–e1e, each a session of its own.
 The owner decided there (questions 226–228) that `forall` in C names a `pure` function whose body is inlined, that
 the exact array sum is in M4.5e1 (so e1d takes `pure` bodies and their recursion from M4.5f1/f2), and that
-`cerastes_reads_range` is added beside `owns_range`. e1a is done (2026-11-11, record 0059). e1b is planned in full
-(2026-11-11, `.claude/plans/m4-5e1b-ranges-in-contracts.md`): its probes and spikes have decision tables, so it does
-not plan again, and its plan assigns the work to the session's agents. The owner moved two things from it to M4.5e2
-(questions 236 and 237): atoms on one element, and range atoms written in loop invariants. e1c–e1e each run their
-probes and spikes, then plan again.
+`cerastes_reads_range` is added beside `owns_range`. e1a is done (2026-11-11, record 0059), and so is e1b (2026-11-12,
+record 0060, from its complete plan `.claude/plans/m4-5e1b-ranges-in-contracts.md`); the owner moved two things from
+e1b to M4.5e2 (questions 236 and 237): atoms on one element, and range atoms written in loop invariants. e1c–e1e each
+run their probes and spikes, then plan again.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5e1b Ranges in contracts** | next (record 0060): `owns_range` and `reads_range` as quantified permissions, element reads in contracts, array parameters, calls and returns over ranges, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter; the `carrays.c` port | M4.5e1a |
-| **M4.5e1c Quantifiers** | `forall` in C (0029 item 4; question 226: a `pure` function's body inlined), max, the tutorial chapter | M4.5e1b |
+| **M4.5e1c Quantifiers** | next: `forall` in C (0029 item 4; question 226: a `pure` function's body inlined), max, the tutorial chapter | M4.5e1b |
 | **M4.5e1d Pure functions and the exact sum** | `pure` bodies as Viper functions, calls of `pure` functions in annotations, recursion with `decreases`; the exact array sum (question 227) | M4.5e1c |
 | **M4.5e1e Arrays in aggregates and storage** | inner arrays and arrays of structs on M4.5c1's member blocks, 2-D arrays, global and `static` arrays, array compound literals; M4.4b2's types computed from constants, for array types | M4.5e1b |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))`, `realloc` (from M4.5d2a, question 120); relational comparisons and `p - q` under `pointer-comparison`; `owning(n)` beyond parameters; atoms on one element (`owns(p[i])`) and range atoms written in loop invariants (questions 236, 237) | M4.5e1a, M4.5e1b, M4.5d2a |

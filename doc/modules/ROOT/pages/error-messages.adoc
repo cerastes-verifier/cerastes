@@ -397,7 +397,10 @@ label that jumps past the assignment, or a read that comes before an assignment 
 the same expression (`(y = x, x = 1)`). A read is any use of the value, including
 the old value in `x += 1` or `pass:[x++]`, a `return`, an argument, and an annotation
 such as `CERASTES_CHECK` or a loop invariant (there it is reported where the
-invariant is checked).
+invariant is checked). A call to a function whose contract holds a range of elements
+needs every element to have a value: "passes `a` to `f`, whose parameter `p` needs
+every element of `p[0..n)` to have a value; it may not have one here"
+(xref:memory.adoc#ranges[Ranges in contracts]).
 
 [source,c]
 ----
@@ -497,6 +500,18 @@ right is missing:
   parameters of which one owns it, whatever their types: `&s` and `&s.x` reach
   one object when `x` is a member of `s`
   (xref:memory.adoc#structures[Structures]);
+* at a call, a `return` or a contract that holds a range of elements
+  (`cerastes_owns_range(p, n)`, `cerastes_reads_range(p, n)`): "calls `f`, which needs
+  to own `a[0..5)`, without owning it" (the range is longer than the object, or the
+  caller does not hold every element; "… which needs to own the range the pointer
+  points to …" where the count cannot be spelled as written, as for a null pointer or a
+  literal negative count, and "calls `f`,
+  which needs to read `a[0..4)`, without the permission to read it" for
+  `cerastes_reads_range`), "passes `a[0..2)` and `a[1..3)` to `f`,
+  which may be one object, once to own it", "returns without owning `p[0..n)`, which
+  its contract promises", "the contract of `f` reads `p[i]` without owning it", and
+  "the contract of `f` returns `p[0..n)` on a path where its `requires` did not take
+  it" (xref:memory.adoc#ranges[Ranges in contracts]);
 * at a `return`, when the function does not hold what its `ensures` promises;
   an `ensures` that promises a place on the result that no `requires` atom took,
   and that the function does not hold, is "returns `*r` without holding it"
@@ -770,7 +785,11 @@ to one object). A call is not interleaved with the rest of its expression, but
 C leaves open whether it comes before or after an operand beside it, so in
 `x + bump(&x)` the value read from `x` depends on that choice; so does `g + f()`
 when `f` may change the global `g`, and `f() + f()` when `f` has a `static` local
-(xref:memory.adoc#static-locals[`static` local variables]). cerastes reports
+(xref:memory.adoc#static-locals[`static` local variables]); a call whose contract
+owns a range of elements counts every element of it (`a[1] + fill(a, 4)`, with
+`fill` owning `a[0..4)` and returning an `int`: "accesses `a[1]`, which the call to
+`fill` may change, in an order C leaves unspecified";
+xref:memory.adoc#ranges[Ranges in contracts]). cerastes reports
 both whenever the two may be one object on some path, rather than choose an
 order. When the source names the object twice (`pass:[x++] + x`, `*p = pass:[(*p)++]`), the
 compilers warn, and cerastes rejects the expression

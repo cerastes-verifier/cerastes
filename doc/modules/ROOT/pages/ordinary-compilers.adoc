@@ -111,7 +111,8 @@ specification functions, and those are the next section's subject.
 
 == Specification functions are declared, not defined
 
-`cerastes::owns`, `reads`, `old`, `forall` and `owns_range` are declared in
+`cerastes::owns`, `reads`, `old`, `forall`, `owns_range` and `reads_range` (and their
+C spellings, `cerastes_owns` and the others) are declared in
 `<cerastes.h>` and never defined. They are only ever named inside annotations,
 which an ordinary compiler never sees, or inside the body of a predicate or a
 pure function. If a program calls one of them, directly or through a predicate

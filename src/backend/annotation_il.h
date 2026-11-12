@@ -196,6 +196,15 @@ inline ParamRef interpret_param_ref(an_expr_node_ptr e, Annot a, bool binder_pre
             r.kind = ParamRef::Kind::binder;
         }
     }
+    else if (a == Annot::owning)
+    {
+        // decision 0060 item 13 (P79 F4): a reference written in a parameter's own `owning(n)` sits inside one parameter list, `{k, levels_up 1}`, and is parameter `k`
+        // (the position, the same on every declaration whatever the names)
+        if (up == 1U)
+        {
+            r.kind = ParamRef::Kind::param;
+        }
+    }
     else if (up == 0U)
     {
         r.kind = ParamRef::Kind::param;

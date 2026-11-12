@@ -260,3 +260,5 @@ session's re-run on the real registration) and S32, in `internal/il-inventory.md
   write, one invariant line per such place (question 89); no verdict changes.
 
 *2026-11-11, amended by 0059 (M4.5e1a): items 3 and 5 — `cerastes::uninit` applies to an array local without an initializer, and `--strict-init` asks for it (0059 item 11); a loop's flag and range rows hold over every element of every array it carries (0059 item 8).*
+
+*2026-11-12, amended by 0060 (M4.5e1b): items 4–8 — a marker's atom may be `owns_range(p, n)`: `ref_to_uninit` drops the flags on entry and keeps `old(flag) ==> flag` per element, `must_init` promises every element's flag (`postcondition`), a marked range has no flags row at the call, and `--strict-init` reads an `uninit` array argument as `&x` (0060 item 12).*

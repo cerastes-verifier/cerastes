@@ -326,3 +326,5 @@ P8 (written atoms on Silicon), P62 (the IL of this record's shapes) and S30 (Sil
   where it ends.
 - Programs accepted before b1c3 keep their Viper: none has a pointer pointee, an address-taken pointer variable,
   `owning`, a read of `*result` or an atom in an invariant.
+
+*2026-11-12, amended by 0060 (M4.5e1b): item 3 — `owning(n)` on a parameter (0060 item 13), merged with an explicit `owns_range(p, n)` of the same count.*

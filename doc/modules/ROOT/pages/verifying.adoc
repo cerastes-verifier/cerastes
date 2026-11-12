@@ -412,9 +412,9 @@ written in the source:
   carries `CERASTES_UNINIT` (`cerastes-uninit_unmarked` otherwise); a `static`
   local is not asked;
 * every argument of a parameter marked `cerastes::must_init` or
-  `cerastes::ref_to_uninit` is the address of such a local (`&x`), or the calling
-  function's own marked parameter passed on unchanged
-  (`cerastes-uninit_ref_initialized` otherwise).
+  `cerastes::ref_to_uninit` is the address of such a local (`&x`), such a local array
+  (`a`, for a parameter whose contract owns a range), or the calling function's own
+  marked parameter passed on unchanged (`cerastes-uninit_ref_initialized` otherwise).
 * the result of a function that gives an object without a value (`malloc`, a
   function marked `ref_to_uninit`) goes to a pointer local marked
   `cerastes::ref_to_uninit`, and a function marked `ref_to_uninit` returns only
@@ -784,6 +784,15 @@ in both modes and also in annotations, even when only one compiler warns, in one
 language (the body of a `CERASTES_PREDICATE` or `CERASTES_PURE` function is not
 verified yet, so these rules do not reach it either):
 
+* `sizeof` of a parameter written as an array (`void f(int a[4])` with `sizeof(a)`, or
+  `sizeof(a) / sizeof(a[0])`), which is the size of a pointer
+  (`cerastes-sizeof_array_argument`; clang and GCC `-Wsizeof-array-argument`);
+* two declarations of one function whose array parameters disagree on the bound
+  (`int a[3]` and `int a[4]`), give a bound in one and none in the other (`int a[3]`
+  and `int a[]`), or write an array in one and a pointer in the other (`int a[3]` and
+  `int *a`) (`cerastes-array_parameter_mismatch`; clang and GCC's C `-Warray-parameter`
+  with `-Wall`); `int a[]` against `int *a` is accepted
+  (xref:memory.adoc#array-parameters[Array parameters]);
 * `&&` as an operand of `||` without parentheses: `a && b || c` (write
   `(a && b) || c`);
 * `{plus}` or `-` as an operand of a shift without parentheses:
@@ -1220,8 +1229,9 @@ The constructs that are rejected in this version are:
   from itself (`int x = x;`), `static const` and `static constexpr` locals,
   `thread_local` and `extern` locals and globals, `volatile` globals, globals
   defined in another file (`extern` with no definition here), arrays other than
-  the local arrays of xref:memory.adoc#arrays[Arrays] and designators in their
-  initializers (`{[2] = 5}`), classes
+  the local arrays of xref:memory.adoc#arrays[Arrays] and the parameters written as
+  arrays of xref:memory.adoc#array-parameters[Array parameters], and designators in
+  their initializers (`{[2] = 5}`), classes
   other than the C structures xref:memory.adoc#structures[Structures] describes
   (`const` structure parameters and globals among them), unions,
   an enumeration declared in a function, a class or a template, or with a
@@ -1245,7 +1255,7 @@ The constructs that are rejected in this version are:
   pointer conversions other than adding `const` to the object pointed to; its
   xref:memory.adoc#not-yet[list] names the rest, such as `+owns(*r.q)+` of a
   returned structure),
-  references, arrays other than local arrays, floating point, `volatile`, `_BitInt`,
+  references, arrays other than local arrays and array parameters, floating point, `volatile`, `_BitInt`,
   vector types, enumerations declared in system headers. Array types, `_BitInt`,
   vector types and class templates with a constant argument
   (`std::array<char, 4>`) are rejected also as the operand of `sizeof`,

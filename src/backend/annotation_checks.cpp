@@ -1139,11 +1139,12 @@ void check_attribute(an_attribute_ptr a, a_routine_ptr owner, a_statement_ptr st
     {
         return;
     }
-    if (k == Annot::owning)
+    if (k == Annot::owning && arguments_of(a).empty())
     {
-        // a parameter's marker (decision 0040 item 3): the encoder reads it; its argument is no annotation expression
+        // a parameter's marker (decision 0040 item 3): the encoder reads it
         return;
     }
+    // `owning(n)` (decision 0060 item 13): its argument, the count, is an annotation expression over the earlier parameters and is checked like one
     // The initialization markers (decision 0042): no argument list; the encoder reads them on the parameter or the local.
     if (k == Annot::uninit || k == Annot::ref_to_uninit || k == Annot::must_init || k == Annot::not_invalidating)
     {

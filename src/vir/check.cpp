@@ -1305,7 +1305,7 @@ private:
             {
                 err(f.params[k].loc,
                     "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
-                        "' is `restrict` without `owns(*p)` in its `requires` and `ensures` (decision 0037 item 2)");
+                        "' is `restrict` without `owns(*p)` or `owns_range(p, n)` in its `requires` and `ensures` (decision 0037 item 2, record 0060 item 14)");
             }
         }
         init_markers(f, sites, block_sites);
@@ -1522,6 +1522,12 @@ private:
             {
                 out.push_back({e, in_old});
             }
+            // record 0060 item 12: `p[e]` of a marked parameter (the element's address is an `ElemAddr` of the formal)
+            else if (root != nullptr && root->kind == Expr::Kind::ElemAddr && root->a != nullptr &&
+                     root->a->kind == Expr::Kind::Formal && root->a->index == k)
+            {
+                out.push_back({e, in_old});
+            }
         }
         for (const Expr* x : {e->a, e->b, e->c})
         {
@@ -1560,6 +1566,7 @@ private:
             bool owns_in {false};
             bool owns_out {false};
             bool reads_any {false};
+            bool reads_range_any {false};
             for (const AtomSite& s : sites)
             {
                 const PlaceKey pk {atom_place(*s.atom)};
@@ -1567,12 +1574,18 @@ private:
                 {
                     continue;
                 }
-                // Record 0060 item 12 (Part E): a marker over a range is not lowered yet; the encoder refuses it first, and a marked range would assume its flags.
+                // Record 0060 item 12: `owns_range(p, n)` is the atom a marker over a range needs (as `owns(*p)` is for a cell); a `reads_range` of a marked parameter is refused
+                // like a `reads(*p)` is.  Lowering has the rows of both (`site_marker`): a marked range never assumes its flags.
                 if (is_range_atom(s.atom->atom))
                 {
-                    err(pr.loc,
-                        who +
-                            " is marked `ref_to_uninit` or `must_init` beside a range permission atom (record 0060 item 12: not lowered yet)");
+                    if (s.atom->atom == AtomKind::OwnsRange)
+                    {
+                        (s.in_ensures ? owns_out : owns_in) = true;
+                    }
+                    else
+                    {
+                        reads_range_any = true;
+                    }
                     continue;
                 }
                 // `owns(*p)` (the whole pointee) is the atom a marker needs; a `reads` of the pointee or of any member of it beside a marker is refused.
@@ -1607,6 +1620,12 @@ private:
             {
                 err(pr.loc,
                     who + " is marked `ref_to_uninit` or `must_init` beside `reads(*p)` (decision 0042 item 4)");
+            }
+            if (reads_range_any)
+            {
+                err(pr.loc,
+                    who +
+                        " is marked `ref_to_uninit` or `must_init` beside `reads_range(p, n)` (decision 0042 item 4, record 0060 item 12)");
             }
             // The reads that decision 0042 item 6 refuses: in a `requires` or `decreases`, under `Old`, and in the `ensures` of a `RefToUninit` parameter.
             std::vector<std::pair<const Expr*, bool>> reads;

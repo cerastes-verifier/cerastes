@@ -82,15 +82,17 @@ does not own. Today that covers, in C23 and in pass:[C++]20:
 * *Memory:* pointers to local and global variables, pointer parameters and
   results with ownership contracts (`owns`, `reads`, `old`), pointers to
   pointers, C structures, local arrays (indexing checked against their bounds,
-  pointers to their elements), and single objects allocated with `malloc` and
+  pointers to their elements), contracts over ranges of elements
+  (`cerastes_owns_range(p, n)`, `cerastes_reads_range(p, n)`), and single objects
+  allocated with `malloc` and
   `calloc` and released with `free`, with leaks reported
   (xref:memory.adoc[Memory and ownership]).
 
 Every message the tool prints is on xref:error-messages.adoc[Error messages].
 
 Anything else is rejected with a diagnostic at its line, never approximated:
-among it arrays outside a function's locals, contracts over ranges of elements,
-pointer arithmetic, floating point, references, classes and
+among it arrays outside a function's locals, statements about every element at
+once (`forall`), pointer arithmetic, floating point, references, classes and
 templates. The lists are on xref:verifying.adoc#not-supported[Verifying a
 program] and xref:memory.adoc#not-yet[Memory and ownership]. Results are for
 one translation unit.

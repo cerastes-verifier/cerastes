@@ -3962,6 +3962,12 @@ private:
 
     // The loop's places and the heap reads recorded so far, set by loop() around the lowering of an invariant or a measure.
     const std::vector<Place>* inv_places_ {nullptr};
+    // The loop's range places (record 0060 item 11): a read of a slot of one is framed by its interval test.
+    struct RangePlace;
+    const std::vector<RangePlace>* inv_ranges_ {nullptr};
+    // and its array places (decision 0059 item 8): a read through a pointer into an array local that the loop carries is framed by the array's interval
+    struct ArrayPlace;
+    const std::vector<ArrayPlace>* inv_arrays_ {nullptr};
     // The loop-entry snapshots of the loops being lowered (decision 0045 item 10): a `requires` site and the Ref of its place through `lb`; the body's loads are split
     // against them like against every automatic place.
     struct LbPlace
@@ -4032,11 +4038,20 @@ private:
     {
         using low::BinOp;
         const Expr& ea {*e.a};
-        if (ea.a == nullptr || ea.b == nullptr || ea.a->kind != Expr::Kind::AddrOf || ea.a->var == nullptr ||
-            !ea.a->var->type.is_array())
+        if (ea.a == nullptr || ea.b == nullptr || !ea.a->type.is_ptr())
         {
-            internal_error(e.loc, "an element of anything but a local array in a loop annotation reached lowering");
+            internal_error(e.loc, "an element of anything but a pointer in a loop annotation reached lowering");
             return {inv_dummy(e.type), {}};
+        }
+        if (ea.a->kind != Expr::Kind::AddrOf || ea.a->var == nullptr || !ea.a->var->type.is_array())
+        {
+            // `p[e]` of any other pointer (record 0060 item 11): the slot is the pointer's block at its offset plus the index, read through the loop's places like `*q`: framed by a
+            // cell place or a range place, else `permission` at the clause.  No bound row: a slot no place holds is the unframed read, and a held slot is inside its object.
+            const LV b {lower(*ea.a, env, guard, gdep, full)};
+            const LV i {lower(*ea.b, env, guard, gdep, full)};
+            const E slot {low::dom("loc", {block_of(b.e), low::bin(BinOp::Add, low::dom("offset_of", {b.e}), i.e)})};
+            return inv_read_at(e, LV {slot, join(b.dep, i.dep)}, e.c_text.empty() ? place_text(ea) : e.c_text, guard,
+                               gdep, full);
         }
         const LV b {lower(*ea.a, env, guard, gdep, full)};
         const LV i {lower(*ea.b, env, guard, gdep, full)};
@@ -4062,20 +4077,71 @@ private:
         {
             return inv_elem(e, env, guard, gdep, full);
         }
-        LV p {lower(*e.a, env, guard, gdep, full)};
+        const LV p {lower(*e.a, env, guard, gdep, full)};
+        return inv_read_at(e, p,
+                           e.c_text.empty() ? (e.a->c_text.empty() ? std::string() : "*" + e.a->c_text) : e.c_text,
+                           guard, gdep, full);
+    }
+
+    // The value `*q` of an invariant or a measure read through the address `p.e`: the chain over the loop's places (and range places) that hold it, the flag as an `uninitialized`
+    // obligation, the read recorded for the framing assert.  `text` is the place as the user wrote it.
+    // `q` is a slot of the array local `ap` (the loop holds every element): the array's block and `0 <= offset_of(q) < count`
+    E array_place_hit(const ArrayPlace& ap, const E& q)
+    {
+        const E ar {low::var(var_name(*ap.var))};
+        const E off {low::dom("offset_of", {q})};
+        return low::and_(low::and_(low::bin(low::BinOp::Eq, block_of(q), block_of(ar)),
+                                   low::bin(low::BinOp::Le, low::int_lit("0"), off)),
+                         low::bin(low::BinOp::Lt, off, low::int_lit(std::to_string(ap.count))));
+    }
+    E inv_range_chain(const E& q, const Type& t, const E& read, E rest)
+    {
+        if (t.is_struct())
+        {
+            return rest;
+        }
+        const std::string sfx {cell_suffix(t)};
+        if (inv_arrays_ != nullptr)
+        {
+            for (size_t i {inv_arrays_->size()}; i-- > 0U;)
+            {
+                const ArrayPlace& ap {(*inv_arrays_)[i]};
+                if (cell_suffix(ap.element) == sfx)
+                {
+                    rest = low::ite(array_place_hit(ap, q), read, rest);
+                }
+            }
+        }
+        if (inv_ranges_ == nullptr)
+        {
+            return rest;
+        }
+        for (size_t i {inv_ranges_->size()}; i-- > 0U;)
+        {
+            const RangePlace& rp {(*inv_ranges_)[i]};
+            if (rp.cmp == sfx)
+            {
+                rest = low::ite(range_place_hit(rp, q), read, rest);
+            }
+        }
+        return rest;
+    }
+    LV inv_read_at(const Expr& e, const LV& p, const std::string& text, const E& guard, const Deps& gdep, Full& full)
+    {
         const Type& t {e.type};
         const std::string sfx {cell_suffix(t)};
         InvRead r;
         r.ptr = p.e;
         r.type = t;
         r.loc = e.loc;
-        r.text = e.c_text.empty() ? (e.a->c_text.empty() ? std::string() : "*" + e.a->c_text) : e.c_text;
+        r.text = text;
         r.guard = guard;
         inv_reads_.push_back(r);
         const E read {cell_value(p.e, t)};
         E v {inv_dummy(t)};
         if (inv_places_ != nullptr)
         {
+            v = inv_range_chain(p.e, t, read, v);
             std::vector<const Place*> ps;
             for (const Place& pl : *inv_places_)
             {
@@ -4089,7 +4155,7 @@ private:
                 v = low::ite(inv_place_disjunct(p.e, *ps[i]), read, v);
             }
             // The flag, chain-guarded the same way (see inv_cell): an `uninitialized` obligation clause.
-            E f {low::bool_lit(false)};
+            E f {inv_range_chain(p.e, t, cell_flag(p.e, t), low::bool_lit(false))};
             for (size_t i {ps.size()}; i-- > 0U;)
             {
                 f = low::ite(low::and_(ps[i]->wg,
@@ -4154,6 +4220,28 @@ private:
                 }
                 const E d {inv_place_disjunct(r.ptr, pl)};
                 any = any ? low::bin(low::BinOp::Or, any, d) : d;
+            }
+            if (inv_arrays_ != nullptr && !r.type.is_struct())
+            {
+                for (const ArrayPlace& ap : *inv_arrays_)
+                {
+                    if (cell_suffix(ap.element) == sfx)
+                    {
+                        const E d {array_place_hit(ap, r.ptr)};
+                        any = any ? low::bin(low::BinOp::Or, any, d) : d;
+                    }
+                }
+            }
+            if (inv_ranges_ != nullptr && !r.type.is_struct())
+            {
+                for (const RangePlace& rp : *inv_ranges_)
+                {
+                    if (rp.cmp == sfx)
+                    {
+                        const E d {range_place_hit(rp, r.ptr)};
+                        any = any ? low::bin(low::BinOp::Or, any, d) : d;
+                    }
+                }
             }
             if (!any)
             {
@@ -6060,7 +6148,9 @@ private:
     InitMarker site_marker(const Function& f, const AtomSite& s) const
     {
         const int k {site_key(s)};
-        if (k < 0 || k >= kGlobalSiteBase || !s.path.empty() || s.atom->atom != AtomKind::Owns ||
+        // record 0060 item 12: the `owns_range(p, n)` atom of a marked parameter is marked too (a `reads_range` beside a marker is the checker's refusal)
+        if (k < 0 || k >= kGlobalSiteBase || !s.path.empty() ||
+            (s.atom->atom != AtomKind::Owns && s.atom->atom != AtomKind::OwnsRange) ||
             static_cast<size_t>(k) >= f.params.size())
         {
             return InitMarker::None;
@@ -6392,17 +6482,40 @@ private:
                                      {
                                          return owns ? low::acc(slot, "d_" + sfx) : low::acc(slot, "d_" + sfx, amount);
                                      }));
-        r = low::and_(r, range_quant(root, n.e,
-                                     [&](const E& slot)
-                                     {
-                                         return cell_flag(slot, t);
-                                     }));
+        // Record 0060 item 12 (decision 0042 item 5): a marked parameter's elements need not have a value on entry, so its `requires` atom has no flags conjunct and states the
+        // type's range under the flag; `must_init`'s `ensures` atom is the plain one; `ref_to_uninit`'s `ensures` atom keeps a flag that was set (`old(flag) ==> flag`, under
+        // the partner's guard in the entry state) and states the range under the flag
+        const InitMarker mk {site_marker(*cf_, site)};
+        const bool plain {mk == InitMarker::None || (mk == InitMarker::MustInit && site.in_ensures)};
+        if (plain)
+        {
+            r = low::and_(r, range_quant(root, n.e,
+                                         [&](const E& slot)
+                                         {
+                                             return cell_flag(slot, t);
+                                         }));
+        }
+        else if (site.in_ensures && e.amount >= 0 && e.amount < atoms_of(*cf_).nreq)
+        {
+            const E gp {site_guard(atoms_of(*cf_).sites[static_cast<size_t>(e.amount)], env)};
+            r = low::and_(r, range_quant(root, n.e,
+                                         [&](const E& slot)
+                                         {
+                                             E kept {low::old_(cell_flag(slot, t))};
+                                             if (gp)
+                                             {
+                                                 kept = low::and_(old_entry(gp), kept);
+                                             }
+                                             return low::implies(kept, cell_flag(slot, t));
+                                         }));
+        }
         if (!t.is_bool())
         {
             r = low::and_(r, range_quant(root, n.e,
                                          [&](const E& slot)
                                          {
-                                             return element_range(cell_value(slot, t), t);
+                                             const E range {element_range(cell_value(slot, t), t)};
+                                             return plain ? range : low::implies(cell_flag(slot, t), range);
                                          }));
         }
         r = low::and_(r, low::acc(live_cell(root), "lv", amount));
@@ -6934,6 +7047,12 @@ private:
             }
             if (site_is_range(s))
             {
+                // a marked range never frames a read of the pre-state (record 0060 item 12), and frames one of the post-state only for `must_init`, as a marked cell atom does
+                if (const InitMarker mk {site_marker(*cf_, s)};
+                    mk != InitMarker::None && !(post && mk == InitMarker::MustInit))
+                {
+                    continue;
+                }
                 // Record 0060 item 5: a range atom frames the cells of its interval: `g_i && block_of(q) == block_of(p_i) && offset_of(p_i) <= offset_of(q) < offset_of(p_i) + n_i`
                 Full scratch;
                 const LV n {lower(*s.atom->b, env, nullptr, Deps {}, scratch)};
@@ -8412,9 +8531,10 @@ private:
             place_nodes_.erase(pn);
         }
         const bool writing {write_places_.erase(&e) != 0U};
-        if (cmode_ != CMode::None)
+        // an address of an element is a value in a loop invariant or measure (record 0060 item 11: `q == a`, the decay of an array local), as in code; in a contract it is refused
+        if (cmode_ != CMode::None && cmode_ != CMode::Inv)
         {
-            internal_error(e.loc, "the address of an array element in a contract or an invariant reached lowering");
+            internal_error(e.loc, "the address of an array element in a contract reached lowering");
             return {low::null_(), {}};
         }
         if (e.a == nullptr || e.b == nullptr || !e.a->type.is_ptr())
@@ -9334,6 +9454,9 @@ private:
                 }
                 full.obls.back().stmts = std::move(rows);
             }
+            // a marked parameter's atom has no flags row and its range holds under the flag (record 0060 item 12, decision 0042 item 5)
+            const bool marked_range {site_marker(callee, *x.site) != InitMarker::None};
+            if (!marked_range)
             {
                 const Expr& arg {site_arg(*x.site, e)};
                 const std::string who {arg.kind == Expr::Kind::Null ? std::string("the null pointer")
@@ -12635,17 +12758,17 @@ private:
             }
             add(low::bin(BinOp::Ge, live_perm(root[k]), total), perm_meta(msg, k));
         }
-        range_returns(out, ens, g, root, amt_of, name, perm_meta, env);
+        range_returns(out, ens, g, root, amt_of, name, perm_meta, cat_meta, internal, env);
     }
 
     // The rows of the `ensures` range atoms at a return (record 0060 item 9), after the cell atoms' rows, in this order per atom: the two marked rows (value then flag; the quantified
     // permission at `write` for `owns_range`, at the atom's amount for `reads_range`, plus the amount of every other read atom of the field that may cover the slot: S44 (e)),
     // inside `if (g) { }`; the shape row (a `permission` row with the marked rows' message: on a path where a guard that does not imply its partner's leaves the range empty,
     // the marked rows pass and an `internal` row would be the first to fail); the flags; the type's range; the liveness sum.  A failed marked row ends its path (S43 G2).
-    template <typename AmtOf, typename Name, typename PermMeta>
+    template <typename AmtOf, typename Name, typename PermMeta, typename CatMeta, typename Internal>
     void range_returns(std::vector<low::LStmt>& out, const std::vector<size_t>& ens, const std::vector<E>& g,
                        const std::vector<E>& root, const AmtOf& amt_of, const Name& name, const PermMeta& perm_meta,
-                       const Env& env)
+                       const CatMeta& cat_meta, const Internal& internal, const Env& env)
     {
         const Function& f {*fn_.f};
         const FnAtoms& fa {atoms_of(f)};
@@ -12725,17 +12848,62 @@ private:
                 }
             }
             row(range_shape(ptr, site.atom->a->type, n));
-            row(range_quant(ptr, n,
-                            [&](const E& slot)
-                            {
-                                return cell_flag(slot, t);
-                            }));
+            // Record 0060 item 12 (decision 0042 item 5): a marked parameter.  `must_init`: the flags row is the promise (`postcondition`, "returns without initializing every
+            // element of `p[0..n)`, which `cerastes::must_init` on `p` promises") and the range holds under the flag, so a missing write is reported once; `ref_to_uninit`: an element
+            // that had a flag on entry keeps it (`old(flag) ==> flag`, an `internal` row, under the partner's guard in the entry state), and the range holds under the flag.
+            const InitMarker mk {site_marker(f, site)};
+            auto row_as = [&](E cond, const low::Meta& m)
+            {
+                emit_assert(out, gk ? low::implies(gk, std::move(cond)) : std::move(cond), m);
+            };
+            if (mk == InitMarker::None)
+            {
+                row(range_quant(ptr, n,
+                                [&](const E& slot)
+                                {
+                                    return cell_flag(slot, t);
+                                }));
+            }
+            else if (mk == InitMarker::MustInit)
+            {
+                const std::string& pname {f.params[static_cast<size_t>(site_key(site))].name};
+                row_as(range_quant(ptr, n,
+                                   [&](const E& slot)
+                                   {
+                                       return cell_flag(slot, t);
+                                   }),
+                       cat_meta("postcondition",
+                                "returns without initializing every element of " + pl +
+                                    ", which `cerastes::must_init` on " +
+                                    (pname.empty() ? std::string("the parameter") : "`" + pname + "`") + " promises",
+                                k));
+            }
+            else
+            {
+                E gp;
+                if (site.atom->amount >= 0 && site.atom->amount < fa.nreq)
+                {
+                    gp = site_guard(fa.sites[static_cast<size_t>(site.atom->amount)], env);
+                }
+                row_as(range_quant(ptr, n,
+                                   [&](const E& slot)
+                                   {
+                                       E kept {low::old_(cell_flag(slot, t))};
+                                       if (gp)
+                                       {
+                                           kept = low::and_(old_entry(gp), kept);
+                                       }
+                                       return low::implies(kept, cell_flag(slot, t));
+                                   }),
+                       internal("an element that had a value on entry keeps it"));
+            }
             if (!t.is_bool())
             {
                 row(range_quant(ptr, n,
                                 [&](const E& slot)
                                 {
-                                    return element_range(cell_value(slot, t), t);
+                                    const E range {element_range(cell_value(slot, t), t)};
+                                    return mk == InitMarker::None ? range : low::implies(cell_flag(slot, t), range);
                                 }));
             }
             E total {amt_of(k)};
@@ -13294,6 +13462,78 @@ private:
         bool reach {false}; // a write in the loop can reach an element
     };
 
+    // A `requires` range atom of a pointer parameter the function never assigns, as a place of a loop (record 0060 item 11): the slots `[offset_of(p), offset_of(p) + n)` of
+    // the parameter's block, at `write` (`owns_range`) or at the atom's ghost amount (`reads_range`), under the atom's guard.  The base and the count are read over the
+    // formals (the entry values: the loop never moves them).  Its liveness cell is the parameter's own `live` place (`loop_places`).
+    struct RangePlace
+    {
+        const AtomSite* site {nullptr};
+        E base;
+        E count;
+        E lo;
+        E hi;
+        E guard; // null: unconditional
+        bool owns {false};
+        E amount; // null: write
+        Type element;
+        std::string sfx;    // the field's Viper suffix (`use_cell_type`)
+        std::string cmp;    // the field suffix of a place of the same field (`cell_suffix`)
+        bool reach {false}; // a write in the loop can reach a slot of the field
+        std::string text;   // `p[0..n)` as written, or empty
+    };
+
+    // The slot `q` is one of the range place's, and the place's guard holds (item 5's interval test over the entry values).
+    E range_place_hit(const RangePlace& rp, const E& q)
+    {
+        return low::and_(rp.guard, in_range(q, rp.base, rp.count));
+    }
+
+    // The amount of `rp`'s marked rows at the entry and the back edge of a loop: a read place's own amount plus, over the binder `k`, the amount of every other read place of the field
+    // that covers the slot (S44 (e), as `range_returns` has it): the invariant demands both at a slot two places share, which the per-place rows do not say (record 0060 item 8,
+    // audit round 3).  Null for `owns_range` (full permission, no other place can cover its slots) and for a lone read place.
+    E range_row_amount(const RangePlace& rp, const std::vector<RangePlace>& all)
+    {
+        if (rp.owns)
+        {
+            return nullptr;
+        }
+        E amount {rp.amount};
+        const E kv {low::var("k")};
+        for (const RangePlace& o : all)
+        {
+            if (&o == &rp || o.owns || o.cmp != rp.cmp)
+            {
+                continue;
+            }
+            const E inside {
+                low::bin(low::BinOp::And,
+                         low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, block_of(o.base), block_of(rp.base)),
+                                  low::bin(low::BinOp::Le, o.lo, kv)),
+                         low::bin(low::BinOp::Lt, kv, o.hi))};
+            amount = low::bin(low::BinOp::Add, amount, low::ite(low::and_(o.guard, inside), o.amount, low::no_perm()));
+        }
+        return amount;
+    }
+
+    // The two marked rows of a range place (value, then flag) at its loop's entry or back edge, inside `if (g) { }` when the atom is guarded (S44 (a), (g)).
+    void range_marked_rows(std::vector<low::LStmt>& out, const RangePlace& rp, const std::vector<RangePlace>& all,
+                           const low::Meta& m)
+    {
+        low::LStmt ifs;
+        std::vector<low::LStmt>& dst {rp.guard ? ifs.then_body : out};
+        const E amount {range_row_amount(rp, all)};
+        for (const char* field : {"v_", "d_"})
+        {
+            emit_marked_row(dst, range_perm(rp.base, rp.lo, rp.hi, std::string(field) + rp.sfx, amount), m);
+        }
+        if (rp.guard)
+        {
+            ifs.kind = low::LStmt::Kind::If;
+            ifs.expr = rp.guard;
+            out.push_back(std::move(ifs));
+        }
+    }
+
     // The writes a loop can make to memory (decision 0038 item 3): the cells it assigns by name, and the cell fields a store through a pointer, or a
     // call of a function that owns a cell of that field (Viper havocs what a callee owns), can write.
     struct LoopWrites
@@ -13308,6 +13548,48 @@ private:
         // leaf (distinct member blocks), another global (`unique` blocks) or an object of another block, and a write through a pointer is `fields` as before.
         std::set<std::pair<int, std::vector<int>>> gleaves;
     };
+
+    // The range places of the loop being lowered: every `requires` range atom of a parameter the function never assigns (a function that assigns it has no place for it, a pinned
+    // false alarm: question 237).  Called only where the loop carries places.
+    std::vector<RangePlace> range_places(const LoopWrites& writes)
+    {
+        std::vector<RangePlace> out;
+        const FnAtoms& fa {atoms_of(*fn_.f)};
+        const Env env {contract_env()};
+        for (int i {0}; i < fa.nreq; ++i)
+        {
+            const AtomSite& site {fa.sites[static_cast<size_t>(i)]};
+            if (!site_is_range(site) || site.in_ensures || fn_.assigned_params.count(site_key(site)) != 0U)
+            {
+                continue;
+            }
+            RangePlace rp;
+            rp.site = &site;
+            rp.base = site_root(site, env);
+            {
+                CtxSave save(*this);
+                cmode_ = CMode::Wf; // the count reads no heap: a value over the formals
+                Full scratch;
+                rp.count = lower(*site.atom->b, env, nullptr, Deps {}, scratch).e;
+            }
+            rp.lo = low::dom("offset_of", {rp.base});
+            rp.hi = low::bin(low::BinOp::Add, rp.lo, rp.count);
+            rp.guard = site_guard(site, env);
+            rp.owns = site.atom->atom == AtomKind::OwnsRange;
+            if (!rp.owns)
+            {
+                rp.amount = low::var(amount_name(site.atom->amount));
+            }
+            rp.element = site_pointee(site);
+            rp.sfx = use_cell_type(rp.element);
+            rp.cmp = cell_suffix(rp.element);
+            // a store through any pointer of the field, or a call that owns a cell of it, can reach a slot; a global written by name can too (the range may be that global's cell)
+            rp.reach = writes.fields.count(rp.cmp) != 0U || !writes.globals.empty() || !writes.gleaves.empty();
+            rp.text = site_text(site);
+            out.push_back(std::move(rp));
+        }
+        return out;
+    }
 
     // The function holds the leaf `path` of the global `id` as one of its own automatic places (decision 0044 item 8): it is the entry function (every global is held from
     // program_start), or a `requires` atom of this function names that global at a path that is a prefix of the leaf's (`owns(g)`, `owns(g.t)`, `owns(g.t.y)`).
@@ -15208,6 +15490,8 @@ private:
             }
             frame = has_return || outward;
         }
+        // record 0060 item 11: each `requires` range atom of a parameter the function never assigns is a range place of the loop, whenever the loop carries its places at all
+        std::vector<RangePlace> ranges;
         if (!frame)
         {
             places.clear();
@@ -15215,17 +15499,7 @@ private:
         }
         else
         {
-            for (const AtomSite& rs : atoms_of(*fn_.f).sites)
-            {
-                if (site_is_range(rs))
-                {
-                    // record 0060, staging pin S2 (its wording, a loop that touches memory, is narrower than this gate: a loop with a return or an outward goto in its body also carries places): Part D's; fail closed
-                    internal_error(
-                        s.loc,
-                        "a loop that carries places (it touches memory, or leaves the function or a block with a return or a goto) in a function whose contract holds a range permission atom reached lowering before Part D of record 0060 reads it");
-                    break;
-                }
-            }
+            ranges = range_places(writes);
         }
         // Decision 0038 item 3 (audit round 2, B1) for arrays: a parameter place whose atom can be false holds nothing on that path, and nothing tells Silicon that its pointer
         // is not a slot of the array's block (the snapshot would pick up the array's permission, and the invariant would demand it twice): its guards gain
@@ -15247,6 +15521,23 @@ private:
                 if (pl.live)
                 {
                     pl.gl = low::and_(pl.gl, low::bin(low::BinOp::Ne, live_cell(lv_of(pl)), live_cell(ar)));
+                }
+            }
+        }
+        // Record 0060 item 11, beside cell places: a cell place of the range's field that is a slot of the range (a parameter's, a global's, a loaded or a heap place's cell) is
+        // carried by the range, whose amount is not the cell's snapshot: every conjunct and the back-edge row of the place stand where the cell is not inside the range, with a
+        // case split before the snapshots (what the function holds beyond the range stays in the frame)
+        for (Place& pl : places)
+        {
+            if (pl.cell || !pl.value)
+            {
+                continue;
+            }
+            for (const RangePlace& rp : ranges)
+            {
+                if (pl.suffix == rp.cmp)
+                {
+                    pl.gv = low::and_(pl.gv, low::not_(range_place_hit(rp, pl.recv)));
                 }
             }
         }
@@ -15665,6 +15956,26 @@ private:
                     }
                 }
             }
+            // Record 0060 item 11 (S44 (g)): each range place against every value place of its field (the cell it may contain: the guard above is decided by the branch) and
+            // against each array of its field (a range of the parameter's block is not the array's slots)
+            for (const RangePlace& rp : ranges)
+            {
+                for (const Place& c : places)
+                {
+                    if (c.value && c.suffix == rp.cmp)
+                    {
+                        case_split(entry, range_place_hit(rp, c.recv));
+                    }
+                }
+                for (const ArrayPlace& ap : arrays)
+                {
+                    if (cell_suffix(ap.element) == rp.cmp)
+                    {
+                        case_split(entry,
+                                   low::bin(BinOp::Eq, block_of(rp.base), block_of(low::var(var_name(*ap.var)))));
+                    }
+                }
+            }
             // Record 0047 item 10 (re-audit B1): a heap place's snapshot holds a symbolic permission, and Silicon cannot decide `k == none` for a holder it never
             // branched on (a member address `&s->b`, a pointer reached through a load, a cursor parameter): the invariant's `acc(.., k)` then fails on entry
             // ("insufficient permission") for a correct program.  A catch-all `if (k > none) { }` after each heap snapshot gives it the branch.
@@ -15813,6 +16124,15 @@ private:
             fn_.snapshots.push_back(low::LVar {ap.kl, low::LType::Perm});
             assign(entry, ap.kl, live_perm(r));
         }
+        // Record 0060 item 11: the range places' entry rows (a marked row per field, inside `if (g) { }` for a guarded atom, the sum form where two read places may share a slot);
+        // the place's liveness is its parameter's `live` place's snapshot
+        for (const RangePlace& rp : ranges)
+        {
+            range_marked_rows(
+                entry, rp, ranges,
+                meta("permission", loop_at,
+                     "this loop begins without the permission to every element of " + quoted(rp.text, "the range")));
+        }
         // the conjuncts: every `acc` first (so every read after it is framed), then the flags, the range and the values (item 8's list; S43 (c) and its addendum)
         for (const ArrayPlace& ap : arrays)
         {
@@ -15848,6 +16168,48 @@ private:
                     low::forall_("k", {slot},
                                  low::implies(in, low::bin(BinOp::Eq, value, low::old_(value, array_label)))),
                     s.loc));
+            }
+        }
+
+        // Record 0060 item 11: the range places' conjuncts: every `acc` first, then the flags kept, the type's range and (for a place no write reaches, or a read-only one) the
+        // values kept, each under the atom's guard; the liveness is the parameter's `live` place's
+        {
+            using low::BinOp;
+            auto guarded = [](const RangePlace& rp, E e)
+            {
+                return rp.guard ? low::implies(rp.guard, std::move(e)) : e;
+            };
+            for (const RangePlace& rp : ranges)
+            {
+                w.invariants.push_back(
+                    auto_invariant(guarded(rp, range_perm(rp.base, rp.lo, rp.hi, "v_" + rp.sfx, rp.amount)), s.loc));
+                w.invariants.push_back(
+                    auto_invariant(guarded(rp, range_perm(rp.base, rp.lo, rp.hi, "d_" + rp.sfx, rp.amount)), s.loc));
+            }
+            for (const RangePlace& rp : ranges)
+            {
+                const E k {low::var("k")};
+                const E slot {low::dom("loc", {block_of(rp.base), k})};
+                const E in {low::bin(BinOp::And, low::bin(BinOp::Le, rp.lo, k), low::bin(BinOp::Lt, k, rp.hi))};
+                const E flag {cell_flag(slot, rp.element)};
+                w.invariants.push_back(auto_invariant(
+                    guarded(rp,
+                            low::forall_("k", {slot}, low::implies(low::and_(in, low::old_(flag, array_label)), flag))),
+                    s.loc));
+                if (const E range = cell_range_inv(slot, rp.element))
+                {
+                    w.invariants.push_back(auto_invariant(
+                        guarded(rp, low::forall_("k", {slot}, low::implies(low::and_(in, flag), range))), s.loc));
+                }
+                if (!rp.reach || !rp.owns)
+                {
+                    const E value {cell_value(slot, rp.element)};
+                    w.invariants.push_back(auto_invariant(
+                        guarded(rp, low::forall_(
+                                        "k", {slot},
+                                        low::implies(in, low::bin(BinOp::Eq, value, low::old_(value, array_label))))),
+                        s.loc));
+                }
             }
         }
 
@@ -15980,7 +16342,11 @@ private:
         E prior; // the conjunction of the user invariants so far
         // Invariants and the measure are lowered in `Inv` mode (decision 0038 item 6): the reads of memory in them are chains over the loop's places.
         const std::vector<Place>* saved_places {inv_places_};
+        const std::vector<RangePlace>* saved_ranges {inv_ranges_};
+        const std::vector<ArrayPlace>* saved_arrays {inv_arrays_};
         inv_places_ = &inv_all;
+        inv_ranges_ = &ranges;
+        inv_arrays_ = &arrays;
         for (const Clause& c : s.invariants)
         {
             Full full;
@@ -16061,6 +16427,8 @@ private:
             w.decreases.push_back(mv.e);
         }
         inv_places_ = saved_places;
+        inv_ranges_ = saved_ranges;
+        inv_arrays_ = saved_arrays;
         if (!s.measure.empty())
         {
             low::Meta m;
@@ -16128,7 +16496,7 @@ private:
         {
             out.push_back(std::move(st));
         }
-        if (!arrays.empty())
+        if (!arrays.empty() || !ranges.empty())
         {
             label(out, array_label);
         }
@@ -16317,6 +16685,16 @@ private:
             emit_marked_row(w.then_body, range_perm(r, 0, ap.count, "d_" + sfx), meta("permission", at, msg));
             emit_assert(w.then_body, low::not_(low::bin(low::BinOp::Lt, live_perm(r), low::var(ap.kl))),
                         meta("permission", at, msg));
+        }
+        // Record 0060 item 11: the back edge of a range place: the marked rows (inside `if (g) { }`, the sum form where two read places may share a slot); its liveness row is its
+        // parameter's `live` place's, above
+        for (const RangePlace& rp : ranges)
+        {
+            const SrcLoc at {s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : loop_at};
+            range_marked_rows(w.then_body, rp, ranges,
+                              meta("permission", at,
+                                   "an iteration of this loop ends without the permission to " +
+                                       quoted(rp.text, "the range") + " that it began with"));
         }
         owner_flag_rows(owners, places, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc,
                         w.then_body);

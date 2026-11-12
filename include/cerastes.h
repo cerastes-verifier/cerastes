@@ -17,9 +17,11 @@
 // Write CERASTES_PREDICATE and CERASTES_PURE first in the declaration, before
 // `static`, `constexpr` and the return type.  CERASTES_OWNING marks a pointer parameter: the function owns its
 // pointee unless the pointer is null (decision 0040 item 3).  Write it before the parameter's type or after its name.
+// CERASTES_OWNING_N(n) marks a pointer parameter that owns the elements p[0..n) unless the pointer is null, `n` an earlier parameter or an expression over
+// earlier parameters and constants (decision 0060 item 13).
 // CERASTES_UNINIT marks an automatic local declared without an initializer (documentation, checked by --strict-init);
 // CERASTES_REF_TO_UNINIT and CERASTES_MUST_INIT mark a pointer parameter whose pointee need not have a value on entry, and
-// (must_init) has one on return (P4222's markers, decision 0042).  Each parameter marker needs an owns(*p) in the contract.
+// (must_init) has one on return (P4222's markers, decision 0042).  Each parameter marker needs an owns(*p) (or an owns_range(p, n)) in the contract.
 // CERASTES_REF_TO_UNINIT also marks a pointer member of a structure: the object it points to may have no value (decision 0058
 // item 4); beside CERASTES_OWNING the member's buffer may be allocated and not yet written.
 // CERASTES_NOT_INVALIDATING marks a pointer parameter whose function leaves what the pointer reaches in place: whatever the
@@ -60,6 +62,7 @@
 #  define CERASTES_PREDICATE [[cerastes::predicate]] inline
 #  define CERASTES_PURE [[cerastes::pure]] inline
 #  define CERASTES_OWNING [[cerastes::owning]]
+#  define CERASTES_OWNING_N(n) [[cerastes::owning(n)]]
 #  define CERASTES_UNINIT [[cerastes::uninit]]
 #  define CERASTES_REF_TO_UNINIT [[cerastes::ref_to_uninit]]
 #  define CERASTES_MUST_INIT [[cerastes::must_init]]
@@ -77,6 +80,7 @@
 #  define CERASTES_PREDICATE inline
 #  define CERASTES_PURE inline
 #  define CERASTES_OWNING
+#  define CERASTES_OWNING_N(n)
 #  define CERASTES_UNINIT
 #  define CERASTES_REF_TO_UNINIT
 #  define CERASTES_MUST_INIT

@@ -294,7 +294,17 @@ may be given a null pointer, and otherwise owns the object and gives it back
 (xref:memory.adoc#contracts[Memory and ownership]). Every declaration of the
 function must carry the same `owning` attributes; one that differs is
 `annotation_mismatch`. The attribute applies to parameters, and only to
-pointers to objects that are not `const`; `owning(n)` is not supported yet.
+pointers to objects that are not `const`.
+
+With a count, `cerastes::owning(n)` on a parameter (`CERASTES_OWNING_N(n)`) is the
+contract `p == NULL || cerastes_owns_range(p, n)` in both lists: the function owns the
+`n` elements starting at `p` (xref:memory.adoc#ranges[Ranges in contracts]). `n`
+names earlier parameters and constants (a later parameter is not yet declared there,
+and the front end refuses it) and reads no memory; every declaration gives the same
+count. An
+explicit `cerastes_owns_range(p, n)` of the same count beside it is merged, and any other
+atom on `p` beside it is rejected. `owning(n)` on a function, a variable or a member
+is not supported yet.
 
 On a function that returns a pointer, `cerastes::owning` is the contract
 `ensures(r == NULL || owns_block(r))`: the caller receives the whole allocation
@@ -500,7 +510,8 @@ Each of these is `cerastes-unsupported_annotation`, reported at the attribute:
   it to `T *` first);
 * `owning` on a pointer to a `const` or `volatile` object (nothing may be written
   through an owner);
-* `owning(n)`, an owned range, which comes with contracts over ranges of elements;
+* `owning(n)`, an owned range, which comes with pointer arithmetic and allocations of
+  `n` elements (on a parameter it is accepted: <<_owning_parameters>>);
 * either attribute twice on one variable;
 * either attribute on a global or a `static` local whose initializer is not a null
   pointer (an owner owns only what it is given).
@@ -781,7 +792,7 @@ include::example$annotations/predicates.cpp[tag=fold]
 
 == Specification functions
 
-`<cerastes.h>` declares five functions in `namespace cerastes` for use in
+`<cerastes.h>` declares six functions in `namespace cerastes` for use in
 annotations. They are declared and type-checked like any function, and they
 are never defined, so a program cannot call one. cerastes recognizes them by the
 declarations in `<cerastes.h>`: written `cerastes::old(x)`, or `old(x)` after
@@ -793,9 +804,10 @@ inside a template, and so is any such call in a file that does not include
 `reads`, `forall`, `owns_range`) whose callee depends on a template parameter
 is taken to be the specification function whenever `<cerastes.h>` is
 included, even if argument-dependent lookup would find a function of yours:
-qualify your own functions there (this errs on the side of rejecting). A sixth,
-`live`, is declared for pointers. C has no namespaces, so `<cerastes.h>` also
-declares the C spellings `cerastes_owns`, `cerastes_reads`, `cerastes_live` and
+qualify your own functions there (this errs on the side of rejecting). A seventh,
+`live`, is declared for pointers, and `reads_range` beside `owns_range`. C has no
+namespaces, so `<cerastes.h>` also declares the C spellings `cerastes_owns`,
+`cerastes_reads`, `cerastes_live`, `cerastes_owns_range`, `cerastes_reads_range` and
 `cerastes_old` (a macro), in C and in pass:[C++] alike, and `owns_block` with its C
 spelling `cerastes_owns_block` for allocations. The functions:
 
@@ -833,8 +845,15 @@ owns entirely, everything `free` needs; on a pointer parameter or, in an
 `+p->q->x+`, `+*gp+`), every read on entry
 
 | `owns_range(p, n)`
-| (later)
-| permission to the `n` elements starting at `p` (not supported yet)
+| `cerastes_owns_range(p, n)`
+| `p` is not null and the function may read and write the `n` elements `p[0]` to `p[n
+- 1]`, each of which holds a value (unless the parameter is marked `must_init` or
+`ref_to_uninit`); on a pointer parameter, with a count over the
+parameters (xref:memory.adoc#ranges[Ranges in contracts])
+
+| `reads_range(p, n)`
+| `cerastes_reads_range(p, n)`
+| `p` is not null and the function may read the `n` elements starting at `p`
 
 | `forall(body, free...)`
 | (later)
@@ -856,9 +875,14 @@ read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an
 invariant they may name any pointer variable, the object behind a pointer read from memory
 (`+owns(**pp)+`, `+owns(*gp)+`), and a structure or a member of one (`owns(*q)`, `+owns(q->x)+`)
 (xref:memory.adoc#loops[Loops]), but not a global itself, which every loop of a
-function that holds it keeps already. `cerastes verify` does not accept `owns_range`
-and `forall` yet, nor `owns`, `reads` and `live` in a measure or in a
-`do … while (0)` invariant.
+function that holds it keeps already. `owns_range` and `reads_range` take a pointer
+parameter and a count that reads no memory, in a function's `requires` and `ensures`
+(an `ensures` range gives back the `requires` range of the same kind, parameter and
+count), as a conjunct, after a condition that reads no memory and `||`, or as an arm of
+`?:`; one parameter has one range and no other atom
+(xref:memory.adoc#ranges[Ranges in contracts]). `cerastes verify` does not accept
+`forall` yet, nor a range in a loop invariant, nor `owns`, `reads` and `live` in a
+measure or in a `do … while (0)` invariant.
 
 [source,cpp]
 ----
@@ -1280,7 +1304,7 @@ anywhere in the translation unit and outside `<cerastes.h>` itself, of one of th
 
 * `cerastes`, an attribute name (`requires`, `ensures`, `invariant`, `check`, `fold`, `unfold`,
   `predicate`, `pure`, `owning`, `uninit`, `must_init`, `ref_to_uninit`, `not_invalidating`) and a specification-function name (`old`, `owns`, `reads`, `forall`,
-  `owns_range`): `+#define ensures requires+` would turn every postcondition into a precondition;
+  `owns_range`, `reads_range`): `+#define ensures requires+` would turn every postcondition into a precondition;
 * `+CERASTES_H+` and every `+CERASTES_*+` macro, which are the header's own;
 * every predefined macro of the front end, among them `+__cplusplus+`,
   `+__STDC_VERSION__+`, `+__has_cpp_attribute+` and `+__has_c_attribute+`: the header uses them to

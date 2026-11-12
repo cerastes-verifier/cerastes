@@ -4,7 +4,7 @@
 // ==> ...`), a guard outside each, one conjunct per `requires` and `ensures` line; its `f__wf` is the pure line; a read `p[e]` is framed by a range atom's interval (or a cell
 // atom's cell) and has one ghost value per base, index and state; at a return the marked rows (value then flag, the sum form where two read atoms may overlap) stand inside
 // `if (g) { }`, then the shape row, the flags, the type's range and the liveness sum.
-// A loop in a function with a range atom (Part D) is still refused: the last cases are the backstops.  The callers of range functions are `define_range_calls` (Part C).
+// The loops of such a function are `define_range_loops` (Part D) and the callers of range functions `define_range_calls` (Part C).
 // Each rule has a case that verifies and a twin that fails for one reason (invariant 2); a failure's category and the VIR node whose position the record gives are the
 // expectation (the store or the read for a body access, the contract's read for a framing failure, the closing brace or the `return` for a return row).  The twins that need a
 // call (a callee that keeps the range) are Part C's: no call is made here.
@@ -773,22 +773,6 @@ void define_ranges_lowering()
                {k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), k.pv(f, 1)), {}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)});
            k.done(f);
        });
-    // the same with a `return` in the body: void lr(int *p, int n) ... { int i = 0; while (i < n) decreases(n - i) { if (i == 3) { return; } i = i + 1; } }
-    rh("range_hold_loop_return", "before Part D of record 0060",
-       [=](Kit& k)
-       {
-           // the loop touches no memory, but it leaves the function while the function holds a place, so it carries every place (record 0038 item 3): the staging gate fires, and S2 does not name it
-           Function* f {k.fn("lr", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
-           k.req(f, k.land(RO(k, f, 0, 1, 0), ge0(k, f, 1)));
-           k.ens(f, RO(k, f, 0, 1, 0));
-           Var* i {k.local(f, "i", k.i32)};
-           const Stmt* body {k.blk({k.iff(k.eq_c(k.v(i), k.i32, "3"), k.blk({k.ret(nullptr)}), nullptr),
-                                    k.asg(i, k.add(k.v(i), N(k, "1")))})};
-           f->body = k.blk(
-               {k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), k.pv(f, 1)), {}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)});
-           k.done(f);
-       });
-
     // ---- a range beside an output atom ----
     // int *oa(int *p, int n) requires(reads_range(p, n) && 1 <= n) ensures(reads_range(p, n) && reads(*result)) { return &p[0]; }
     lc("rng_output_atom",
@@ -969,13 +953,35 @@ void define_ranges_lowering()
            f->body = k.blk({});
            k.done(f);
        });
-    rc("range_rej_marked", "beside a range permission atom",
+    rc("range_rej_marked_reads_range", "beside `reads_range(p, n)`",
        [=](Kit& k)
        {
-           // CERASTES_REF_TO_UNINIT on a parameter whose atom is a range
+           // CERASTES_REF_TO_UNINIT on a parameter whose atom is a reads_range: refused like a marker beside reads(*p)
            Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
            f->params[0U].init = InitMarker::RefToUninit;
+           k.req(f, RR(k, f, 0, 1, 0));
+           k.ens(f, RR(k, f, 0, 1, 0));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("range_rej_marked_must_init_no_ensures", "is `must_init` without `owns(*p)` in its `ensures`",
+       [=](Kit& k)
+       {
+           // CERASTES_MUST_INIT on owns_range(p, n) whose ensures does not return it
+           Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+           f->params[0U].init = InitMarker::MustInit;
            k.req(f, RO(k, f, 0, 1, 0));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("range_rej_marked_element_read", "a contract reads `*p`",
+       [=](Kit& k)
+       {
+           // CERASTES_REF_TO_UNINIT on owns_range(p, n) with requires(p[0] > 0): the element of a marked parameter has no value to read
+           Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+           f->params[0U].init = InitMarker::RefToUninit;
+           k.req(f, k.land(k.land(RO(k, f, 0, 1, 0), k.gt(fx(k, f, 1), N(k, "0"))),
+                           k.gt(crd(k, f, 0, N(k, "0")), N(k, "0"))));
            k.ens(f, RO(k, f, 0, 1, 0));
            f->body = k.blk({});
            k.done(f);
@@ -1008,18 +1014,1616 @@ void define_ranges_lowering()
            f->body = k.blk({});
            k.done(f);
        });
-    // the staging backstops: lowering refuses what Parts C and D lift
-    rh("range_hold_loop", "before Part D of record 0060",
+}
+
+// ---- Part D: loops over the ranges of parameters (record 0060 item 11) ----
+// A loop of a function with a `requires` range atom of a pointer parameter the function never assigns carries a range place: its marked entry rows ("this loop begins without the
+// permission to every element of `p[0..n)`", at the loop), the permissions (at `write`, or at the atom's own amount), the flags kept, the type's range and (for a place no write
+// reaches, or a read-only one) the values kept, all under the atom's guard, then the marked back-edge rows (at the end of the body); the liveness is the parameter's `live`
+// place's.  A cell place of the range's field gains "not inside the range" on every conjunct and its back-edge row; where two read places may share a slot the marked rows take the
+// sum form.  `p[e]` of any pointer in an invariant or a measure is framed by a place (a cell's or a range's interval test), else `permission` at the clause.
+void define_range_loops()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto PI = [](Kit& k)
+    {
+        return k.ptr(k.i32);
+    };
+    auto fx = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    auto RO = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::OwnsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    auto RR = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::ReadsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    // `p[e]` as a read in a contract, and in a body (of the parameter's local copy)
+    auto crd = [=](Kit& k, Function* f, int p, const Expr* idx)
+    {
+        return k.deref(k.b.elem_addr(fx(k, f, p), idx, k.at()));
+    };
+    auto bat = [](Kit& k, Function* f, int p, const Expr* idx)
+    {
+        return k.b.elem_addr(k.pn(f->param_var(p)), idx, k.at());
+    };
+    auto brd = [=](Kit& k, Function* f, int p, const Expr* idx)
+    {
+        return k.deref(bat(k, f, p, idx));
+    };
+    auto bwr = [=](Kit& k, Function* f, int p, const Expr* idx, const Expr* v)
+    {
+        return k.store(bat(k, f, p, idx), v);
+    };
+    auto inc = [](Kit& k, Var* i)
+    {
+        return k.asg(i, k.add(k.v(i), k.num(k.i32, "1")));
+    };
+    auto arr = [](Kit& k, Function* f, const char* name, Type element, unsigned long long count)
+    {
+        Var* x {f->new_local(name, k.prog.array_of(element, count), k.at())};
+        f->mark_address_taken(x);
+        return x;
+    };
+    auto aat = [](Kit& k, const Var* a, const Expr* i)
+    {
+        return k.b.elem_addr(k.addr(a), i, k.at());
+    };
+    auto ard = [=](Kit& k, const Var* a, const Expr* i)
+    {
+        return k.deref(aat(k, a, i));
+    };
+    auto awr = [=](Kit& k, const Var* a, const Expr* i, const Expr* v)
+    {
+        return k.store(aat(k, a, i), v);
+    };
+    // 0 <= i && i <= n, the loop's usual invariant over parameter `n`, and its measure n - i
+    auto bounds = [=](Kit& k, Function* f, Var* i, int n)
+    {
+        return k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, n)));
+    };
+    // a statement list ending in the vacuity twin when `vac` (check(false)), which must fail: the path it stands on is not empty
+    auto vac_fail = [](Kit& k, const Stmt* c)
+    {
+        k.fail("check", c->loc);
+    };
+
+    // ---- the fill loop over an owned range ----
+    // void fill(int *p, int n) requires(owns_range(p, n) && n < 100) ensures(owns_range(p, n))
+    //   { int i = 0; while ([i < n|i <= n]) inv 0 <= i <= [n|100] decreases n - i { p[i] = i; [check(false);] i++; } [check(false);] }
+    // `mode`: 0 the fill, 1 i <= n, 2 the check(false) after the loop, 3 the check(false) at the end of the body
+    const auto fill = [=](Kit& k, int mode) -> const Stmt*
+    {
+        Function* f {k.fn("fill", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(RO(k, f, 0, 1, 0), k.lt(fx(k, f, 1), N(k, "100"))));
+        k.ens(f, RO(k, f, 0, 1, 0));
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* w {bwr(k, f, 0, k.v(i), k.v(i))};
+        const Stmt* c3 {mode == 3 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {w};
+        if (c3 != nullptr)
+        {
+            bs.push_back(c3);
+        }
+        bs.push_back(inc(k, i));
+        const Expr* cond {mode == 1 ? k.le(k.v(i), k.pv(f, 1)) : k.lt(k.v(i), k.pv(f, 1))};
+        const Expr* inv {mode == 1 ? k.range(k.v(i), k.i32, "0", "100") : bounds(k, f, i, 1)};
+        const Stmt* loop {k.whl(cond, {k.cl(inv)}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blkc(bs))};
+        const Stmt* c2 {mode == 2 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> body {k.decl(i, N(k, "0")), loop};
+        if (c2 != nullptr)
+        {
+            body.push_back(c2);
+        }
+        f->body = k.blk(std::move(body));
+        k.done(f);
+        return mode == 2 ? c2 : mode == 3 ? c3 : w;
+    };
+    lc("rngd_fill",
+       "while (i < n) p[i] = i over owns_range(p, n): the range place carries the permissions, the flags and the type's range through the loop; its marked entry and back-edge rows hold",
        [=](Kit& k)
        {
-           // void f(int *p, int n) requires(owns_range(p, n)) ensures(owns_range(p, n)) { int i = 0; while (i < n) { p[i] = 0; i = i + 1; } }
+           fill(k, 0);
+       });
+    lc("rngd_fill_high",
+       "the loop runs to i <= n: p[n] fails its bound row and its write-permission row at the store (two real cases at one line, N1)",
+       [=](Kit& k)
+       {
+           const Stmt* w {fill(k, 1)};
+           k.fail("out-of-bounds", w->loc);
+           k.fail("permission", w->loc);
+       });
+    lc("rngd_fill_vacuity",
+       "the fill with check(false) after the loop: it fails (the path through the loop is not empty)",
+       [=](Kit& k)
+       {
+           vac_fail(k, fill(k, 2));
+       });
+    lc("rngd_fill_body_vacuity",
+       "the fill with check(false) at the end of the body: it fails (an iteration is possible; the body is not vacuous)",
+       [=](Kit& k)
+       {
+           vac_fail(k, fill(k, 3));
+       });
+
+    // ---- the values: kept where no write reaches the field or the place is read-only, lost for a written one ----
+    // int vals(int *p, int n) requires(owns_range(p, n) && 0 < n && p[0] == 7) ensures(owns_range(p, n) && ...) { int i = 0; int s = 0;
+    //   while (i < n) inv 0 <= i <= n && [s == s] { [p[i] = 0;|s = s + p[i];] i++; } check(p[0] == [7|8]); return s; }
+    // `write`: the loop writes p[i]; the values are lost then (the check fails), and kept otherwise
+    const auto values = [=](Kit& k, bool write, const char* want, bool reads, bool vac) -> const Stmt*
+    {
+        Function* f {k.fn("vals", k.i32, {{"p", PI(k)}, {"n", k.i32}})};
+        const Expr* atom {reads ? RR(k, f, 0, 1, 0) : RO(k, f, 0, 1, 0)};
+        k.req(f, k.land(k.land(atom, k.gt(fx(k, f, 1), N(k, "0"))), k.eq_c(crd(k, f, 0, N(k, "0")), k.i32, "7")));
+        k.ens(f, k.land(reads ? RR(k, f, 0, 1, 0) : RO(k, f, 0, 1, 0), k.ge_c(k.R(f), k.i32, "0")));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* s {k.local(f, "s", k.i32)};
+        std::vector<const Stmt*> bs;
+        if (write)
+        {
+            bs.push_back(bwr(k, f, 0, k.v(i), N(k, "0")));
+        }
+        else
+        {
+            bs.push_back(
+                k.iff(k.eq_c(brd(k, f, 0, k.v(i)), k.i32, "7"), k.blkc({k.asg(s, k.add(k.v(s), N(k, "1")))}), nullptr));
+        }
+        bs.push_back(inc(k, i));
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)),
+                  {k.cl(k.land(bounds(k, f, i, 1), k.land(k.ge_c(k.v(s), k.i32, "0"), k.le(k.v(s), k.v(i)))))},
+                  {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blkc(bs))};
+        const Stmt* c {k.chk(vac ? k.no() : k.eq_c(brd(k, f, 0, N(k, "0")), k.i32, want))};
+        f->body = k.blk({k.decl(i, N(k, "0")), k.decl(s, N(k, "0")), loop, c, k.ret(k.v(s))});
+        k.done(f);
+        return c;
+    };
+    lc("rngd_values_kept_reads",
+       "a read-only loop over reads_range(p, n) keeps the values (the read-only place's values-kept conjunct): p[0] == 7 still holds after it",
+       [=](Kit& k)
+       {
+           values(k, false, "7", true, false);
+       });
+    lc("rngd_values_kept_reads_wrong", "the same checking p[0] == 8: fails at the check",
+       [=](Kit& k)
+       {
+           k.fail("check", values(k, false, "8", true, false)->loc);
+       });
+    lc("rngd_values_kept_reads_vacuity", "the same with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, values(k, false, "7", true, true));
+       });
+    lc("rngd_values_kept_owns",
+       "a loop that only reads an owned range keeps the values too (no write reaches the field)",
+       [=](Kit& k)
+       {
+           values(k, false, "7", false, false);
+       });
+    lc("rngd_values_lost_owns",
+       "a loop that writes p[i] over an owned range loses the values: p[0] == 7 is not known after it (check)",
+       [=](Kit& k)
+       {
+           k.fail("check", values(k, true, "7", false, false)->loc);
+       });
+
+    // ---- the search: a read place, a return in the body ----
+    // int search(int *p, int n, int x) requires(reads_range(p, n)) ensures(reads_range(p, n) && (result == -1 || (0 <= result && result < n && p[result] [==|!=] x)))
+    //   { int i = 0; while (i < n) inv 0 <= i <= n decreases n - i { if (p[i] == x) { [check(false);] return i; } i++; } [check(false);] return -1; }
+    // `mode`: 0 the search, 1 the ensures says p[r] != x, 2 check(false) in the branch before the return, 3 check(false) after the loop
+    const auto search = [=](Kit& k, int mode) -> const Stmt*
+    {
+        Function* f {k.fn("search", k.i32, {{"p", PI(k)}, {"n", k.i32}, {"x", k.i32}})};
+        k.req(f, RR(k, f, 0, 1, 0));
+        const Expr* hit {crd(k, f, 0, k.R(f))};
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.lor(k.eq_c(k.R(f), k.i32, "-1"),
+                                                 k.land(k.land(k.ge_c(k.R(f), k.i32, "0"), k.lt(k.R(f), fx(k, f, 1))),
+                                                        mode == 1 ? k.ne(hit, fx(k, f, 2)) : k.eq(hit, fx(k, f, 2))))));
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* c2 {mode == 2 ? k.chk(k.no()) : nullptr};
+        const Stmt* r {k.ret(k.v(i))};
+        std::vector<const Stmt*> hits;
+        if (c2 != nullptr)
+        {
+            hits.push_back(c2);
+        }
+        hits.push_back(r);
+        const Stmt* body {k.blkc({k.iff(k.eq(brd(k, f, 0, k.v(i)), k.pv(f, 2)), k.blkc(hits), nullptr), inc(k, i)})};
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1))}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)};
+        const Stmt* c3 {mode == 3 ? k.chk(k.no()) : nullptr};
+        const Stmt* last {k.ret(N(k, "-1"))};
+        std::vector<const Stmt*> bs {k.decl(i, N(k, "0")), loop};
+        if (c3 != nullptr)
+        {
+            bs.push_back(c3);
+        }
+        bs.push_back(last);
+        f->body = k.blk(std::move(bs));
+        k.done(f);
+        return mode == 1 ? r : mode == 2 ? c2 : mode == 3 ? c3 : nullptr;
+    };
+    lc("rngd_search",
+       "a loop over reads_range(p, n) with a return in its body: the return rows run inside the body, the ensures reads p[result] under result != -1 (framed by the range), the values are kept",
+       [=](Kit& k)
+       {
+           search(k, 0);
+       });
+    lc("rngd_search_wrong",
+       "the ensures claims p[result] != x where the loop returned the index of x: the postcondition fails at that return only",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", search(k, 1)->loc);
+       });
+    lc("rngd_search_vacuity_branch",
+       "the search with check(false) before the return in the loop: it fails (the branch is reachable)",
+       [=](Kit& k)
+       {
+           vac_fail(k, search(k, 2));
+       });
+    lc("rngd_search_vacuity_after", "the search with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, search(k, 3));
+       });
+
+    // ---- two range parameters: a copy, and a read place written ----
+    // void copy(int *dst, int *src, int n) requires(owns_range(dst, n) && reads_range(src, n)) ensures(the same)
+    //   { int i = 0; while (i < n) inv 0 <= i <= n decreases n - i { [dst[i] = src[i];|src[i] = 0;] [check(false);] i++; } [check(false);] }
+    const auto copy = [=](Kit& k, int mode) -> const Stmt*
+    {
+        Function* f {k.fn("copy", k.vd, {{"dst", PI(k)}, {"src", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(RO(k, f, 0, 2, 0), RR(k, f, 1, 2, 1)));
+        k.ens(f, k.land(RO(k, f, 0, 2, 0), RR(k, f, 1, 2, 1)));
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* w {mode == 1 ? bwr(k, f, 1, k.v(i), N(k, "0")) : bwr(k, f, 0, k.v(i), brd(k, f, 1, k.v(i)))};
+        const Stmt* c3 {mode == 3 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {w};
+        if (c3 != nullptr)
+        {
+            bs.push_back(c3);
+        }
+        bs.push_back(inc(k, i));
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 2)), {k.cl(bounds(k, f, i, 2))}, {k.cl(k.sub(k.pv(f, 2), k.v(i)))}, k.blkc(bs))};
+        const Stmt* c2 {mode == 2 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> body {k.decl(i, N(k, "0")), loop};
+        if (c2 != nullptr)
+        {
+            body.push_back(c2);
+        }
+        f->body = k.blk(std::move(body));
+        k.done(f);
+        return mode == 1 ? w : mode == 2 ? c2 : mode == 3 ? c3 : nullptr;
+    };
+    lc("rngd_copy",
+       "dst[i] = src[i] over owns_range(dst, n) and reads_range(src, n): two range places, the entry liveness split, both given back",
+       [=](Kit& k)
+       {
+           copy(k, 0);
+       });
+    lc("rngd_copy_write_src",
+       "the loop writes the read-only range (src[i] = 0): the write's permission row fails at the store (permission)",
+       [=](Kit& k)
+       {
+           k.fail("permission", copy(k, 1)->loc);
+       });
+    lc("rngd_copy_vacuity", "the copy with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, copy(k, 2));
+       });
+    lc("rngd_copy_body_vacuity", "the copy with check(false) at the end of the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, copy(k, 3));
+       });
+
+    // ---- a guarded range: the conjuncts and the marked rows under the guard ----
+    // void fill_g(int *p, int n) requires(n == 0 || owns_range(p, n)) ensures(n == 0 || owns_range(p, n) [&& (n == 0 || p[0] == 0)])
+    //   { int i = 0; while (i < n) inv 0 <= i <= n decreases n - i { p[i] = i; [if (n != 0) check(false);] i++; } [if (n != 0) check(false);] }
+    // `mode`: 0 the fill, 1 a second ensures claims p[0] == 0 under the guard (the loop wrote p[i] = i and keeps no value), 2 check(false) under the guard in the body,
+    // 3 check(false) under the guard after the loop
+    const auto guarded = [=](Kit& k, int mode, SrcLoc* end = nullptr) -> const Stmt*
+    {
+        Function* f {k.fn("fill_g", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), RO(k, f, 0, 1, 0)));
+        const Expr* atom {k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), RO(k, f, 0, 1, 0))};
+        k.ens(f, mode == 1
+                     ? k.land(atom, k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), k.eq_c(crd(k, f, 0, N(k, "0")), k.i32, "0")))
+                     : atom);
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* w {bwr(k, f, 0, k.v(i), k.v(i))};
+        const Stmt* c2 {mode == 2 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {w};
+        if (c2 != nullptr)
+        {
+            bs.push_back(k.iff(k.ne(k.pv(f, 1), N(k, "0")), k.blkc({c2}), nullptr));
+        }
+        bs.push_back(inc(k, i));
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1))}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blkc(bs))};
+        const Stmt* c3 {mode == 3 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> body {k.decl(i, N(k, "0")), loop};
+        if (c3 != nullptr)
+        {
+            body.push_back(k.iff(k.ne(k.pv(f, 1), N(k, "0")), k.blkc({c3}), nullptr));
+        }
+        f->body = k.blk(std::move(body));
+        k.done(f);
+        if (end != nullptr)
+        {
+            *end = f->end_loc;
+        }
+        return mode == 2 ? c2 : mode == 3 ? c3 : nullptr;
+    };
+    lc("rngd_guarded",
+       "a loop over n == 0 || owns_range(p, n): the conjuncts and the marked rows are under the guard (if (g) { }), the liveness is the parameter's place",
+       [=](Kit& k)
+       {
+           guarded(k, 0);
+       });
+    lc("rngd_guarded_post",
+       "a second ensures claims p[0] == 0 under the guard: the loop wrote p[i] = i and keeps no value, so the postcondition fails at the closing brace",
+       [=](Kit& k)
+       {
+           SrcLoc end;
+           guarded(k, 1, &end);
+           k.fail("postcondition", end);
+       });
+    lc("rngd_guarded_body_vacuity",
+       "check(false) under n != 0 at the end of the body: it fails (the guard-true iteration is possible)",
+       [=](Kit& k)
+       {
+           vac_fail(k, guarded(k, 2));
+       });
+    lc("rngd_guarded_after_vacuity", "check(false) under n != 0 after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, guarded(k, 3));
+       });
+
+    // ---- a guarded range beside an address-taken local and a local array of the same field (0038's audit round 2 and e1a's shape) ----
+    // int beside(int *p, int n) requires(n == 0 || owns_range(p, n)) ensures((n == 0 || owns_range(p, n)) && result == [0|1])
+    //   { int x = 1; int *px = &x; int a[3] = {1, 2, 3}; int i = 0;
+    //     while (i < n) inv 0 <= i <= n decreases n - i { p[i] = i; *px = i; a[[0|i]] = i; i++; } return a[1] - a[1]; }
+    // `mode`: 0 the shape, 1 a[i] with i up to n (the array's bound row), 2 the ensures claims result == 1, 3 check(false) at the end of the body
+    const auto beside = [=](Kit& k, int mode, const Function** fout = nullptr) -> const Stmt*
+    {
+        Function* f {k.fn("beside", k.i32, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), RO(k, f, 0, 1, 0)));
+        k.ens(f, k.land(k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), RO(k, f, 0, 1, 0)),
+                        k.eq_c(k.R(f), k.i32, mode == 2 ? "1" : "0")));
+        Var* x {k.cell(f, "x", k.i32)};
+        Var* px {k.local(f, "px", PI(k))};
+        Var* a {arr(k, f, "a", k.i32, 3U)};
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* wa {awr(k, a, mode == 1 ? k.v(i) : N(k, "0"), k.v(i))};
+        const Stmt* c3 {mode == 3 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {bwr(k, f, 0, k.v(i), k.v(i)), k.store(k.pn(px), k.v(i)), wa};
+        if (c3 != nullptr)
+        {
+            bs.push_back(k.iff(k.ne(k.pv(f, 1), N(k, "0")), k.blkc({c3}), nullptr));
+        }
+        bs.push_back(inc(k, i));
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1))}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blkc(bs))};
+        const Stmt* last {k.ret(k.sub(ard(k, a, N(k, "1")), ard(k, a, N(k, "1"))))};
+        f->body = k.blkc({k.decl(x, N(k, "1")), k.decl(px, k.addr(x)), k.decl(a, nullptr),
+                          awr(k, a, N(k, "0"), N(k, "1")), awr(k, a, N(k, "1"), N(k, "2")),
+                          awr(k, a, N(k, "2"), N(k, "3")), k.decl(i, N(k, "0")), loop, last});
+        k.done(f);
+        if (fout != nullptr)
+        {
+            *fout = f;
+        }
+        return mode == 1 ? wa : mode == 2 ? last : c3;
+    };
+    lc("rngd_beside",
+       "a guarded range, an address-taken local and a local array of one field all written in one loop: three places, the range's rows inside if (g), no exit 3 for either guard value",
+       [=](Kit& k)
+       {
+           beside(k, 0);
+       });
+    lc("rngd_beside_index",
+       "the body stores a[i] with i up to n into the three-element array: the array's bound row fails at the store, one error",
+       [=](Kit& k)
+       {
+           k.fail("out-of-bounds", beside(k, 1)->loc);
+       });
+    lc("rngd_beside_post",
+       "the ensures claims result == 1 where the function returns 0: the postcondition fails at the return, one error",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", beside(k, 2)->loc);
+       });
+    lc("rngd_beside_body_vacuity",
+       "check(false) under n != 0 at the end of the body: it fails (the guard-true iteration is reachable)",
+       [=](Kit& k)
+       {
+           vac_fail(k, beside(k, 3));
+       });
+
+    // ---- p[e] in an invariant and in a measure ----
+    // void countdown(int *p, int n) requires(owns_range(p, n) && n > 0 && 0 <= p[0] && p[0] <= 100) ensures(owns_range(p, n) && p[0] == 0)
+    //   { while (p[0] > 0) inv 0 <= p[0] && p[0] <= 100 decreases p[0] { p[0] -= 1; [check(false);] } [check(false);] }
+    // `mode`: 0 the countdown, 1 check(false) at the end of the body, 2 check(false) after the loop
+    const auto countdown = [=](Kit& k, int mode) -> const Stmt*
+    {
+        Function* f {k.fn("countdown", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(k.land(RO(k, f, 0, 1, 0), k.gt(fx(k, f, 1), N(k, "0"))),
+                        k.land(k.ge_c(crd(k, f, 0, N(k, "0")), k.i32, "0"),
+                               k.le_c(crd(k, f, 0, N(k, "0")), k.i32, "100"))));
+        k.ens(f, k.land(RO(k, f, 0, 1, 0), k.eq_c(crd(k, f, 0, N(k, "0")), k.i32, "0")));
+        const Stmt* w {k.cstore(bat(k, f, 0, N(k, "0")), BinaryOp::Sub, N(k, "1"))};
+        const Stmt* c1 {mode == 1 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {w};
+        if (c1 != nullptr)
+        {
+            bs.push_back(c1);
+        }
+        const Expr* cur {brd(k, f, 0, N(k, "0"))};
+        const Stmt* loop {k.whl(
+            k.gt(cur, N(k, "0")),
+            {k.cl(k.land(k.ge_c(brd(k, f, 0, N(k, "0")), k.i32, "0"), k.le_c(brd(k, f, 0, N(k, "0")), k.i32, "100")))},
+            {k.cl(brd(k, f, 0, N(k, "0")))}, k.blkc(bs))};
+        const Stmt* c2 {mode == 2 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> body {loop};
+        if (c2 != nullptr)
+        {
+            body.push_back(c2);
+        }
+        f->body = k.blk(std::move(body));
+        k.done(f);
+        return mode == 1 ? c1 : c2;
+    };
+    lc("rngd_element_clauses",
+       "p[0] in a loop's invariant and in its measure over owns_range(p, n): the reads are framed by the range place's interval test",
+       [=](Kit& k)
+       {
+           countdown(k, 0);
+       });
+    lc("rngd_element_clauses_body_vacuity", "the countdown with check(false) at the end of the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, countdown(k, 1));
+       });
+    lc("rngd_element_clauses_vacuity", "the countdown with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, countdown(k, 2));
+       });
+
+    // int first_negative(int *p, int n) requires(reads_range(p, n)) ensures(reads_range(p, n) && (result == -1 || (0 <= result && result < n && p[result] < 0)))
+    //   { int i = 0; while (i < n) inv 0 <= i <= n && (i == 0 || p[i - 1] >= 0) decreases n - i { if (p[i] < 0) { return i; } i++; } return -1; }
+    // `unframed`: the invariant is `i < n || p[i] >= 0`, which reads p[i] where i is n (and is inductive: the unframed read is the dummy value 0, the only failure the framing)
+    const auto first_negative = [=](Kit& k, bool unframed, bool vac, SrcLoc* vac_at = nullptr) -> const Expr*
+    {
+        Function* f {k.fn("first_negative", k.i32, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, RR(k, f, 0, 1, 0));
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.lor(k.eq_c(k.R(f), k.i32, "-1"),
+                                                 k.land(k.land(k.ge_c(k.R(f), k.i32, "0"), k.lt(k.R(f), fx(k, f, 1))),
+                                                        k.lt(crd(k, f, 0, k.R(f)), N(k, "0"))))));
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* read {
+            k.b.text(brd(k, f, 0, unframed ? k.v(i) : k.sub(k.v(i), N(k, "1"))), unframed ? "p[i]" : "p[i - 1]")};
+        const Expr* clause {
+            k.lor(unframed ? k.lt(k.v(i), k.pv(f, 1)) : k.eq_c(k.v(i), k.i32, "0"), k.ge_c(read, k.i32, "0"))};
+        const Stmt* body {
+            k.blkc({k.iff(k.lt(brd(k, f, 0, k.v(i)), N(k, "0")), k.blkc({k.ret(k.v(i))}), nullptr), inc(k, i)})};
+        const Stmt* loop {k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1)), k.cl(clause)},
+                                {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)};
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {k.decl(i, N(k, "0")), loop};
+        if (c != nullptr)
+        {
+            bs.push_back(c);
+        }
+        bs.push_back(k.ret(N(k, "-1")));
+        f->body = k.blk(std::move(bs));
+        k.done(f);
+        if (vac_at != nullptr && c != nullptr)
+        {
+            *vac_at = c->loc;
+        }
+        return read;
+    };
+    lc("rngd_element_guarded",
+       "p[i - 1] under i == 0 || in a loop invariant over reads_range(p, n): framed by the range for 0 < i <= n",
+       [=](Kit& k)
+       {
+           first_negative(k, false, false);
+       });
+    lc("rngd_element_guarded_vacuity", "the same with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           first_negative(k, false, true, &at);
+           k.fail("check", at);
+       });
+    lc("rngd_element_unframed",
+       "i < n || p[i] >= 0 as an invariant: for i == n (and for n == 0 at the entry) the range place ends at n, the read is unframed (permission at the read in the clause: entry and back edge)",
+       [=](Kit& k)
+       {
+           // two real cases at one line: n == 0 at the entry (p[0] is outside an empty range), and an iteration that reaches i == n; the driver prints them as one
+           k.fail("permission", first_negative(k, true, false)->loc, 2U, "",
+                  "this loop invariant reads `p[i]`, which this loop does not hold");
+       });
+
+    // int count(int *p, int n) requires(owns(*p) && 0 <= n && n <= 10 && *p >= 0) { int i = 0; while (i < n) inv 0 <= i <= n && p[<idx>] >= 0 decreases n - i { [*p = -1;] i++; } return i; }
+    // `mode`: 0 p[0] framed by the cell place, 1 the body stores -1 (not preserved), 2 p[1] (no atom holds it)
+    const auto cell_element = [=](Kit& k, int mode, SrcLoc* clause_at = nullptr) -> const Expr*
+    {
+        Function* f {k.fn("count", k.i32, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(k.land(k.b.atom(AtomKind::Owns, fx(k, f, 0), 0, k.at()), k.ge_c(fx(k, f, 1), k.i32, "0")),
+                        k.land(k.le_c(fx(k, f, 1), k.i32, "10"), k.ge_c(k.deref(fx(k, f, 0)), k.i32, "0"))));
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* read {k.b.text(brd(k, f, 0, N(k, mode == 2 ? "1" : "0")), mode == 2 ? "p[1]" : "p[0]")};
+        const Expr* clause {k.ge_c(read, k.i32, "0")};
+        std::vector<const Stmt*> bs;
+        if (mode == 1)
+        {
+            bs.push_back(k.store(k.pn(f->param_var(0)), k.neg(N(k, "1"))));
+        }
+        bs.push_back(inc(k, i));
+        const Clause kept {k.cl(clause)};
+        if (clause_at != nullptr)
+        {
+            *clause_at = kept.loc;
+        }
+        const Stmt* loop {k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1)), kept},
+                                {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blkc(bs))};
+        f->body = k.blk({k.decl(i, N(k, "0")), loop, k.ret(k.v(i))});
+        k.done(f);
+        return read;
+    };
+    lc("rngd_element_cell",
+       "p[0] >= 0 as an invariant under owns(*p): framed by the cell place of *p (the element is the cell)",
+       [=](Kit& k)
+       {
+           cell_element(k, 0);
+       });
+    lc("rngd_element_cell_write",
+       "the body stores -1 to *p: p[0] >= 0 is not preserved (invariant-preserved at the clause)",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           cell_element(k, 1, &at);
+           k.fail("invariant-preserved", at);
+       });
+    lc("rngd_element_cell_unframed",
+       "the invariant reads p[1], which no atom of the function holds: permission at the read (the entry assert fails, and its assumption ends the path)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", cell_element(k, 2)->loc, 2U, 0U,
+                       "this loop invariant reads `p[1]`, which this loop does not hold");
+       });
+
+    // the callers, with both guard values: int use_both(void) ensures(result == 0) { int buf[4] = {1, 2, 3, 4}; int r0 = beside(buf, 0); int r1 = beside(buf, 4); return r0 + r1; }
+    const auto beside_callers = [=](Kit& k, bool vac) -> const Stmt*
+    {
+        const Function* bf {nullptr};
+        beside(k, 0, &bf);
+        Function* u {k.fn("use_both", k.i32)};
+        k.ens(u, k.eq_c(k.R(u), k.i32, "0"));
+        Var* buf {arr(k, u, "buf", k.i32, 4U)};
+        Var* r0 {k.local(u, "r0", k.i32)};
+        Var* r1 {k.local(u, "r1", k.i32)};
+        std::vector<const Stmt*> st {k.decl(buf, nullptr)};
+        for (int j {0}; j < 4; ++j)
+        {
+            st.push_back(awr(k, buf, N(k, std::to_string(j).c_str()), N(k, std::to_string(j + 1).c_str())));
+        }
+        st.push_back(k.decl(r0, k.call(bf, {aat(k, buf, N(k, "0")), N(k, "0")})));
+        st.push_back(k.decl(r1, k.call(bf, {aat(k, buf, N(k, "0")), N(k, "4")})));
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        if (c != nullptr)
+        {
+            st.push_back(c);
+        }
+        st.push_back(k.ret(k.add(k.v(r0), k.v(r1))));
+        u->body = k.blkc(std::move(st));
+        k.done(u);
+        return c;
+    };
+    lc("rngd_beside_callers",
+       "beside(buf, 0) (the guard false, nothing given) and beside(buf, 4) on a four-element array: both guard values, the array is whole again after each call",
+       [=](Kit& k)
+       {
+           beside_callers(k, false);
+       });
+    lc("rngd_beside_callers_vacuity", "the same with check(false) before the return: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, beside_callers(k, true));
+       });
+
+    // ---- a callee in the body: it takes one element of the loop's range and gives it back (or keeps it) ----
+    // void give(int *q) requires(owns(*q)) ensures(owns(*q) && *q == 5);   void keep(int *q) requires(owns(*q));
+    // void fill5(int *p, int n) requires(owns_range(p, n)) ensures(owns_range(p, n)) { int i = 0; while (i < n) inv 0 <= i <= n decreases n - i { give(&p[i]); [check(false);] i++; } }
+    const auto callee_loop = [=](Kit& k, bool keeps, bool vac, SrcLoc* body_end = nullptr) -> const Stmt*
+    {
+        Function* g {k.fn(keeps ? "keep" : "give", k.vd, {{"q", PI(k)}})};
+        k.req(g, k.b.atom(AtomKind::Owns, fx(k, g, 0), 0, k.at()));
+        if (!keeps)
+        {
+            k.ens(g,
+                  k.land(k.b.atom(AtomKind::Owns, fx(k, g, 0), 0, k.at()), k.eq_c(k.deref(fx(k, g, 0)), k.i32, "5")));
+        }
+        k.trusted(g);
+        k.done(g);
+        Function* f {k.fn("fill5", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, RO(k, f, 0, 1, 0));
+        k.ens(f, RO(k, f, 0, 1, 0));
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {k.es(k.call(g, {bat(k, f, 0, k.v(i))}))};
+        if (c != nullptr)
+        {
+            bs.push_back(c);
+        }
+        bs.push_back(inc(k, i));
+        const Stmt* body {k.blkc(bs)};
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1))}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)};
+        f->body = k.blk({k.decl(i, N(k, "0")), loop});
+        k.done(f);
+        if (body_end != nullptr)
+        {
+            *body_end = body->end_loc;
+        }
+        return c;
+    };
+    lc("rngd_callee_gives",
+       "give(&p[i]) takes one element of the loop's range and gives it back each iteration: the back-edge marked rows hold",
+       [=](Kit& k)
+       {
+           callee_loop(k, false, false);
+       });
+    lc("rngd_callee_gives_vacuity", "the same with check(false) after the call in the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, callee_loop(k, false, true));
+       });
+    lc("rngd_callee_keeps",
+       "keep(&p[i]) never gives the element back (nor the liveness fraction it took): the parameter's liveness row, the first back-edge row, fails at the end of the body (permission, the range's own message); its assumption is contradictory, so the marked rows after it report nothing",
+       [=](Kit& k)
+       {
+           SrcLoc end;
+           callee_loop(k, true, false, &end);
+           k.fail_only("permission", end, 3U, 0U, "an iteration of this loop ends without the permission to `p[0..n)`");
+       });
+
+    // ---- a read range and a read cell in one loop: the cell place carries "not inside the range" ----
+    // int count_eq(int *p, int n, int *q) requires(reads_range(p, n) && reads(*q)) ensures(reads_range(p, n) && reads(*q) && 0 <= result && result <= n)
+    //   { int i = 0; int c = 0; while (i < n) inv 0 <= i <= n && 0 <= c && c <= [i|i - 1] decreases n - i { if (p[i] == *q) { c++; } i++; } return c; }
+    // `entry`: the invariant claims c < i, false on entry
+    const auto range_cell = [=](Kit& k, bool entry, bool vac, const Function** fout = nullptr,
+                                SrcLoc* clause_at = nullptr) -> const Stmt*
+    {
+        Function* f {k.fn("count_eq", k.i32, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}})};
+        k.req(f, k.land(RR(k, f, 0, 1, 0), k.b.atom(AtomKind::Reads, fx(k, f, 2), 1, k.at())));
+        k.ens(f, k.land(k.land(RR(k, f, 0, 1, 0), k.b.atom(AtomKind::Reads, fx(k, f, 2), 1, k.at())),
+                        k.land(k.ge_c(k.R(f), k.i32, "0"), k.le(k.R(f), fx(k, f, 1)))));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* c {k.local(f, "c", k.i32)};
+        const Stmt* body {k.blkc({k.iff(k.eq(brd(k, f, 0, k.v(i)), k.deref(k.pn(f->param_var(2)))),
+                                        k.blkc({k.asg(c, k.add(k.v(c), N(k, "1")))}), nullptr),
+                                  inc(k, i)})};
+        const Clause cc {k.cl(k.land(k.ge_c(k.v(c), k.i32, "0"), entry ? k.lt(k.v(c), k.v(i)) : k.le(k.v(c), k.v(i))))};
+        if (clause_at != nullptr)
+        {
+            *clause_at = cc.loc;
+        }
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1)), cc}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)};
+        const Stmt* v {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {k.decl(i, N(k, "0")), k.decl(c, N(k, "0")), loop};
+        if (v != nullptr)
+        {
+            bs.push_back(v);
+        }
+        bs.push_back(k.ret(k.v(c)));
+        f->body = k.blk(std::move(bs));
+        k.done(f);
+        if (fout != nullptr)
+        {
+            *fout = f;
+        }
+        return v;
+    };
+    lc("rngd_range_cell",
+       "a reads_range and a reads(*q) cell in one loop that reads both: the cell place carries the guard 'not inside the range', so the one function verifies whether q is inside the range or not",
+       [=](Kit& k)
+       {
+           range_cell(k, false, false);
+       });
+    lc("rngd_range_cell_vacuity", "the same with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, range_cell(k, false, true));
+       });
+    lc("rngd_range_cell_entry",
+       "the invariant claims c < i, false on entry (c == i == 0): invariant-entry at the clause",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           range_cell(k, true, false, nullptr, &at);
+           k.fail("invariant-entry", at);
+       });
+    // int inside(void) { int a[3] = {1, 2, 3}; return count_eq(a, 3, &a[1]); }  and outside with a separate cell
+    const auto range_cell_callers = [=](Kit& k, bool inside, bool vac) -> const Stmt*
+    {
+        const Function* cf {nullptr};
+        range_cell(k, false, false, &cf);
+        Function* u {k.fn(inside ? "inside" : "outside", k.i32)};
+        Var* a {arr(k, u, "a", k.i32, 3U)};
+        Var* x {k.cell(u, "x", k.i32)};
+        std::vector<const Stmt*> st {k.decl(a, nullptr), awr(k, a, N(k, "0"), N(k, "1")),
+                                     awr(k, a, N(k, "1"), N(k, "2")), awr(k, a, N(k, "2"), N(k, "3")),
+                                     k.decl(x, N(k, "2"))};
+        Var* r {k.local(u, "r", k.i32)};
+        st.push_back(
+            k.decl(r, k.call(cf, {aat(k, a, N(k, "0")), N(k, "3"), inside ? aat(k, a, N(k, "1")) : k.addr(x)})));
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        if (c != nullptr)
+        {
+            st.push_back(c);
+        }
+        st.push_back(k.ret(k.v(r)));
+        u->body = k.blkc(std::move(st));
+        k.done(u);
+        return c;
+    };
+    lc("rngd_range_cell_inside", "count_eq(a, 3, &a[1]): the cell is inside the range (both reads), the call verifies",
+       [=](Kit& k)
+       {
+           range_cell_callers(k, true, false);
+       });
+    lc("rngd_range_cell_inside_vacuity", "the same with check(false) before the return: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, range_cell_callers(k, true, true));
+       });
+    lc("rngd_range_cell_outside", "count_eq(a, 3, &x) with a separate cell: the call verifies",
+       [=](Kit& k)
+       {
+           range_cell_callers(k, false, false);
+       });
+    lc("rngd_range_cell_outside_vacuity", "the same with check(false) before the return: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, range_cell_callers(k, false, true));
+       });
+
+    // ---- two read ranges that may share a slot ----
+    // void two_reads(int *p, int n, int *q, int m) requires(reads_range(p, n) && reads_range(q, m) && m == n && n > 1) ensures(the same)
+    //   { [keep_slot(&p[1]);] int i = 0; int x = 0; while (i < n) inv 0 <= i <= n decreases n - i { x = p[i]; [keep_slot(&p[1]);] x = q[i]; i++; } }
+    // `mode`: 0 the loop, 1 a callee keeps a fraction of slot 1 before the loop (the entry rows), 2 it does so in the body (the back-edge rows)
+    const auto two_reads = [=](Kit& k, int mode, bool vac, SrcLoc* loop_at = nullptr,
+                               SrcLoc* body_end = nullptr) -> const Stmt*
+    {
+        Function* kf {nullptr};
+        if (mode == 1 || mode == 2)
+        {
+            kf = k.fn("keep_slot", k.vd, {{"x", PI(k)}});
+            k.req(kf, k.b.atom(AtomKind::Reads, fx(k, kf, 0), 0, k.at()));
+            k.ens(kf, k.b.atom(AtomKind::Live, fx(k, kf, 0), 1, k.at()));
+            kf->body = k.blk({});
+            k.done(kf);
+        }
+        else if (mode == 3)
+        {
+            // void eat(int *x, int c) requires(reads_range(x, c)): bodiless, it keeps the fraction it takes of every slot
+            kf = k.fn("eat", k.vd, {{"x", PI(k)}, {"c", k.i32}});
+            k.req(kf, RR(k, kf, 0, 1, 0));
+            k.trusted(kf);
+            k.done(kf);
+        }
+        Function* f {k.fn("two_reads", k.vd, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}, {"m", k.i32}})};
+        const Expr* shape {k.land(k.eq(fx(k, f, 3), fx(k, f, 1)), k.gt(fx(k, f, 1), N(k, "1")))};
+        if (mode == 3)
+        {
+            shape = k.land(shape, k.eq(fx(k, f, 2), fx(k, f, 0))); // p == q: every slot of the range is shared
+        }
+        k.req(f, k.land(k.land(RR(k, f, 0, 1, 0), RR(k, f, 2, 3, 1)), shape));
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), RR(k, f, 2, 3, 1)));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        std::vector<const Stmt*> bs {k.asg(x, brd(k, f, 0, k.v(i)))};
+        if (mode == 2)
+        {
+            bs.push_back(k.es(k.call(kf, {bat(k, f, 0, N(k, "1"))})));
+        }
+        bs.push_back(k.asg(x, brd(k, f, 2, k.v(i))));
+        bs.push_back(inc(k, i));
+        const Stmt* body {k.blkc(bs)};
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1))}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)};
+        std::vector<const Stmt*> st;
+        if (mode == 1)
+        {
+            st.push_back(k.es(k.call(kf, {bat(k, f, 0, N(k, "1"))})));
+        }
+        if (mode == 3)
+        {
+            st.push_back(k.es(k.call(kf, {k.pn(f->param_var(0)), k.pv(f, 1)})));
+        }
+        st.push_back(k.decl(i, N(k, "0")));
+        st.push_back(k.decl(x, N(k, "0")));
+        st.push_back(loop);
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        if (c != nullptr)
+        {
+            st.push_back(c);
+        }
+        f->body = k.blk(std::move(st));
+        k.done(f);
+        if (loop_at != nullptr)
+        {
+            *loop_at = loop->loc;
+        }
+        if (body_end != nullptr)
+        {
+            *body_end = body->end_loc;
+        }
+        return c;
+    };
+    lc("rngd_two_reads",
+       "two reads_range places that may overlap, both read in the body, no exclusion of the earlier one: both marked rows take the sum form, and the function verifies",
+       [=](Kit& k)
+       {
+           two_reads(k, 0, false);
+       });
+    lc("rngd_two_reads_vacuity", "the same with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, two_reads(k, 0, true));
+       });
+    lc("rngd_two_reads_keep_entry",
+       "keep_slot(&p[1]) keeps a fraction of slot 1 before the loop (the callee takes half of what the slot holds and returns only the liveness): the loop begins without the permission to every element of p[0..n): the first marked entry row, p's value row, fails at the loop (permission); the failed marked row ends the path",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           two_reads(k, 1, false, &at);
+           k.fail_only("permission", at, 2U, 0U,
+                       "this loop begins without the permission to every element of `p[0..n)`");
+       });
+    lc("rngd_two_reads_keep_body",
+       "keep_slot(&p[1]) in the body keeps a fraction of slot 1 and the liveness fraction it takes does not come back: the end of the body fails twice, the parameter's liveness row and then the first marked back-edge row, both permission with the range's message",
+       [=](Kit& k)
+       {
+           SrcLoc end;
+           two_reads(k, 2, false, nullptr, &end);
+           k.fail_only("permission", end, 3U, 0U, "an iteration of this loop ends without the permission to `p[0..n)`");
+           k.fail_only("permission", end, 3U, 1U, "an iteration of this loop ends without the permission to `p[0..n)`");
+       });
+    lc("rngd_two_reads_eat_entry",
+       "p == q, and eat(p, n) (reads_range, bodiless: it keeps the fraction it takes of every slot, a third of what each holds) before the loop: every slot is shared, each place's own amount is still there, their sum is not: the first sum-form marked entry row fails at the loop (permission); with per-place rows only, Silicon's own invariant check fails on entry (an internal reason, an exit 3)",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           two_reads(k, 3, false, &at);
+           k.fail_only("permission", at, 2U, 0U,
+                       "this loop begins without the permission to every element of `p[0..n)`");
+       });
+
+    // ---- the assigned parameter: no range place for it (question 237's pinned false alarm) ----
+    // int pin(int *p, int *q, int n) requires(reads_range(p, n) && reads_range(q, n) && n > 0) ensures(reads_range(p, n) && reads_range(q, n))
+    //   { int i = 0; int z = 0; p = q; while (i < n) inv 0 <= i <= n && 0 <= z && z <= i decreases n - i { if (q[i] == 0) { z++; } i++; } return z; }
+    // The loop reads q only: p's range is not carried by the loop, it stays in the frame and comes back after it: the program verifies (no false alarm here).
+    const auto pin = [=](Kit& k, bool vac) -> const Stmt*
+    {
+        Function* f {k.fn("pin", k.i32, {{"p", PI(k)}, {"q", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(k.land(RR(k, f, 0, 2, 0), RR(k, f, 1, 2, 1)), k.gt(fx(k, f, 2), N(k, "0"))));
+        k.ens(f, k.land(RR(k, f, 0, 2, 0), RR(k, f, 1, 2, 1)));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* z {k.local(f, "z", k.i32)};
+        const Stmt* body {k.blkc(
+            {k.iff(k.eq_c(brd(k, f, 1, k.v(i)), k.i32, "0"), k.blkc({k.asg(z, k.add(k.v(z), N(k, "1")))}), nullptr),
+             inc(k, i)})};
+        const Stmt* loop {
+            k.whl(k.lt(k.v(i), k.pv(f, 2)),
+                  {k.cl(k.land(bounds(k, f, i, 2), k.land(k.ge_c(k.v(z), k.i32, "0"), k.le(k.v(z), k.v(i)))))},
+                  {k.cl(k.sub(k.pv(f, 2), k.v(i)))}, body)};
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> st {k.decl(i, N(k, "0")), k.decl(z, N(k, "0")),
+                                     k.asg(f->param_var(0), k.pn(f->param_var(1))), loop};
+        if (c != nullptr)
+        {
+            st.push_back(c);
+        }
+        st.push_back(k.ret(k.v(z)));
+        f->body = k.blk(std::move(st));
+        k.done(f);
+        return c;
+    };
+    lc("rngd_assigned_param_frame",
+       "the function assigns p (p = q) and the loop reads only q: p has no range place, so its range stays in the frame through the loop and comes back whole: the program verifies",
+       [=](Kit& k)
+       {
+           pin(k, false);
+       });
+    lc("rngd_assigned_param_frame_vacuity", "the same with check(false) after the loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, pin(k, true));
+       });
+    // int pin2(int *p, int n) requires(reads_range(p, n) && n > 1) ensures(reads_range(p, n))
+    //   { int i = 0; int z = 0; p = &p[1]; while (i < n - 1) inv 0 <= i <= n - 1 && 0 <= z && z <= i decreases n - 1 - i { if (p[i] == 0) { z++; } i++; } return z; }
+    // The loop reads slots of p's range through the assigned p: nothing carries them in the loop (a pinned false alarm, question 237)
+    const auto pin_read = [=](Kit& k, SrcLoc* read_at) -> const Stmt*
+    {
+        Function* f {k.fn("pin2", k.i32, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(RR(k, f, 0, 1, 0), k.gt(fx(k, f, 1), N(k, "1"))));
+        k.ens(f, RR(k, f, 0, 1, 0));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* z {k.local(f, "z", k.i32)};
+        const Expr* rd {k.b.text(brd(k, f, 0, k.v(i)), "p[i]")};
+        *read_at = rd->loc;
+        const Expr* lim {k.sub(k.pv(f, 1), N(k, "1"))};
+        const Stmt* body {
+            k.blkc({k.iff(k.eq_c(rd, k.i32, "0"), k.blkc({k.asg(z, k.add(k.v(z), N(k, "1")))}), nullptr), inc(k, i)})};
+        const Stmt* loop {k.whl(k.lt(k.v(i), lim),
+                                {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"),
+                                             k.land(k.le(k.v(i), k.sub(k.pv(f, 1), N(k, "1"))),
+                                                    k.land(k.ge_c(k.v(z), k.i32, "0"), k.le(k.v(z), k.v(i))))))},
+                                {k.cl(k.sub(k.sub(k.pv(f, 1), N(k, "1")), k.v(i)))}, body)};
+        f->body = k.blk({k.decl(i, N(k, "0")), k.decl(z, N(k, "0")), k.asg(f->param_var(0), bat(k, f, 0, N(k, "1"))),
+                         loop, k.ret(k.v(z))});
+        k.done(f);
+        return nullptr;
+    };
+    lc("rngd_assigned_param",
+       "the function assigns p (p = &p[1]) and the loop reads p[i] through it: p has no range place and the loop carries nothing for those slots, so the read is a user error (a false alarm: the program is correct, pinned, question 237); the errors are the read's own rows, never an internal one",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           pin_read(k, &at);
+           k.fail("lifetime", at);
+       });
+
+    // ---- a loop that assigns the count parameter: the range's bounds are the entry values ----
+    // void dec(int *p, int n) requires(owns_range(p, n) && n > 0) ensures(owns_range(p, n)) { while (n > 0) inv 0 <= n decreases n { p[0] = 5; n = n - 1; } }
+    const auto dec_count = [=](Kit& k, bool vac) -> const Stmt*
+    {
+        Function* f {k.fn("dec", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(RO(k, f, 0, 1, 0), k.gt(fx(k, f, 1), N(k, "0"))));
+        k.ens(f, RO(k, f, 0, 1, 0));
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {bwr(k, f, 0, N(k, "0"), N(k, "5")),
+                                     k.asg(f->param_var(1), k.sub(k.pv(f, 1), N(k, "1")))};
+        if (c != nullptr)
+        {
+            bs.push_back(c);
+        }
+        f->body = k.blk({k.whl(k.gt(k.pv(f, 1), N(k, "0")), {k.cl(k.ge_c(k.pv(f, 1), k.i32, "0"))}, {k.cl(k.pv(f, 1))},
+                               k.blkc(bs))});
+        k.done(f);
+        return c;
+    };
+    lc("rngd_count_assigned",
+       "the loop decrements the count parameter n: the range place keeps the entry value of n (the formal), so p[0] stays inside it and the range comes back whole",
+       [=](Kit& k)
+       {
+           dec_count(k, false);
+       });
+    lc("rngd_count_assigned_body_vacuity", "the same with check(false) at the end of the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, dec_count(k, true));
+       });
+
+    // ---- an array used as a pointer in an invariant ----
+    // int walk(void) { int a[3] = {1, 2, 3}; int *q = &a[0]; int i = 0; while (i < 3) inv 0 <= i <= 3 && q == a decreases 3 - i { [q = &a[1];] i++; } return *q; }
+    const auto walk = [=](Kit& k, bool moved, bool vac, SrcLoc* clause_at = nullptr) -> const Stmt*
+    {
+        Function* f {k.fn("walk", k.i32)};
+        Var* a {arr(k, f, "a", k.i32, 3U)};
+        Var* q {k.local(f, "q", PI(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Clause same {k.cl(k.eq(k.v(q), aat(k, a, N(k, "0"))))};
+        if (clause_at != nullptr)
+        {
+            *clause_at = same.loc;
+        }
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs;
+        if (moved)
+        {
+            bs.push_back(k.asg(q, aat(k, a, N(k, "1"))));
+        }
+        bs.push_back(inc(k, i));
+        if (c != nullptr)
+        {
+            bs.push_back(c);
+        }
+        const Stmt* loop {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3")), same},
+                                {k.cl(k.sub(N(k, "3"), k.v(i)))}, k.blkc(bs))};
+        f->body = k.blkc({k.decl(a, nullptr), awr(k, a, N(k, "0"), N(k, "1")), awr(k, a, N(k, "1"), N(k, "2")),
+                          awr(k, a, N(k, "2"), N(k, "3")), k.decl(q, aat(k, a, N(k, "0"))), k.decl(i, N(k, "0")), loop,
+                          k.ret(k.deref(k.pn(q)))});
+        k.done(f);
+        return c;
+    };
+    lc("rngd_array_as_pointer",
+       "q == a in a loop invariant (the decay of an array local is the address of its element 0): q keeps the address of a[0] through the loop",
+       [=](Kit& k)
+       {
+           walk(k, false, false);
+       });
+    lc("rngd_array_as_pointer_vacuity", "the same with check(false) at the end of the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, walk(k, false, true));
+       });
+    lc("rngd_array_as_pointer_moved",
+       "the body moves q to &a[1]: q == a is not preserved (invariant-preserved at the clause)",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           walk(k, true, false, &at);
+           k.fail("invariant-preserved", at);
+       });
+
+    // ---- nested loops over one range ----
+    // void nest(int *p, int n) requires(owns_range(p, n)) ensures(owns_range(p, n))
+    //   { int i = 0; while (i < n) inv 0 <= i <= n decreases n - i { int j = 0; while (j < n) inv 0 <= j <= n decreases n - j { p[j] = i; j++; } i++; } }
+    const auto nest = [=](Kit& k, bool vac) -> const Stmt*
+    {
+        Function* f {k.fn("nest", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, RO(k, f, 0, 1, 0));
+        k.ens(f, RO(k, f, 0, 1, 0));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* j {k.local(f, "j", k.i32)};
+        const Stmt* inner {k.whl(k.lt(k.v(j), k.pv(f, 1)), {k.cl(bounds(k, f, j, 1))},
+                                 {k.cl(k.sub(k.pv(f, 1), k.v(j)))}, k.blkc({bwr(k, f, 0, k.v(j), k.v(i)), inc(k, j)}))};
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> ob {k.decl(j, N(k, "0")), inner};
+        if (c != nullptr)
+        {
+            ob.push_back(c);
+        }
+        ob.push_back(inc(k, i));
+        const Stmt* outer {
+            k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1))}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blkc(ob))};
+        f->body = k.blk({k.decl(i, N(k, "0")), outer});
+        k.done(f);
+        return c;
+    };
+    lc("rngd_nested", "two nested loops over one owned range: each carries the range place, its own label and rows",
+       [=](Kit& k)
+       {
+           nest(k, false);
+       });
+    lc("rngd_nested_vacuity", "the same with check(false) after the inner loop: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, nest(k, true));
+       });
+
+    // ---- a read range and a global's cell in one loop: the global's place carries "not inside the range" ----
+    // int g;   void gl(int *p, int n) requires(reads_range(p, n) && reads(g)) ensures(the same)
+    //   { int i = 0; int x = 0; int y = 0; while (i < n) inv 0 <= i <= n decreases n - i { x = p[i]; y = g; [check(false);] i++; } }
+    // int main() { int a[4] = {1, 2, 3, 4}; gl(<&g, 1 | &a[0], 4>); return 0; }   (g inside the range, or beside it)
+    // `mode`: 0 the callee alone, 1 the caller with g inside the range, 2 the caller with a separate range; `vac` the vacuity twin (the end of the body, or after the call)
+    const auto global_cell = [=](Kit& k, int mode, bool vac) -> const Stmt*
+    {
+        Global* g {k.prog.add_global("g", k.i32, k.at(), nullptr)};
+        g->init = N(k, "3");
+        g->value = "3";
+        auto gatom = [&](int amount)
+        {
+            return k.b.global_atom(AtomKind::Reads, k.b.global_addr(g, k.at()), amount, k.at());
+        };
+        Function* f {k.fn("gl", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(RR(k, f, 0, 1, 0), gatom(1)));
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), gatom(1)));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
+        const Stmt* c {vac && mode == 0 ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {k.asg(x, brd(k, f, 0, k.v(i))), k.asg(y, k.deref(k.b.global_addr(g, k.at())))};
+        if (c != nullptr)
+        {
+            bs.push_back(c);
+        }
+        bs.push_back(inc(k, i));
+        f->body = k.blk({k.decl(i, N(k, "0")), k.decl(x, N(k, "0")), k.decl(y, N(k, "0")),
+                         k.whl(k.lt(k.v(i), k.pv(f, 1)), {k.cl(bounds(k, f, i, 1))}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))},
+                               k.blkc(bs))});
+        k.done(f);
+        if (mode == 0)
+        {
+            return c;
+        }
+        Function* m {k.fn("main", k.i32)};
+        Var* a {arr(k, m, "a", k.i32, 4U)};
+        const Expr* call {mode == 1 ? k.call(f, {k.b.global_addr(g, k.at()), N(k, "1")})
+                                    : k.call(f, {aat(k, a, N(k, "0")), N(k, "4")})};
+        std::vector<const Stmt*> st {k.decl(a, nullptr),
+                                     awr(k, a, N(k, "0"), N(k, "1")),
+                                     awr(k, a, N(k, "1"), N(k, "2")),
+                                     awr(k, a, N(k, "2"), N(k, "3")),
+                                     awr(k, a, N(k, "3"), N(k, "4")),
+                                     k.es(call)};
+        const Stmt* v {vac ? k.chk(k.no()) : nullptr};
+        if (v != nullptr)
+        {
+            st.push_back(v);
+        }
+        st.push_back(k.ret(N(k, "0")));
+        m->body = k.blkc(std::move(st));
+        k.done(m);
+        k.prog.set_entry(m);
+        return v;
+    };
+    lc("rngd_global_cell",
+       "a reads_range and reads(g) of a global in one loop that reads both: the global's place stands where g is not inside the range",
+       [=](Kit& k)
+       {
+           global_cell(k, 0, false);
+       });
+    lc("rngd_global_cell_body_vacuity", "the same with check(false) at the end of the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, global_cell(k, 0, true));
+       });
+    lc("rngd_global_cell_inside", "gl(&g, 1): the global is the range's one cell (both reads), the call verifies",
+       [=](Kit& k)
+       {
+           global_cell(k, 1, false);
+       });
+    lc("rngd_global_cell_inside_vacuity", "the same with check(false) after the call: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, global_cell(k, 1, true));
+       });
+    lc("rngd_global_cell_outside",
+       "gl(&a[0], 4) with a local array: the global is outside the range, the call verifies",
+       [=](Kit& k)
+       {
+           global_cell(k, 2, false);
+       });
+    lc("rngd_global_cell_outside_vacuity", "the same with check(false) after the call: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, global_cell(k, 2, true));
+       });
+
+    // ---- p[e] through a pointer into a local array, in an invariant: framed by the array's place ----
+    // int qarr(int k) requires(0 <= k && k <= 3) { int a[3] = {1, 2, 3}; int *q = &a[<0|k>]; int i = 0; while (i < 3) inv 0 <= i <= 3 && q[0] >= 0 decreases 3 - i { i++; [check(false);] } return 0; }
+    const auto array_through_pointer = [=](Kit& k, bool outside, bool vac, SrcLoc* read_at = nullptr) -> const Stmt*
+    {
+        Function* f {k.fn("qarr", k.i32, {{"k", k.i32}})};
+        k.req(f, k.land(k.ge_c(fx(k, f, 0), k.i32, "0"), k.le_c(fx(k, f, 0), k.i32, "3")));
+        Var* a {arr(k, f, "a", k.i32, 3U)};
+        Var* q {k.local(f, "q", PI(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* rd {k.b.text(k.deref(k.b.elem_addr(k.pn(q), N(k, "0"), k.at())), "q[0]")};
+        if (read_at != nullptr)
+        {
+            *read_at = rd->loc;
+        }
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs {inc(k, i)};
+        if (c != nullptr)
+        {
+            bs.push_back(c);
+        }
+        const Stmt* loop {k.whl(k.lt(k.v(i), N(k, "3")),
+                                {k.cl(k.range(k.v(i), k.i32, "0", "3")), k.cl(k.ge_c(rd, k.i32, "0"))},
+                                {k.cl(k.sub(N(k, "3"), k.v(i)))}, k.blkc(bs))};
+        f->body = k.blkc({k.decl(a, nullptr), awr(k, a, N(k, "0"), N(k, "1")), awr(k, a, N(k, "1"), N(k, "2")),
+                          awr(k, a, N(k, "2"), N(k, "3")), k.decl(q, aat(k, a, outside ? k.pv(f, 0) : N(k, "0"))),
+                          k.decl(i, N(k, "0")), loop, k.ret(N(k, "0"))});
+        k.done(f);
+        return c;
+    };
+    lc("rngd_array_through_pointer",
+       "q[0] >= 0 in a loop invariant with int *q = &a[0] of a local array the loop carries: the read is framed by the array's place (its block and 0 <= offset < 3) and the values are kept",
+       [=](Kit& k)
+       {
+           array_through_pointer(k, false, false);
+       });
+    lc("rngd_array_through_pointer_vacuity", "the same with check(false) at the end of the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, array_through_pointer(k, false, true));
+       });
+    lc("rngd_array_through_pointer_outside",
+       "the same with q = &a[k] for 0 <= k <= 3: for k == 3 q is one past the array and the read is unframed (permission at the read)",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           array_through_pointer(k, true, false, &at);
+           k.fail_only("permission", at, 2U, 0U, "this loop invariant reads `q[0]`, which this loop does not hold");
+       });
+
+    // ---- the address of an element as a value in an invariant and a measure (compared with == and !=); in a contract it stays refused (range_rej_elem_address_value, arr_rej_elem_addr_in_*) ----
+    // int adr(void) { int a[3] = {1, 2, 3}; int *q = &a[1]; int i = 0;
+    //   while (i < 3) inv 0 <= i <= 3 && q == &a[1] && q != &a[2] decreases (q == &a[1] ? 3 : 3) - i { [q = &a[2];] i++; } return 0; }
+    const auto address_clause = [=](Kit& k, bool moved, bool vac, SrcLoc* clause_at = nullptr) -> const Stmt*
+    {
+        Function* f {k.fn("adr", k.i32)};
+        Var* a {arr(k, f, "a", k.i32, 3U)};
+        Var* q {k.local(f, "q", PI(k))};
+        Var* i {k.local(f, "i", k.i32)};
+        const Clause same {k.cl(k.land(k.eq(k.v(q), aat(k, a, N(k, "1"))), k.ne(k.v(q), aat(k, a, N(k, "2")))))};
+        if (clause_at != nullptr)
+        {
+            *clause_at = same.loc;
+        }
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> bs;
+        if (moved)
+        {
+            bs.push_back(k.asg(q, aat(k, a, N(k, "2"))));
+        }
+        bs.push_back(inc(k, i));
+        if (c != nullptr)
+        {
+            bs.push_back(c);
+        }
+        const Expr* measure {k.sub(k.cond(k.eq(k.v(q), aat(k, a, N(k, "1"))), N(k, "3"), N(k, "3")), k.v(i))};
+        const Stmt* loop {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3")), same},
+                                {k.cl(measure)}, k.blkc(bs))};
+        f->body = k.blkc({k.decl(a, nullptr), awr(k, a, N(k, "0"), N(k, "1")), awr(k, a, N(k, "1"), N(k, "2")),
+                          awr(k, a, N(k, "2"), N(k, "3")), k.decl(q, aat(k, a, N(k, "1"))), k.decl(i, N(k, "0")), loop,
+                          k.ret(N(k, "0"))});
+        k.done(f);
+        return c;
+    };
+    lc("rngd_address_clauses",
+       "q == &a[1] && q != &a[2] in a loop invariant and the same address in the loop's measure: the address of an element is a value there, the loop keeps q",
+       [=](Kit& k)
+       {
+           address_clause(k, false, false);
+       });
+    lc("rngd_address_clauses_vacuity", "the same with check(false) at the end of the body: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, address_clause(k, false, true));
+       });
+    lc("rngd_address_clauses_moved",
+       "the body moves q to &a[2]: q == &a[1] is not preserved (invariant-preserved at the clause)",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           address_clause(k, true, false, &at);
+           k.fail("invariant-preserved", at);
+       });
+}
+
+// ---- Part E: markers over a range, and `restrict` backed by a range (record 0060 items 12 and 14) ----
+// `must_init` and `ref_to_uninit` on a parameter whose `requires` atom is `owns_range(p, n)` (decision 0042 items 4-8 over a range): the `requires` atom has no flags conjunct and
+// states the type's range under the flag; `must_init`'s `ensures` atom is the plain one and the flags row at a return is the promise (`postcondition`, "returns without initializing every
+// element of `p[0..3)`, which `cerastes::must_init` on `p` promises"); `ref_to_uninit`'s `ensures` atom keeps a flag that was set (`old(flag) ==> flag`, an `internal` row at the return);
+// a call has no flags row for a marked parameter.  `owns_range(p, n)` unguarded or after `p == NULL ||`, in both lists, backs `restrict`.
+void define_range_markers()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto PI = [](Kit& k)
+    {
+        return k.ptr(k.i32);
+    };
+    auto fx = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    // `owns_range(p, <count>)` over a constant count, with its spelling
+    auto RO3 = [=](Kit& k, Function* f, int p, int amount)
+    {
+        return k.b.range_atom(AtomKind::OwnsRange, fx(k, f, p), k.b.text(N(k, "3"), "3"), amount, k.at());
+    };
+    auto ROn = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::OwnsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    auto RRn = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::ReadsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    auto bat = [](Kit& k, Function* f, int p, const Expr* idx)
+    {
+        return k.b.elem_addr(k.pn(f->param_var(p)), idx, k.at());
+    };
+    auto arr = [](Kit& k, Function* f, const char* name, Type element, unsigned long long count)
+    {
+        Var* x {f->new_local(name, k.prog.array_of(element, count), k.at())};
+        f->mark_address_taken(x);
+        return x;
+    };
+    auto aat = [](Kit& k, const Var* a, const Expr* i)
+    {
+        return k.b.elem_addr(k.addr(a), i, k.at());
+    };
+    auto ard = [=](Kit& k, const Var* a, const Expr* i)
+    {
+        return k.deref(aat(k, a, i));
+    };
+    auto awr = [=](Kit& k, const Var* a, const Expr* i, const Expr* v)
+    {
+        return k.store(aat(k, a, i), v);
+    };
+    auto vac_fail = [](Kit& k, const Stmt* c)
+    {
+        k.fail("check", c->loc);
+    };
+
+    // ---- a straight-line `must_init` filler ----
+    // void fill3(int *p) [must_init p] requires(owns_range(p, 3)) ensures(owns_range(p, 3)) { p[0] = 1; p[1] = 2; [p[2] = 3;] [check(false);] }
+    // `written`: the elements it writes (3: all, 2: leaves p[2]); `vac`: check(false) after the writes
+    const auto filler = [=](Kit& k, int written, bool vac, SrcLoc* end = nullptr) -> const Function*
+    {
+        Function* f {k.fn("fill3", k.vd, {{"p", PI(k)}})};
+        f->params[0U].init = InitMarker::MustInit;
+        k.req(f, RO3(k, f, 0, 0));
+        k.ens(f, RO3(k, f, 0, 0));
+        std::vector<const Stmt*> st;
+        for (int j {0}; j < written; ++j)
+        {
+            st.push_back(k.store(bat(k, f, 0, N(k, std::to_string(j).c_str())), N(k, std::to_string(j + 1).c_str())));
+        }
+        if (vac)
+        {
+            vac_fail(k, st.emplace_back(k.chk(k.no())));
+        }
+        f->body = k.blk(std::move(st));
+        k.done(f);
+        if (end != nullptr)
+        {
+            *end = f->end_loc;
+        }
+        return f;
+    };
+    lc("rngm_filler",
+       "a must_init filler writes p[0], p[1], p[2] of owns_range(p, 3): the flags row at the return holds, no flag is assumed on entry",
+       [=](Kit& k)
+       {
+           filler(k, 3, false);
+       });
+    lc("rngm_filler_vacuity", "the same with check(false) after the writes: it fails",
+       [=](Kit& k)
+       {
+           filler(k, 3, true);
+       });
+    lc("rngm_filler_leaves_one",
+       "the filler writes only p[0] and p[1]: its flags row at the return fails, postcondition, 'returns without initializing every element of `p[0..3)`, which `cerastes::must_init` on `p` promises'",
+       [=](Kit& k)
+       {
+           SrcLoc end;
+           filler(k, 2, false, &end);
+           k.fail(
+               "postcondition", end, 1U, "",
+               "returns without initializing every element of `p[0..3)`, which `cerastes::must_init` on `p` promises");
+       });
+    // int user(void) { int a[3]; fill3(&a[0]); int x = a[1]; return x; }   a caller with an uninit array: the call has no flags row, and every element has a value after it
+    const auto filler_caller = [=](Kit& k, bool vac) -> const Stmt*
+    {
+        const Function* ff {filler(k, 3, false)};
+        Function* u {k.fn("user", k.i32)};
+        Var* a {arr(k, u, "a", k.i32, 3U)};
+        Var* x {k.local(u, "x", k.i32)};
+        std::vector<const Stmt*> st {k.decl(a, nullptr), k.es(k.call(ff, {aat(k, a, N(k, "0"))})),
+                                     k.decl(x, ard(k, a, N(k, "1")))};
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        if (c != nullptr)
+        {
+            st.push_back(c);
+        }
+        st.push_back(k.ret(k.v(x)));
+        u->body = k.blkc(std::move(st));
+        k.done(u);
+        return c;
+    };
+    lc("rngm_filler_caller",
+       "fill3(&a[0]) on an array no element of which was written: the call has no flags row, and a[1] is readable after it (the filler promised every element)",
+       [=](Kit& k)
+       {
+           filler_caller(k, false);
+       });
+    lc("rngm_filler_caller_vacuity", "the same with check(false) before the return: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, filler_caller(k, true));
+       });
+
+    // ---- `ref_to_uninit` ----
+    // void wr(int *p, int n) [ref_to_uninit p] requires(owns_range(p, n) && n > 0) ensures(owns_range(p, n)) { [int x = p[0];] p[0] = 1; [check(false);] }
+    // `mode`: 0 writes p[0], 1 reads p[0] before the write (no value to read), 2 check(false) after the write
+    const auto ref_callee = [=](Kit& k, int mode, SrcLoc* read_at = nullptr) -> const Stmt*
+    {
+        Function* f {k.fn("wr", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+        f->params[0U].init = InitMarker::RefToUninit;
+        k.req(f, k.land(ROn(k, f, 0, 1, 0), k.gt(fx(k, f, 1), N(k, "0"))));
+        k.ens(f, ROn(k, f, 0, 1, 0));
+        Var* x {k.local(f, "x", k.i32)};
+        const Expr* rd {k.b.text(k.deref(bat(k, f, 0, N(k, "0"))), "p[0]")};
+        std::vector<const Stmt*> st;
+        if (mode == 1)
+        {
+            st.push_back(k.decl(x, rd));
+            if (read_at != nullptr)
+            {
+                *read_at = rd->loc;
+            }
+        }
+        st.push_back(k.store(bat(k, f, 0, N(k, "0")), N(k, "1")));
+        const Stmt* c {mode == 2 ? k.chk(k.no()) : nullptr};
+        if (c != nullptr)
+        {
+            st.push_back(c);
+        }
+        f->body = k.blk(std::move(st));
+        k.done(f);
+        return mode == 1 ? static_cast<const Stmt*>(nullptr) : c;
+    };
+    lc("rngm_ref_callee",
+       "a ref_to_uninit callee writes p[0] of owns_range(p, n): no flags on entry, the flags it had come back (old(flag) ==> flag), the range under the flag",
+       [=](Kit& k)
+       {
+           ref_callee(k, 0);
+       });
+    lc("rngm_ref_callee_vacuity", "the same with check(false) after the write: it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, ref_callee(k, 2));
+       });
+    lc("rngm_ref_read_first",
+       "the callee reads p[0] before it writes it: nothing says the element has a value, uninitialized at the read",
+       [=](Kit& k)
+       {
+           SrcLoc at;
+           ref_callee(k, 1, &at);
+           k.fail("uninitialized", at);
+       });
+    // int use_ref(void) { int a[3]; [a[0] = 7;] wr(&a[0], 3); int y = a[<0|1>]; [check(false);] return y; }
+    // `mode`: 0 a[0] written before the call and read after (the flag it had is kept), 1 nothing written and a[1] read after (it never had a value), 2 mode 0 with check(false)
+    const auto ref_caller = [=](Kit& k, int mode) -> const Expr*
+    {
+        Function* wf {nullptr};
+        {
+            wf = k.fn("wr", k.vd, {{"p", PI(k)}, {"n", k.i32}});
+            wf->params[0U].init = InitMarker::RefToUninit;
+            k.req(wf, k.land(ROn(k, wf, 0, 1, 0), k.gt(fx(k, wf, 1), N(k, "0"))));
+            k.ens(wf, ROn(k, wf, 0, 1, 0));
+            wf->body = k.blk({k.store(bat(k, wf, 0, N(k, "0")), N(k, "1"))});
+            k.done(wf);
+        }
+        Function* u {k.fn("use_ref", k.i32)};
+        Var* a {arr(k, u, "a", k.i32, 3U)};
+        Var* y {k.local(u, "y", k.i32)};
+        std::vector<const Stmt*> st {k.decl(a, nullptr)};
+        if (mode != 1)
+        {
+            st.push_back(awr(k, a, N(k, "0"), N(k, "7")));
+        }
+        st.push_back(k.es(k.call(wf, {aat(k, a, N(k, "0")), N(k, "3")})));
+        const Expr* rd {k.b.text(ard(k, a, N(k, mode == 1 ? "1" : "0")), mode == 1 ? "a[1]" : "a[0]")};
+        st.push_back(k.decl(y, rd));
+        if (mode == 2)
+        {
+            vac_fail(k, st.emplace_back(k.chk(k.no())));
+        }
+        st.push_back(k.ret(k.v(y)));
+        u->body = k.blkc(std::move(st));
+        k.done(u);
+        return rd;
+    };
+    lc("rngm_ref_caller_kept",
+       "a[0] is written, wr(&a[0], 3) is called on the array, a[0] is read after: the flag it had is kept",
+       [=](Kit& k)
+       {
+           ref_caller(k, 0);
+       });
+    lc("rngm_ref_caller_vacuity", "the same with check(false) before the return: it fails",
+       [=](Kit& k)
+       {
+           ref_caller(k, 2);
+       });
+    lc("rngm_ref_caller_unwritten",
+       "nothing is written before wr(&a[0], 3) (the call passes: no flags row) and a[1] is read after it: it never had a value, uninitialized at the read",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", ref_caller(k, 1)->loc);
+       });
+
+    // ---- `restrict` backed by a range ----
+    // int rg(int *restrict p, int n) requires([p == NULL ||] owns_range(p, n)) ensures([p == NULL ||] owns_range(p, n)) { [check(false);] return 0; }
+    const auto restrict_range = [=](Kit& k, bool guarded, bool vac) -> const Stmt*
+    {
+        Function* f {k.fn("rg", k.i32, {{"p", PI(k)}, {"n", k.i32}})};
+        f->params[0U].is_restrict = true;
+        auto atom = [&](int amount)
+        {
+            const Expr* a {ROn(k, f, 0, 1, amount)};
+            return guarded ? k.lor(k.eq(fx(k, f, 0), k.nul(PI(k))), a) : a;
+        };
+        k.req(f, atom(0));
+        k.ens(f, atom(0));
+        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
+        std::vector<const Stmt*> st;
+        if (c != nullptr)
+        {
+            st.push_back(c);
+        }
+        st.push_back(k.ret(N(k, "0")));
+        f->body = k.blk(std::move(st));
+        k.done(f);
+        return c;
+    };
+    lc("rngm_restrict_range", "int *restrict p backed by owns_range(p, n) in both lists",
+       [=](Kit& k)
+       {
+           restrict_range(k, false, false);
+       });
+    lc("rngm_restrict_range_vacuity", "the same with check(false): it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, restrict_range(k, false, true));
+       });
+    lc("rngm_restrict_range_null", "the atom after p == NULL ||, in both lists",
+       [=](Kit& k)
+       {
+           restrict_range(k, true, false);
+       });
+    lc("rngm_restrict_range_null_vacuity", "the same with check(false): it fails",
+       [=](Kit& k)
+       {
+           vac_fail(k, restrict_range(k, true, true));
+       });
+    // int rq(int *restrict p, int n, int *q, int m) requires(owns_range(p, n) && reads_range(q, m)) ensures(the same): another parameter of the pointee type has a range atom of its own
+    lc("rngm_restrict_range_other_covered", "another int * parameter covered by a reads_range of its own: accepted",
+       [=](Kit& k)
+       {
+           Function* f {k.fn("rq", k.i32, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}, {"m", k.i32}})};
+           f->params[0U].is_restrict = true;
+           k.req(f, k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)));
+           k.ens(f, k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)));
+           f->body = k.blk({k.ret(N(k, "0"))});
+           k.done(f);
+       });
+    rc("rngm_rej_restrict_reads_range", "restrict",
+       [=](Kit& k)
+       {
+           // a reads_range does not back restrict: nothing is owned
            Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
-           k.req(f, RO(k, f, 0, 1, 0));
-           k.ens(f, RO(k, f, 0, 1, 0));
-           Var* i {k.local(f, "i", k.i32)};
-           const Stmt* body {k.blk({bwr(k, f, 0, k.v(i), N(k, "0")), k.asg(i, k.add(k.v(i), N(k, "1")))})};
-           f->body = k.blk(
-               {k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), k.pv(f, 1)), {}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, body)});
+           f->params[0U].is_restrict = true;
+           k.req(f, RRn(k, f, 0, 1, 0));
+           k.ens(f, RRn(k, f, 0, 1, 0));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("rngm_rej_restrict_range_guard", "restrict",
+       [=](Kit& k)
+       {
+           // n == 0 || owns_range(p, n): a guard that is not `p == NULL` does not back restrict
+           Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
+           f->params[0U].is_restrict = true;
+           k.req(f, k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), ROn(k, f, 0, 1, 0)));
+           k.ens(f, k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), ROn(k, f, 0, 1, 0)));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("rngm_rej_restrict_range_other_uncovered", "restrict",
+       [=](Kit& k)
+       {
+           // another int * parameter with no atom of its own could alias the restrict pointer's elements
+           Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}})};
+           f->params[0U].is_restrict = true;
+           k.req(f, ROn(k, f, 0, 1, 0));
+           k.ens(f, ROn(k, f, 0, 1, 0));
+           f->body = k.blk({});
            k.done(f);
        });
 }
@@ -1034,7 +2638,8 @@ void define_range_calls()
 {
     auto N = [](Kit& k, const char* v)
     {
-        return k.b.text(k.num(k.i32, v), v); // with its spelling, so that a call's messages name the range as written
+        return k.b.text(k.num(k.i32, v),
+                        v); // with its spelling, so that a call's messages name the range as written
     };
     auto PI = [](Kit& k)
     {
