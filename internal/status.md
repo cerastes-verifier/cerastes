@@ -103,7 +103,11 @@ pre-existing exit 3 found on the baseline (a pass-through of `owns(*pp) && owns(
 - The box (`ubuntu-26.04` container, the branch at `c58060e` as a bundle from `3ceb13c`; a fresh bootstrap build): a
   pre-check — regeneration 6,033 files, 0 missing (the new array-parameter rules reach no glibc declaration the tests
   use), lint clean; 677 runs of the session's tests and the seven Linux-only tests passed (native-ok clang 114, GCC 114:
-  the box's compilers warn on no positive) — then `CERASTES_LONG=1 scripts/check.sh` (`-j32`): CHECK-RESULT.
+  the box's compilers warn on no positive) — then `CERASTES_LONG=1 scripts/check.sh` (`-j32`) on `c58060e`: **all green** in 84 minutes (14,871 passed, 0 failed,
+  10 skipped; native-ok clang 2,836 and GCC 2,836; the long tier ran; lint 6,033 files clean; VIR self-test 2,044
+  lowering cases, 324 rejection cases, 0 problems, 2,044 passed through Silicon; the walker oracle; `test_run_tests.py`
+  1,221, `test_walker_oracle.py` 79, `test_lint_viper.py` 809; `--check-headers` 5,420; format 87 files; the doc
+  examples (355) and docs; vlibc's headers). Nothing in `src/`, `include/`, `scripts/` or `tests/` changed after it.
 
 **First step for the next session:** the owner merges `m4.5e1b-ranges-in-contracts` and answers questions 238–242 and
 the overnight answers inline (handoff §2, §8); then M4.5e1c (quantifiers) from `.claude/plans/m4-5e1-arrays.md`

@@ -23,8 +23,8 @@ origin in brackets, so its full wording can be found there. Session plans approv
 
 - **M4.5e1b** (2026-11-12; record 0060) is done on branch `m4.5e1b-ranges-in-contracts` (worktree
   `.claude/worktrees/m4.5e1b`), not merged and not pushed: `42d4832` to `c58060e` and this handoff's commit, from
-  `origin/main` = `685034b`. Its result is in `internal/status.md`; the box's `CERASTES_LONG=1 scripts/check.sh`:
-  BOX-RESULT.
+  `origin/main` = `685034b`. Its result is in `internal/status.md`; the box's `CERASTES_LONG=1 scripts/check.sh` on
+  `c58060e` was all green (14,871 passed, 0 failed; the long tier ran; 84 minutes at `-j32`).
 - **M4.5e1c** quantifiers is next: `.claude/plans/m4-5e1-arrays.md` section 5 (its Step 0, P80 and S45, then plan
   again), with §3's notes from e1a and e1b.
 - **CI:** unchanged (record 0053; question 176 the owner's). The 2026-11-11 nightly (`f57ee43`) failed on the Linux jobs
