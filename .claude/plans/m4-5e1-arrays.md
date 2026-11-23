@@ -1,7 +1,7 @@
-# Plan: M4.5e1 — Arrays (five sub-sessions, records from 0059)
+# Plan: M4.5e1 — Arrays (six sub-sessions, records from 0059)
 
 **Approved by the owner on 2026-11-11**, at a session that only planned (question 224). Its commit also split
-M4.5e1 into five sub-sessions (e1a–e1e).
+M4.5e1 into five sub-sessions (e1a–e1e); e1c's planning (2026-11-23) added a sixth, e1f.
 
 **Trimmed at M4.5e1b's planning (2026-11-11, owner's choice) to what e1c–e1e still need.** e1a is done (record
 0059, `internal/status.md`), and e1b has a plan of its own, `.claude/plans/m4-5e1b-ranges-in-contracts.md`. **The
@@ -9,7 +9,13 @@ text before the trim is `git show dc40377:.claude/plans/m4-5e1-arrays.md`**: its
 (scope, survey facts, P78 and S43, the record's draft, parts, tests, flips, docs, acceptance), its section 4 e1b's
 sketch, its section 8 questions 229–233 as asked. Section numbers are kept, so older references still resolve.
 
-e1c–e1e each start with their probes and spikes as written here, then plan again (section 1).
+**Trimmed again at M4.5e1c's planning (2026-11-23).** e1b is done (record 0060), and e1c has a plan of its own,
+`.claude/plans/m4-5e1c-quantifiers.md`, planned in full as e1b was. **The text before this trim is `git show
+bdf3581:.claude/plans/m4-5e1-arrays.md`**: its section 5 is e1c's sketch (decided, proposed, P80 and S45, tests).
+The same planning added a sixth sub-session, **e1f** (section 10).
+
+e1d and e1e each start with their probes and spikes as written here, then plan again (section 1), unless the owner
+has them planned in full as e1b and e1c were.
 
 ## 1. Context
 
@@ -18,7 +24,10 @@ e1c–e1e each start with their probes and spikes as written here, then plan aga
 
 **Where it stands.** e1a built local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers,
 `out-of-bounds`, the marked range rows in the driver, loops carrying arrays and the `offset_of == 0` backstops
-(record 0059; its as-built names are in e1b's plan, section 12). e1b is planned in full.
+(record 0059; its as-built names are in e1b's plan, section 12). e1b built ranges in contracts (record 0060:
+`owns_range`, `reads_range`, element reads in contracts, calls and returns over ranges, loops over parameters'
+ranges, markers over ranges, `owning(n)` on a parameter, array parameters; `internal/status.md`). e1c is planned in
+full.
 
 **Owner decisions.**
 - **226 `forall` in C: inline the body.** `cerastes_forall(f, free...)`, where `f` is a `pure` function whose body
@@ -33,6 +42,10 @@ e1c–e1e each start with their probes and spikes as written here, then plan aga
   allowed in a `pure` body that only an `ensures` names (e1c); e1e's planning may split it in two.
 - **236, 237** (e1b's planning): an atom on one element (`owns(p[i])`) and a range atom written in a loop invariant
   are M4.5e2's, not e1b's.
+- **At e1c's planning (2026-11-23):** question 238 (`reads_range`'s amount from the range's first slot) is a false
+  alarm, not unsoundness, and is to be fixed: e1c runs the spike (its S45 (r)), and the fix is a session of its
+  own, **e1f**, which also builds question 242's row order D for `owns_range` (section 10). `cerastes_old` in a loop
+  invariant is in e1c, as its last part and its first cut.
 
 **Standing:** 69 (no EDG work), 77 (one context), 160 (a new test's expect line may be corrected after its first
 run, each listed in status), 176 (the owner handles CI); `check.sh` once, at the end, on the x86-64 box; no test
@@ -43,10 +56,11 @@ runs while a fix is queued; no Claude trailer; commits stay local.
 | Sub-session | Scope | Needs | `src/` estimate | State |
 |---|---|---|---|---|
 | **e1a Arrays inside one function** | local arrays as blocks, `a[i]`, `&a[i]`, initializers, scope exits, the marked range rows, `out-of-bounds`, loops over arrays, sequencing, pointers into arrays, the `offset_of == 0` restatements | — | landed 1,943 | **done** (record 0059) |
-| **e1b Ranges in contracts** | `owns_range`, `reads_range`, element reads in contracts, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, array parameters, the `carrays.c` port | e1a | 2,050–3,050 | **planned in full**: `.claude/plans/m4-5e1b-ranges-in-contracts.md` |
-| **e1c Quantifiers** | `cerastes_forall` (question 226), triggers, `old` under a binder, max, the fill loop, the tutorial chapter | e1b | 1,200–2,000 | **plan mode again** (section 5) |
+| **e1b Ranges in contracts** | `owns_range`, `reads_range`, element reads in contracts, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, array parameters, the `carrays.c` port | e1a | landed 2,754 | **done** (record 0060) |
+| **e1c Quantifiers** | `cerastes_forall` (question 226), triggers, `old` under a binder, max, the fill loop, `cerastes_old` in loop invariants, the full `carrays.c` port, the tutorial chapter; the spike for e1f | e1b | 1,500–2,200 | **planned in full**: `.claude/plans/m4-5e1c-quantifiers.md` |
 | **e1d Pure functions and the exact sum** | `pure` bodies as Viper functions, calls of `pure` functions in annotations, recursion with `decreases`, the exact sum (question 227) | e1c | 1,200–2,000 | **plan mode again** (section 6) |
 | **e1e Arrays in aggregates and storage** | array members, arrays of structures, 2-D arrays, global and `static` arrays, array compound literals, 0024 item 6 lifted for array types | e1b (e1c for its quantified tests) | 1,500–2,500 | **plan mode again** (section 7) |
+| **e1f Range call rows** | the minimum read amount over a range at a call (question 238) and `owns_range`'s row order D (question 242); one set of Viper flips over e1b's range calls | e1c (its spike S45 (r)) | 150–400 | **planned after e1c**, from the spike (section 10) |
 
 The estimates are insertions without self-tests; each sub-session's own planning measures them again. Each
 sub-session is a session of its own (question 77): its branch and worktree, its record (the next free number), its
@@ -57,13 +71,13 @@ S))`); it may run before e1c–e1e.
 spikes exactly as written here (they change no `src/`), commits their results to `internal/il-inventory.md`,
 then enters plan mode. That planning takes the spike results and the as-built facts of the sub-sessions before it,
 refines the record draft and the encoding steps, lists the Flips, and is saved as
-`.claude/plans/m4-5e1<x>-<topic>.md`. (e1b did not: the owner had it planned in full, with a decision table per
-probe and spike in place of the second planning; a later sub-session may be planned the same way.)
+`.claude/plans/m4-5e1<x>-<topic>.md`. (e1b and e1c did not: the owner had each planned in full, with a decision
+table per probe and spike in place of the second planning; a later sub-session may be planned the same way.)
 
 ## 2. Rules for every sub-session
 
-`internal/handoff.md` §4's rules and §6's process notes apply. e1b's plan (its section 2) is the model for the
-team: who owns which files, when an agent is replaced, the build and runner rules, the audit rounds and the
+`internal/handoff.md` §4's rules and §6's process notes apply. e1b's and e1c's plans (their section 2) are the
+model for the team: who owns which files, when an agent is replaced, the build and runner rules, the audit rounds and the
 advisor's checkpoints. The rules this plan relies on:
 - **Team** (`.claude/agents/`): three Sonnet agents with disjoint files and the Opus `soundness-auditor`,
   read-only. The orchestrator is Opus and consults the Fable advisor before a record is accepted, at any cut or
@@ -71,7 +85,7 @@ advisor's checkpoints. The rules this plan relies on:
   - **edg-backend:** `src/backend`, `src/driver`, `include/cerastes.h`, the joined builds,
     `regen_vpr.py`/`vprdiff.py` after each part.
   - **il-analyst:** the probes and spikes; then `src/vir` and `src/viper` with the VIR self-test cases. A fresh
-    il-analyst takes over after the spikes and wherever its context would run low (`lower.cpp` is 19,293 lines).
+    il-analyst takes over after the spikes and wherever its context would run low (`lower.cpp` is 20,479 lines).
   - **test-mutator:** tests, twins, exactly the Flips, the compiler matrix (`native-ok`: clang and GCC, both modes,
     `-Wall -Wextra -Werror`), `run_tests.py`, `lint_viper.py` and their self-tests, the doc example files.
   - **soundness-auditor:** one round per diff on a snapshot commit in `.claude/worktrees/<session>-audit`, one
@@ -100,73 +114,37 @@ chapter M4.5e1a (P78, S43).
 In sections 5–7 below, `E` is `src/backend/encode.cpp` and `L` is `src/vir/lower.cpp`, with lines at `f57ee43`
 (before e1a): each sub-session's planning refreshes them.
 
-## 4. M4.5e1b — Ranges in contracts (record 0060; planned in full)
+## 4. M4.5e1b — Ranges in contracts (record 0060; done 2026-11-12)
 
-**Its plan is `.claude/plans/m4-5e1b-ranges-in-contracts.md`** (approved 2026-11-11). The sketch that stood here
+**Its plan is `.claude/plans/m4-5e1b-ranges-in-contracts.md`** (approved 2026-11-11; executed without re-planning;
+what was built is record 0060 and `internal/status.md`'s entry). The sketch that stood here
 (what was decided, what was proposed, P79 and S44, the known pins) is section 4 of
 `git show dc40377:.claude/plans/m4-5e1-arrays.md`; the new plan fixes its proposals and replaces its "plan again"
 by decision tables. Against the sketch, two things moved to M4.5e2 (questions 236 and 237): atoms on one element,
 and range atoms written in loop invariants.
 
-## 5. M4.5e1c — Quantifiers (the next free record) — ⟲ plan mode again after P80 and S45
+## 5. M4.5e1c — Quantifiers (record 0061; planned in full)
 
-**Scope** (question 226). `cerastes_forall(f, free...)` in `requires`, `ensures`, `CERASTES_INVARIANT` and
-`CERASTES_CHECK`; max; the fill loop of e1a's pin; the rest of the `carrays.c` port; the tutorial chapter "Arrays
-and quantifiers". The C++ lambda form stays M7's (`reject_forall_pointer.cpp` keeps its line).
-
-### 5.1 Decided
-
-- `f` names a `pure` function with a body that is one `return E;`; its first parameter is the bound variable and
-  the others receive the trailing arguments in order (0029 item 4; P53: `enk_routine` in C23, a constant address
-  in C++20). The quantifier means `E` over every value of the first parameter's type.
-- `E` is substituted at the site; no Viper function is emitted for `f` here, and a call of `f` stays rejected.
-
-### 5.2 Proposed, for the re-plan to fix
-
-- **The pure body reader:** finds the one `return E;`, refuses anything else (`unsupported_annotation_expression`),
-  and encodes `E` in contract mode with the parameters bound. e1d reuses it.
-- **The binder and triggers** (0028 item 2; S24). The Viper binder is the absolute slot of the first element read
-  that is indexed by the bound variable plus a constant (`p[i]`, `p[i + 1]`), with the trigger `{ loc(block_of(p),
-  k) }`; the other reads are rewritten over it. A body with no such read, or an index with another coefficient
-  (`a[2 * i]`), is rejected and pinned.
-- **Arity and types:** a count or type mismatch between `f`'s parameters and the arguments is rejected (0006
-  item 9 left it to the session that gives `forall` its meaning).
-- **Framing and well-formedness under the binder:** every read of `E` must be framed, and every operation of `E`
-  defined (0010 item 11), for every value of the bound variable that reaches it. `f__wf` reads no heap today
-  (0037 item 7), so a read under a binder needs a ghost that depends on the binder: S45 decides between a ghost
-  `Map[Int, T]` formal per read and a `f__wf` that holds the range permissions. **The choice binds e1d:** a
-  heap-free `f__wf` cannot evaluate a call of a heap-reading `pure` function (`r == sum_to(a, n)` in an
-  `ensures`), so S45 chooses with that shape in view and says what e1d would need under each variant.
-- **Flags:** a read under the binder states that the element holds a value (0038 item 6), so a quantified
-  invariant can say which elements a loop has written; that lifts e1a's pin.
-- **`old` under the binder** (question 232): `cerastes_old(p[i])` is allowed in the body of a `pure` function
-  that only an `ensures` names; `array_test2`'s `update(0, 10, vs)` and `to_verify`'s lists need it.
-- **Max:** `max` returns the value with `forall i: a[i] <= r`; `max_index` returns `r` with `0 <= r && r < n` and
-  `forall i: a[i] <= a[r]` (there is no `exists`).
-
-### 5.3 P80 and S45 (run before the re-plan)
-
-- **P80:** `cerastes_forall(f, a, n)` and `cerastes::forall(f, a, n)` in every annotation kind, with `f` and
-  `&f`; the IL of a `pure` function's body (the `return`'s expression, its parameter references) and what
-  `annotation_checks.cpp` already enforces on it; a mismatch of count and of type; `cerastes_old` inside a `pure`
-  body.
-- **S45:** the absolute-slot rewriting for one array, for `a[i] <= a[i + 1]`, and for two arrays (`a[i] ==
-  b[i]`); the fill loop with a quantified invariant; max; a copy loop; `forall` with `old`; both variants of
-  `f__wf` under a binder; an array of 4 and a symbolic `n`. **Stop rules:** a matching loop (a time over 60 s), a
-  correct shape that fails, or neither `f__wf` variant holding: stop and ask.
-
-### 5.4 Tests and docs
-
-- Positives with twins: a quantified `requires` used at a read; a quantified `ensures` proved by a loop; the fill
-  loop (the pin's twin); max and `max_index` (twins: an off-by-one range, `<` for `<=`); sortedness; the
-  `carrays.c` functions in full; every rejection of 5.2.
-- Docs: `annotations.adoc` (`forall`); `memory.adoc` "Arrays"; the tutorial chapter with max and the fill loop,
-  its `console` blocks copied from runs.
+**Its plan is `.claude/plans/m4-5e1c-quantifiers.md`** (approved 2026-11-23). The sketch that stood here (what was
+decided, what was proposed, P80 and S45, the tests and docs) is section 5 of `git show
+bdf3581:.claude/plans/m4-5e1-arrays.md`; the new plan fixes its proposals and replaces its "plan again" by decision
+tables. Against the sketch: the `f__wf` choice has a stated order (today's heap-free method extended by ghost
+functions first, a heap form with a boundary as the fallback), a body may read several arrays or neighbours (one
+binder per read class, decided by the spike), `forall` in a `check` has its own rows, `cerastes_old` in a loop
+invariant was added as Part D, and the spike for e1f rides along.
 
 ## 6. M4.5e1d — Pure functions and the exact sum (the next free record) — ⟲ plan mode again after P81 and S46
 
 **Scope** (question 227): the slice of M4.5f1/f2 that an exact sum needs. M4.5f1 keeps predicates, `fold` and
 `unfold`, and pure functions over predicates.
+
+**From e1c, as its plan leaves them** (its sections 12 and 13; its status entry has the as-built facts): the
+pure-body reader (one `return E;`, a substitution map from parameters to arguments), which e1d reuses; the
+`f__wf` variant e1c built and its spike's row S45 (d) (7), a function application in `f__wf` under each variant;
+a contract on a `pure` function, which e1c rejects only where a `forall` names the function and e1d gives its
+meaning (also at a `forall` site); `cerastes_old` in a `pure` body, which only a `forall` in an `ensures` or a loop
+invariant may name (a Viper function has no `old`: a call of such a function is rejected); `lint_viper.py`'s
+`HEAP_READ_RE`, to tighten with function applications.
 
 ### 6.1 Proposed, for the re-plan to fix
 
@@ -256,10 +234,11 @@ the list from records 0024 and 0018 in `tests/scalar/negative` (`reject_sizeof_*
 
 ## 8. Open questions
 
-None: 229–233 are answered (section 1; the questions as asked are in the commit named at the top). e1b's
-planning opened 238–240 (`internal/handoff.md` §8).
+None here: 229–233 are answered (section 1; the questions as asked are in the commit named at the top), and so
+are 238–246 (`internal/handoff.md` §8). e1c's planning opened 247–252, each built as its recommendation unless
+answered (e1c's plan, section 13; `internal/handoff.md` §8).
 
-## 9. Inputs e1c–e1e still take (from handoff §3 and §4.2 at M4.5e1's planning)
+## 9. Inputs e1d and e1e still take (from handoff §3 and §4.2 at M4.5e1's planning; e1c's moved into its plan)
 
 - P38's braced initializers: a list of more than 1,000 elements keeps no `expr` for its elements
   (`REDUCE_BACKING_EXPRESSION_USE`), only an `orig_type`; read every element through `constant_value`, which
@@ -269,10 +248,35 @@ planning opened 238–240 (`internal/handoff.md` §8).
   local. [d2b2c re-audit] (e1e)
 - M4.4b2's types computed from a constant (`sizeof`, `typeof`, typedefs), and a bound that names a local constant
   (P78 F1). (e1e)
-- The port `carrays.c`: e1b ports its five functions with single-element facts
-  (`tests/memory/verifast/carrays.c`); its lists become `forall` in e1c.
-- From e1b's plan: a `must_init` filler that fills with a loop is a pinned false alarm until e1c's quantified
-  invariants (question 239); ranges over structures, array members and global arrays are e1e's.
+- From e1b's plan: ranges over structures, array members and global arrays are e1e's.
 - **The survey's contradictions, settled:** `reject_forall_pointer.cpp` is the C++ lambda form (M7), not e1's;
   0024's "until M4.5e" also names `_BitInt`, vectors and non-type template arguments, which stay rejected;
   "M4.5e" in 0022 and 0047 for `n * sizeof(T)`, `calloc(n, …)` and `realloc` is M4.5e2.
+
+## 10. M4.5e1f — Range call rows (the next free record) — planned after e1c, from its spike
+
+**Scope** (owner, 2026-11-23, questions 238 and 242). Two changes to the rows `call_atoms` writes for a range atom,
+in one session, because both change the Viper of e1b's existing range calls and are re-proved and flipped once:
+- **The read amount** (238). `reads_range`'s amount at a call is taken from the range's first slot, lowered by the
+  caller's own read amounts (record 0060 item 6). A caller whose holding over the range is uneven for another
+  reason (a callee kept a read fraction of one element and gave the liveness back) gets a false `permission`. It
+  is fail-closed: the amount can only be too high for another slot, and every slot is still asserted at it. The
+  fix is the minimum over the range, which `perm` cannot state under a quantifier in an `assert`; the candidate
+  is a tagged `inhale` that defines it (a bound over the range and a witness), **the encoder's first `inhale`**
+  (invariant 4: its record argues that a minimum over a non-empty finite range exists, and the lint admits
+  exactly that shape).
+- **Order D** (242). For `owns_range` the marked rows before the shape row, the liveness row and the amount: one
+  Silicon error in every twin of S44 (b), where the built order gives two rows (shown as one error) for a callee
+  that forwards `(p, n + 1)` of its own range. `reads_range` keeps its order (its amount needs the liveness cell
+  first).
+
+**Inputs.** e1c's spike S45 (r) (`internal/il-inventory.md`, chapter M4.5e1c: whether the pinned Silicon takes
+`perm` under a quantifier in an `inhale` or in a helper's `ensures`, the pin's verdict with it, order D in the
+built rows); the pins `range_call_reads_unequal_pin.c`, `range_call_reads_two_atoms_pin.c` and `_local.c`; the
+fixtures `s44_b_*_orderD*`; handoff §3 "M4.5e1f". **If the spike shows no form Silicon takes,** the session builds
+order D alone and question 238 goes to M4.8's work on read amounts (question 66), by the owner's decision then.
+
+**Shape of the session.** Small (150–400 `src/` lines): its record, the lint rule and its twins, the two changes,
+the flips (every `.vpr` of a test with a range call: outcomes unchanged, the changed lines classified by exact
+inverse rules, e1a's lesson), the pins re-expected as positives with twins, one audit round, one box `check.sh`. It
+needs e1c only for the spike; it may run before e1d and e1e.

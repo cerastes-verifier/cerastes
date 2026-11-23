@@ -15,12 +15,13 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
 `git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, and M4.5e1a's `git show 685034b:internal/status.md`.
 
-## M4.5e1b — Ranges in contracts (2026-11-11/12): done on branch `m4.5e1b-ranges-in-contracts`
+## M4.5e1b — Ranges in contracts (2026-11-11/12): done on branch `m4.5e1b-ranges-in-contracts`, merged
 
 Plan: `.claude/plans/m4-5e1b-ranges-in-contracts.md` (approved 2026-11-11; executed without re-planning). Record 0060
 (amends 0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059). Read `internal/handoff.md` next: §1, §2, the rules of §4,
-§6, §8 (questions 238–246; 243–246 the answers built overnight). Branched from `origin/main` = `685034b` (the owner had
-pushed the planning). Session from 2026-11-11 18:45 to 2026-11-12 (about 7 h before the box run).
+§6, §8 (questions 247 on; 238–246 are answered there). Branched from `origin/main` = `685034b` (the owner had
+pushed the planning); merged into `main` (`origin/main` = `bdf3581` holds it; the branch, its worktree and
+`build/m4.5e1b/` are gone). Session from 2026-11-11 18:45 to 2026-11-12 (about 7 h before the box run).
 
 **Owner decisions in the session:** the split point at Commit 2 (Parts A+B at +1,602 `src/` lines, over the plan's
 1,600, about 250 of them staging code Parts C and D deleted): "Continue (Recommended)". At 2026-11-11 evening the owner
@@ -111,9 +112,12 @@ pre-existing exit 3 found on the baseline (a pass-through of `owns(*pp) && owns(
   1,221, `test_walker_oracle.py` 79, `test_lint_viper.py` 809; `--check-headers` 5,420; format 87 files; the doc
   examples (355) and docs; vlibc's headers). Nothing in `src/`, `include/`, `scripts/` or `tests/` changed after it.
 
-**First step for the next session:** the owner merges `m4.5e1b-ranges-in-contracts` and answers questions 238–246 inline (243–246
-are the overnight answers) (handoff §2, §8); then M4.5e1c (quantifiers) from `.claude/plans/m4-5e1-arrays.md`
-section 5: its Step 0, P80 and S45 (they change no `src/`), then plan again (handoff §2 has the opening prompt).
+**First step for the next session** (rewritten at M4.5e1c's planning, 2026-11-23: the owner had merged the branch
+and answered questions 238–242 inline, `d615630`): M4.5e1c (quantifiers) from **`.claude/plans/m4-5e1c-quantifiers.md`**,
+approved 2026-11-23 and complete (P80 and S45 with decision tables, every task assigned; no plan mode, no second
+planning); handoff §2 has the opening prompt. That planning also fixed `main`, red since Dependabot's PR #35 (the
+docs lockfile, `fabcd25`), placed question 238's fix and question 242's row order in a session of their own after
+e1c (M4.5e1f; e1c runs its spike), and put `cerastes_old` in loop invariants into e1c as its last part.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 

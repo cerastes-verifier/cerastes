@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start. The last was M4.5e1b's planning (2026-11-11); M4.5d2b2b's (2026-11-09) cut the Done table to
+each session's start. The last was M4.5e1c's planning (2026-11-23); M4.5d2b2b's (2026-11-09) cut the Done table to
 one line per row, and the rows as they were are `git show 2430529:plan.md`. The plans of the finished milestones,
 the superseded text and the appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
@@ -188,16 +188,19 @@ The owner decided there (questions 226–228) that `forall` in C names a `pure` 
 the exact array sum is in M4.5e1 (so e1d takes `pure` bodies and their recursion from M4.5f1/f2), and that
 `cerastes_reads_range` is added beside `owns_range`. e1a is done (2026-11-11, record 0059), and so is e1b (2026-11-12,
 record 0060, from its complete plan `.claude/plans/m4-5e1b-ranges-in-contracts.md`); the owner moved two things from
-e1b to M4.5e2 (questions 236 and 237): atoms on one element, and range atoms written in loop invariants. e1c–e1e each
-run their probes and spikes, then plan again.
+e1b to M4.5e2 (questions 236 and 237): atoms on one element, and range atoms written in loop invariants. e1c is
+planned in full (2026-11-23, `.claude/plans/m4-5e1c-quantifiers.md`), with `cerastes_old` in loop invariants as its
+last part; its planning relooked question 238 (a false alarm, not unsoundness) and added a sixth sub-session, e1f,
+for its fix and question 242's row order. e1d and e1e each run their probes and spikes, then plan again.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5e1c Quantifiers** | next: `forall` in C (0029 item 4; question 226: a `pure` function's body inlined), max, the tutorial chapter | M4.5e1b |
+| **M4.5e1c Quantifiers** | next, planned in full (`.claude/plans/m4-5e1c-quantifiers.md`, record 0061): `forall` in C (0029 item 4; question 226: a `pure` function's body inlined) in contracts, loop invariants and checks; `cerastes_old` in loop invariants (its last part, its first cut); max, the fill loop, the full `carrays.c` port, the tutorial chapter; the spike for M4.5e1f | M4.5e1b |
 | **M4.5e1d Pure functions and the exact sum** | `pure` bodies as Viper functions, calls of `pure` functions in annotations, recursion with `decreases`; the exact array sum (question 227) | M4.5e1c |
 | **M4.5e1e Arrays in aggregates and storage** | inner arrays and arrays of structs on M4.5c1's member blocks, 2-D arrays, global and `static` arrays, array compound literals; M4.4b2's types computed from constants, for array types | M4.5e1b |
+| **M4.5e1f Range call rows** | the minimum read amount over a range at a call (question 238: a false alarm today, fail closed; the candidate fix is the encoder's first tagged `inhale`, if e1c's spike shows the pinned Silicon takes it) and `owns_range`'s row order D (question 242); one set of Viper flips over e1b's range calls; a short session, any time after e1c | M4.5e1c (its spike) |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))`, `realloc` (from M4.5d2a, question 120); relational comparisons and `p - q` under `pointer-comparison`; `owning(n)` beyond parameters; atoms on one element (`owns(p[i])`) and range atoms written in loop invariants (questions 236, 237) | M4.5e1a, M4.5e1b, M4.5d2a |
 | **M4.5f1 Predicates** | predicate bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates, pure functions over predicates | M4.5c2b, M4.5d2b2b, M4.5e1d |
 | **M4.5f2 Recursive predicates** | recursive predicates; a linked list (push, pop, length); recursive owning fields | M4.5f1 |
