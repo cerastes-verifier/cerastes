@@ -997,16 +997,33 @@ handoff's questions start at 253):
 - **247** An obligation inside the `pure` function a `forall` names (an overflow, an unowned read) is reported at
   the `forall` site, with a note at the operation's line in the function. **Recommended:** the site (one function
   serves many sites, and a contract's errors are reported at the contract).
+
+Follow recommendation
+
 - **248** A trailing argument of `forall` reads no memory; the read is written inside the function.
   **Recommended:** accept as e1c's rule (M4.5e2 lifts it with the other argument forms).
+
+Follow recommendation
+
 - **249** A `forall` stands only in a positive position (a conjunct, either side of `||`, an arm of `?:`): a nested
   `forall`, `!forall` and an `exists` are rejected until M4.8 reviews them. **Recommended:** accept (neighbour
   sortedness, max and the fill loop need none).
+
+Keep rejected until M4.8 and document that this needs to be handled in M4.8
+
 - **250** The three false-alarm pins (`array_loop_fill_then_read_false_alarm.c`,
   `array_loop_self_write_false_alarm.c`, `range_marker_pin_loop_filler.c`) keep their names and expectations: their
   programs write no quantified invariant and fail as before; their comments name their verifying siblings.
   **Recommended:** accept (a rename would move twin references for no change of outcome).
+
+Accept
+
 - **251** Under a binder `old` is written `cerastes_old` in both modes; `cerastes::old` in a `pure` body stays the
   front end's `old_outside_ensures` until M7. **Recommended:** accept (no front-end expectation changes).
+
+Accept
+
 - **252** A contract on a `pure` function is neither read nor rejected today; e1c rejects it only where a `forall`
   names the function. **Recommended:** accept; e1d gives such contracts their meaning.
+
+Accept
