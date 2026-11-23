@@ -57,8 +57,8 @@ approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes m
    You are the orchestrator of M4.5e1c (quantifiers). Do not use plan mode: the plan is approved and complete.
    Read CLAUDE.md, .claude/plans/m4-5e1c-quantifiers.md (all of it), the M4.5e1b entry of internal/status.md,
    internal/handoff.md §1, §2, the rules of §4, §6 and §8, and decision records 0060, 0059, 0037, 0038, 0029,
-   0006 (items 8 and 9) and 0041 (item 12) (not the rest of internal/decisions/). Then execute the plan from its
-   section 4. Use the ensemble exactly as its section 2 assigns it: edg-backend, il-analyst and test-mutator
+   0028 (item 2), 0011 (items 4, 7 and 10), 0006 (items 8 and 9) and 0041 (item 12) (not the rest of
+   internal/decisions/). Then execute the plan from its section 4. Use the ensemble exactly as its section 2 assigns it: edg-backend, il-analyst and test-mutator
    (Sonnet) and the soundness-auditor (Opus) from .claude/agents/, and the Fable advisor at the plan's five
    checkpoints. Stop and ask me at every stop rule of the plan's sections 4, 5, 7 and 11, and for any question an
    agent raises.
@@ -955,29 +955,14 @@ are re-filed in §3.
   a queued fix will replace; the implementer's own proof of its fix still runs; one test run after the last fix.
 
 Other answers that steer a later session are in that session's notes (§3, §4) or its plan: 66, 79, 189, 194, 196,
-212, 215, 216, 222, 225 and 246 (M4.8), 78 (M4.6), 120, 236 and 237 (M4.5e2), 226–228 (M4.5e1's plan), 232 and 239
-(M4.5e1c's plan), 238 and 242 (M4.5e1f).
+212, 215, 216, 222, 225 and 246 (M4.8), 78 (M4.6), 120, 229, 236 and 237 (M4.5e2), 226–228 and 233 (M4.5e1's
+plan), 232 and 239 (M4.5e1c's plan), 238 and 242 (M4.5e1f), 230, 234 and 241 (M8).
 
-**Answered before and at M4.5e1's planning (2026-11-11):** 224 (a planning session first; five sub-sessions), 225
-(M4.8, a mode comment beside each block site), 226 (`forall` in C inlines a `pure` body: e1c), 227 (the exact sum in
-M4.5e1: e1d), 228 (`cerastes_reads_range`: e1b); the owner's words are in `git show 1c5f9bd:internal/handoff.md` §8.
-
-**Answered before M4.5e1a (2026-11-11), each "Follow recommendation":** 229 (`*p` one past the end is `permission`;
-M4.5e2 decides its bounds row), 230 (`int a[static N]` rejected, an M8 entry: e1a rejects it), 231 (e1b:
-`owns_range(p, n)` and `reads_range(p, n)` imply `p != NULL`), 232 (e1c: `cerastes_old(p[i])` in a `pure` body that
-only an `ensures` names), 233 (e1e: its planning may split it).
-
-**Answered after M4.5e1a (2026-11-11), each "Follow recommendation."** (the owner's inline answers; the questions as
-asked, with the answers, are in `git show 825a9ee:internal/handoff.md` §8): 234 (array designators stay rejected in C and C++, an M8
-entry needing an EDG change; a bound naming a local constant stays rejected), 235 (the 1,080 `.vpr` files of the
-`offset_of == 0` restatements are accepted as e1a's Flips D). M4.5e1a's deviations (its status entry) were listed
-there for confirmation; the owner answered 234 and 235 beside them and wrote nothing about them, so they stand
-unless the owner says otherwise.
-
-**Answered at M4.5e1b's planning and in the session (2026-11-11):** 236 (an atom on one element,
-`cerastes_owns(p[i])`: M4.5e2, with `owns(*(p + i))`), 237 (a range atom written in a loop invariant: M4.5e2); the
-ensemble (an Opus orchestrator that executes the plan without re-planning, three Sonnet implementers and the Opus
-reviewer from `.claude/agents/`, a Fable advisor); the split point at Commit 2: "Continue (Recommended)".
+**Answered 224–237** (2026-11-11: before and at M4.5e1's planning, around M4.5e1a, and at M4.5e1b's planning and
+in its session): recorded in the headers of records 0059 and 0060 and in section 1 of
+`.claude/plans/m4-5e1-arrays.md` and of `.claude/plans/m4-5e1b-ranges-in-contracts.md`; the digests that stood here
+are in `git show bdf3581:internal/handoff.md` §8. M4.5e1a's and M4.5e1b's listed deviations (their status
+entries) stand: the owner answered the questions beside them and wrote nothing about them.
 
 **Answered after M4.5e1b (2026-11-12, inline; the owner's words; the questions as asked are in `git show
 bdf3581:internal/handoff.md` §8):**
