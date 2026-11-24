@@ -3896,6 +3896,7 @@ class PfInfo:
     quantified: tuple[str, ...] = ()  # the user quantifiers (`forall q<j>`) of its `requires`: fact (ii)'s guard V holds each over the `hvq` ghosts (B1)
     atoms: tuple[tuple[str, str, str], ...] = ()  # its range atoms: (pointer parameter, count, field `v_<t>`), read from the `acc(..., wildcard)` lines (S1)
     result_tag: tuple[int, int] | None = None  # the `// cerastes:result <lo> <hi>` tag of its signature line (S2)
+    cells: tuple[tuple[str, str], ...] = ()  # its cell atoms: (pointer parameter, field `v_<t>`), read from the `acc(p.v_<t>, wildcard)` lines (R3-S1)
 
 
 @dataclasses.dataclass
@@ -3955,11 +3956,21 @@ def method_atoms(src: Source, d: Decl) -> list[RangeAtom]:
                     out.append(RangeAtom(clause, "range", x, acc[0], amount, high[len(f"offset_of({x})+"):],
                                          None if guard is None else norm_viper(guard)))
             continue
-        for cell in re.finditer(rf"acc\(\s*({IDENT})\.(v_[\w$']+)\s*(?:,\s*({IDENT})\s*)?\)", rest):
-            if cell.group(3) is None or cell.group(3) in perm_formals or (d.kind == "function" and cell.group(3) == "wildcard"):  # an owns(*p) atom has no amount
-                parts = _split_top(rest.strip(), "==>")
-                out.append(RangeAtom(clause, "cell", cell.group(1), cell.group(2), cell.group(3), None,
-                                     norm_viper(parts[0]) if len(parts) > 1 else None))
+        cell_re = rf"acc\(\s*({IDENT})\.(v_[\w$']+)\s*(?:,\s*({IDENT})\s*)?\)"
+        if len(_split_top(rest.strip(), "==>")) > 1 or not re.search(cell_re, rest):
+            pieces = [(rest, rest)]
+        else:
+            # a clause that is one conjunction: each conjunct `guard ==> atoms` is a guarded atom of its own (a `reads` atom under a condition on memory)
+            try:
+                pieces = [(piece, piece) for piece in _flatten_and(rest)]
+            except ValueError:
+                pieces = [(rest, rest)]
+        for piece, _ in pieces:
+            parts = _split_top(piece.strip(), "==>")
+            for cell in re.finditer(cell_re, piece):
+                if cell.group(3) is None or cell.group(3) in perm_formals or (d.kind == "function" and cell.group(3) == "wildcard"):  # an owns(*p) atom has no amount
+                    out.append(RangeAtom(clause, "cell", cell.group(1), cell.group(2), cell.group(3), None,
+                                         norm_viper(parts[0]) if len(parts) > 1 else None))
     return out
 
 
@@ -3979,6 +3990,22 @@ def _expected_guard(*atoms: RangeAtom) -> list[str]:
         if a.guard is not None:
             out += sorted(norm_viper(x) for x in _flatten_and(a.guard))
     return sorted(out)
+
+
+def _keep_atom_guard(atom: RangeAtom, state: str) -> set[str]:
+    """The conjuncts a keep fact's guard holds for the guard of `atom` (state `pre` for the `requires` atom, `post` for its partner): a conjunct that
+    reads no memory verbatim; a condition on memory (a read of a cell) as the same condition over the read ghosts of that state, each read `X.v_<t>`
+    standing as `@h` (`pre:`/`post:` marks the ghost's state)."""
+    if atom.guard is None:
+        return set()
+    out: set[str] = set()
+    for c in _flatten_and(atom.guard):
+        n = norm_viper(c)
+        if _heap_free(c):
+            out.add(n)
+        else:
+            out.add(f"{state}:" + re.sub(r"(?<![\w$'.])[A-Za-z_$][\w$']*\.v_[\w$']+", "@h", n))
+    return out
 
 
 def _type_range_problem(field: str, ret: str, ghost: str, s: str, qbody: str) -> str | None:
@@ -4446,40 +4473,44 @@ def loop_clause_scopes(src: Source, d: Decl) -> dict[int, frozenset[str]]:
     return out
 
 
-def _reads_as_markers(norm_text: str, counts: dict[str, str]) -> str:
-    """The normalized text with each read `(membership ? loc(block_of(p), q<j>).v_<t> : 0)` whose membership is the interval of the atom of `p` (count
-    `counts[p]`) replaced by the marker `@rd(p,q<j>)`, and a bare `loc(block_of(p), q<j>).v_<t>` too."""
+def _reads_as_markers(norm_text: str, accept: Callable[[str, str], bool]) -> str:
+    """The normalized text with each read `(membership ? loc(block_of(p), q<j>).v_<t> : 0)` whose membership is an interval of `p` that `accept(p, count)`
+    allows replaced by the marker `@rd(p,q<j>)`."""
     def site(m: re.Match) -> str:
-        return f"@rd({m.group(1)},{m.group(2)})" if counts.get(m.group(1)) == norm_viper(m.group(3)) else m.group(0)
+        return f"@rd({m.group(1)},{m.group(2)})" if accept(m.group(1), norm_viper(m.group(3))) else m.group(0)
 
-    text = re.sub(rf"block_of\(loc\(block_of\(({IDENT})\),(q[0-9]+)\)\)==block_of\(\1\)&&offset_of\(\1\)<=offset_of\(loc\(block_of\(\1\),\2\)\)"
+    return re.sub(rf"block_of\(loc\(block_of\(({IDENT})\),(q[0-9]+)\)\)==block_of\(\1\)&&offset_of\(\1\)<=offset_of\(loc\(block_of\(\1\),\2\)\)"
                   rf"&&offset_of\(loc\(block_of\(\1\),\2\)\)<offset_of\(\1\)\+([^?]+?)\?loc\(block_of\(\1\),\2\)\.v_[\w$']+:0", site, norm_text)
-    return text
 
 
-def pf_body_quantifier_problem(src: Source, d: Decl, pfs: dict[str, PfInfo], code: str) -> str | None:
-    """Decision 0062 item 12, last bullets: a body line of a `pf_` function holds a user quantifier (`forall q<j>`) only as a conjunct of an application's
-    guard, and then it is the quantified clause of the applied callee's `requires` at that application's arguments (cut 2), its element reads written in
-    the form of the function's own contract: `(membership of the function's own atom ? loc(block_of(p), q<j>).v_<t> : 0)`, so that the callee's reads
-    and the body's compare equal as markers.  None when each quantifier of the line is one of those; else why not."""
-    body = "\n".join(src.code[max(d.body_line, 1) - 1:d.end_line])
-    own = pfs.get(d.name)
-    own_counts = {pname: cnt for pname, cnt, _f in own.atoms} if own is not None else {}
+def app_guard_quantifier_problem(code: str, scope: str, pfs: dict[str, PfInfo], site_counts: dict[str, set[str]]) -> str | None:
+    """Decision 0062 items 7 and 12 (cut 2): a line holds a user quantifier (`forall q<j>`) only as a parenthesized conjunct of the guard of an application
+    (in a `pf_` body, a method's `requires` or `ensures`, a call's or a return's `assert` row), and then it is the quantified `requires` clause of an applied
+    callee at that application's arguments.  `scope` is the text that holds the applications (the line; a `pf_` function's whole body), `site_counts` the
+    counts of the atoms of the site (a method's or function's own atoms, by pointer) whose interval the element reads' membership may be, besides the
+    callee's own interval at the arguments.  The reads are compared as markers.  None when each quantifier of the line is one of those; else why not."""
     expected: set[str] = set()
-    for m in PF_ANY_RE.finditer(body):
+    allowed = {k: set(v) for k, v in site_counts.items()}
+    pending: list[tuple[PfInfo, dict[str, str]]] = []
+    for m in PF_ANY_RE.finditer(scope):
         info = pfs.get(m.group("name"))
         if info is None or not info.quantified:
             continue
-        args = parenthesized_list(body, m.end() - 1)
+        args = parenthesized_list(scope, m.end() - 1)
         if len(args) != len(info.params):
             continue
-        counts = {pname: cnt for pname, cnt, _f in info.atoms}
         mapping = {pname: f"({a.strip()})" for (pname, _t), a in zip(info.params, args)}
-        expected |= {norm_viper(_substitute(_reads_as_markers(norm_viper(q), counts), mapping)) for q in info.quantified}
+        for pname, cnt, _f in info.atoms:
+            arg = _strip_wrap(mapping.get(pname, ""))
+            allowed.setdefault(arg, set()).add(norm_viper(_substitute(cnt, mapping)))
+        pending.append((info, mapping))
+    for info, mapping in pending:
+        counts = {pname: cnt for pname, cnt, _f in info.atoms}
+        expected |= {norm_viper(_substitute(_reads_as_markers(norm_viper(q), lambda p, c: counts.get(p) == c), mapping)) for q in info.quantified}
     for m in re.finditer(r"(?<![\w$'])forall\s+q[0-9]+\s*:", code):
         before = code[:m.start()].rstrip()
         if not before.endswith("("):
-            return "a quantifier of a `pf_` body stands parenthesized, as a conjunct of an application's guard"
+            return "a quantifier of an application's guard stands parenthesized, as a conjunct"
         depth, end = 1, -1
         for i in range(m.start(), len(code)):
             depth += (code[i] == "(") - (code[i] == ")")
@@ -4487,11 +4518,23 @@ def pf_body_quantifier_problem(src: Source, d: Decl, pfs: dict[str, PfInfo], cod
                 end = i
                 break
         if end < 0:
-            return "a quantifier of a `pf_` body is not closed on its line"
-        if _reads_as_markers(norm_viper(code[m.start():end]), own_counts) not in expected:
-            return ("a quantifier of a `pf_` body is the quantified clause of the `requires` of a function the body applies, at that application's "
-                    "arguments, its reads in the form of the function's own contract (the guard of the application, cut 2)")
+            return "a quantifier of an application's guard is not closed on its line"
+        got = _reads_as_markers(norm_viper(code[m.start():end]), lambda p, c: c in allowed.get(p, set()))
+        if got not in expected:
+            return ("a quantifier of a line is the quantified clause of the `requires` of a function applied there, at that application's "
+                    "arguments, its element reads over the interval of the callee at the arguments or of an atom of the site (the guard of the "
+                    "application, cut 2)")
     return None
+
+
+def pf_body_quantifier_problem(src: Source, d: Decl, pfs: dict[str, PfInfo], code: str) -> str | None:
+    """A body line of a `pf_` function (decision 0062 item 12): `app_guard_quantifier_problem` over the whole body, the function's own atoms the site's."""
+    body = "\n".join(src.code[max(d.body_line, 1) - 1:d.end_line])
+    own = pfs.get(d.name)
+    site: dict[str, set[str]] = {}
+    for pname, cnt, _f in (own.atoms if own is not None else ()):
+        site.setdefault(pname, set()).add(cnt)
+    return app_guard_quantifier_problem(code, body, pfs, site)
 
 
 def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines:
@@ -4554,6 +4597,14 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
                 else:
                     why = f"a `{kind}` of an `f__wf` method holds no quantifier and no ghost application (item 7's facts are `requires`, its rows `assert`)"
                 out.verdicts[lineno] = (why is None, "" if why is None else f"{Q11}: in an `f__wf` method: {why}", False)
+            elif USER_QUANT_RE.search(code) and PF_ANY_RE.search(code) and kind in ("requires", "ensures", "assert"):
+                # the quantified clause of an applied callee, a conjunct of the application's guard (decision 0062 item 7, cut 2)
+                site: dict[str, set[str]] = {}
+                for atom in method_atoms(src, d):
+                    if atom.kind == "range" and atom.count is not None:
+                        site.setdefault(atom.formal, set()).add(atom.count)
+                why = app_guard_quantifier_problem(code, code, pfs, site)
+                out.verdicts[lineno] = (why is None, "" if why is None else f"{Q11}: {why}", False)
             elif USER_QUANT_RE.search(code):
                 if kind not in ("requires", "ensures", "invariant", "assert"):
                     out.verdicts[lineno] = (False, f"{Q11}: a user quantifier stands in a `requires`, `ensures`, `invariant` or `assert`, not an `{kind}`", False)
@@ -4766,6 +4817,7 @@ def pf_infos(src: Source, decls: list[Decl]) -> dict[str, PfInfo]:
         ensures: list[str] = []
         quantified: list[str] = []
         atoms: list[tuple[str, str, str]] = []
+        cells: list[tuple[str, str]] = []
         opaque = False
         for kw, _line, text in clause_texts(src, d):
             if kw == "requires":
@@ -4782,13 +4834,16 @@ def pf_infos(src: Source, decls: list[Decl]) -> dict[str, PfInfo]:
                         atom = _pf_atom(part, dict(params))
                         if atom is not None:
                             atoms.append(atom)
+                        cell = re.fullmatch(rf"acc\(({IDENT})\.(v_[\w$']+),wildcard\)", norm_viper(part))
+                        if cell is not None and dict(params).get(cell.group(1)) == "Ref":
+                            cells.append((cell.group(1), cell.group(2)))
             elif kw == "ensures":
                 ensures += _memory_free_conjuncts(text)
         tag = None
         m = PF_RESULT_TAG_RE.search(src.comments[d.line - 1]) if d.line - 1 < len(src.comments) else None
         if m is not None:
             tag = (int(m.group(1)), int(m.group(2)))
-        out[d.name] = PfInfo(d.name, params, ret, tuple(requires), tuple(ensures), opaque, tuple(quantified), tuple(atoms), tag)
+        out[d.name] = PfInfo(d.name, params, ret, tuple(requires), tuple(ensures), opaque, tuple(quantified), tuple(atoms), tag, tuple(cells))
     return out
 
 
@@ -5302,32 +5357,45 @@ def hva_fact_problem(rest: str, ctx: WfContext) -> str | None:
         if quant_conj:
             return "the keep fact's guard holds no quantifier"
         have = set(_conjunct_set(guard))
-        if not info.atoms:
-            return (f"the keep fact is about a callee that names memory: `{callee}` has no range atom in its `requires`, so its value does not depend "
-                    "on a place the method's `reads_range` atom keeps")
+        if not info.atoms and not info.cells:
+            return (f"the keep fact is about a callee that names memory: `{callee}` has no range or cell atom in its `requires`, so its value does not depend "
+                    "on a place the method's `reads_range` or `reads` atom keeps")
+        if info.atoms and info.cells:
+            return f"`{callee}` holds a range atom and a cell atom: the keep fact is not written for it (a false alarm, fail closed)"
         amap = {pname: a.strip() for (pname, _t), a in zip(info.params, args_raw)}
         cmap = {pname: f"({a})" for pname, a in amap.items()}
+        kind = "range" if info.atoms else "cell"
+        mine = {}
+        for c in have:
+            pre, post = re.search(r"(?<![\w$'])hv_[\w$']*_pre(?![\w$'])", c), re.search(r"(?<![\w$'])hv_[\w$']*_post(?![\w$'])", c)
+            if pre and post:
+                mine[c] = "?" + c
+            elif pre or post:
+                mine[c] = ("pre:" if pre else "post:") + re.sub(r"(?<![\w$'])hv_[\w$']*_(?:pre|post)(?![\w$'])", "@h", c)
         for r in ctx.atoms:
-            if r.kind != "range" or r.clause != "requires" or r.amount is None:
+            if r.kind != kind or r.clause != "requires" or r.amount is None:
                 continue
             for e in ctx.atoms:
-                if (e.kind, e.clause, e.formal, e.field, e.amount, e.count) == ("range", "ensures", r.formal, r.field, r.amount, r.count):
-                    need = set(_expected_guard(r, e))
+                if (e.kind, e.clause, e.formal, e.field, e.amount, e.count) == (kind, "ensures", r.formal, r.field, r.amount, r.count):
+                    need = _keep_atom_guard(r, "pre") | _keep_atom_guard(e, "post")
                     ok = True
-                    for pname, cnt, field in info.atoms:
+                    callee_atoms = [(pname, cnt, field) for pname, cnt, field in info.atoms] if kind == "range" else [(pname, "1", field) for pname, field in info.cells]
+                    for pname, cnt, field in callee_atoms:
                         arg = _strip_wrap(amap.get(pname, ""))
                         if field != r.field or re.fullmatch(IDENT, arg) is None:
                             ok = False
                             break
                         need.add(norm_viper(f"(block_of({arg}) == block_of({r.formal}))"))
                         need.add(norm_viper(f"(offset_of({r.formal}) <= offset_of({arg}))"))
-                        need.add(norm_viper(f"((offset_of({arg}) + {_substitute(cnt, cmap)}) <= (offset_of({r.formal}) + {r.count}))"))
-                    if ok and have == need:
+                        count = _substitute(cnt, cmap) if kind == "range" else "1"
+                        need.add(norm_viper(f"((offset_of({arg}) + {count}) <= (offset_of({r.formal}) + {r.count if kind == 'range' else '1'}))"))
+                    got = {mine.get(c, c) for c in have}
+                    if ok and got == need:
                         return None
-        return ("the keep fact is guarded by exactly the guards of a `reads_range(p, n)` `requires` atom of the method and its `ensures` partner "
-                "(same field, amount and count), the same block, and for every range atom of the callee its interval at the arguments inside the "
-                "method's atom's interval (`offset_of(p) <= offset_of(arg)` and `offset_of(arg) + count <= offset_of(p) + n`), read from the "
-                "callee's own atoms (decision 0062 item 12)")
+        return ("the keep fact is guarded by exactly the guards of a `reads_range(p, n)` or `reads(*p)` `requires` atom of the method (a condition on memory "
+                "over the entry state's read ghosts `hv_<k>_pre`) and of its `ensures` partner (over `hv_<k>_post`; same field, amount and count), the same "
+                "block, and for every atom of the callee its interval at the arguments inside the method's atom's interval (`offset_of(p) <= offset_of(arg)` "
+                "and `offset_of(arg) + count <= offset_of(p) + n`; one slot for a cell), read from the callee's own atoms (decision 0062 item 12)")
     # (i) the type range of an application
     app_text = norm_viper(apps[0][2])
     rng = [norm_viper(x) for x in (_flatten_and(body) if "&&" in body else [body])]

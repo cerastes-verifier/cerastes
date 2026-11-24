@@ -4965,6 +4965,14 @@ private:
             {
                 continue;
             }
+            if (const Expr* g {application_in_guard(c)}; g != nullptr)
+            {
+                reject(
+                    Diag::unsupported_annotation, a->position,
+                    "a call of \"" + (g->callee != nullptr ? g->callee->c_name : std::string("a pure function")) +
+                        "\" in the guard of a permission atom (a guard reads no memory, and a call counts as a read: M4.5e2, decision 0062 item 4)");
+                continue;
+            }
             if (f->pure && !pure_clause_ok(c, k, a->position))
             {
                 continue; // item 3's rules on a read function's contract: reported
@@ -5564,6 +5572,62 @@ private:
         return false;
     }
 
+    // An application in the guard of an atom (`g(n) || owns(*p)`, `g(n) ? owns(*p) : ...`): the first one, or null.  A guard reads no memory the contract's atoms
+    // frame, and an application counts as a read (record 0062 item 4); the positions are the ones AtomCollector gives guards.
+    static const Expr* application_in_guard(const Expr* x)
+    {
+        if (x == nullptr)
+        {
+            return nullptr;
+        }
+        const bool or_guard {x->kind == Expr::Kind::Binary && x->bop == vir::BinaryOp::LOr && x->b != nullptr &&
+                             holds_atom(*x->b)};
+        const bool cond_guard {x->kind == Expr::Kind::Cond &&
+                               ((x->b != nullptr && holds_atom(*x->b)) || (x->c != nullptr && holds_atom(*x->c)))};
+        if ((or_guard || cond_guard) && x->a != nullptr)
+        {
+            if (const Expr* g {find_kind(x->a, Expr::Kind::Apply)})
+            {
+                return g;
+            }
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (const Expr* g {application_in_guard(y)})
+            {
+                return g;
+            }
+        }
+        return nullptr;
+    }
+
+    static const Expr* find_kind(const Expr* x, Expr::Kind k)
+    {
+        if (x == nullptr)
+        {
+            return nullptr;
+        }
+        if (x->kind == k)
+        {
+            return x;
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (const Expr* r {find_kind(y, k)})
+            {
+                return r;
+            }
+        }
+        for (const Expr* y : x->args)
+        {
+            if (const Expr* r {find_kind(y, k)})
+            {
+                return r;
+            }
+        }
+        return nullptr;
+    }
+
     // A read through a pointer loaded from memory (`**pp`, `(*pp)[i]`): the first such Deref in `x`, or null.  A read function's atoms stand on its parameters'
     // cells only, so the pointee of a loaded pointer can never be framed (audit round 2, R2-S5); a quantifier's own reads are written over its arguments.
     static const Expr* loaded_read(const Expr* x)
@@ -5680,7 +5744,7 @@ private:
     }
 
     // `g(e_1, ..., e_m)`, a call of a `pure` function in an annotation (record 0062 item 4).  Where an application may not stand it is the rejection that
-    // names where it is lifted; in an ordinary function's `requires` or `ensures` and in a loop invariant it is still `call_in_annotation` (parts C and D).
+    // names where it is lifted; in a loop invariant it is still `call_in_annotation` (part D).
     const Expr* application(an_expr_node_ptr e, a_routine_ptr callee, const std::vector<an_expr_node_ptr>& ops)
     {
         const std::string name {rname(callee)};
@@ -5708,10 +5772,9 @@ private:
             return refuse(
                 "in a position that must read no memory (the count of an atom, an element's index, a trailing argument of `cerastes_forall`: a call counts as a read there; M4.5e2)");
         }
-        if (!cx_.check_clause && cx_.pure_fn == nullptr)
+        if (!cx_.check_clause && !cx_.contract)
         {
-            reject(Diag::call_in_annotation, at,
-                   name); // an ordinary function's contract, a loop invariant: parts C and D
+            reject(Diag::call_in_annotation, at, name); // a loop invariant: part D lifts it
             return nullptr;
         }
         vir::Function* f {read_pure(callee, at)};
@@ -5728,15 +5791,50 @@ private:
         std::set<int> atoms {atom_parameters(*f)};
         const std::set<int> quantified {forall_parameters(*f)};
         atoms.insert(quantified.begin(), quantified.end());
+        if (!cx_.contract)
+        {
+            // audit round 3, R3-S2: in a `check` and a loop invariant the rows over a callee's range of POINTER elements would hold a computed `loc` term over the
+            // binder, which the lint refuses; record 0061 question 259 rejects pointer elements under a binder there, and so does this (contracts keep it)
+            for (int k : atoms)
+            {
+                const vir::Type& t {f->params[static_cast<size_t>(k)].type};
+                if (t.is_ptr() && t.pointee != nullptr && t.pointee->is_ptr())
+                {
+                    reject(
+                        Diag::unsupported_annotation, at,
+                        "a call of \"" + name +
+                            "\" in a `check` or a loop invariant whose function reads pointer elements (a `reads` or `reads_range` over `T **`: M4.5e2, decision 0062 item 4)");
+                    return nullptr;
+                }
+            }
+        }
         std::vector<const Expr*> args;
-        for (size_t i {1U}; i < ops.size(); ++i)
+        a_routine_type_supplement_ptr callee_sup {routine_supplement(callee)};
+        a_param_type_ptr callee_param {callee_sup != nullptr ? callee_sup->param_type_list : nullptr};
+        for (size_t i {1U}; i < ops.size(); ++i, callee_param = callee_param != nullptr ? callee_param->next : nullptr)
         {
             const size_t k {i - 1U};
             const vir::Type& pty {f->params[k].type};
             const bool named_by_atom {atoms.count(static_cast<int>(k)) != 0U};
             an_expr_node_ptr use {pty.is_ptr() ? peel_one_generated_cast(ops[i]) : ops[i]};
+            if (use != ops[i] && (callee_param == nullptr || !forall_argument_type_ok(callee_param->type, use->type)))
+            {
+                // audit round 3, R3-S3: only the one-level `T *` -> `const T *` conversion is peeled (P81 (d)); a conversion that adds a qualifier below the first level
+                // (`int **` -> `const int *const *`) is read as a written cast is, and 0040 item 2 rejects it
+                use = ops[i];
+            }
             const Expr* a {nullptr};
             bool is_array {false};
+            if (named_by_atom && pty.is_ptr() && use->kind == enk_operation &&
+                use->variant.operation.kind == eok_address_of)
+            {
+                // `&a[1]`, `&x`: the address of an element or a cell as the pointer a callee reads through (as `cerastes_forall` refuses it)
+                reject(
+                    Diag::unsupported_annotation, ops[i]->position,
+                    "a pointer argument of \"" + name +
+                        "\", which reads through it, that is not a bare pointer parameter, a pointer variable or a named local array (`&a[1]`, `&x`: M4.5e2, decision 0062 item 4)");
+                return nullptr;
+            }
             if (pty.is_ptr() && !cx_.contract && array_variable(use) != nullptr)
             {
                 // a named local array in a `check` (record 0061 item 3, as `cerastes_forall` reads it): its decay collapsed to the array
@@ -5766,7 +5864,9 @@ private:
             else
             {
                 allow_enum_conversion(ops[i]);
-                a = expr(ops[i]);
+                // a pointer argument is read without the one generated conversion that adds a qualifier (`int *` for `const int *`, P81 (d)); the VIR types
+                // are then compared, so a conversion that changes anything else is a mismatch
+                a = expr(use);
                 if (a == nullptr)
                 {
                     return nullptr;

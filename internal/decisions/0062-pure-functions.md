@@ -9,7 +9,14 @@
   compiles in C++, items 1 and 4; six should-fix items, all taken: S1 the keep fact's guard read from the callee's
   atoms, S2 fact (i)'s range tied to a result tag, S3 every read function's `__wf`, S4 trusted contracts read
   functions, S5 the check's range and shape rows, S6 a discriminating no-`decreases` fixture; notes N1 (item 11's
-  argument traced), N2, N9 taken; `build/m4.5e1d/auditor-report-1.md`). Owner decisions:
+  argument traced), N2, N9 taken; `build/m4.5e1d/auditor-report-1.md`), by audit round 2 (Opus, on the snapshot
+  `80b2954` of Parts A and B: no blocking item; five should-fix items, all taken: cut 2's source tests, the
+  definition-unknown pin (question 282), value checks in seven positives, a pure body's own message for an unframed
+  read, a read through a loaded pointer rejected; `build/m4.5e1d/auditor-report-2.md`) and by audit round 3 (Opus, on
+  the snapshot `62f79b5` of Part C: no blocking item; four should-fix items, all taken: the keep fact over a cell atom
+  admitted by the lint with a test, an application over a range of pointer elements in a `check` or a loop invariant
+  rejected, the pointer-argument conversion peeled one qualifier level only, a source pin for an application in an
+  atom's guard; `build/m4.5e1d/auditor-report-3.md`). Owner decisions:
   - At M4.5e1's planning (2026-11-11): **226** a `forall` inlines its function's body; a call of a `pure` function
     anywhere else waits for e1d. **227** the exact sum is in M4.5e1: e1d takes `pure` bodies, their calls and their
     recursion from M4.5f1/f2; M4.5f1 keeps predicates, `fold`/`unfold` and pure functions over predicates.
@@ -100,7 +107,7 @@ the branch of the plan's decision table it took.
    | a read `pure` function that returns a pointer, a structure or `void`, or takes a structure by value | M4.5f1 |
    | in a `pure` function's `requires`: `owns`, `owns_range`, `owns_block`, `live`, an atom under a guard or `\|\|`; any atom in its `ensures`; markers on its parameters (0042 item 4); `restrict` | M4.5f1 |
    | in a read `pure` body: a global or `static` local (0041 item 12), structure members, array members, a local declaration, more than the one `return` | M4.5f1, e1e |
-   | a pointer argument that a callee's atom names and that is not a bare pointer parameter (contract) or a pointer variable that is not address-taken or a named local array (loop invariant, `check`): 0061 item 3's rule | M4.5e2 |
+   | a pointer argument that a callee's atom names and that is not a bare pointer parameter (contract) or a pointer variable that is not address-taken or a named local array (loop invariant, `check`): 0061 item 3's rule; in a loop invariant or a `check`, an application whose callee reads a range of pointer elements (audit round 3, S2: question 259's rule for pointer elements under a binder) | M4.5e2 |
 
 2. **Which `pure` functions are read** (owner, 2026-11-24, question 268). A `pure` function of the unit is **read** when
    an annotation of a function whose contract is lowered calls it (a verified function's, or a trusted one's: a
@@ -175,7 +182,9 @@ the branch of the plan's decision table it took.
      parameter; in a loop invariant or a `check`, a pointer variable that is not address-taken or a named local array
      (0061 item 3's rule, for the same reason: the rows' trigger terms name a variable). P81 (d): an argument has the
      shape the same expression has as a call argument in code; `int *` for `const int *` and `int` for `long long` are
-     one generated conversion, and a named local array for a `const T *` parameter is a generated qualification cast
+     one generated conversion (only the one-level qualification `T *` to `const T *` is read through for a pointer;
+     C++'s multi-level `int **` to `const int *const *` is rejected as 0040 item 2 rejects it elsewhere: audit round 3,
+     S3), and a named local array for a `const T *` parameter is a generated qualification cast
      over the generated decay (two nodes), read as e1c reads it (`forall_check_local.c`).
    - **Meaning:** the value of `g`'s `E` with its parameters replaced by the argument values, read in the site's state.
 
@@ -313,8 +322,10 @@ the branch of the plan's decision table it took.
      callee's full precondition exists, Silicon proved the `ensures` there, and the clause reads no memory. For an
      application of the function inside its own body this is the induction hypothesis, sound because the function's
      termination is checked (item 10);
-   - **(iii) the keep fact** (cut 1): for a post-state application whose arguments read no memory and whose every callee
-     interval lies inside a `reads` or `reads_range` atom of the method that has an `ensures` partner, under both atoms'
+   - **(iii) the keep fact** (cut 1): for a post-state application whose arguments read no memory, whose every pointer
+     argument that a callee atom names is a bare variable (as built: otherwise the fact is left out, a false alarm), and
+     whose every callee interval lies inside a `reads` or `reads_range` atom of the method that has an `ensures` partner
+     (a cell atom is an interval of one slot: audit round 3, S1), under both atoms'
      guards and the inclusion, `hva_…_post(args) == hva_…_pre(args)` (the function's value depends on its arguments and
      on the cells its atoms name, and a `reads` place is not written between entry and return: 0061 item 7 (d)'s
      argument).

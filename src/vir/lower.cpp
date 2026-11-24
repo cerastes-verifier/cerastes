@@ -20986,6 +20986,7 @@ private:
         std::string ghost;
         std::vector<E>
             quants; // the callee's quantified clauses at the arguments, over the method's `hvq` ghosts (record 0062 item 8: part of fact (ii)'s `V`)
+        bool mem_free {false}; // no argument reads memory (the keep fact, item 8 (iii), is written only then)
     };
     std::vector<WfApp> wf_apps_;
     // One row of an application's guard: what it says, and what a failure of it means
@@ -21403,9 +21404,13 @@ private:
         return m;
     }
 
+    std::string hva_name(const Function& g, bool post) const
+    {
+        return "hva_" + method_name(*fn_.f) + "__" + method_name(g) + (post ? "_post" : "_pre");
+    }
     std::string hva_name(const Function& g) const
     {
-        return "hva_" + method_name(*fn_.f) + "__" + method_name(g) + (cens_ && !cold_ ? "_post" : "_pre");
+        return hva_name(g, cens_ && !cold_);
     }
 
     // `e` with each parameter of the callee replaced by the application's argument (a copy of every node on the way to one; the rest is shared)
@@ -21473,11 +21478,10 @@ private:
         {
             return apply_check(e, g, args, adep, env, guard, gdep, full);
         }
-        if (cmode_ != CMode::Method && cmode_ != CMode::Wf)
+        if (cmode_ == CMode::Inv)
         {
             internal_error(
-                e.loc,
-                "an application of a `pure` function in a call, a return or a loop invariant reached lowering (record 0062 parts C and D)");
+                e.loc, "an application of a `pure` function in a loop invariant reached lowering (record 0062 part D)");
             return {inv_dummy(e.type), {}};
         }
         const std::vector<ApplyConj> conj {apply_conjuncts(g, args, env, true)};
@@ -21505,7 +21509,7 @@ private:
             // guarded by the callee's other lines (the quantifier is evaluated only where they hold)
             Full& target {cmode_ == CMode::Wf ? full : scratch};
             const LV q {lower(*site, env, cmode_ == CMode::Wf ? low::and_(guard, vlines) : nullptr, gdep, target)};
-            if (cmode_ == CMode::Method)
+            if (cmode_ != CMode::Wf)
             {
                 pure_full(scratch, *site, "a quantified clause");
             }
@@ -21513,8 +21517,9 @@ private:
             quant_texts.push_back(l.text);
             quant_locs.push_back(l.loc);
         }
-        if (cmode_ == CMode::Method)
+        if (cmode_ != CMode::Wf)
         {
+            // a method's contract, a `pure` function, and a call's or a return's clause lowered again over the arguments (the form the method's contract gives it)
             const E gd {apply_guard(conj, quants)};
             const E call {low::fn(method_name(g), args)};
             if (&g == fn_.f && cbody_)
@@ -21538,7 +21543,12 @@ private:
         }
         if (!known)
         {
-            wf_apps_.push_back(WfApp {&g, post, args, ghost, quants});
+            bool mem_free {true};
+            for (const Expr* a : e.args)
+            {
+                mem_free = mem_free && !reads_heap(*a);
+            }
+            wf_apps_.push_back(WfApp {&g, post, args, ghost, quants, mem_free});
         }
         for (const ApplyConj& c : conj)
         {
@@ -21910,7 +21920,122 @@ private:
         return false;
     }
 
-    void wf_application_facts(low::LMethod& m, std::vector<E>& facts)
+    // The ghost function `name` of an application of `callee`, declared once in the method's domain
+    void declare_hva(low::LMethod& m, const std::string& name, const Function& callee)
+    {
+        for (const low::LGhostFn& x : m.ghost_fns)
+        {
+            if (x.name == name)
+            {
+                return;
+            }
+        }
+        low::LGhostFn gf;
+        gf.name = name;
+        gf.result = ltype(callee.ret);
+        gf.params.clear();
+        for (size_t k {0U}; k < callee.params.size(); ++k)
+        {
+            gf.params.push_back(low::LVar {"x" + std::to_string(k), ltype(callee.params[k].type)});
+        }
+        m.ghost_fns.push_back(std::move(gf));
+    }
+
+    // Fact (iii), the keep fact (record 0062 item 8; cut 1): a post-state application whose arguments read no memory, and every one of whose callee's intervals lies inside one `reads` or
+    // `reads_range` atom of the method that its `ensures` returns (the partner), has the value the pre-state application has: the function depends on its arguments and on the cells its atoms
+    // name, and a `reads` place is not written between entry and return (0061 item 7 (d)).  It is assumed under both atoms' guards and the inclusion, as the lint requires.
+    void wf_keep_facts(low::LMethod& m, const Env& env, std::vector<E>& facts)
+    {
+        using low::BinOp;
+        const Function& f {*fn_.f};
+        const FnAtoms& fa {atoms_of(f)};
+        CtxSave save(*this);
+        cmode_ = CMode::Wf;
+        for (const WfApp& w : wf_apps_)
+        {
+            const Function& g {*w.callee};
+            if (!w.post || !w.mem_free)
+            {
+                continue;
+            }
+            std::vector<const AtomSite*> gsites;
+            for (const AtomSite& gs : atoms_of(g).sites)
+            {
+                if (!gs.in_ensures)
+                {
+                    gsites.push_back(&gs);
+                }
+            }
+            if (gsites.empty())
+            {
+                continue;
+            }
+            Env aenv;
+            aenv.formals = w.args;
+            aenv.formal_leaves.resize(w.args.size());
+            for (int i {0}; i < fa.nreq; ++i)
+            {
+                const AtomSite& rs {fa.sites[static_cast<size_t>(i)]};
+                const bool range {rs.atom->atom == AtomKind::ReadsRange};
+                if ((!range && rs.atom->atom != AtomKind::Reads) || !rs.path.empty() || !rs.via.empty() ||
+                    site_is_global(rs) || site_key(rs) < 0)
+                {
+                    continue;
+                }
+                const std::string sfx {use_cell_type(site_pointee(rs))};
+                const E ref {site_ref(rs, env)};
+                E n_site {low::int_lit("1")};
+                if (range)
+                {
+                    Full scratch;
+                    n_site = lower(*rs.atom->b, env, nullptr, Deps {}, scratch).e;
+                }
+                // every interval of the callee's atoms inside this one: the same block, the same cell field, a pointer argument that is a variable
+                E inside;
+                bool ok {true};
+                for (const AtomSite* gs : gsites)
+                {
+                    const E root {w.args[static_cast<size_t>(site_key(*gs))]};
+                    if (root == nullptr || root->kind != low::LExpr::Kind::Var ||
+                        use_cell_type(site_pointee(*gs)) != sfx || site_fields(rs).count(sfx) == 0U)
+                    {
+                        ok = false;
+                        break;
+                    }
+                    E count {low::int_lit("1")};
+                    if (site_is_range(*gs))
+                    {
+                        Full scratch;
+                        count = lower(*gs->atom->b, aenv, nullptr, Deps {}, scratch).e;
+                    }
+                    const E off_site {low::dom("offset_of", {ref})};
+                    const E off_callee {low::dom("offset_of", {root})};
+                    inside = low::and_(inside, low::bin(BinOp::Eq, block_of(root), block_of(ref)));
+                    inside = low::and_(inside, low::bin(BinOp::Le, off_site, off_callee));
+                    inside = low::and_(inside, low::bin(BinOp::Le, low::bin(BinOp::Add, off_callee, count),
+                                                        low::bin(BinOp::Add, off_site, n_site)));
+                }
+                if (!ok)
+                {
+                    continue;
+                }
+                for (const AtomSite& es : fa.sites)
+                {
+                    if (!es.in_ensures || es.atom->amount != i)
+                    {
+                        continue;
+                    }
+                    const E guards {low::and_(low::and_(site_guard(rs, env), site_guard(es, env)), inside)};
+                    const std::string pre {hva_name(g, false)};
+                    declare_hva(m, pre, g);
+                    facts.push_back(
+                        low::implies(guards, low::bin(BinOp::Eq, low::fn(w.ghost, w.args), low::fn(pre, w.args))));
+                }
+            }
+        }
+    }
+
+    void wf_application_facts(low::LMethod& m, const Env& env, std::vector<E>& facts)
     {
         if (wf_apps_.empty())
         {
@@ -21918,24 +22043,9 @@ private:
         }
         for (const WfApp& w : wf_apps_)
         {
-            low::LGhostFn gf;
-            gf.name = w.ghost;
-            gf.result = ltype(w.callee->ret);
-            gf.params.clear();
-            for (size_t k {0U}; k < w.callee->params.size(); ++k)
-            {
-                gf.params.push_back(low::LVar {"x" + std::to_string(k), ltype(w.callee->params[k].type)});
-            }
-            bool have {false};
-            for (const low::LGhostFn& x : m.ghost_fns)
-            {
-                have = have || x.name == gf.name;
-            }
-            if (!have)
-            {
-                m.ghost_fns.push_back(std::move(gf));
-            }
+            declare_hva(m, w.ghost, *w.callee);
         }
+        wf_keep_facts(m, env, facts);
         for (const WfApp& w : wf_apps_)
         {
             const Function& g {*w.callee};
@@ -22703,7 +22813,7 @@ private:
             }
         }
         std::vector<low::E> hva_facts;
-        wf_application_facts(m, hva_facts);
+        wf_application_facts(m, env, hva_facts);
         for (size_t k {0U}; k < f.params.size(); ++k)
         {
             for (const LeafVar& lv : param_vars(f, static_cast<int>(k)))

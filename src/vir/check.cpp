@@ -901,8 +901,8 @@ private:
             }
             named_const(c, "the local constant");
         }
-        apply_ok_ =
-            f.pure; // record 0062 item 4: an application stands in the `requires` and `ensures` of a `pure` function (a measure: never)
+        // record 0062 item 4: an application stands in the `requires` and `ensures` of any function (M4.5e1d part C; a measure: never)
+        apply_ok_ = true;
         for (const Clause& c : f.requires_)
         {
             clause(c, Ctx::Requires, "requires");
@@ -4488,8 +4488,8 @@ private:
 
     // ---- applications of `pure` functions (record 0062 items 4 and 5; M4.5e1d part B) ----
 
-    // An application `g(args)`: in a `check` and in the body, `requires` and `ensures` of a `pure` function (a loop invariant is part D's, an ordinary function's contract part C's: both
-    // stay refused here, fail closed between the parts), never under a quantifier's binder, in a measure or under `old`.  The callee is a `pure` function with a value expression, with
+    // An application `g(args)`: in a `check`, in the `requires` and `ensures` of any function and in the body of a `pure` function (a loop invariant is part D's and stays refused here, fail
+    // closed between the parts), never under a quantifier's binder, in a measure or under `old`.  The callee is a `pure` function with a value expression, with
     // the arity and parameter types of the arguments.  A pointer argument that an atom of the callee names is, in a contract or a `pure` function, a parameter of the function and, in a
     // `check`, a pointer variable or the decay of a named array: the rows of the application name that pointer as a variable (item 4).
     void apply(const Expr& e, Ctx ctx)
@@ -4499,7 +4499,7 @@ private:
         if (!in_check && !in_pure)
         {
             err(e.loc,
-                "an application of a `pure` function outside a `check` and the body, `requires` and `ensures` of a `pure` function (record 0062 item 4: an ordinary function's contract is part C's, a loop invariant part D's, a measure, a guard and code never)");
+                "an application of a `pure` function outside a `check`, a `requires` and an `ensures` and the body of a `pure` function (record 0062 item 4: a loop invariant is part D's, a measure, a guard and code never)");
             return;
         }
         if (cur_forall_ != nullptr)

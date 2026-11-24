@@ -54,7 +54,8 @@ void define_pure_functions()
     auto lcv = [](const char* name, const char* doc, const std::function<void(Kit&)>& build)
     {
         lc(name, doc, build);
-        lc(std::string(name) + "_vacuity", "the same with check(false) after everything: it fails (what the program assumes is not inconsistent)",
+        lc(std::string(name) + "_vacuity",
+           "the same with check(false) after everything: it fails (what the program assumes is not inconsistent)",
            [build](Kit& k)
            {
                k.vac_tail = true;
@@ -81,7 +82,8 @@ void define_pure_functions()
                        });
     };
     // ---- a function without a contract, in a `check` ----
-    lcv("pure_scalar_check", "check(is_small(5)): the function's body, the fact", [=](Kit& k)
+    lcv("pure_scalar_check", "check(is_small(5)): the function's body, the fact",
+        [=](Kit& k)
         {
             Function* g {mk_small(k)};
             Function* f {k.fn("use", k.vd)};
@@ -90,7 +92,8 @@ void define_pure_functions()
             f->body = k.blk(st);
             k.done(f);
         });
-    lc("pure_scalar_check_false", "check(is_small(500)): fails at the fact (the default is not observable, and the application is the body's value)",
+    lc("pure_scalar_check_false",
+       "check(is_small(500)): fails at the fact (the default is not observable, and the application is the body's value)",
        [=](Kit& k)
        {
            Function* g {mk_small(k)};
@@ -117,12 +120,15 @@ void define_pure_functions()
         }
         const Expr* nm1 {k.sub(k.F(f, 1), k.num(k.i32, "1"))};
         const Expr* self {app(k, f, {k.F(f, 0), variant == 2 ? k.F(f, 1) : nm1}, "sum_to(a, n - 1)")};
-        const Expr* elem {k.deref(k.b.elem_addr(k.F(f, 0), variant == 3 ? k.F(f, 1) : k.sub(k.F(f, 1), k.num(k.i32, "1")), k.at()))};
+        const Expr* elem {
+            k.deref(k.b.elem_addr(k.F(f, 0), variant == 3 ? k.F(f, 1) : k.sub(k.F(f, 1), k.num(k.i32, "1")), k.at()))};
         f->pure_body = k.cond(k.eq(k.F(f, 1), k.num(k.i32, "0")), k.num(k.i64, "0"), k.add(self, k.cv(k.i64, elem)));
         k.done(f);
         return f;
     };
-    lcv("pure_sum_definition", "the recursive sum with its measure and bound: the function, its `__wf` (the guarded self-application, facts (i) and (ii)) verify", [=](Kit& k)
+    lcv("pure_sum_definition",
+        "the recursive sum with its measure and bound: the function, its `__wf` (the guarded self-application, facts (i) and (ii)) verify",
+        [=](Kit& k)
         {
             Function* g {mk_sum(k, 0)};
             Function* f {k.fn("use", k.vd)};
@@ -147,12 +153,14 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_overflow_bounded", "x + x under -1000 <= x <= 1000: the function and its `__wf` verify", [=](Kit& k)
+    lc("pure_overflow_bounded", "x + x under -1000 <= x <= 1000: the function and its `__wf` verify",
+       [=](Kit& k)
        {
            const Expr* sum {nullptr};
            mk_twice(k, true, &sum);
        });
-    lc("pure_overflow_unbounded", "x + x with no bound: the overflow row of the `__wf`, in the function, at the sum", [=](Kit& k)
+    lc("pure_overflow_unbounded", "x + x with no bound: the overflow row of the `__wf`, in the function, at the sum",
+       [=](Kit& k)
        {
            const Expr* sum {nullptr};
            mk_twice(k, false, &sum);
@@ -172,12 +180,15 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_conversion_bounded", "the conversion at the return of an int to short under a bound: verifies", [=](Kit& k)
+    lc("pure_conversion_bounded", "the conversion at the return of an int to short under a bound: verifies",
+       [=](Kit& k)
        {
            const Expr* c {nullptr};
            mk_narrow(k, true, &c);
        });
-    lc("pure_conversion_unbounded", "the conversion at the return without a bound: the `conversion` row in the function", [=](Kit& k)
+    lc("pure_conversion_unbounded",
+       "the conversion at the return without a bound: the `conversion` row in the function",
+       [=](Kit& k)
        {
            const Expr* c {nullptr};
            mk_narrow(k, false, &c);
@@ -193,7 +204,8 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lcv("pure_value_requires_check", "check(pos(5)): the value clause is a precondition row, held", [=](Kit& k)
+    lcv("pure_value_requires_check", "check(pos(5)): the value clause is a precondition row, held",
+        [=](Kit& k)
         {
             Function* g {mk_pos(k)};
             Function* f {k.fn("use", k.vd)};
@@ -202,7 +214,8 @@ void define_pure_functions()
             f->body = k.blk(st);
             k.done(f);
         });
-    lc("pure_value_requires_check_outside", "check(pos(0)): the application is outside the function's `requires`: the `precondition` row, with the note at the clause",
+    lc("pure_value_requires_check_outside",
+       "check(pos(0)): the application is outside the function's `requires`: the `precondition` row, with the note at the clause",
        [=](Kit& k)
        {
            Function* g {mk_pos(k)};
@@ -226,18 +239,22 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_recursion_down", "a self-recursive bool function with decreases(n): its Viper function (termination) and its `__wf` verify", [=](Kit& k)
+    lc("pure_recursion_down",
+       "a self-recursive bool function with decreases(n): its Viper function (termination) and its `__wf` verify",
+       [=](Kit& k)
        {
            const Expr* self {nullptr};
            mk_down(k, 0, &self);
        });
-    lc("pure_recursion_not_decreasing", "the self-call with n: `termination` at the self-call, one error", [=](Kit& k)
+    lc("pure_recursion_not_decreasing", "the self-call with n: `termination` at the self-call, one error",
+       [=](Kit& k)
        {
            const Expr* self {nullptr};
            mk_down(k, 1, &self);
            k.fail("termination", self->loc);
        });
-    lc("pure_recursion_unbounded_measure", "the measure n - 5 may be negative: `termination` at the self-call", [=](Kit& k)
+    lc("pure_recursion_unbounded_measure", "the measure n - 5 may be negative: `termination` at the self-call",
+       [=](Kit& k)
        {
            const Expr* self {nullptr};
            mk_down(k, 2, &self);
@@ -250,7 +267,8 @@ void define_pure_functions()
         Function* f {k.fn("tri", k.i32, {{"n", k.i32}})};
         f->pure = true;
         k.req(f, k.land(k.ge_c(k.F(f, 0), k.i32, "0"), k.le_c(k.F(f, 0), k.i32, "1000")));
-        k.ens(f, k.land(k.ge_c(k.R(f), k.i32, "0"), k.le(k.R(f), k.mul(k.num(k.i32, variant == 1 ? "500" : "1000"), k.F(f, 0)))));
+        k.ens(f, k.land(k.ge_c(k.R(f), k.i32, "0"),
+                        k.le(k.R(f), k.mul(k.num(k.i32, variant == 1 ? "500" : "1000"), k.F(f, 0)))));
         k.dec(f, k.F(f, 0));
         const Expr* self {app(k, f, {k.sub(k.F(f, 0), k.num(k.i32, "1"))}, "tri(n - 1)")};
         *body_out = k.cond(k.eq(k.F(f, 0), k.num(k.i32, "0")), k.num(k.i32, "0"), k.add(self, k.F(f, 0)));
@@ -258,25 +276,31 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_tri", "tri(n) = 0 + ... + n with its bound: the `ensures` is proved from the function's own induction hypothesis", [=](Kit& k)
+    lc("pure_tri",
+       "tri(n) = 0 + ... + n with its bound: the `ensures` is proved from the function's own induction hypothesis",
+       [=](Kit& k)
        {
            const Expr* b {nullptr};
            mk_tri(k, 0, &b);
        });
-    lc("pure_tri_wrong_bound", "the wrong bound 500 * n: `postcondition` at the function's return, one error", [=](Kit& k)
+    lc("pure_tri_wrong_bound", "the wrong bound 500 * n: `postcondition` at the function's return, one error",
+       [=](Kit& k)
        {
            const Expr* b {nullptr};
            mk_tri(k, 1, &b);
            k.fail("postcondition", b->loc);
        });
-    lc("pure_sum_over_read", "the body also reads a[n], one past reads_range(a, n): `permission` in the function, at the read", [=](Kit& k)
+    lc("pure_sum_over_read",
+       "the body also reads a[n], one past reads_range(a, n): `permission` in the function, at the read",
+       [=](Kit& k)
        {
            Function* f {mk_sum(k, 3)};
            // the read is the Deref inside the conversion inside the addition (the else arm of the conditional)
            const Expr* read {f->pure_body->c->b->a};
            k.fail("permission", read->loc);
        });
-    lc("pure_sum_wrong_bound", "the bound 2147483646 * n is not what the sum satisfies: `postcondition` at the return", [=](Kit& k)
+    lc("pure_sum_wrong_bound", "the bound 2147483646 * n is not what the sum satisfies: `postcondition` at the return",
+       [=](Kit& k)
        {
            Function* f {mk_sum(k, 4)};
            k.fail("postcondition", f->pure_body->loc);
@@ -302,27 +326,34 @@ void define_pure_functions()
         f->body = k.blkc(st);
         k.done(f);
     };
-    lcv("pure_check_local_array", "check(sum_to(a, 3) <= ...) over a local array written in full: the rows, then the fact, verify", [=](Kit& k)
+    lcv("pure_check_local_array",
+        "check(sum_to(a, 3) <= ...) over a local array written in full: the rows, then the fact, verify",
+        [=](Kit& k)
         {
             const Expr* ap {nullptr};
             const Stmt* c {nullptr};
             local_check(k, 3, "3", 0, &ap, &c);
         });
-    lc("pure_check_local_false_fact", "check(sum_to(a, 3) < 0): the rows hold, the fact is not provable: `check`", [=](Kit& k)
+    lc("pure_check_local_false_fact", "check(sum_to(a, 3) < 0): the rows hold, the fact is not provable: `check`",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            const Stmt* c {nullptr};
            local_check(k, 3, "3", 1, &ap, &c);
            k.fail("check", c->loc);
        });
-    lc("pure_check_local_unwritten", "the third element is unwritten: the flag row, `uninitialized`, at the application", [=](Kit& k)
+    lc("pure_check_local_unwritten",
+       "the third element is unwritten: the flag row, `uninitialized`, at the application",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            const Stmt* c {nullptr};
            local_check(k, 2, "3", 0, &ap, &c);
            k.fail("uninitialized", ap->loc);
        });
-    lc("pure_check_local_count_past", "a count of 4 over an array of 3: the callee's pure line (the bound), `precondition`, one error", [=](Kit& k)
+    lc("pure_check_local_count_past",
+       "a count of 4 over an array of 3: the callee's pure line (the bound), `precondition`, one error",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            const Stmt* c {nullptr};
@@ -330,7 +361,8 @@ void define_pure_functions()
            // the five `precondition` rows are the callee's four atom lines and its value clause; the bound is the fourth, and the row after it is assumed-away
            k.fail_only("precondition", ap->loc, 5, 3);
        });
-    lc("pure_check_local_negative_count", "a negative count: the callee's pure line `0 <= n`, `precondition`", [=](Kit& k)
+    lc("pure_check_local_negative_count", "a negative count: the callee's pure line `0 <= n`, `precondition`",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            const Stmt* c {nullptr};
@@ -352,12 +384,16 @@ void define_pure_functions()
         f->body = k.blk(st);
         k.done(f);
     };
-    lc("pure_check_parameter", "an application in a check over a parameter's reads_range(p, n): the rows (marked wildcard rows over the binder) and the fact verify", [=](Kit& k)
+    lc("pure_check_parameter",
+       "an application in a check over a parameter's reads_range(p, n): the rows (marked wildcard rows over the binder) and the fact verify",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            param_check(k, 0, &ap);
        });
-    lc("pure_check_parameter_past", "sum_to(p, n + 1) over reads_range(p, n): the callee's bound line, `precondition`, and the element past the range, `permission` (the marked row is not assumed away)", [=](Kit& k)
+    lc("pure_check_parameter_past",
+       "sum_to(p, n + 1) over reads_range(p, n): the callee's bound line, `precondition`, and the element past the range, `permission` (the marked row is not assumed away)",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            param_check(k, 1, &ap);
@@ -390,12 +426,16 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_body_applies_with_ensures", "clamp100(x) + 1: fact (ii) bounds the application, so the sum cannot overflow: the `__wf` rows hold", [=](Kit& k)
+    lc("pure_body_applies_with_ensures",
+       "clamp100(x) + 1: fact (ii) bounds the application, so the sum cannot overflow: the `__wf` rows hold",
+       [=](Kit& k)
        {
            const Expr* sum {nullptr};
            mk_bump(k, true, &sum);
        });
-    lc("pure_body_applies_without_ensures", "the same without clamp100's `ensures`: only the type range (fact (i)) is known, so the sum may overflow: `overflow` at the sum, one error", [=](Kit& k)
+    lc("pure_body_applies_without_ensures",
+       "the same without clamp100's `ensures`: only the type range (fact (i)) is known, so the sum may overflow: `overflow` at the sum, one error",
+       [=](Kit& k)
        {
            const Expr* sum {nullptr};
            mk_bump(k, false, &sum);
@@ -416,12 +456,16 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_body_applies_requires_given", "wrap(x) requires 0 < x applies pos(x): the callee's value clause is a row of the caller's `__wf`, held", [=](Kit& k)
+    lc("pure_body_applies_requires_given",
+       "wrap(x) requires 0 < x applies pos(x): the callee's value clause is a row of the caller's `__wf`, held",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            mk_wrap(k, true, &ap);
        });
-    lc("pure_body_applies_requires_not_given", "wrap(x) with no `requires` applies pos(x): the `precondition` row in the function, at the application", [=](Kit& k)
+    lc("pure_body_applies_requires_not_given",
+       "wrap(x) with no `requires` applies pos(x): the `precondition` row in the function, at the application",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            mk_wrap(k, false, &ap);
@@ -433,19 +477,24 @@ void define_pure_functions()
         Function* g {mk_sum(k, 0)};
         Function* f {k.fn("total", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
         f->pure = true;
-        const Expr* atom {whole ? RR(k, f, 0, 1, 0) : k.b.range_atom(AtomKind::ReadsRange, fx(k, f, 0), N(k, "1"), 0, k.at())};
+        const Expr* atom {whole ? RR(k, f, 0, 1, 0)
+                                : k.b.range_atom(AtomKind::ReadsRange, fx(k, f, 0), N(k, "1"), 0, k.at())};
         k.req(f, k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), atom));
         *ap = app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)");
         f->pure_body = *ap;
         k.done(f);
         return f;
     };
-    lc("pure_body_applies_reads_framed", "total(a, n) over reads_range(a, n) applies sum_to(a, n): the callee's interval is inside the site's, the framing row holds", [=](Kit& k)
+    lc("pure_body_applies_reads_framed",
+       "total(a, n) over reads_range(a, n) applies sum_to(a, n): the callee's interval is inside the site's, the framing row holds",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            mk_total(k, true, &ap);
        });
-    lc("pure_body_applies_reads_unframed", "total over reads_range(a, 1) applies sum_to(a, n): the framing row, `permission`, in the function at the application, one error", [=](Kit& k)
+    lc("pure_body_applies_reads_unframed",
+       "total over reads_range(a, 1) applies sum_to(a, n): the framing row, `permission`, in the function at the application, one error",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            mk_total(k, false, &ap);
@@ -474,13 +523,17 @@ void define_pure_functions()
         f->body = k.blk(st);
         k.done(f);
     };
-    lcv("pure_requires_applies_check", "sp(5) with requires(0 < x && pos(x)): the callee's clause that applies pos is a row of the check, held", [=](Kit& k)
+    lcv("pure_requires_applies_check",
+        "sp(5) with requires(0 < x && pos(x)): the callee's clause that applies pos is a row of the check, held",
+        [=](Kit& k)
         {
             const Expr* ap {nullptr};
             const Stmt* c {nullptr};
             sp_check(k, "5", &ap, &c);
         });
-    lc("pure_requires_applies_check_outside", "sp(500): pos(500) is false, so the second clause of sp's `requires` is not held: `precondition` at the application", [=](Kit& k)
+    lc("pure_requires_applies_check_outside",
+       "sp(500): pos(500) is false, so the second clause of sp's `requires` is not held: `precondition` at the application",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            const Stmt* c {nullptr};
@@ -500,12 +553,14 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_ensures_applies", "ensures(r, r == pos(x)) with the body pos has: Silicon proves it from the definition", [=](Kit& k)
+    lc("pure_ensures_applies", "ensures(r, r == pos(x)) with the body pos has: Silicon proves it from the definition",
+       [=](Kit& k)
        {
            const Expr* b {nullptr};
            mk_agree(k, true, &b);
        });
-    lc("pure_ensures_applies_wrong", "the body x < 99 differs from pos(x): `postcondition` at the function's return", [=](Kit& k)
+    lc("pure_ensures_applies_wrong", "the body x < 99 differs from pos(x): `postcondition` at the function's return",
+       [=](Kit& k)
        {
            const Expr* b {nullptr};
            mk_agree(k, false, &b);
@@ -540,13 +595,16 @@ void define_pure_functions()
         f->body = k.blkc(st);
         k.done(f);
     };
-    lcv("pure_check_cell", "int x = 5; int *p = &x; check(get(p) == 5): the rows of a cell atom (null, liveness, permission, flag) then the fact", [=](Kit& k)
+    lcv("pure_check_cell",
+        "int x = 5; int *p = &x; check(get(p) == 5): the rows of a cell atom (null, liveness, permission, flag) then the fact",
+        [=](Kit& k)
         {
             const Expr* ap {nullptr};
             const Stmt* c {nullptr};
             get_check(k, true, &ap, &c);
         });
-    lc("pure_check_cell_unwritten", "x is not written: the flag row, `uninitialized`, at the application", [=](Kit& k)
+    lc("pure_check_cell_unwritten", "x is not written: the flag row, `uninitialized`, at the application",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            const Stmt* c {nullptr};
@@ -554,7 +612,9 @@ void define_pure_functions()
            k.fail("uninitialized", ap->loc);
        });
     // a static assertion in the body of a pure function is a local constant of it, checked by its `__wf` method's prologue
-    lc("pure_static_assertion", "bool yes() { static_assert(1 < 2); return true; }: the assertion is a local constant, checked in `__wf`", [=](Kit& k)
+    lc("pure_static_assertion",
+       "bool yes() { static_assert(1 < 2); return true; }: the assertion is a local constant, checked in `__wf`",
+       [=](Kit& k)
        {
            Function* f {k.fn("yes", k.bl)};
            f->pure = true;
@@ -575,18 +635,24 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_body_argument_reads", "is_small(a[0]) under reads_range(a, n): the argument's read is framed (its own row), the application's rows hold", [=](Kit& k)
+    lc("pure_body_argument_reads",
+       "is_small(a[0]) under reads_range(a, n): the argument's read is framed (its own row), the application's rows hold",
+       [=](Kit& k)
        {
            const Expr* r {nullptr};
            mk_first_small(k, false, &r);
        });
-    lc("pure_body_argument_reads_past", "is_small(a[n]): the argument's own framing row, `permission`, at the read, one error", [=](Kit& k)
+    lc("pure_body_argument_reads_past",
+       "is_small(a[n]): the argument's own framing row, `permission`, at the read, one error",
+       [=](Kit& k)
        {
            const Expr* r {nullptr};
            mk_first_small(k, true, &r);
            k.fail("permission", r->loc);
        });
-    lcv("pure_check_argument_reads", "int a[2] = {5}: check(is_small(a[0])): the argument is read as code reads it, then the application", [=](Kit& k)
+    lcv("pure_check_argument_reads",
+        "int a[2] = {5}: check(is_small(a[0])): the argument is read as code reads it, then the application",
+        [=](Kit& k)
         {
             Function* g {mk_small(k)};
             Function* f {k.fn("use", k.vd)};
@@ -597,7 +663,9 @@ void define_pure_functions()
             f->body = k.blkc(st);
             k.done(f);
         });
-    lc("pure_check_argument_reads_unwritten", "the element read as the argument is unwritten: its own `uninitialized` row", [=](Kit& k)
+    lc("pure_check_argument_reads_unwritten",
+       "the element read as the argument is unwritten: its own `uninitialized` row",
+       [=](Kit& k)
        {
            Function* g {mk_small(k)};
            Function* f {k.fn("use", k.vd)};
@@ -608,7 +676,8 @@ void define_pure_functions()
            k.fail("uninitialized", rd->loc);
        });
     // ---- no parameters, other result types ----
-    lc("pure_no_parameters", "int seven() { return 7; } with check(seven() == 7): no `requires` line, no guard", [=](Kit& k)
+    lc("pure_no_parameters", "int seven() { return 7; } with check(seven() == 7): no `requires` line, no guard",
+       [=](Kit& k)
        {
            Function* g {pure_fn(k, "seven", k.i32, {},
                                 [&](Function*)
@@ -619,7 +688,9 @@ void define_pure_functions()
            f->body = k.blk({k.chk(k.eq(app(k, g, {}, "seven()"), k.num(k.i32, "7")))});
            k.done(f);
        });
-    lc("pure_unsigned_char_result", "unsigned char id(unsigned char x) { return x; }: the result tag is `0 255`, fact (i) is the type's range", [=](Kit& k)
+    lc("pure_unsigned_char_result",
+       "unsigned char id(unsigned char x) { return x; }: the result tag is `0 255`, fact (i) is the type's range",
+       [=](Kit& k)
        {
            Function* g {pure_fn(k, "id8", k.u8, {{"x", k.u8}},
                                 [&](Function* f)
@@ -630,7 +701,9 @@ void define_pure_functions()
            f->body = k.blk({k.chk(k.le(app(k, g, {k.num(k.u8, "3")}, "id8(3)"), k.num(k.u8, "255")))});
            k.done(f);
        });
-    lc("pure_enumeration_result", "an enumeration result: no result tag and no fact (i) (record 0062 item 8's narrowing); the conversion into the enumeration is a row of the `__wf`", [=](Kit& k)
+    lc("pure_enumeration_result",
+       "an enumeration result: no result tag and no fact (i) (record 0062 item 8's narrowing); the conversion into the enumeration is a row of the `__wf`",
+       [=](Kit& k)
        {
            const Type e {k.en("E", 32, true, "0", "2")};
            pure_fn(k, "pick", e, {},
@@ -639,7 +712,8 @@ void define_pure_functions()
                        return k.cv(e, k.num(k.i32, "1"));
                    });
        });
-    rh("pure_recursion_without_decreases", "applies itself and has no measure", [=](Kit& k)
+    rh("pure_recursion_without_decreases", "applies itself and has no measure",
+       [=](Kit& k)
        {
            mk_sum(k, 1);
        });
@@ -652,7 +726,8 @@ void define_pure_functions()
         const Expr* x1 {k.b.forall_arg(id, 1, k.i32, n->c_text.empty() ? "n" : n->c_text, k.at())};
         const Expr* rd {k.deref(k.b.elem_addr(x0, i, k.at()))};
         const Expr* in {k.land(k.ge_c(i, k.i32, "0"), k.lt(i, x1))};
-        const Expr* body {k.lor(k.lnot(in), k.land(k.ge_c(rd, k.i32, "-1000"), k.le_c(k.deref(k.b.elem_addr(x0, i, k.at())), k.i32, "1000")))};
+        const Expr* body {k.lor(k.lnot(in), k.land(k.ge_c(rd, k.i32, "-1000"),
+                                                   k.le_c(k.deref(k.b.elem_addr(x0, i, k.at())), k.i32, "1000")))};
         return k.b.forall(id, k.i32.int_type, body, {a, n}, "forall(small_at)", "small_at", k.at());
     };
     // int smallsum(const int *a, int n) requires(0 <= n && n <= 1000 && reads_range(a, n) [&& forall(small_at, a, n)]) ensures(r, -1000 * n <= r && r <= 1000 * n) decreases(n)
@@ -661,11 +736,13 @@ void define_pure_functions()
     {
         Function* f {k.fn("smallsum", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
         f->pure = true;
-        const Expr* base {k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
+        const Expr* base {
+            k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
         k.req(f, with_q ? k.land(base, small_q(k, 1, fx(k, f, 0), fx(k, f, 1))) : base);
         if (with_q)
         {
-            k.ens(f, k.land(k.le(k.mul(k.num(k.i32, "-1000"), k.F(f, 1)), k.R(f)), k.le(k.R(f), k.mul(k.num(k.i32, "1000"), k.F(f, 1)))));
+            k.ens(f, k.land(k.le(k.mul(k.num(k.i32, "-1000"), k.F(f, 1)), k.R(f)),
+                            k.le(k.R(f), k.mul(k.num(k.i32, "1000"), k.F(f, 1)))));
         }
         k.dec(f, k.F(f, 1));
         const Expr* nm1 {k.sub(k.F(f, 1), k.num(k.i32, "1"))};
@@ -676,12 +753,16 @@ void define_pure_functions()
         k.done(f);
         return f;
     };
-    lc("pure_forall_function", "smallsum with the quantified bound: the function (its quantifier line), its `__wf` (the self-application's quantifier over the ghosts, fact (ii) under V that holds it) verify", [=](Kit& k)
+    lc("pure_forall_function",
+       "smallsum with the quantified bound: the function (its quantifier line), its `__wf` (the self-application's quantifier over the ghosts, fact (ii) under V that holds it) verify",
+       [=](Kit& k)
        {
            const Expr* add {nullptr};
            mk_smallsum(k, true, &add);
        });
-    lc("pure_forall_function_noq", "no quantified clause and no `ensures`: the sum of the application and a[n - 1] may overflow an int: `overflow` at the sum, in the function", [=](Kit& k)
+    lc("pure_forall_function_noq",
+       "no quantified clause and no `ensures`: the sum of the application and a[n - 1] may overflow an int: `overflow` at the sum, in the function",
+       [=](Kit& k)
        {
            const Expr* add {nullptr};
            mk_smallsum(k, false, &add);
@@ -693,19 +774,24 @@ void define_pure_functions()
         Function* g {mk_smallsum(k, true, ap)};
         Function* f {k.fn("wrapq", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
         f->pure = true;
-        const Expr* base {k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
+        const Expr* base {
+            k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
         k.req(f, with_q ? k.land(base, small_q(k, 2, fx(k, f, 0), fx(k, f, 1))) : base);
         *ap = app(k, g, {k.F(f, 0), k.F(f, 1)}, "smallsum(a, n)");
         f->pure_body = *ap;
         k.done(f);
         return f;
     };
-    lc("pure_forall_body_applies_given", "wrapq gives the clause: the Q row of its `__wf` holds, and the quantifier is a conjunct of the guard in the Viper function", [=](Kit& k)
+    lc("pure_forall_body_applies_given",
+       "wrapq gives the clause: the Q row of its `__wf` holds, and the quantifier is a conjunct of the guard in the Viper function",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            mk_wrapq(k, true, &ap);
        });
-    lc("pure_forall_body_applies_not_given", "wrapq does not give the clause: one `precondition` row (the Q row) in its `__wf`, no native error", [=](Kit& k)
+    lc("pure_forall_body_applies_not_given",
+       "wrapq does not give the clause: one `precondition` row (the Q row) in its `__wf`, no native error",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            mk_wrapq(k, false, &ap);
@@ -718,19 +804,24 @@ void define_pure_functions()
         Function* g {mk_smallsum(k, true, &add)};
         Function* f {k.fn("use", k.vd)};
         Var* a {arr(k, f, "a", k.i32, 3U)};
-        std::vector<const Stmt*> st {k.decl(a, nullptr), awr(k, a, N(k, "0"), N(k, "1")), awr(k, a, N(k, "1"), N(k, "2")), awr(k, a, N(k, "2"), N(k, third))};
+        std::vector<const Stmt*> st {k.decl(a, nullptr), awr(k, a, N(k, "0"), N(k, "1")),
+                                     awr(k, a, N(k, "1"), N(k, "2")), awr(k, a, N(k, "2"), N(k, third))};
         *ap = app(k, g, {k.addr(a), N(k, "3")}, "smallsum(a, 3)");
         st.push_back(k.chk(k.le(*ap, k.num(k.i32, "3000"))));
         tail(k, st);
         f->body = k.blkc(st);
         k.done(f);
     };
-    lcv("pure_forall_check_local", "a local array {1, 2, 3}: the callee's quantified clause is one `precondition` row of the check (with the rows of item 10 for its reads), held; the fact follows from the `ensures`", [=](Kit& k)
+    lcv("pure_forall_check_local",
+        "a local array {1, 2, 3}: the callee's quantified clause is one `precondition` row of the check (with the rows of item 10 for its reads), held; the fact follows from the `ensures`",
+        [=](Kit& k)
         {
             const Expr* ap {nullptr};
             small_check(k, "3", &ap);
         });
-    lc("pure_forall_check_local_big", "the third element is 5000: the quantified clause does not hold: one `precondition` row, at the application", [=](Kit& k)
+    lc("pure_forall_check_local_big",
+       "the third element is 5000: the quantified clause does not hold: one `precondition` row, at the application",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            small_check(k, "5000", &ap);
@@ -742,25 +833,636 @@ void define_pure_functions()
         const Expr* add {nullptr};
         Function* g {mk_smallsum(k, true, &add)};
         Function* f {k.fn("use", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
-        const Expr* base {k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
+        const Expr* base {
+            k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
         k.req(f, with_q ? k.land(base, small_q(k, 3, fx(k, f, 0), fx(k, f, 1))) : base);
         k.ens(f, RR(k, f, 0, 1, 0));
         *ap = app(k, g, {k.pn(f->param_var(0)), k.pn(f->param_var(1))}, "smallsum(a, n)");
         f->body = k.blk({k.chk(k.le(*ap, k.num(k.i32, "1000000"))), k.ret(k.num(k.i32, "0"))});
         k.done(f);
     };
-    lc("pure_forall_check_parameter", "use gives the clause in its `requires`: the check's Q row and the fact verify", [=](Kit& k)
+    lc("pure_forall_check_parameter", "use gives the clause in its `requires`: the check's Q row and the fact verify",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            param_small(k, true, &ap);
        });
-    lc("pure_forall_check_parameter_noq", "use does not give the clause: one `precondition` row (the Q row) at the application, no native error", [=](Kit& k)
+    lc("pure_forall_check_parameter_noq",
+       "use does not give the clause: one `precondition` row (the Q row) at the application, no native error",
+       [=](Kit& k)
        {
            const Expr* ap {nullptr};
            param_small(k, false, &ap);
            k.fail_only("precondition", ap->loc, 7, 6);
        });
     (void)PI;
+}
+
+// Record 0062 items 4, 7 and 8, M4.5e1d Part C: an application in the `requires` and `ensures` of an ordinary function.  In the method's own contract it is `(G ? pf_g(args) : d)` (G the callee's lines
+// at the arguments, then the enclosing contract's framing of its atoms); in `f__wf` it is a ghost `hva_<m>__<g>_<pre|post>` with rows (the framing a `permission`, an atom's pure line and a value clause a
+// `precondition`) and the facts (i), (ii) and, for a post-state application over a `reads` place its partner returns, the keep fact (iii); at a call and at a return the clause is lowered again over the arguments
+// in the caller's state.  Bodiless (trusted) functions isolate the `__wf` rows; the functions with a body and the callers exercise Silicon's own checks, the call rows and the return rows.
+void define_pure_contract_applications()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.b.text(k.num(k.i32, v), v);
+    };
+    auto PI = [](Kit& k)
+    {
+        return k.ptr(k.i32);
+    };
+    auto fx = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    auto RR = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::ReadsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    auto RO = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::OwnsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    auto app = [](Kit& k, const Function* f, std::vector<const Expr*> args, const char* text)
+    {
+        return k.b.apply(f, std::move(args), text, k.at());
+    };
+    auto lcv = [](const char* name, const char* doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(std::string(name) + "_vacuity",
+           "the same with check(false) after everything: it fails (what the program assumes is not inconsistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    auto tail = [](Kit& k, std::vector<const Stmt*>& st)
+    {
+        if (k.vac_tail)
+        {
+            const Stmt* v {k.chk(k.no())};
+            st.push_back(v);
+            k.vac_loc = v->loc;
+        }
+    };
+    auto vac_fn = [=](Kit& k)
+    {
+        if (k.vac_tail)
+        {
+            Function* g {k.fn("vac", k.vd)};
+            const Stmt* v {k.chk(k.no())};
+            g->body = k.blk({v});
+            k.done(g);
+            k.vac_loc = v->loc;
+        }
+    };
+    // long sum_to(const int *a, int n) requires(0 <= n && reads_range(a, n)) ensures(r, -2147483648LL * n <= r && r <= 2147483647LL * n) decreases(n) { return n == 0 ? 0 : sum_to(a, n - 1) + a[n - 1]; }
+    auto mk_sum = [=](Kit& k)
+    {
+        Function* f {k.fn("sum_to", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        f->pure = true;
+        k.req(f, k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), RR(k, f, 0, 1, 0)));
+        k.ens(f, k.land(k.le(k.mul(k.num(k.i64, "-2147483648"), k.cv(k.i64, fx(k, f, 1))), k.R(f)),
+                        k.le(k.R(f), k.mul(k.num(k.i64, "2147483647"), k.cv(k.i64, fx(k, f, 1))))));
+        k.dec(f, fx(k, f, 1));
+        const Expr* nm1 {k.sub(k.F(f, 1), k.num(k.i32, "1"))};
+        const Expr* self {app(k, f, {k.F(f, 0), nm1}, "sum_to(a, n - 1)")};
+        const Expr* elem {k.deref(k.b.elem_addr(k.F(f, 0), k.sub(k.F(f, 1), k.num(k.i32, "1")), k.at()))};
+        f->pure_body = k.cond(k.eq(k.F(f, 1), k.num(k.i32, "0")), k.num(k.i64, "0"), k.add(self, k.cv(k.i64, elem)));
+        k.done(f);
+        return f;
+    };
+    // int dbl(int x) requires(-1000 <= x && x <= 1000) { return x + x; }
+    auto mk_dbl = [=](Kit& k)
+    {
+        Function* f {k.fn("dbl", k.i32, {{"x", k.i32}})};
+        f->pure = true;
+        k.req(f, k.range(k.F(f, 0), k.i32, "-1000", "1000"));
+        f->pure_body = k.add(k.F(f, 0), k.F(f, 0));
+        k.done(f);
+        return f;
+    };
+    // bool is_small(int x) { return -100 < x && x < 100; }
+    auto mk_small = [=](Kit& k)
+    {
+        Function* f {k.fn("is_small", k.bl, {{"x", k.i32}})};
+        f->pure = true;
+        f->pure_body = k.land(k.lt(k.num(k.i32, "-100"), k.F(f, 0)), k.lt(k.F(f, 0), k.num(k.i32, "100")));
+        k.done(f);
+        return f;
+    };
+    // int clamp100(int x) [ensures(r, 0 <= r && r <= 100)] { return x < 0 ? 0 : (x > 100 ? 100 : x); }
+    auto mk_clamp = [=](Kit& k, bool with_ensures)
+    {
+        Function* f {k.fn("clamp100", k.i32, {{"x", k.i32}})};
+        f->pure = true;
+        if (with_ensures)
+        {
+            k.ens(f, k.land(k.ge_c(k.R(f), k.i32, "0"), k.le_c(k.R(f), k.i32, "100")));
+        }
+        f->pure_body = k.cond(k.lt(k.F(f, 0), k.num(k.i32, "0")), k.num(k.i32, "0"),
+                              k.cond(k.gt(k.F(f, 0), k.num(k.i32, "100")), k.num(k.i32, "100"), k.F(f, 0)));
+        k.done(f);
+        return f;
+    };
+    // ---- a scalar function: no atoms, the guard is the callee's lines (its parameter's range and its value clause) ----
+    // int twice(int x) requires(-1000 <= x && x <= 1000) ensures(r, r == dbl(x)) { return x + x [+ 1]; }
+    auto mk_twice = [=](Kit& k, bool wrong, const Stmt** ret_out)
+    {
+        Function* g {mk_dbl(k)};
+        Function* f {k.fn("twice", k.i32, {{"x", k.i32}})};
+        k.req(f, k.range(k.F(f, 0), k.i32, "-1000", "1000"));
+        k.ens(f, k.eq(k.R(f), app(k, g, {k.F(f, 0)}, "dbl(x)")));
+        const Expr* sum {k.add(k.pv(f, 0), k.pv(f, 0))};
+        *ret_out = k.ret(wrong ? k.add(sum, k.num(k.i32, "1")) : sum);
+        f->body = k.blk({*ret_out});
+        k.done(f);
+        return f;
+    };
+    lcv("ctr_ensures_twice",
+        "ensures(r, r == dbl(x)) under the bound dbl needs: Silicon proves the method's postcondition from the definition of dbl; the `__wf` rows hold",
+        [=](Kit& k)
+        {
+            const Stmt* r {nullptr};
+            mk_twice(k, false, &r);
+            vac_fn(k);
+        });
+    lc("ctr_ensures_twice_wrong_body", "the body returns x + x + 1: `postcondition` at the return, one error",
+       [=](Kit& k)
+       {
+           const Stmt* r {nullptr};
+           mk_twice(k, true, &r);
+           k.fail("postcondition", r->loc);
+       });
+    // void h(int x) requires(is_small(x)) { check(x < <100|50>); }: the requires application feeds the body (the Viper function's definition)
+    auto mk_h = [=](Kit& k, const char* bound, const Stmt** c)
+    {
+        Function* g {mk_small(k)};
+        Function* f {k.fn("h", k.vd, {{"x", k.i32}})};
+        k.req(f, app(k, g, {k.F(f, 0)}, "is_small(x)"));
+        *c = k.chk(k.lt(k.pv(f, 0), k.num(k.i32, bound)));
+        std::vector<const Stmt*> st {*c};
+        tail(k, st);
+        f->body = k.blk(st);
+        k.done(f);
+    };
+    lcv("ctr_requires_feeds_body", "requires(is_small(x)): the body checks x < 100 from the function's definition",
+        [=](Kit& k)
+        {
+            const Stmt* c {nullptr};
+            mk_h(k, "100", &c);
+        });
+    lc("ctr_requires_feeds_body_false", "the body checks x < 50: not given by is_small(x), `check`",
+       [=](Kit& k)
+       {
+           const Stmt* c {nullptr};
+           mk_h(k, "50", &c);
+           k.fail("check", c->loc);
+       });
+    // int one_more(int x) ensures(r, r == clamp100(x) + 1) -- bodiless: only the `__wf` row of the sum
+    auto mk_one_more = [=](Kit& k, bool with_ensures, const Expr** sum)
+    {
+        Function* c {mk_clamp(k, with_ensures)};
+        Function* f {k.fn("one_more", k.i32, {{"x", k.i32}})};
+        k.trusted(f);
+        *sum = k.add(app(k, c, {k.F(f, 0)}, "clamp100(x)"), k.num(k.i32, "1"));
+        k.ens(f, k.eq(k.R(f), *sum));
+        k.done(f);
+    };
+    lcv("ctr_ensures_clamp_plus_one",
+        "ensures(r, r == clamp100(x) + 1): fact (ii) bounds the application at the arguments, so the sum cannot overflow",
+        [=](Kit& k)
+        {
+            const Expr* sum {nullptr};
+            mk_one_more(k, true, &sum);
+            vac_fn(k);
+        });
+    lc("ctr_ensures_clamp_plus_one_no_ensures",
+       "the same without clamp100's `ensures`: only fact (i) (the type's range) is known, `overflow` at the sum in the contract, one error",
+       [=](Kit& k)
+       {
+           const Expr* sum {nullptr};
+           mk_one_more(k, false, &sum);
+           k.fail("overflow", sum->loc);
+       });
+    // ---- the callee's atoms: the guard holds the framing, the rows are the `__wf`'s ----
+    // long total(const int *a, int n) requires(0 <= n && reads_range(a, n) [&& sum_to(a, n) < 100]) ensures(r, reads_range(a, n) && r == sum_to(a, n)) -- bodiless
+    auto mk_total = [=](Kit& k, Function* g, bool bounded)
+    {
+        Function* f {k.fn(bounded ? "total_b" : "total", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        k.trusted(f);
+        const Expr* pre {k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), RR(k, f, 0, 1, 0))};
+        if (bounded)
+        {
+            pre = k.land(pre, k.lt(app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)"), k.num(k.i64, "100")));
+        }
+        k.req(f, pre);
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.eq(k.R(f), app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)"))));
+        k.done(f);
+        return f;
+    };
+    lcv("ctr_total_wf",
+        "the callee total: its requires and ensures apply sum_to over reads_range(a, n): every row of its `__wf` holds",
+        [=](Kit& k)
+        {
+            Function* g {mk_sum(k)};
+            mk_total(k, g, false);
+            mk_total(k, g, true);
+            vac_fn(k);
+        });
+    // long use(const int *a, int n) requires(0 <= n && reads_range(a, n)) ensures(r, reads_range(a, n)) { long x = total(a, n); check(x == <sum_to(a, n)|0>); return x; }
+    auto mk_use = [=](Kit& k, bool observe_default, const Stmt** c)
+    {
+        Function* g {mk_sum(k)};
+        Function* t {mk_total(k, g, false)};
+        Function* f {k.fn("use", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), RR(k, f, 0, 1, 0)));
+        k.ens(f, RR(k, f, 0, 1, 0));
+        Var* x {k.local(f, "x", k.i64)};
+        const Expr* want {observe_default ? k.num(k.i64, "0")
+                                          : app(k, g, {k.pn(f->param_var(0)), k.pn(f->param_var(1))}, "sum_to(a, n)")};
+        *c = k.chk(k.eq(k.v(x), want));
+        std::vector<const Stmt*> st {k.decl(x, k.call(t, {k.pn(f->param_var(0)), k.pn(f->param_var(1))})), *c};
+        tail(k, st);
+        st.push_back(k.ret(k.v(x)));
+        f->body = k.blk(st);
+        k.done(f);
+    };
+    lcv("ctr_caller_learns_ensures",
+        "x = total(a, n); check(x == sum_to(a, n)): the caller learns the callee's ensures from the method's postcondition, read in its state",
+        [=](Kit& k)
+        {
+            const Stmt* c {nullptr};
+            mk_use(k, false, &c);
+        });
+    lc("ctr_caller_default_not_observable",
+       "check(x == 0): the guard's default is not what the caller learns (the guard holds, so the value is the application's), `check`",
+       [=](Kit& k)
+       {
+           const Stmt* c {nullptr};
+           mk_use(k, true, &c);
+           k.fail("check", c->loc);
+       });
+    // void c(const int *a, int n) requires(0 <= n && reads_range(a, n) [&& sum_to(a, n) < 100]) ensures(reads_range(a, n)) { total_b(a, n); }
+    auto mk_callbounded = [=](Kit& k, bool given, const Expr** call_out)
+    {
+        Function* g {mk_sum(k)};
+        Function* t {mk_total(k, g, true)};
+        Function* f {k.fn("callbounded", k.vd, {{"a", PI(k)}, {"n", k.i32}})};
+        const Expr* pre {k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), RR(k, f, 0, 1, 0))};
+        if (given)
+        {
+            pre = k.land(pre, k.lt(app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)"), k.num(k.i64, "100")));
+        }
+        k.req(f, pre);
+        k.ens(f, RR(k, f, 0, 1, 0));
+        *call_out = k.call(t, {k.pn(f->param_var(0)), k.pn(f->param_var(1))});
+        std::vector<const Stmt*> st {k.es(*call_out)};
+        tail(k, st);
+        f->body = k.blk(st);
+        k.done(f);
+    };
+    lcv("ctr_call_requires_given",
+        "total_b requires sum_to(a, n) < 100 and its caller requires the same: the call's `precondition` row holds, read in the caller's state after the atoms' rows",
+        [=](Kit& k)
+        {
+            const Expr* call {nullptr};
+            mk_callbounded(k, true, &call);
+        });
+    lc("ctr_call_requires_weak", "the caller does not require the bound: `precondition` at the call, one error",
+       [=](Kit& k)
+       {
+           const Expr* call {nullptr};
+           mk_callbounded(k, false, &call);
+           k.fail("precondition", call->loc);
+       });
+    // ---- a return: the ensures application is read in the post-state, after the body's write ----
+    // long sas(int *a, int n) requires(1 <= n && owns_range(a, n)) ensures(r, owns_range(a, n) && r == sum_to(a, n)) { [long s = total(a, n);] a[0] = 5; return <total(a, n)|s>; }
+    auto mk_sas = [=](Kit& k, bool before, const Stmt** ret_out)
+    {
+        Function* g {mk_sum(k)};
+        Function* t {mk_total(k, g, false)};
+        Function* f {k.fn("sas", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(k.ge_c(fx(k, f, 1), k.i32, "1"), RO(k, f, 0, 1, 0)));
+        k.ens(f, k.land(RO(k, f, 0, 1, 0), k.eq(k.R(f), app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)"))));
+        const auto write = [&]()
+        {
+            return k.store(k.b.elem_addr(k.pn(f->param_var(0)), N(k, "0"), k.at()), N(k, "5"));
+        };
+        const auto call = [&]()
+        {
+            return k.call(t, {k.pn(f->param_var(0)), k.pn(f->param_var(1))});
+        };
+        std::vector<const Stmt*> st;
+        if (before)
+        {
+            Var* s {k.local(f, "s", k.i64)};
+            st.push_back(k.decl(s, call()));
+            st.push_back(write());
+            *ret_out = k.ret(k.v(s));
+        }
+        else
+        {
+            st.push_back(write());
+            *ret_out = k.ret(call());
+        }
+        st.push_back(*ret_out);
+        f->body = k.blk(st);
+        k.done(f);
+    };
+    lc("ctr_ensures_after_write",
+       "a[0] = 5; return total(a, n): the ensures application is the post-state's sum, the return's row holds",
+       [=](Kit& k)
+       {
+           const Stmt* r {nullptr};
+           mk_sas(k, false, &r);
+       });
+    lc("ctr_ensures_before_write", "the sum is taken before the write: the return's row, `postcondition`, one error",
+       [=](Kit& k)
+       {
+           const Stmt* r {nullptr};
+           mk_sas(k, true, &r);
+           k.fail("postcondition", r->loc);
+       });
+    // ---- rows of the application in the contract: framing, a value clause ----
+    // long uf(const int *a, int n) requires(0 <= n && n < 1000 && reads_range(a, n)) ensures(r, reads_range(a, n) && r == sum_to(a, <n|n + 1>)) -- bodiless
+    auto mk_uf = [=](Kit& k, int extra, const Expr** ap)
+    {
+        Function* g {mk_sum(k)};
+        Function* f {k.fn("uf", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        k.trusted(f);
+        k.req(f, k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.lt(fx(k, f, 1), N(k, "1000"))), RR(k, f, 0, 1, 0)));
+        const Expr* count {extra == 0 ? k.F(f, 1) : k.add(k.F(f, 1), k.num(k.i32, "1"))};
+        *ap = app(k, g, {k.F(f, 0), count}, "sum_to(a, n)");
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.eq(k.R(f), *ap)));
+        k.done(f);
+    };
+    lc("ctr_contract_framed", "the application over exactly the interval the ensures returns: the framing row holds",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           mk_uf(k, 0, &ap);
+       });
+    lc("ctr_contract_unframed",
+       "sum_to(a, n + 1) over reads_range(a, n): the framing row, `permission`, one error (a failed framing ends the path of the rows that depend on it)",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           mk_uf(k, 1, &ap);
+           k.fail("permission", ap->loc);
+       });
+    // int head(const int *a, int n) requires(0 < n && reads_range(a, n)) { return a[0]; }
+    // int hd(const int *a, int n) requires(<0 <= n|0 < n> && reads_range(a, n)) ensures(r, reads_range(a, n) && r == head(a, n)) -- bodiless
+    auto mk_hd = [=](Kit& k, bool given, const Expr** ap)
+    {
+        Function* g {k.fn("head", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
+        g->pure = true;
+        k.req(g, k.land(k.lt(k.num(k.i32, "0"), fx(k, g, 1)), RR(k, g, 0, 1, 0)));
+        g->pure_body = k.deref(k.b.elem_addr(k.F(g, 0), k.num(k.i32, "0"), k.at()));
+        k.done(g);
+        Function* f {k.fn("hd", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
+        k.trusted(f);
+        k.req(f, k.land(given ? k.lt(k.num(k.i32, "0"), fx(k, f, 1)) : k.ge_c(fx(k, f, 1), k.i32, "0"),
+                        RR(k, f, 0, 1, 0)));
+        *ap = app(k, g, {k.F(f, 0), k.F(f, 1)}, "head(a, n)");
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.eq(k.R(f), *ap)));
+        k.done(f);
+    };
+    lc("ctr_contract_value_requires_given", "head requires 0 < n and the contract gives it: every row holds",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           mk_hd(k, true, &ap);
+       });
+    lc("ctr_contract_value_requires_not_given",
+       "the contract gives only 0 <= n: the callee's value clause, `precondition` at the application, one error (the atom's pure lines hold)",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           mk_hd(k, false, &ap);
+           k.fail_only("precondition", ap->loc, 5, 0);
+       });
+    // ---- an argument that reads memory ----
+    // bool ls(const int *a, int n) requires(1 <= n && reads_range(a, n)) ensures(r, reads_range(a, n) && r == is_small(a[<n - 1|n>])) { return -100 < a[n - 1] && a[n - 1] < <100|99>; }
+    auto mk_ls = [=](Kit& k, bool past, bool wrong, const Expr** rd_out, const Stmt** ret_out)
+    {
+        Function* g {mk_small(k)};
+        Function* f {k.fn("ls", k.bl, {{"a", PI(k)}, {"n", k.i32}})};
+        k.req(f, k.land(k.ge_c(fx(k, f, 1), k.i32, "1"), RR(k, f, 0, 1, 0)));
+        const Expr* idx {past ? fx(k, f, 1) : k.sub(fx(k, f, 1), k.num(k.i32, "1"))};
+        *rd_out = k.deref(k.b.elem_addr(fx(k, f, 0), idx, k.at()));
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.eq(k.R(f), app(k, g, {*rd_out}, "is_small(a[n - 1])"))));
+        const auto at = [&]()
+        {
+            return k.deref(
+                k.b.elem_addr(k.pn(f->param_var(0)), k.sub(k.pn(f->param_var(1)), k.num(k.i32, "1")), k.at()));
+        };
+        if (past)
+        {
+            k.trusted(f);
+        }
+        else
+        {
+            *ret_out = k.ret(k.land(k.lt(k.num(k.i32, "-100"), at()), k.lt(at(), k.num(k.i32, wrong ? "99" : "100"))));
+            f->body = k.blk({*ret_out});
+        }
+        k.done(f);
+    };
+    lcv("ctr_argument_reads",
+        "is_small(a[n - 1]) under reads_range(a, n): the argument's own framing row holds, the method proves the postcondition",
+        [=](Kit& k)
+        {
+            const Expr* rd {nullptr};
+            const Stmt* r {nullptr};
+            mk_ls(k, false, false, &rd, &r);
+            vac_fn(k);
+        });
+    lc("ctr_argument_reads_wrong_body", "the body tests a[n - 1] < 99: `postcondition` at the return",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           const Stmt* r {nullptr};
+           mk_ls(k, false, true, &rd, &r);
+           k.fail("postcondition", r->loc);
+       });
+    lc("ctr_argument_reads_unframed",
+       "is_small(a[n]) one past reads_range(a, n): the argument's own framing row, `permission`, at the read",
+       [=](Kit& k)
+       {
+           const Expr* rd {nullptr};
+           const Stmt* r {nullptr};
+           mk_ls(k, true, false, &rd, &r);
+           k.fail("permission", rd->loc);
+       });
+    // ---- the keep fact (iii) ----
+    // long keep(const int *a, int n) requires(0 <= n && reads_range(a, n) && sum_to(a, n) < 100) ensures(r, reads_range(a, n) && r == sum_to(a, n) + 9223372036854775000LL) -- bodiless
+    auto mk_keep = [=](Kit& k, const char* big)
+    {
+        Function* g {mk_sum(k)};
+        Function* f {k.fn("keep", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        k.trusted(f);
+        k.req(f, k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), RR(k, f, 0, 1, 0)),
+                        k.lt(app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)"), k.num(k.i64, "100"))));
+        const Expr* sum {k.add(app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)"), k.num(k.i64, big))};
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.eq(k.R(f), sum)));
+        k.done(f);
+        return sum;
+    };
+    lcv("ctr_keep_fact",
+        "the post-state sum equals the pre-state sum under both atoms' guards: the added constant cannot overflow",
+        [=](Kit& k)
+        {
+            mk_keep(k, "9223372036854775000");
+            vac_fn(k);
+        });
+    lc("ctr_keep_fact_too_big",
+       "the same with a constant that overflows even for a sum below 100: `overflow` at the sum (the keep fact makes the facts no more than the pre-state's bound)",
+       [=](Kit& k)
+       {
+           k.fail("overflow", mk_keep(k, "9223372036854775750")->loc);
+       });
+    // long ka(int *a, int *b, int c, int n) requires(b == a && 0 <= n && (c == 0 || reads_range(a, n)) && owns_range(b, n) && sum_to(b, n) < 100)
+    //     ensures(r, (c == 0 || reads_range(a, n)) && owns_range(b, n) && r == sum_to(b, n) + 9223372036854775000LL) -- bodiless
+    lc("ctr_keep_fact_owns_alias",
+       "the application is over an owns_range alias of a guarded reads_range: the keep fact holds under the guard only, so the post value is not tied to the pre value and the added constant may overflow",
+       [=](Kit& k)
+       {
+           Function* g {mk_sum(k)};
+           Function* f {k.fn("ka", k.i64, {{"a", PI(k)}, {"b", PI(k)}, {"c", k.i32}, {"n", k.i32}})};
+           k.trusted(f);
+           const auto guarded_rr = [&]()
+           {
+               return k.lor(k.eq(fx(k, f, 2), N(k, "0")), RR(k, f, 0, 3, 0));
+           };
+           k.req(f, k.land(k.land(k.land(k.eq(fx(k, f, 1), fx(k, f, 0)), k.ge_c(fx(k, f, 3), k.i32, "0")),
+                                  k.land(guarded_rr(), RO(k, f, 1, 3, 1))),
+                           k.lt(app(k, g, {k.F(f, 1), k.F(f, 3)}, "sum_to(b, n)"), k.num(k.i64, "100"))));
+           const Expr* sum {
+               k.add(app(k, g, {k.F(f, 1), k.F(f, 3)}, "sum_to(b, n)"), k.num(k.i64, "9223372036854775000"))};
+           k.ens(f, k.land(k.land(guarded_rr(), RO(k, f, 1, 3, 1)), k.eq(k.R(f), sum)));
+           k.done(f);
+           k.fail("overflow", sum->loc);
+       });
+    // ---- a callee with a quantified clause (cut 2): the quantifier as if written at the site, in the contract, at a call ----
+    // small_at(i, a, n): !(0 <= i && i < n) || (-1000 <= a[i] && a[i] <= 1000), named by `cerastes_forall(small_at, a, n)`
+    auto small_q = [=](Kit& k, int id, const Expr* a, const Expr* n)
+    {
+        const Expr* i {k.b.bound(id, k.i32.int_type, "i", k.at())};
+        const Expr* x0 {k.b.forall_arg(id, 0, PI(k), a->c_text.empty() ? "a" : a->c_text, k.at())};
+        const Expr* x1 {k.b.forall_arg(id, 1, k.i32, n->c_text.empty() ? "n" : n->c_text, k.at())};
+        const Expr* rd {k.deref(k.b.elem_addr(x0, i, k.at()))};
+        const Expr* in {k.land(k.ge_c(i, k.i32, "0"), k.lt(i, x1))};
+        const Expr* body {k.lor(k.lnot(in), k.land(k.ge_c(rd, k.i32, "-1000"),
+                                                   k.le_c(k.deref(k.b.elem_addr(x0, i, k.at())), k.i32, "1000")))};
+        return k.b.forall(id, k.i32.int_type, body, {a, n}, "forall(small_at)", "small_at", k.at());
+    };
+    // int smallsum(const int *a, int n) requires(0 <= n && n <= 1000 && reads_range(a, n) && forall(small_at, a, n)) ensures(r, -1000 * n <= r && r <= 1000 * n) decreases(n)
+    //     { return n == 0 ? 0 : smallsum(a, n - 1) + a[n - 1]; }
+    auto mk_smallsum = [=](Kit& k)
+    {
+        Function* f {k.fn("smallsum", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
+        f->pure = true;
+        k.req(f, k.land(k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")),
+                               RR(k, f, 0, 1, 0)),
+                        small_q(k, 1, fx(k, f, 0), fx(k, f, 1))));
+        k.ens(f, k.land(k.le(k.mul(k.num(k.i32, "-1000"), k.F(f, 1)), k.R(f)),
+                        k.le(k.R(f), k.mul(k.num(k.i32, "1000"), k.F(f, 1)))));
+        k.dec(f, k.F(f, 1));
+        const Expr* nm1 {k.sub(k.F(f, 1), k.num(k.i32, "1"))};
+        const Expr* self {app(k, f, {k.F(f, 0), nm1}, "smallsum(a, n - 1)")};
+        const Expr* elem {k.deref(k.b.elem_addr(k.F(f, 0), k.sub(k.F(f, 1), k.num(k.i32, "1")), k.at()))};
+        f->pure_body = k.cond(k.eq(k.F(f, 1), k.num(k.i32, "0")), k.num(k.i32, "0"), k.add(self, elem));
+        k.done(f);
+        return f;
+    };
+    // the requires of a function over (a, n) holding the callee's clause [and the bound smallsum(a, n) <= 1000]
+    auto q_requires = [=](Kit& k, Function* f, Function* g, int id, bool clause, bool bound)
+    {
+        const Expr* pre {
+            k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
+        if (clause)
+        {
+            pre = k.land(pre, small_q(k, id, fx(k, f, 0), fx(k, f, 1)));
+        }
+        if (bound)
+        {
+            pre = k.land(pre, k.le(app(k, g, {k.F(f, 0), k.F(f, 1)}, "smallsum(a, n)"), k.num(k.i32, "1000")));
+        }
+        return pre;
+    };
+    // int sq(const int *a, int n) requires(<base> [&& forall small_at]) ensures(r, reads_range(a, n) && r == smallsum(a, n)) -- bodiless
+    auto mk_sq = [=](Kit& k, bool clause, const Expr** ap)
+    {
+        Function* g {mk_smallsum(k)};
+        Function* f {k.fn("sq", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
+        k.trusted(f);
+        k.req(f, q_requires(k, f, g, 2, clause, false));
+        *ap = app(k, g, {k.F(f, 0), k.F(f, 1)}, "smallsum(a, n)");
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.eq(k.R(f), *ap)));
+        k.done(f);
+    };
+    lcv("ctr_forall_contract_given",
+        "the contract gives the callee's quantified clause: its Q row holds, the quantifier is a conjunct of the guard",
+        [=](Kit& k)
+        {
+            const Expr* ap {nullptr};
+            mk_sq(k, true, &ap);
+            vac_fn(k);
+        });
+    lc("ctr_forall_contract_not_given",
+       "the contract does not give it: one `precondition` row (the Q row) at the application, none of the others",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           mk_sq(k, false, &ap);
+           k.fail_only("precondition", ap->loc, 7, 6);
+       });
+    // int sqb(const int *a, int n) requires(<base> && forall small_at && smallsum(a, n) <= 1000) ensures(reads_range(a, n)) -- bodiless; a caller with the same [or without the bound]
+    auto mk_sqcall = [=](Kit& k, bool bound, const Expr** call_out)
+    {
+        Function* g {mk_smallsum(k)};
+        Function* t {k.fn("sqb", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
+        k.trusted(t);
+        k.req(t, q_requires(k, t, g, 3, true, true));
+        k.ens(t, RR(k, t, 0, 1, 0));
+        k.done(t);
+        Function* f {k.fn("sqc", k.vd, {{"a", PI(k)}, {"n", k.i32}})};
+        k.req(f, q_requires(k, f, g, 4, true, bound));
+        k.ens(f, RR(k, f, 0, 1, 0));
+        *call_out = k.call(t, {k.pn(f->param_var(0)), k.pn(f->param_var(1))});
+        std::vector<const Stmt*> st {k.es(*call_out)};
+        tail(k, st);
+        f->body = k.blk(st);
+        k.done(f);
+    };
+    lcv("ctr_forall_call_given",
+        "a call of a function whose requires applies smallsum (a quantified clause) and holds it: the call's rows, the quantifier lowered over the arguments, hold",
+        [=](Kit& k)
+        {
+            const Expr* call {nullptr};
+            mk_sqcall(k, true, &call);
+        });
+    lc("ctr_forall_call_weak", "the caller does not require the bound: `precondition` at the call",
+       [=](Kit& k)
+       {
+           const Expr* call {nullptr};
+           mk_sqcall(k, false, &call);
+           k.fail_only("precondition", call->loc, 4, 3);
+       });
+    // ---- rejections of the checker's backstop for an ordinary function's contract ----
+    rc("ctr_apply_in_atom_guard", "holds no atom, call or side effect",
+       [=](Kit& k)
+       {
+           Function* g {mk_small(k)};
+           Function* f {k.fn("h", k.vd, {{"x", k.i32}, {"a", PI(k)}, {"n", k.i32}})};
+           k.req(f, k.cond(app(k, g, {k.F(f, 0)}, "is_small(x)"), RR(k, f, 1, 2, 0), k.yes()));
+           f->body = k.blk({});
+           k.done(f);
+       });
 }
 
 // Record 0062 item 5: the rules `check_program` repeats as backstops of the encoder's own rejections.
@@ -783,40 +1485,28 @@ void define_pure_function_rejections()
         Function* f {k.fn("use", k.vd)};
         return f;
     };
-    rc("pure_apply_in_invariant", "outside a `check`", [=](Kit& k)
+    rc("pure_apply_in_invariant", "outside a `check`",
+       [=](Kit& k)
        {
            Function* g {small(k)};
            Function* f {caller(k)};
            Var* i {k.local(f, "i", k.i32)};
-           f->body = k.blk({k.decl(i, k.num(k.i32, "0")),
-                            k.whl(k.lt(k.v(i), k.num(k.i32, "3")), {k.cl(ap(k, g, {k.v(i)}))}, {k.cl(k.sub(k.num(k.i32, "3"), k.v(i)))},
-                                  k.blk({k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))});
+           f->body =
+               k.blk({k.decl(i, k.num(k.i32, "0")), k.whl(k.lt(k.v(i), k.num(k.i32, "3")), {k.cl(ap(k, g, {k.v(i)}))},
+                                                          {k.cl(k.sub(k.num(k.i32, "3"), k.v(i)))},
+                                                          k.blk({k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))});
            k.done(f);
        });
-    rc("pure_apply_in_ordinary_requires", "outside a `check`", [=](Kit& k)
-       {
-           Function* g {small(k)};
-           Function* f {k.fn("h", k.vd, {{"x", k.i32}})};
-           k.req(f, ap(k, g, {k.F(f, 0)}));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("pure_apply_in_ordinary_ensures", "outside a `check`", [=](Kit& k)
-       {
-           Function* g {small(k)};
-           Function* f {k.fn("h", k.vd, {{"x", k.i32}})};
-           k.ens(f, ap(k, g, {k.F(f, 0)}));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("pure_apply_in_c_assert", "outside a `check`", [=](Kit& k)
+    rc("pure_apply_in_c_assert", "outside a `check`",
+       [=](Kit& k)
        {
            Function* g {small(k)};
            Function* f {caller(k)};
            f->body = k.blk({k.asrt(ap(k, g, {k.num(k.i32, "1")}))});
            k.done(f);
        });
-    rc("pure_apply_in_measure", "outside a `check`", [=](Kit& k)
+    rc("pure_apply_in_measure", "outside a `check`",
+       [=](Kit& k)
        {
            Function* g {small(k)};
            Function* c {k.fn("clamp", k.i32, {{"x", k.i32}})};
@@ -829,7 +1519,8 @@ void define_pure_function_rejections()
            f->pure_body = ap(k, g, {k.F(f, 0)});
            k.done(f);
        });
-    rc("pure_apply_under_old", "under `old`", [=](Kit& k)
+    rc("pure_apply_under_old", "under `old`",
+       [=](Kit& k)
        {
            Function* g {small(k)};
            Function* f {k.fn("p", k.bl, {{"x", k.i32}})};
@@ -838,7 +1529,8 @@ void define_pure_function_rejections()
            f->pure_body = ap(k, g, {k.F(f, 0)});
            k.done(f);
        });
-    rc("pure_apply_callee_not_pure", "not a `pure` function", [=](Kit& k)
+    rc("pure_apply_callee_not_pure", "not a `pure` function",
+       [=](Kit& k)
        {
            Function* g {k.fn("g", k.bl, {{"x", k.i32}})};
            g->body = k.blk({k.ret(k.yes())});
@@ -847,35 +1539,40 @@ void define_pure_function_rejections()
            f->body = k.blk({k.chk(ap(k, g, {k.num(k.i32, "1")}))});
            k.done(f);
        });
-    rc("pure_apply_arity", "with 0 arguments", [=](Kit& k)
+    rc("pure_apply_arity", "with 0 arguments",
+       [=](Kit& k)
        {
            Function* g {small(k)};
            Function* f {caller(k)};
            f->body = k.blk({k.chk(ap(k, g, {}))});
            k.done(f);
        });
-    rc("pure_apply_argument_type", "(convert it)", [=](Kit& k)
+    rc("pure_apply_argument_type", "(convert it)",
+       [=](Kit& k)
        {
            Function* g {small(k)};
            Function* f {caller(k)};
            f->body = k.blk({k.chk(ap(k, g, {k.num(k.i64, "1")}))});
            k.done(f);
        });
-    rc("pure_body_holds_old", "holds an old value", [=](Kit& k)
+    rc("pure_body_holds_old", "holds an old value",
+       [=](Kit& k)
        {
            Function* f {k.fn("p", k.i32, {{"x", k.i32}})};
            f->pure = true;
            f->pure_body = k.old(k.F(f, 0));
            k.done(f);
        });
-    rc("pure_body_holds_atom", "holds a permission atom", [=](Kit& k)
+    rc("pure_body_holds_atom", "holds a permission atom",
+       [=](Kit& k)
        {
            Function* f {k.fn("p", k.bl, {{"a", k.ptr(k.i32)}})};
            f->pure = true;
            f->pure_body = k.b.atom(AtomKind::Reads, k.F(f, 0), 0, k.at());
            k.done(f);
        });
-    rc("pure_body_holds_write", "holds a write or a call", [=](Kit& k)
+    rc("pure_body_holds_write", "holds a write or a call",
+       [=](Kit& k)
        {
            Function* f {k.fn("p", k.i32, {{"x", k.i32}})};
            f->pure = true;
@@ -883,7 +1580,8 @@ void define_pure_function_rejections()
            f->pure_body = k.asgE(v, k.F(f, 0));
            k.done(f);
        });
-    rc("pure_requires_other_atom", "other than `reads(*p)` or `reads_range(p, n)`", [=](Kit& k)
+    rc("pure_requires_other_atom", "other than `reads(*p)` or `reads_range(p, n)`",
+       [=](Kit& k)
        {
            Function* f {k.fn("p", k.i32, {{"a", k.ptr(k.i32)}})};
            f->pure = true;
@@ -891,7 +1589,8 @@ void define_pure_function_rejections()
            f->pure_body = k.num(k.i32, "0");
            k.done(f);
        });
-    rc("pure_ensures_atom", "in the `ensures` of the `pure` function", [=](Kit& k)
+    rc("pure_ensures_atom", "in the `ensures` of the `pure` function",
+       [=](Kit& k)
        {
            Function* f {k.fn("p", k.i32, {{"a", k.ptr(k.i32)}})};
            f->pure = true;
@@ -900,7 +1599,8 @@ void define_pure_function_rejections()
            f->pure_body = k.num(k.i32, "0");
            k.done(f);
        });
-    rc("pure_cycle_mutual", "in a cycle", [=](Kit& k)
+    rc("pure_cycle_mutual", "in a cycle",
+       [=](Kit& k)
        {
            Function* f {k.fn("f", k.bl, {{"x", k.i32}})};
            Function* g {k.fn("g", k.bl, {{"x", k.i32}})};
@@ -911,7 +1611,8 @@ void define_pure_function_rejections()
            k.done(f);
            k.done(g);
        });
-    rc("pure_cycle_through_ensures", "applies itself in its `requires` or `ensures`", [=](Kit& k)
+    rc("pure_cycle_through_ensures", "applies itself in its `requires` or `ensures`",
+       [=](Kit& k)
        {
            Function* f {k.fn("f", k.bl, {{"x", k.i32}})};
            f->pure = true;
