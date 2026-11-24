@@ -22,7 +22,7 @@ amends 0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060). Read `internal/han
 this one feeds: M4.5e1f, M4.5e1d, M4.5e2, M4.8), §8 (questions 253-263, **the overnight ones for review**). Branched
 from local `main` = `bf820fe` (`origin/main` = `aa4a9fe` plus one commit holding the owner's inline answers to
 247-252, committed at the session's start so that a fast-forward is not blocked). Session from 2026-11-23 about 22:35
-UTC to 2026-11-24 about BOX_END UTC.
+UTC to 2026-11-24 about 07:15 UTC.
 
 **Owner decisions in the session:** 253 (the multi-class one-term false alarm: M4.5e2), 254 (the skipped-write twin's two
 errors expected, a one-error twin added), 255 (method-qualified ghost names; four narrowings as listed limits). At
@@ -93,7 +93,14 @@ message for a kept element); the S45 fixtures' ghost names.
   5,713; format 89 files; `build_docs.sh` and `check_doc_examples.py` (source and `--html`).
 - `src/` and `include/` against `bf820fe` (measured): +3,514/−294 without the self-test cases (the plan's 1,500–2,200, with
   Part D), +6,038/−294 with them; Parts A+B +2,483 at split point 1, Part C about +900 (questions 256, 263).
-- The box: BOX_RESULT
+- The box: `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` **all green** on `7964d33` in the `ubuntu-26.04` container
+  on the x86-64 box (a fresh bootstrap by `ci-linux.sh`), 89 min, exit 0, no rerun: 15,496 tests passed, 0 failed, 10
+  skipped (native-ok clang and GCC 2,918 each), the long tier ran; lint 6,217 files clean (the Mac's 6,213 and the four
+  Linux-only tests); VIR self-test 2,202 lowering and 358 rejection cases, 0 problems, every case through Silicon; the
+  self-tests, format, the doc examples (400 blocks) and the docs (27 pages) clean. A pre-check passed first (regeneration
+  6,217 of 6,217, lint clean, the session's 658 tests). The closing commits change only this file, the handoff and
+  `plan.md`, which `check.sh` does not read. Report `build/m4.5e1c/box-report.md`, log
+  `~/cerastes-s8/p-ubuntu-26.04/e1c-check.log`.
 
 **First step for the next session:** the owner reviews handoff §8's overnight questions (256-263, cut 1 above all),
 merges the branch (`git merge --ff-only m4.5e1c-quantifiers` in the main checkout, then removes the worktree), and

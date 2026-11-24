@@ -23,7 +23,8 @@ are in `.claude/plans/`; the notes a session consumes move into its plan's "Inpu
   file, `plan.md`). The branch starts from local `main` = `bf820fe`, which is `origin/main` = `aa4a9fe` plus one commit
   holding the owner's inline answers to 247-252. **Part D (`cerastes_old` in loop invariants) was cut** (question 260)
   and goes to M4.5e2 with its design (record 0061 item 12, §3 "M4.5e2").
-- **The box:** BOX_STATE
+- **The box:** `CERASTES_LONG=1 scripts/check.sh` all green on `7964d33` (2026-11-24, 89 min, 15,496 tests, the long tier
+  ran; `internal/status.md` has the numbers). The box's tree `~/cerastes-s8/p-ubuntu-26.04` is detached at `7964d33`.
 - **CI:** unchanged since the planning (question 176 the owner's; the `profiles=all` dispatch pending, question 172).
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
 - `build/m4.5e1c/` in the worktree holds the four audit reports, every agent's reports and state files, the baseline and
