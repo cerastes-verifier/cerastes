@@ -3,7 +3,13 @@
 - **Status:** draft (2026-11-24, M4.5e1d), written before code (invariant 6) from the plan's section 6
   (`.claude/plans/m4-5e1d-pure-functions.md`, approved 2026-11-24); to be revised only by P81's and S46's decision
   tables (the plan's section 5; `internal/il-inventory.md`, chapter M4.5e1d; fixtures
-  `tests/viper-smoke/memory/s46_*.vpr`), by Step 0's runs and by audit round 1. Owner decisions:
+  `tests/viper-smoke/memory/s46_*.vpr`), by Step 0's runs and by audit round 1 (Opus, on Commit 1 `92294b7`: every
+  S46 fixture reproduced; two blocking items, both taken: B1 the lint admitted fact (ii) without a callee's quantified
+  clause and refused the record's form, items 8 and 12; B2 an application nested in `cerastes::old`'s operand
+  compiles in C++, items 1 and 4; six should-fix items, all taken: S1 the keep fact's guard read from the callee's
+  atoms, S2 fact (i)'s range tied to a result tag, S3 every read function's `__wf`, S4 trusted contracts read
+  functions, S5 the check's range and shape rows, S6 a discriminating no-`decreases` fixture; notes N1 (item 11's
+  argument traced), N2, N9 taken; `build/m4.5e1d/auditor-report-1.md`). Owner decisions:
   - At M4.5e1's planning (2026-11-11): **226** a `forall` inlines its function's body; a call of a `pure` function
     anywhere else waits for e1d. **227** the exact sum is in M4.5e1: e1d takes `pure` bodies, their calls and their
     recursion from M4.5f1/f2; M4.5f1 keeps predicates, `fold`/`unfold` and pure functions over predicates.
@@ -40,7 +46,10 @@
     twin's expect lines list every error the driver prints (question 254's rule), and item 7 says why; **278** (S46
     (f): a count past a local array in a `check` gave two errors in the planned order, the bound row and the callee's
     pure line; with the pure lines first, one) "Pure lines first": in a `check` the callee's pure lines are asserted
-    before the bound and the marked rows (item 7), as e1b's shape row comes first at a call (0060 item 8). **279**
+    before the bound and the marked rows (item 7), as e1b's shape row comes first at a call (0060 item 8); **280**
+    (test-mechanics, raised by test-mutator-2) two rejection pins of a function rule call from a `check`, which Part B
+    accepts, not from an ordinary `requires`; **281** "Count read pure functions": a read `pure` function counts as one
+    function verified (item 9; amends 0011 item 9). **279**
     (the test-mutator's lint found two facts of item 8 that `f__wf` cannot assume safely, outside the plan: fact
     (i) for an enumeration result, fact (ii) for a callee whose `requires` holds an application) "Accept, M4.8": both
     are listed limits, fail closed (item 8).
@@ -84,7 +93,7 @@ the branch of the plan's decision table it took.
    | mutual recursion between `pure` functions; a `pure` function that reaches itself through a `requires` or an `ensures` (its own or another function's): the only cycle accepted is a function calling itself in its own body | M4.5f2 |
    | a call under a quantifier's binder (inside the function a `cerastes_forall` names); a `cerastes_forall` naming a function that has a contract (question 252 at the `forall` site) | M4.5e2 |
    | a `cerastes_forall` inside the body of a read `pure` function (a named quantified property) | M4.5f1 |
-   | a call in a function's or a loop's `decreases`; in the count or guard of an atom, in an element's index, as a trailing argument of `cerastes_forall` (the positions that must read no memory: a call counts as a read there); under `old` (neither spelling compiles, P81 (f): `cerastes_old` takes an address and `cerastes::old` refuses an rvalue argument; the front end's diagnostic, pinned as a front-end negative, with `check.cpp`'s backstop) | M4.5f1 (measures), M4.5e2 (the rest) |
+   | a call in a function's or a loop's `decreases`; in the count or guard of an atom, in an element's index, as a trailing argument of `cerastes_forall` (the positions that must read no memory: a call counts as a read there); under `old` (the direct forms do not compile, P81 (f): `cerastes_old` takes an address, `cerastes::old` refuses an rvalue argument, each pinned as a front-end negative; an application nested in `cerastes::old`'s operand compiles in C++, `cerastes::old(*(g(n) ? p : q))`, `cerastes::old(a[g(n)])`, audit round 1 B2, and the encoder rejects it, pinned in C++, with `check.cpp`'s backstop behind it) | M4.5f1 (measures), M4.5e2 (the rest) |
    | a read `pure` function whose body names `cerastes_old` (a function has one state; e1c allows the body only under a `forall` in an `ensures`) | never as a call |
    | a read `pure` function that returns a pointer, a structure or `void`, or takes a structure by value | M4.5f1 |
    | in a `pure` function's `requires`: `owns`, `owns_range`, `owns_block`, `live`, an atom under a guard or `\|\|`; any atom in its `ensures`; markers on its parameters (0042 item 4); `restrict` | M4.5f1 |
@@ -92,7 +101,8 @@ the branch of the plan's decision table it took.
    | a pointer argument that a callee's atom names and that is not a bare pointer parameter (contract) or a pointer variable that is not address-taken or a named local array (loop invariant, `check`): 0061 item 3's rule | M4.5e2 |
 
 2. **Which `pure` functions are read** (owner, 2026-11-24, question 268). A `pure` function of the unit is **read** when
-   an annotation of a verified function calls it, when a read `pure` function's body or contract calls it, or when it
+   an annotation of a function whose contract is lowered calls it (a verified function's, or a trusted one's: a
+   bodiless or vlibc contract; audit round 1, S4), when a read `pure` function's body or contract calls it, or when it
    carries a `requires`, an `ensures` or a `decreases`. A read function is checked once, whether or not anything calls
    it. Every other `pure` function is as before: one that a `cerastes_forall` names is inlined there (0061), one that
    nothing uses is not read (0011 item 4), and the checks `Encoder::run` makes on every spec routine (markers, structure
@@ -146,12 +156,16 @@ the branch of the plan's decision table it took.
    - **An application counts as a read of memory** (`reads_heap`), whatever its callee reads: where a rule asks that an
      expression read no memory (an atom's count or guard, an element's index, a `forall`'s trailing argument) it is
      rejected, and **`old` over an application is rejected** (today `old` wraps only what `reads_heap` sees, so an
-     application under it would silently be read in the post-state). P81 (f): no spelling of it compiles — the front
-     end refuses `cerastes_old(g(…))` in both modes (the macro takes an address: "expression must be an lvalue or a
-     function designator") and `cerastes::old(g(…))` in C++ (an rvalue bound to `old`'s reference parameter, an
-     `enk_temp_init`, as P80 (b) found: "this version cannot check this part of an annotation") — so the encoder never
-     meets one. The source pin is a front-end negative that keeps the front end's diagnostic, and `check.cpp`'s refusal
-     of an `Apply` under `Old` is the backstop, pinned by a VIR rejection case.
+     application under it would silently be read in the post-state). P81 (f): the direct forms do not compile — the
+     front end refuses `cerastes_old(g(…))` in both modes (the macro takes an address: "expression must be an lvalue or
+     a function designator") and `cerastes::old(g(…))` in C++ (an rvalue bound to `old`'s reference parameter, an
+     `enk_temp_init`, as P80 (b) found: "this version cannot check this part of an annotation"), each pinned as a
+     front-end negative. **An application nested in `cerastes::old`'s operand compiles in C++** (audit round 1, B2:
+     `cerastes::old(*(g(n) ? p : q))`, `cerastes::old(a[g(n)])`; in C the operand of `cerastes_old` is ordinary code,
+     where the front end refuses the call): the encoder rejects an application anywhere under `old`
+     (`unsupported_annotation`, M4.5e2; pinned in C++ with both shapes from Part C, when an application in an `ensures`
+     is lifted), and `check.cpp`'s refusal of an `Apply` under `Old` is the backstop behind it (an internal error,
+     pinned by a VIR rejection case).
    - **Arguments** are expressions of the site, each evaluated once, at the site, in the site's state, with its own
      obligations (0010 item 11's; a read's framing, bound and flag) as rows of their own before the application's, in
      evaluation order. An argument may read memory (cut 3).
@@ -251,7 +265,9 @@ the branch of the plan's decision table it took.
      tests expect every error the driver prints (question 254's rule). Two arrays with a pair of places need the
      entry case split `if (lvloc(block_of(b)) == lvloc(block_of(a))) { }` before the snapshots, as 0060 item 11 has
      it (S46 (d)'s copy loop).
-   - **A `check` (`CMode::None`):** per callee atom, **first its pure lines** (`p != null`, the shape, `0 <= n`,
+   - **A `check` (`CMode::None`):** **first the callee's parameter ranges and pointer shapes at the arguments** (audit
+     round 1, S5: S46 (f) writes them as rows; without them the native `application.precondition` would fail, an exit
+     3), then per callee atom **its pure lines** (`p != null`, the shape, `0 <= n`,
      `offset_of(p) + n <= len(block_of(p))`; `precondition`, question 278: in the planned order a count past a local
      array was two errors, the bound row and the pure line, and with the pure lines first one), then the rows of 0061
      item 10 over its interval, in the binder form the lint admits (the null row and the liveness row for a pointer
@@ -267,7 +283,7 @@ the branch of the plan's decision table it took.
      | a method's contract | `G` | the framing site (unmarked) | the site's range line |
      | a call, a return | `G` over the arguments | `call_atoms`' and the return's marked rows | their range rows |
      | a loop invariant | `G` over the places | the place's conjuncts | the place's range conjunct |
-     | a `check` | the `precondition` rows | the marked rows | the `internal` row above |
+     | a `check` | the `precondition` rows, the parameters' ranges and pointer shapes among them (audit round 1, S5) | the marked rows | the `internal` row above |
 
 8. **`f__wf`** (amends 0037 item 7 and 0061 item 7; variant M stays: the method is heap-free and applies no function).
    An application is a ghost function of the method's domain, `hva_<m>__<g>_<pre|post>(args)` (`<m>` the `__wf`
@@ -307,6 +323,12 @@ the branch of the plan's decision table it took.
      elements, fails); an `ensures` of `g` that reads memory is not assumed.
 
 9. **The definition check of a read `pure` function.**
+   - **Every read function gets its `__wf` method**, `pf_<name>__<id>__wf`, whether or not it has a contract (audit
+     round 1, S3: today `run()` makes one only for a function with a clause; the body is always a clause here, and the
+     lint requires the method: without it neither fact (i) nor the argument below has a basis).
+   - **A read function counts as one function verified** (amends 0011 item 9; owner, question 281): the success line's
+     `n` counts each read `pure` function besides the verified bodies, so a file whose only functions are read `pure`
+     functions verifies and is not "nothing to verify".
    - **Its `__wf` method** (`wf_method`, extended): the `requires` clauses; then **the body as one more clause of the
      entry state**: every obligation of `E` (0010 item 11's, each read's framing by the function's own atoms, each
      application's rows by item 7 with the ghosts of item 8, the conversion at the `return`), reported **in the
@@ -342,8 +364,9 @@ the branch of the plan's decision table it took.
       code. The unresolved expression will be replaced by a fresh symbol, i.e. an arbitrary value.` It does so beside
       "verified" for a correct function (`requires n >= 0`, body `n < 0 ? a[0] : 0`) and beside the `__wf` row of a
       wrong one (an application whose guard the `requires` make false). The driver (`silicon_output.cpp`) and
-      `run_tests.py` accept exactly that line, **only before the verdict line** (where Silicon prints it; after it, or
-      after an error entry, it is a stray line as before), when `<f>` is a `pf_<name>__<id>` function, whatever the
+      `run_tests.py` accept exactly that line, **only before the verdict line** (where Silicon prints it; after the
+      verdict it is a stray line as before, and after an error entry it joins that entry's text as any continuation line
+      does, in both readers: audit round 1, N2), when `<f>` is a `pf_<name>__<id>` function, whatever the
       verdict; any other warning, and this one for any other function, stays exit 3 (both readers share one rule and
       the harness's agreement tests run both). **Why it is sound** (S46 (b), M5, from the
       pinned Silicon's source; audit round 1 checks it): the line is printed only when no explored path evaluated the
@@ -353,9 +376,15 @@ the branch of the plan's decision table it took.
       axiom `pre(args) ==> f(args) == body(args)`, which Silicon emits only for a function that verified; so for every
       argument satisfying the `requires` the axiom's value never depends on it. The same holds on an `ensures` line
       (measured, M4): an expression of the postcondition that no path satisfying the `requires` evaluates is replaced
-      in the postcondition's translation, which is guarded by the same precondition. Silicon prints nothing when the
-      function's own check already failed. **Not traced in S46 (M5), for audit round 1:** recordings made at a nested
-      evaluation depth, and one expression shared by two contexts.
+      in the postcondition's translation, which is guarded by the same precondition. For a body expression Silicon
+      prints nothing when the function's own check already failed (the postcondition's axiom is computed before that
+      check, so an `ensures` expression may still print it: harmless, since the line is accepted whatever the verdict).
+      **Audit round 1 traced the rest** (N1): the default function encoding adds no auxiliary axiom; the `requires`
+      expressions enter no axiom (each axiom's antecedent is the uninterpreted `f%pre`, assumed only after the callee's
+      precondition is consumed); recording happens only at evaluation depth 0, and depth rises only while consuming a
+      callee's precondition or unfolding a predicate (e1d has none), so a body or contract expression is always recorded
+      at depth 0; snapshots are keyed by (AST node, context) with structural equality, so a dead occurrence equal to a
+      live one resolves to the live snapshot and prints nothing.
 
 12. **The lint** (amends 0012 item 11, 0061 item 11).
     - A top-level `function` is a prelude function (by name, its body under today's prelude rules, and an empty
@@ -383,6 +412,17 @@ the branch of the plan's decision table it took.
     - A user quantifier of 0061's shape is admitted in a `pf_` function's `requires` and `ensures` (today's rules read
       methods only) and, for a callee whose `requires` holds one (cut 2), as a conjunct of an application's guard and,
       over the ghosts, in the antecedent of fact (ii).
+    - **What the lint checks of each fact** (audit round 1): fact (ii)'s guard `V` is exactly the callee's value
+      `requires`, pure lines **and its quantified clauses (cut 2) over the method's `hvq` ghosts at the arguments**, as
+      a set of conjuncts (B1: a `V` without the quantified clause is the unsound form S46 (c) (2u) shows, and is a
+      must-fail self-test; `audit1-scratch/cx1_vnoq_unsound.vpr` is its evidence); the keep fact's guard is the
+      conjunction of the method's `reads`/`reads_range` atom guard, its `ensures` partner's guard, the same block and
+      **the inclusion of every interval of the callee's atoms at the arguments in that atom's interval**, read from the
+      callee's own atoms (S1); fact (i)'s range is the callee's C result type's, which the `pf_` function's signature
+      line states as a tag `// cerastes:result <lo> <hi>` that the lint checks against a standard C integer range (S2;
+      the lint cannot see the C type itself, so the tag and the fact are checked for agreement); every `pf_` function
+      has its `pf_<name>__<id>__wf` method (S3); the prelude functions apply no function but prelude functions, and
+      their application graph has no cycle (N9: H' rests on it).
     - Each rule with twins.
 
 13. **Categories:** none new. **Tags:** `pure_function`. **Facts:** P81, S46.
