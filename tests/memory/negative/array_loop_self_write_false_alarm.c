@@ -1,7 +1,7 @@
 // expect: error postcondition @ L23
 // mode: c23, c++20
 // twin: tests/memory/array_loop_self_write.c
-// Pins: 0059 item 8 (\"What e1a cannot state\"): the loop stores a[i] = a[i], a write reaches the array, so its values are not kept and r == 3 (a[2]) cannot be proven: a pinned false alarm, M4.5e1c's quantified value invariants give it its verifying twin
+// Pins: 0059 item 8 (\"What e1a cannot state\"), 0061 item 9 (flip B, question 250): the loop stores a[i] = a[i], a write reaches the array, so its values are not kept and r == 3 (a[2]) cannot be proven: a pinned false alarm; this program writes no quantified invariant, so it fails as before; its verifying sibling is tests/memory/forall_self_write.c (M4.5e1c Part C)
 // Pre-registered from the il-analyst's fix (report 7) of the exit 3 of sweep2/loop_alias*.c
 #include <cerastes.h>
 

@@ -316,3 +316,5 @@ locals and parameters. Facts: P63 (the IL of globals and `static` locals) and S3
   the single-unit assumption already is.
 - For later sessions (audit N8, N10): M4.5f1 encodes `pure` bodies, which must then handle globals; M4.7 keeps `&main`
   rejected, so `program_start` stays reached once.
+
+*2026-11-24, amended by 0061 (M4.5e1c): item 12 — a `pure` body that a `forall` names is inlined at the site, and reading a global there is rejected as in any annotation (0061 item 4).*

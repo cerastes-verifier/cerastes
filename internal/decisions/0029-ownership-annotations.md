@@ -174,3 +174,5 @@ says the flag follows the cell once pointers come.
 *2026-10-29, amended by 0038 (M4.5b1c1): item 1 — the registration phasing changes: target `p` (parameters, a borrow) in M4.5b1c3, target `r` (functions, a transfer by `owns_block`) in M4.5d2 together with `owns_block`, `owns(*result)` and an `ensures` atom without a `requires` partner (owner, 2026-10-29: nothing creates a heap block before `malloc`).*
 
 *2026-11-12, amended by 0060 (M4.5e1b): item 1 — `owning(n)` on a parameter is `p == NULL || owns_range(p, n)` in both lists, `n` over earlier parameters and constants, with `CERASTES_OWNING_N(n)`; on functions, variables and members it stays rejected (M4.5e2). Item 3 — `<cerastes.h>` declares `cerastes_owns_range`, `cerastes_reads_range` and `cerastes::reads_range` (0060 item 2).*
+
+*2026-11-24, amended by 0061 (M4.5e1c): items 3 and 4 — `<cerastes.h>` declares `cerastes_forall` in both modes; `f` names a `pure` function (not a `predicate`) whose body is inlined, so no `pure` body becomes a Viper function before M4.5e1d (0061 items 2-4).*

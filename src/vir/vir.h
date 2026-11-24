@@ -431,7 +431,21 @@ struct Expr
         // VALUE as for MemberAddr: the operand of a Deref, the `addr` of a Store or the `c` of a StoreE is a place access (`a[i]`), any other position
         // an address used as a value (`&a[i]`).  c_text: "&" + the place spelling (`&a[i]`, `&p[i]`); place_text gives `a[i]` / `p[i]`.  check_program
         // accepts it nowhere yet (part B lifts it for a local array); a node of this kind is a check error in every position.
-        ElemAddr
+        ElemAddr,
+        // ---- quantifiers (record 0061 item 5; appended, M4.5e1c part A) ----
+        // `forall(f, args...)`, the quantifier of a `pure` function's body inlined at the site (question 226): for every value of the bound variable
+        // (`bound_id`, of the integer type `bound_type`) the Bool `a` holds; `a` mentions the variable as `Bound` nodes with the same `bound_id`.
+        // `c_text` is the site's spelling (`forall(f, a, n)`), `forall_name` is `f`'s name.  Part A plumbs it: check_program refuses it in every
+        // position (fail closed) until part B admits it in contracts (item 3) and part C in loop invariants and checks.
+        Forall,
+        // the bound variable `bound_id` of the enclosing `Forall`; `type` is that quantifier's `bound_type`; no obligation of its own.  Valid only
+        // under its Forall (check_program).
+        Bound,
+        // parameter number `arg_index` (0-based, in `f`'s parameter order after the bound variable) of the Forall whose id is `bound_id` (record 0061
+        // item 3, M4.5e1c part B): inside the body every parameter of `f` other than the bound variable is one, a pointer base included; `type` is
+        // that argument's type.  The value is the Forall's `args[arg_index]`, evaluated once at the site, outside the binder.  Valid only under its
+        // Forall (check_program).
+        ForallArg
     };
     Kind kind {Kind::Const};
     Type type; // the type of the value (Void only for a Call of a void function)
@@ -471,6 +485,14 @@ struct Expr
     // OwnsBlock: spelled `cerastes_owns_vlibc_block` (decision 0052 item 7): the block is vlibc's (its token's value is
     // `false`, decision 0050 item 3), not the platform's.
     bool vlibc_block {false};
+    // Forall, Bound (record 0061 item 5): the bound variable's id (a Bound and a ForallArg name the Forall that binds them by this id; quantifiers do not nest, so two quantifiers may share an id) and,
+    // for Forall, its integer type (a Bound's `type` is the same) and `f`'s name (messages only).
+    int bound_id {-1};
+    const IntType* bound_type {nullptr};
+    std::string forall_name;
+    // ForallArg: the index into its Forall's `args` (record 0061 item 3).  A Forall's own `args` are the encoded trailing arguments of `forall(f, ...)`,
+    // each evaluated once at the site, outside the binder, in `f`'s parameter order after the bound variable.
+    int arg_index {-1};
 };
 
 // ---- statements ------------------------------------------------------------------------------------------------
@@ -1252,6 +1274,16 @@ public:
     // a pointer to an array (`addr_of` of an array local, the decay) (an ill-typed `base` or `index` is built as is and
     // rejected by check_program).  c_text "&" + the place spelling (see Expr::Kind::ElemAddr); `deref` of it is `a[i]` / `p[i]`.
     const Expr* elem_addr(const Expr* base, const Expr* index, SrcLoc loc);
+    // `forall(f, args...)` over the bound variable `id` of integer type `t` (record 0061 item 5): `body` is a Bool that mentions the variable as
+    // `bound(id, t, ...)` nodes; `text` is the site's spelling and `f_name` the function's.  A Bool.  Part A: check_program refuses it everywhere.
+    // `args` are the encoded trailing arguments in f's parameter order after the bound variable; the body reads them as `forall_arg(id, k, ...)`.
+    const Expr* forall(int id, const IntType* t, const Expr* body, std::vector<const Expr*> args, std::string text,
+                       std::string f_name, SrcLoc loc);
+    // the bound variable `id` of an enclosing `forall` of integer type `t`; `text` is its spelling for messages (the parameter's name).
+    const Expr* bound(int id, const IntType* t, std::string text, SrcLoc loc);
+    // trailing argument `k` (0-based) of the enclosing `forall` of id `id` (record 0061 item 3): `type` is the argument's type, `text` the parameter's
+    // spelling for messages.
+    const Expr* forall_arg(int id, int k, Type type, std::string text, SrcLoc loc);
     // `a.m` (decision 0044 item 2): member `index` of the struct value `a`; type = the member's type (an ill-typed `a` or an index out of range is built with
     // `a`'s type and rejected by check_program).  c_text: `a`'s followed by `.m` when `a` has one.
     const Expr* field(const Expr* a, int index, SrcLoc loc);

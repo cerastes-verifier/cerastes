@@ -7252,5 +7252,726 @@ class RangeAtomQuantifierTests(unittest.TestCase):
         self.assertTrue(probs)
 
 
+
+class UserQuantifierTests(unittest.TestCase):
+    """Decision 0061 item 11 (M4.5e1c): a user quantifier (`forall q0: Int, ... :: { loc(block_of(X), q0), ... } body`) in a method's
+    `requires`, `ensures`, `invariant` and `assert`, and item 10's marked `wildcard` row: every twin changes one thing of a clean
+    fixture and must be refused, so the clean fixtures show the shapes pass and a weaker rule fails here."""
+
+    RANGE = "(-2147483648 <= (q0 - offset_of(v_p)) && (q0 - offset_of(v_p)) <= 2147483647)"
+    READ = "(!(0 <= (q0 - offset_of(v_p)) && (q0 - offset_of(v_p)) < v_n) || (loc(block_of(v_p), q0).v_int >= 0))"
+    REACH = "(0 <= (q0 - offset_of(v_p)) && (q0 - offset_of(v_p)) < v_n)"
+    MARK = "assert.failed[insufficient.permission]"
+
+    @staticmethod
+    def uq(body=None, binders="q0: Int", trigger="{ loc(block_of(v_p), q0) }", ante=None):
+        body = UserQuantifierTests.READ if body is None else body
+        ante = UserQuantifierTests.RANGE if ante is None else ante
+        return f"forall {binders} :: {trigger} {ante} ==> {body}"
+
+    def wild(self, trigger="{ loc(block_of(v_p), q0) }", cons="acc(loc(block_of(v_p), q0).v_int, wildcard)", binders="q0: Int", ante=None):
+        return f"forall {binders} :: {trigger} {self.RANGE if ante is None else ante} && {self.REACH} ==> {cons}"
+
+    def method(self, requires=(), ensures=(), body=(), formals="v_p: Ref, v_n: Int, amt: Perm"):
+        lines = [f"method m__1({formals})", Check("  requires none < amt && amt < write", WF, "internal")]
+        lines += [Check(f"  requires {r}", WF, "internal") for r in requires]
+        lines += [Check(f"  ensures {e}", P, "postcondition") for e in ensures]
+        return lines + ["  decreases", "{", "  var ra1: Ref", *body, "}"]
+
+    def loop(self, invariants):
+        return ["  var i__1: Int := 0", "  while (i__1 < v_n)", *[Check(f"    invariant {i}", INV, "invariant-preserved") for i in invariants],
+                Check("    decreases v_n - i__1", "termination.failed", "termination"), "  {", "    i__1 := i__1 + 1", "  }"]
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+                if any(w in p for w in ("decision 0061", "`forall`", "wildcard", "marked range row", "expected reason", "old["))]
+
+    def clean(self, lines):
+        self.assertEqual(self.probs(lines), [])
+        self.assertTrue(all(ok for _n, ok in self.verdicts(lines)))
+
+    @staticmethod
+    def verdicts(lines):
+        text, _ = build(lines)
+        src = lv.split_source(text)
+        return [(n, v[0]) for n, v in sorted(lv.classify_quantified_lines(src, lv.declarations(src)).verdicts.items())]
+
+    def refused(self, lines, fragment="decision 0061"):
+        probs = self.probs(lines)
+        self.assertTrue(any(fragment in p for p in probs), probs)
+
+    def refused_by_the_rule(self, lines, label=""):
+        """The rule's own verdict is `refused` for a line (not only some other rule of the lint)."""
+        self.assertTrue(self.probs(lines), label)
+        self.assertTrue(any(not ok for _n, ok in self.verdicts(lines)), label)
+
+    def row(self, text, kind="assert", ident=None, cat="check"):
+        return Check(f"  {kind} {text}", ident or A, cat)
+
+    # --- the user quantifier
+    def test_a_user_quantifier_is_clean_in_requires_ensures_invariant_and_assert(self):
+        q = self.uq()
+        self.clean(self.method(requires=[q], ensures=[q], body=[self.row(q)]))
+        self.clean(self.method(body=self.loop([q])))
+
+    def test_the_guard_stands_outside_in_either_spelling(self):
+        q = self.uq()
+        for guard in ("(v_n != 0)", "v_n != 0", "(v_n != 0 && v_p != null)"):
+            for wrap in (False, True):
+                with self.subTest(guard=guard, wrap=wrap):
+                    text = f"{guard} ==> ({q})" if wrap else f"{guard} ==> {q}"
+                    self.clean(self.method(requires=[text], ensures=[text], body=[self.row(text)]))
+
+    def test_two_classes_are_one_quantifier_with_one_trigger_set_of_both_terms(self):
+        two = self.uq(binders="q0: Int, q1: Int", trigger="{ loc(block_of(v_p), q0), loc(block_of(v_q), q1) }",
+                      ante=f"({self.RANGE} && (q1 == offset_of(v_q) + (q0 - offset_of(v_p))))")
+        self.clean(self.method(requires=[two], ensures=[two], formals="v_p: Ref, v_q: Ref, v_n: Int, amt: Perm"))
+
+    def test_old_without_a_label_and_the_result_may_stand_in_the_body(self):
+        q = self.uq(body="(loc(block_of(v_p), q0).v_int == old(loc(block_of(v_p), q0).v_int))")
+        self.clean(self.method(ensures=[q]))
+
+    def test_a_read_the_binder_does_not_index_may_be_a_computed_loc(self):
+        q = self.uq(body="(loc(block_of(v_p), q0).v_int <= loc(block_of(v_p), offset_of(v_p) + v_n).v_int)")
+        self.clean(self.method(requires=[q]))
+
+    def test_an_earlier_invariant_clause_may_stand_in_the_prior_of_a_loops_rows(self):
+        """Question 258 (0037 item 7's evaluation-order prior): a loop's obligation `invariant` line and its framing `assert` are `PRIOR ==> CONCLUSION` with
+        the loop's earlier quantified clauses among the conjuncts of the prior."""
+        q = self.uq()
+        q2 = self.uq(body="(loc(block_of(v_p), q0).d_int)")
+        prior = f"((v_n >= 0) && ({q}))"
+        loop = self.loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior} ==> ({q2})", f"{prior} ==> (!((v_n - i__1) < (-2147483648)))"])
+        self.clean(self.method(body=[self.row(f"{prior} ==> ({q2})"), self.row(f"{prior} ==> (!((v_n - 0) < (-2147483648)))"), *loop]))
+
+    def test_the_twins_of_the_quantifier_in_a_loop_rows_prior(self):
+        q = self.uq()
+        q2 = self.uq(body="(loc(block_of(v_p), q0).d_int)")
+        acc_q = self.uq(body="acc(loc(block_of(v_p), q0).v_int)")
+        old_q = self.uq(body="(loc(block_of(v_p), q0).v_int == old[lh_0](loc(block_of(v_p), q0).v_int))")
+        two_q = self.uq(trigger="{ loc(block_of(v_p), q0) } { loc(block_of(v_p), q0) }")
+        other = self.uq(body="(loc(block_of(v_p), q0).v_int >= 5)")
+        def prior(x):
+            return f"((v_n >= 0) && ({x}))"
+        def with_loop(invs, rows=()):
+            return self.method(body=[*rows, *self.loop(invs)])
+        cases = {
+            # a quantifier with acc in the prior of an obligation line (it is no clause of the loop either)
+            "a prior quantifier with acc": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(acc_q)} ==> ({q2})"]),
+            "a prior quantifier with a labelled old": with_loop(["0 <= i__1 && i__1 <= v_n", old_q, f"{prior(old_q)} ==> ({q2})"]),
+            "a prior quantifier with two trigger sets": with_loop(["0 <= i__1 && i__1 <= v_n", two_q, f"{prior(two_q)} ==> ({q2})"]),
+            "a prior quantifier that is no clause of a loop": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(other)} ==> ({q2})"]),
+            "a prior quantifier on a non-loop assert": self.method(body=[self.row(f"{prior(q)} ==> ({q2})")]),
+            "a prior quantifier in a requires": self.method(requires=[f"{prior(q)} ==> ({q2})"]),
+            "a prior quantifier in an ensures": self.method(ensures=[f"{prior(q)} ==> ({q2})"]),
+            "a prior quantifier in a requires beside a loop that has the clause": self.method(requires=[f"{prior(q)} ==> ({q2})"], body=self.loop(["0 <= i__1 && i__1 <= v_n", q])),
+            "a prior quantifier in an ensures beside a loop that has the clause": self.method(ensures=[f"{prior(q)} ==> ({q2})"], body=self.loop(["0 <= i__1 && i__1 <= v_n", q])),
+            "a prior condition that holds a permission": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"((perm(v_p.v_int) > none) && ({q})) ==> ({q2})"]),
+            "an assert prior condition that reads the heap": with_loop(["0 <= i__1 && i__1 <= v_n", q], rows=[self.row(f"((v_p.v_int > 0) && ({q})) ==> ({q2})")]),
+            "a conclusion with acc": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(q)} ==> {acc_q}"]),
+            "a conclusion that is a quantifier with two trigger sets": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(q)} ==> ({two_q})"]),
+            "a conclusion that holds a nested quantifier": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(q)} ==> (true && ({q2}))"]),
+            "a prior mixing && and || without parentheses": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"((v_n >= 0) && (v_n >= 1) || ({q})) ==> ({q2})"]),
+        }
+        for label, lines in cases.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(lines), label)
+                self.assertTrue(any(not ok for _n, ok in self.verdicts(lines)), label)
+
+    def loop_of(self, var, invariants, back_edge=()):
+        """A `while` loop over `var` with its entry run's label, the invariants and `back_edge` asserts at the end of its body."""
+        return [f"  var {var}: Int := 0", f"  label lh_{var}", f"  while ({var} < v_n)",
+                *[Check(f"    invariant {i}", INV, "invariant-preserved") for i in invariants],
+                Check(f"    decreases v_n - {var}", "termination.failed", "termination"), "  {", f"    {var} := {var} + 1", *back_edge, "  }"]
+
+    def test_a_loops_prior_names_the_clauses_of_its_own_loop_only(self):
+        """Audit round 3, issue 3 (question 258): the quantifiers a prior may hold are the EARLIER `invariant` lines of the loop the line belongs to, and
+        for a framing `assert` the clauses of the loop it frames (its entry run, its body's last asserts); no other line has one.  An obligation
+        conditioned on another loop's clause is vacuous wherever that clause is false."""
+        q = self.uq()
+        q2 = self.uq(body="(loc(block_of(v_p), q0).d_int)")
+        other = self.uq(body="(loc(block_of(v_p), q0).v_int >= 5)")
+        other2 = self.uq(body="(loc(block_of(v_p), q0).v_int >= 6)")
+        base = "0 <= i__1 && i__1 <= v_n"
+        base2 = "0 <= j__2 && j__2 <= v_n"
+
+        def prior(x):
+            return f"((v_n >= 0) && ({x}))"
+        row = lambda x, y=q2: self.row(f"{prior(x)} ==> ({y})")  # noqa: E731
+        two_loops = lambda inv1, inv2, between=(), rows1=(), rows2=(), back1=(), back2=(): self.method(  # noqa: E731
+            body=[*rows1, *self.loop_of("i__1", inv1, back1), *between, *rows2, *self.loop_of("j__2", inv2, back2)])
+        # each loop with its own clauses, entry and back-edge asserts and obligation lines: clean
+        self.clean(two_loops([base, q, f"{prior(q)} ==> ({q2})"], [base2, other, f"{prior(other)} ==> ({other2})"],
+                             rows1=[row(q)], back1=[row(q)], rows2=[row(other, other2)], back2=[row(other, other2)]))
+        cases = {
+            "an obligation line of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other, f"{prior(q)} ==> ({other2})"]),
+            "a flag line of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other, f"{prior(q)} ==> (!((v_n - j__2) < (-2147483648)))"]),
+            "an obligation line conditioned on a LATER clause of its own loop": self.method(body=self.loop(
+                [base, f"{prior(q)} ==> ({q2})", q])),
+            "the entry assert of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other], rows2=[row(q, other2)]),
+            "the back-edge assert of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other], back2=[row(q, other2)]),
+            "the entry assert of loop 1 conditioned on loop 2's clause": two_loops([base, q], [base2, other], rows1=[row(other, q2)]),
+            "an assert after the loops conditioned on a loop's clause": two_loops([base, q], [base2, other], between=[self.row("v_n >= 0"), "  exhale v_n >= 0"],
+                                                                                  rows2=[row(q)]),
+            "an assert after the last loop conditioned on its own clause": self.method(body=[*self.loop_of("i__1", [base, q]), row(q)]),
+            "an assert between statements that are no framing run": self.method(body=[*self.loop_of("i__1", [base, q]), "  exhale v_n >= 0", row(q)]),
+            "an assert inside a branch of the loop's body, not its last asserts": self.method(body=self.loop_of("i__1", [base, q], back_edge=[
+                row(q), "    if (v_n > 0) {", "      ra1 := v_p", "    }"])),
+        }
+        for label, lines in cases.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(lines), label)
+                self.assertTrue(any(not ok for _n, ok in self.verdicts(lines)), label)
+
+    def test_a_guard_that_holds_a_permission_a_quantifier_or_the_heap_is_refused(self):
+        q = self.uq()
+        for label, guard in (("a permission", "(perm(v_p.v_int) > none)"), ("a quantifier", f"({self.uq(binders='q1: Int', trigger='{ loc(block_of(v_p), q1) }')})"),
+                             ("a labelled old", "(old[lh_0](v_n) != 0)"), ("an empty guard", " ")):
+            with self.subTest(guard=label):
+                self.refused(self.method(requires=[f"{guard} ==> {q}"]))
+        # an assert's guard reads no heap, a clause's may
+        self.refused(self.method(body=[self.row(f"(v_p.v_int != 0) ==> {q}")]))
+
+    def test_the_twins_of_the_binders_the_trigger_and_the_body(self):
+        cases = {
+            "a binder named q without a number": self.uq(binders="q: Int", trigger="{ loc(block_of(v_p), q) }").replace("q0", "q"),
+            "a binder named i": self.uq(binders="i: Int", trigger="{ loc(block_of(v_p), i) }").replace("q0", "i"),
+            "a binder named k": self.uq(binders="k: Int", trigger="{ loc(block_of(v_p), k) }").replace("q0", "k"),
+            "a second binder not named q": self.uq(binders="q0: Int, x: Int", trigger="{ loc(block_of(v_p), q0), loc(block_of(v_p), x) }"),
+            "a binder that is not Int": self.uq(binders="q0: Bool"),
+            "a binder twice": self.uq(binders="q0: Int, q0: Int", trigger="{ loc(block_of(v_p), q0), loc(block_of(v_p), q0) }"),
+            "no trigger set": self.uq(trigger=""),
+            "two trigger sets": self.uq(trigger="{ loc(block_of(v_p), q0) } { loc(block_of(v_p), q0) }"),
+            "an empty trigger set": self.uq(trigger="{ }"),
+            "a trigger with an offset": self.uq(trigger="{ loc(block_of(v_p), q0 + 1) }"),
+            "a trigger that is not a cell": self.uq(trigger="{ offset_of(loc(block_of(v_p), q0)) }"),
+            "a trigger base that is not a variable": self.uq(trigger="{ loc(block_of(loc(block_of(v_p), 1)), q0) }"),
+            "a trigger base that is not block_of(X)": self.uq(trigger="{ loc(v_p, q0) }"),
+            "a trigger over another variable": self.uq(trigger="{ loc(block_of(v_p), v_n) }"),
+            "a trigger with a term for one class of two": self.uq(binders="q0: Int, q1: Int", trigger="{ loc(block_of(v_p), q0) }"),
+            "a trigger with a term twice for one class of two": self.uq(binders="q0: Int, q1: Int", trigger="{ loc(block_of(v_p), q0), loc(block_of(v_p), q0) }"),
+            "a trigger with a term that is no binder's": self.uq(trigger="{ loc(block_of(v_p), q0), loc(block_of(v_p), q1) }"),
+            "no type range": self.uq(ante="(0 <= (q0 - offset_of(v_p)))"),
+            "no antecedent": f"forall q0: Int :: {{ loc(block_of(v_p), q0) }} {UserQuantifierTests.READ}",
+            "a range that is no integer type's": self.uq(ante="(0 <= (q0 - offset_of(v_p)) && (q0 - offset_of(v_p)) <= 2)"),
+            "a range of another variable": self.uq(ante="(-2147483648 <= v_n && v_n <= 2147483647)"),
+            "a range over two expressions": self.uq(ante="(-2147483648 <= (q0 - offset_of(v_p)) && (q0 - offset_of(v_q)) <= 2147483647)"),
+            "a computed loc in the body": self.uq(body="(loc(block_of(v_p), q0 + 1).v_int >= 0)"),
+            "a computed loc in the antecedent": self.uq(ante=f"({UserQuantifierTests.RANGE} && (loc(block_of(v_p), q0 - 1).d_int))"),
+            "acc in the body": self.uq(body="acc(loc(block_of(v_p), q0).v_int, amt)"),
+            "acc in the antecedent": self.uq(ante="acc(loc(block_of(v_p), q0).v_int)"),
+            "perm in the body": self.uq(body="(perm(loc(block_of(v_p), q0).v_int) > none)"),
+            "forperm in the body": self.uq(body="(forperm k: Ref [k.v_int] :: true)"),
+            "a forall in the body": self.uq(body=f"({self.uq(binders='q1: Int', trigger='{ loc(block_of(v_p), q1) }')})"),
+            "a forall in the antecedent": self.uq(ante=f"({self.uq(binders='q1: Int', trigger='{ loc(block_of(v_p), q1) }')})"),
+        }
+        older = ("a binder named q without a number", "a binder named i", "a binder named k")  # not a user binder: the older rules refuse them
+        for label, q in cases.items():
+            for kind in ("requires", "ensures", "assert"):
+                with self.subTest(mutant=label, kind=kind):
+                    lines = self.method(requires=[q] if kind == "requires" else (), ensures=[q] if kind == "ensures" else (),
+                                        body=[self.row(q)] if kind == "assert" else ())
+                    self.assertTrue(self.probs(lines), label)
+                    if label not in older:
+                        self.refused_by_the_rule(lines, label)
+        with self.subTest(mutant="a binder not named q in a loop invariant"):
+            self.assertTrue(self.probs(self.method(body=self.loop([cases["a binder named i"]]))))
+
+    def test_a_user_quantifier_stands_only_alone_in_a_clause(self):
+        q = self.uq()
+        cases = {
+            "a conjunction": self.method(requires=[f"true && ({q})"]),
+            "a disjunction": self.method(ensures=[f"v_n == 0 || ({q})"]),
+            "a negation": self.method(requires=[f"!({q})"]),
+            "a conjunct of an assert": self.method(body=[self.row(f"true && ({q})")]),
+            "an exhale": self.method(body=[f"  exhale {q}"]),
+            "an inhale": self.method(body=[f"  inhale {q} // cerastes:inhale-ok test"]),
+            "a variable initializer": self.method(body=[f"  var b: Bool := {q}"]),
+            "an if condition": self.method(body=[f"  if ({q}) {{", "  }"]),
+            "a function's requires": ["function f_f(v_p: Ref, v_n: Int): Bool", f"  requires {q}", "{", "  true", "}"],
+            "a function body": ["function f_f(v_p: Ref, v_n: Int): Bool", "{", f"  {q}", "}"],
+        }
+        for label, lines in cases.items():
+            with self.subTest(case=label):
+                self.refused(lines, "`forall`")
+        for label in ("a conjunction", "a disjunction", "a negation", "a conjunct of an assert", "an exhale"):
+            with self.subTest(rule=label):
+                self.refused_by_the_rule(cases[label], label)
+
+    def test_old_with_a_label_stays_the_loop_conjuncts_alone(self):
+        q = self.uq(body="(loc(block_of(v_p), q0).v_int == old[lh_0](loc(block_of(v_p), q0).v_int))")
+        self.refused(self.method(body=self.loop([q])), "old[")
+
+    # --- the marked wildcard row
+    def test_the_marked_wildcard_row_is_clean_as_an_unguarded_assert_with_its_marked_entry(self):
+        self.clean(self.method(body=[self.row(self.wild(), ident=self.MARK, cat="permission")]))
+        d = self.wild(cons="acc(loc(block_of(v_p), q0).d_int, wildcard)")
+        self.clean(self.method(body=[self.row(d, ident=self.MARK, cat="permission")]))
+
+    def test_the_wildcard_row_needs_its_marked_entry_and_only_it_may_have_one(self):
+        self.refused(self.method(body=[self.row(self.wild(), ident="assert.failed", cat="permission")]), "has no expected reason")
+        self.refused(self.method(body=[self.row(self.uq(), ident=self.MARK, cat="permission")]), "carries the expected reason")
+
+    def test_the_twins_of_the_wildcard_row(self):
+        w = self.wild()
+        cases = {
+            "in a requires": self.method(requires=[w]),
+            "in an ensures": self.method(ensures=[w]),
+            "in an invariant": self.method(body=self.loop([w])),
+            "in an exhale": self.method(body=[f"  exhale {w}"]),
+            "guarded": self.method(body=[self.row(f"(v_n != 0) ==> ({w})", ident=self.MARK, cat="permission")]),
+            "wrapped": self.method(body=[self.row(f"({w})", ident=self.MARK, cat="permission")]),
+            "a second permission": self.method(body=[self.row(self.wild(cons="acc(loc(block_of(v_p), q0).v_int, wildcard) && acc(loc(block_of(v_p), q0).d_int, wildcard)"), ident=self.MARK, cat="permission")]),
+            "another amount": self.method(body=[self.row(self.wild(cons="acc(loc(block_of(v_p), q0).v_int, write)"), ident=self.MARK, cat="permission")]),
+            "another base in the acc": self.method(body=[self.row(self.wild(cons="acc(loc(block_of(v_q), q0).v_int, wildcard)"), ident=self.MARK, cat="permission")]),
+            "a reach that reads the heap": self.method(body=[self.row(self.wild(ante=f"({self.RANGE} && loc(block_of(v_p), q0).d_int)"), ident=self.MARK, cat="permission")]),
+            "a reach that holds a permission": self.method(body=[self.row(self.wild(ante=f"({self.RANGE} && (perm(v_p.v_int) > none))"), ident=self.MARK, cat="permission")]),
+            "a binder not named q": self.method(body=[self.row(self.wild(binders="x: Int", trigger="{ loc(block_of(v_p), x) }", cons="acc(loc(block_of(v_p), x).v_int, wildcard)").replace("q0", "x"), ident=self.MARK, cat="permission")]),
+            "a heap trigger of another shape": self.method(body=[self.row(self.wild(trigger="{ loc(block_of(v_p), q0 + 1) }"), ident=self.MARK, cat="permission")]),
+            "no type range": self.method(body=[self.row(f"forall q0: Int :: {{ loc(block_of(v_p), q0) }} {self.REACH} ==> acc(loc(block_of(v_p), q0).v_int, wildcard)", ident=self.MARK, cat="permission")]),
+            "two binders": self.method(body=[self.row(self.wild(binders="q0: Int, q1: Int", trigger="{ loc(block_of(v_p), q0), loc(block_of(v_p), q1) }"), ident=self.MARK, cat="permission")]),
+            "two trigger sets": self.method(body=[self.row(self.wild(trigger="{ loc(block_of(v_p), q0) } { loc(block_of(v_p), q0) }"), ident=self.MARK, cat="permission")]),
+            "an implication in the consequent": self.method(body=[self.row(self.wild(cons="(v_n > 0 ==> acc(loc(block_of(v_p), q0).v_int, wildcard))"), ident=self.MARK, cat="permission")]),
+        }
+        for label, lines in cases.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(lines), label)
+                if label not in ("a binder not named q", "in an exhale"):  # the older rules refuse these two
+                    self.refused_by_the_rule(lines, label)
+        # wildcard anywhere else stays the ghost-amount rule's
+        for label, line in (("a Perm local", "  kq := wildcard"), ("a wildcard acc", "  exhale acc(v_p.v_int, wildcard)")):
+            with self.subTest(case=label):
+                self.refused(self.method(body=["  var kq: Perm", line]), "wildcard")
+
+
+GHOST_FIXTURE_DOMAIN = ["// cerastes:domain-ok 0061", "domain Hvq_a {", "  function hvq_m__1__a_pre(s: Int): Int", "  function hvq_m__1__a_post(s: Int): Int", "}"]
+
+
+class GhostDomainTests(unittest.TestCase):
+    """Decision 0061 item 11: one domain per `f__wf` method, tagged `// cerastes:domain-ok 0061`, holding bodiless ghost functions and no axiom."""
+
+    def lines(self, domain=None, wf=("m__1__wf", "hvq_m__1__a_pre(0)"), extra=()):
+        domain = GHOST_FIXTURE_DOMAIN if domain is None else domain
+        out = [*domain]
+        if wf:
+            name, use = wf
+            out += [f"method {name}(v_a: Ref, v_n: Int)", "  decreases", "{", f"  var t: Int := {use}", "}"]
+        return out + list(extra)
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "domain" in p or "ghost function" in p or "axiom" in p]
+
+    def test_a_tagged_ghost_domain_used_by_one_wf_method_is_clean(self):
+        self.assertEqual(self.probs(self.lines()), [])
+
+    def test_the_twins_of_the_ghost_domain(self):
+        d = GHOST_FIXTURE_DOMAIN
+        cases = {
+            "no tag": self.lines(domain=d[1:]),
+            "another record": self.lines(domain=["// cerastes:domain-ok 0062"] + d[1:]),
+            "a tag with no record": self.lines(domain=["// cerastes:domain-ok"] + d[1:]),
+            "the memory model's record": self.lines(domain=["// cerastes:domain-ok 0028"] + d[1:]),
+            "an axiom": self.lines(domain=d[:-1] + ["  axiom hvq_m__1__range { forall s: Int :: { hvq_m__1__a_pre(s) } hvq_m__1__a_pre(s) == 0 }", "}"]),
+            "a tagged axiom": self.lines(domain=d[:-1] + ["  // cerastes:axiom-ok 0061", "  axiom hvq_m__1__range { forall s: Int :: { hvq_m__1__a_pre(s) } hvq_m__1__a_pre(s) == 0 }", "}"]),
+            "a function with a body": self.lines(domain=d[:2] + ["  function hvq_m__1__a_pre(s: Int): Int { s }", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "a function with a requires": self.lines(domain=d[:3] + ["    requires s > 0", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "a function with an ensures": self.lines(domain=d[:3] + ["    ensures result > 0", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "a Perm result": self.lines(domain=d[:2] + ["  function hvq_m__1__a_pre(s: Int): Perm", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "a Rational result": self.lines(domain=d[:2] + ["  function hvq_m__1__a_pre(s: Int): Rational", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "a Ref argument": self.lines(domain=d[:2] + ["  function hvq_m__1__a_pre(s: Ref): Int", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "no argument": self.lines(domain=d[:2] + ["  function hvq_m__1__a_pre(): Int", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "a unique function": self.lines(domain=d[:2] + ["  unique function hvq_m__1__a_pre(s: Int): Int", "  function hvq_m__1__a_post(s: Int): Int", "}"]),
+            "a field inside": self.lines(domain=d[:-1] + ["  field f: Int", "}"]),
+            "no function": self.lines(domain=["// cerastes:domain-ok 0061", "domain Hvq_a {", "}"], wf=None),
+            "an unused domain": self.lines(wf=None),
+            "a user in a method that is no __wf": self.lines(wf=("m__1", "hvq_m__1__a_pre(0)")),
+            "a user in a function": self.lines(wf=None, extra=["function f_g(x: Int): Int", "{", "  hvq_m__1__a_pre(x)", "}"]),
+            "two methods": self.lines(extra=["method m__2__wf(v_a: Ref, v_n: Int)", "  decreases", "{", "  var t: Int := hvq_m__1__a_post(1)", "}"]),
+            "a ghost function named after another method": self.lines(domain=d[:2] + ["  function hvq_other__a_pre(s: Int): Int", "  function hvq_m__1__a_post(s: Int): Int", "}"], wf=("m__1__wf", "hvq_m__1__a_post(0)")),
+            "an unqualified ghost function name": self.lines(domain=d[:2] + ["  function hvq_a_pre(s: Int): Int", "  function hvq_m__1__a_post(s: Int): Int", "}"], wf=("m__1__wf", "hvq_m__1__a_post(0)")),
+            "a header with content": self.lines(domain=["// cerastes:domain-ok 0061", "domain Hvq_a { function hvq_m__1__a_pre(s: Int): Int",
+                                                        "  function hvq_m__1__a_post(s: Int): Int", "}"], wf=("m__1__wf", "hvq_m__1__a_post(0)")),
+            "a closing brace with content": self.lines(domain=d[:-1] + ["} method evil()"]),
+            "a doubled closing brace": self.lines(domain=d[:-1] + ["}}"]),
+            "two domains in one method": self.lines(
+                domain=d + ["// cerastes:domain-ok 0061", "domain Hvq_b {", "  function hvq_m__1__b_pre(s: Int): Int", "}"],
+                wf=("m__1__wf", "hvq_m__1__a_pre(0) + hvq_m__1__b_pre(0)")),
+        }
+        for label, lines in cases.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(lines), label)
+
+    def test_ghost_functions_return_int_bool_or_ref(self):
+        d = GHOST_FIXTURE_DOMAIN
+        self.assertEqual(self.probs(self.lines(domain=d[:2] + ["  function hvq_m__1__a_pre(s: Int): Bool", "  function hvq_m__1__a_post(s: Int): Ref", "}"])), [])
+
+    def test_a_tag_whose_record_is_missing_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(lv, "DECISIONS_DIR", Path(tmp)):
+                self.assertTrue(any("needs internal/decisions/0061" in p for p in self.probs(self.lines())))
+
+    def test_a_ghost_domain_used_by_two_methods_of_one_domain_each_is_clean(self):
+        d2 = ["// cerastes:domain-ok 0061", "domain Hvq_b {", "  function hvq_m__2__b_pre(s: Int): Int", "}"]
+        lines = self.lines(domain=GHOST_FIXTURE_DOMAIN + d2, extra=["method m__2__wf(v_b: Ref, v_n: Int)", "  decreases", "{", "  var t: Int := hvq_m__2__b_pre(1)", "}"])
+        self.assertEqual(self.probs(lines), [])
+
+
+class WfQuantifierTests(unittest.TestCase):
+    """Decision 0061 item 11, variant M of item 7: the heap-free `f__wf` method.  Its assumed facts (`requires` with a ghost function) have exactly four
+    shapes, each checked against the atoms of the method it belongs to (audit round 1, B2): a false fact is a vacuous prior or a wrong pass.  Its
+    `assert` rows are `[PRIOR ==>] (forall q<j> :: { G(q<j>), ... } ...)` over ghost applications, the prior standing outside the binder.  Every twin
+    changes one thing of a clean fixture."""
+
+    FUNCTIONS = [("a", "Int"), ("b", "Int"), ("g", "Int"), ("o", "Int"), ("w", "Int"), ("q", "Int"), ("z", "Int"), ("p", "Ref"), ("pi", "Int"),
+                 ("bb", "Bool"), ("u", "Int"), ("m", "Int"), ("big", "Int"), ("oc", "Int")]
+    DOMAIN = (["// cerastes:domain-ok 0061", "domain Hvq_all {"]
+              + [f"  function hvq_m__1__{x}_{st}(s: Int): {ret}" for x, ret in FUNCTIONS for st in ("pre", "post")]
+              + ["}"])
+    FORMALS = "a: Ref, b: Ref, g: Ref, o: Ref, w: Ref, q: Ref, z: Ref, oc: Ref, p: Ref, pi: Ref, bb: Ref, u: Ref, m: Ref, big: Ref, v_n: Int, c: Int, amt: Perm"
+    GUARD = "(c != 0)"
+
+    @staticmethod
+    def atom(x, field="v_int", amount="amt", guard=None, count="v_n"):
+        acc = f"acc(loc(block_of({x}), k).{field}" + (f", {amount})" if amount else ")")
+        row = f"forall k: Int :: {{ loc(block_of({x}), k) }} ((offset_of({x}) <= k) && (k < offset_of({x}) + {count})) ==> {acc}"
+        return f"{guard} ==> ({row})" if guard else row
+
+    @classmethod
+    def base(cls, guard_g=GUARD, extra_req=(), extra_ens=()):
+        """The method an `f__wf` belongs to: reads atoms on a, b, g (guarded), w (long), p, pi (pointers), bb (bool), an owns atom on o, a requires
+        atom without a partner on q, a cell atom on z."""
+        both = [cls.atom("a"), cls.atom("b"), cls.atom("g", guard=guard_g), cls.atom("w", "v_long"), cls.atom("p", "v_ptr_int"),
+                cls.atom("pi", "v_ptr_int"), cls.atom("bb", "v_bool"), cls.atom("o", amount=None), cls.atom("big", "v_i128"), "acc(z.v_int, amt)", "acc(oc.v_int)"]
+        reqs = [*both, cls.atom("q"), cls.atom("m"), *extra_req]  # m: a requires atom of one field whose partner is of another
+        ens = [*both, cls.atom("m", "v_long"), *extra_ens]
+        lines = ["// cerastes:trusted-contract test", f"method m__1({cls.FORMALS})", Check("  requires none < amt && amt < write", WF, "internal")]
+        lines += [Check(f"  requires {r}", WF, "internal") for r in reqs]
+        lines += [Check(f"  ensures {e}", P, "postcondition") for e in ens]
+        return lines + ["  decreases _"]
+
+    RANGE_A = "forall s: Int :: { hvq_m__1__a_pre(s) } (-2147483648 <= hvq_m__1__a_pre(s)) && (hvq_m__1__a_pre(s) <= 2147483647)"
+    TIE = "hvq_m__1__a_post(offset_of(a) + 0) == hv_0_post"
+    SAME = "(block_of(a) == block_of(b)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__b_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__b_pre(s))"
+    SHAPE = "((a != null) && (0 <= v_n))"
+    CLAUSE = "forall s: Int :: { hvq_m__1__a_pre(s) } (-2147483648 <= (s - offset_of(a)) && (s - offset_of(a)) <= 2147483647) ==> (!(0 <= (s - offset_of(a)) && (s - offset_of(a)) < v_n) || (hvq_m__1__a_pre(s) < 100))"
+    OBL = "!(((hvq_m__1__a_pre(q0) + 1) < -2147483648) || (2147483647 < (hvq_m__1__a_pre(q0) + 1)))"
+
+    @staticmethod
+    def keep(x="a", n="v_n", lo=None, post=None, pre=None):
+        lo = f"offset_of({x})" if lo is None else lo
+        post = f"hvq_m__1__{x}_post" if post is None else post
+        pre = f"hvq_m__1__{x}_pre" if pre is None else pre
+        return (f"forall s: Int :: {{ {post}(s) }} {{ {pre}(s) }} (({lo} <= s) && (s < offset_of({x}) + {n})) ==> ({post}(s) == {pre}(s))")
+
+    def oq(self, obl=None, trigger="{ hvq_m__1__a_pre(q0) }", binders="q0: Int", ante=None):
+        ante = ("((-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) && "
+                "(0 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) < v_n))") if ante is None else ante
+        return f"forall {binders} :: {trigger} {ante} ==> {self.OBL if obl is None else obl}"
+
+    def wf(self, requires=(), rows=(), ensures=(), base=None, tie=True):
+        lines = [*self.DOMAIN, *(self.base() if base is None else base),
+                 f"method m__1__wf({self.FORMALS}, res: Int, hv_0_post: Int, hv_0_pre: Int, hv_1_pre: Int)"]
+        # every fixture uses the domain (a ghost function in a fact), so that a twin is refused for its own shape and never for an unused domain
+        lines += [Check(f"  requires {r}", WF, "internal") for r in ((self.TIE,) if tie else ()) + tuple(requires)]
+        lines += [Check(f"  ensures {e}", P, "postcondition") for e in ensures]
+        lines += ["  decreases", "{"] + [Check(f"  assert {r}", A, "overflow") for r in rows] + ["}"]
+        return lines
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+                if any(w in p for w in ("decision 0061", "`forall`", "quantified", "domain", "ghost function", "axiom"))]
+
+    def clean(self, lines):
+        self.assertEqual(self.probs(lines), [])
+
+    @staticmethod
+    def verdicts(lines):
+        text, _ = build(lines)
+        src = lv.split_source(text)
+        return [(n, v[0]) for n, v in sorted(lv.classify_quantified_lines(src, lv.declarations(src)).verdicts.items())]
+
+    def refused(self, lines, older=False):
+        """Refused, and (unless the older rules own the shape) by item 11's own verdict on a line."""
+        self.assertTrue(self.probs(lines), lines[-4:])
+        if not older:
+            self.assertTrue(any(not ok for _n, ok in self.verdicts(lines)))
+
+    # --- the four assumed facts, each against the atoms of the method
+    def test_the_assumed_facts_are_clean(self):
+        guard = f"({self.GUARD} && {self.GUARD})"
+        self.clean(self.wf(requires=[
+            self.RANGE_A, self.RANGE_A.replace("hvq_m__1__a_pre", "hvq_m__1__a_post"),
+            f"forall s: Int :: {{ hvq_m__1__p_pre(s) }} {lv._view_wf('hvq_m__1__p_pre(s)')}",
+            # (b) the scalar tie of a state: any index over the formals
+            "hvq_m__1__a_pre(offset_of(a) + 0) == hv_0_pre", "hvq_m__1__a_pre(offset_of(a)) == hv_0_pre", "hvq_m__1__a_pre(offset_of(a) + (v_n - 1)) == hv_1_pre",
+            "hvq_m__1__b_post(offset_of(b) + (c + 1)) == hv_0_post",
+            # (c) two parameters on one block with the same cell field
+            self.SAME, self.SAME.replace("_pre", "_post"),
+            # (d) a reads place keeps its value: unguarded, and under the two atoms' guards
+            self.keep(), f"{guard} ==> ({self.keep('g')})", f"hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_pre(offset_of(z))".replace("hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_pre(offset_of(z))", "hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_pre(offset_of(z))"),
+        ]))
+
+    def test_the_type_range_is_the_element_types_not_any_range_with_zero(self):
+        def fact(ghost, lo, hi):
+            return f"forall s: Int :: {{ {ghost}(s) }} ({lo} <= {ghost}(s)) && ({ghost}(s) <= {hi})"
+        # the element field of `a` is v_int: its range is int's, whatever the ghost function's other uses
+        self.clean(self.wf(requires=[fact("hvq_m__1__a_pre", -2**31, 2**31 - 1), fact("hvq_m__1__w_pre", -2**63, 2**63 - 1), fact("hvq_m__1__big_pre", -2**127, 2**127 - 1)]))
+        for label, f in {
+            "a range that holds zero but is no int range": fact("hvq_m__1__a_pre", 0, 2),
+            "a range that excludes zero": fact("hvq_m__1__a_pre", 1, 5),
+            "another type's standard range": fact("hvq_m__1__a_pre", 0, 2**32 - 1),
+            "a narrower integer type's range": fact("hvq_m__1__a_pre", -128, 127),
+            "the int range for a long field": fact("hvq_m__1__w_pre", -2**31, 2**31 - 1),
+            "one bound": "forall s: Int :: { hvq_m__1__a_pre(s) } hvq_m__1__a_pre(s) <= 5",
+            "an equality": "forall s: Int :: { hvq_m__1__a_pre(s) } hvq_m__1__a_pre(s) == 0",
+            "a bound that is no literal": "forall s: Int :: { hvq_m__1__a_pre(s) } (-2147483648 <= hvq_m__1__a_pre(s)) && (hvq_m__1__a_pre(s) <= v_n)",
+            "another function in the body": "forall s: Int :: { hvq_m__1__a_pre(s) } (-2147483648 <= hvq_m__1__b_pre(s)) && (hvq_m__1__b_pre(s) <= 2147483647)",
+            "a trigger that is not the application": "forall s: Int :: { hvq_m__1__a_post(s) } (-2147483648 <= hvq_m__1__a_pre(s)) && (hvq_m__1__a_pre(s) <= 2147483647)",
+            "a trigger that is no ghost function": "forall s: Int :: { len(s) } (-2147483648 <= len(s)) && (len(s) <= 2147483647)",
+            "a guard on a range": f"(c != 0) ==> ({self.RANGE_A})",
+            "an antecedent": "forall s: Int :: { hvq_m__1__a_pre(s) } (0 <= s) ==> ((-2147483648 <= hvq_m__1__a_pre(s)) && (hvq_m__1__a_pre(s) <= 2147483647))",
+            "a pointer element with an integer range": fact("hvq_m__1__p_pre", -2**31, 2**31 - 1),
+            "a Bool element with a range": fact("hvq_m__1__bb_pre", 0, 1),
+            "a Bool element with an integer range": fact("hvq_m__1__bb_pre", -2**31, 2**31 - 1),
+            "a 128-bit field with a range that holds zero": fact("hvq_m__1__big_pre", 0, 2),
+            "a pointer ghost declared Int": f"forall s: Int :: {{ hvq_m__1__pi_pre(s) }} {lv._view_wf('hvq_m__1__pi_pre(s)')}",
+            "a base with no atom": fact("hvq_m__1__u_pre", -2**31, 2**31 - 1),
+            "a function that is no hvq function": fact("g_pre", -2**31, 2**31 - 1),
+        }.items():
+            with self.subTest(mutant=label):
+                self.refused(self.wf(requires=[f]))
+
+    def test_a_scalar_tie_joins_one_state_over_an_index_of_the_formals(self):
+        for label, f in {
+            # the auditor's state-crossing tie (audit1/abl/tie_state_cross_vacuous.vpr): a pre function tied to a POST scalar ghost
+            "a pre function against a post ghost": "hvq_m__1__a_pre(offset_of(a) + 0) == hv_0_post",
+            "a post function against a pre ghost": "hvq_m__1__a_post(offset_of(a) + 0) == hv_0_pre",
+            "a ghost that is no formal": "hvq_m__1__a_post(offset_of(a) + 0) == hv_9_post",
+            "a variable that is no scalar ghost": "hvq_m__1__a_post(offset_of(a) + 0) == v_n",
+            "a ghost with no state suffix": "hvq_m__1__a_post(offset_of(a) + 0) == res",
+            "a slot of another base": "hvq_m__1__a_post(offset_of(b) + 0) == hv_0_post",
+            "an index that is no offset": "hvq_m__1__a_post(v_n) == hv_0_post",
+            "an index over a name that is no formal": "hvq_m__1__a_post(offset_of(a) + zzz) == hv_0_post",
+            "an index that reads the heap": "hvq_m__1__a_post(offset_of(a) + a.v_int) == hv_0_post",
+            "an index with a quantifier": f"hvq_m__1__a_post(offset_of(a) + ({self.RANGE_A})) == hv_0_post",
+            "a base with no atom": "hvq_m__1__u_post(offset_of(u) + 0) == hv_0_post",
+            "a value that is a literal": "hvq_m__1__a_post(offset_of(a) + 0) == 5",
+            "an inequality": "hvq_m__1__a_post(offset_of(a) + 0) <= hv_0_post",
+            "a guarded tie": "(c != 0) ==> (hvq_m__1__a_post(offset_of(a) + 0) == hv_0_post)",
+            "an application outside a fact": "hvq_m__1__a_post(v_n) > 0",
+        }.items():
+            with self.subTest(mutant=label):
+                self.refused(self.wf(requires=[f]))
+        # the crossing tie beside the right one is what makes a prior vacuous: the lint refuses the pair
+        self.refused(self.wf(requires=["hvq_m__1__a_pre(offset_of(a) + 0) == hv_0_pre", "hvq_m__1__a_pre(offset_of(a) + 0) == hv_0_post"]))
+
+    def test_a_keep_fact_is_tied_to_a_reads_atom_its_partner_and_their_guards(self):
+        guard = f"({self.GUARD} && {self.GUARD})"
+        for label, f in {
+            # the unsound one S45 proved (s45_d_m_unsound_evidence_unguarded_keep): the guarded atoms, an unguarded fact
+            "an unguarded fact on guarded atoms": self.keep("g"),
+            "a guard of one atom on guarded atoms": f"{self.GUARD} ==> ({self.keep('g')})",
+            "a guard on unguarded atoms": f"{guard} ==> ({self.keep()})",
+            "another guard": f"((c != 1) && (c != 1)) ==> ({self.keep('g')})",
+            "a wider guard": f"({guard} || (v_n == 0)) ==> ({self.keep('g')})",
+            "a guard that reads the heap": f"(a.v_int != 0) ==> ({self.keep()})",
+            "a guard with a permission": f"(perm(a.v_int) > none) ==> ({self.keep()})",
+            "a guard with a quantifier": f"({self.RANGE_A}) ==> ({self.keep()})",
+            "an owns atom": self.keep("o"),
+            "an atom with no partner": self.keep("q"),
+            "an atom whose partner is of another field": self.keep("m"),
+            "a base with no atom": self.keep("u"),
+            "a count other than the atoms'": self.keep(n="(v_n + 5)"),
+            "a count that is another variable": self.keep(n="c"),
+            "a low bound of zero": self.keep(lo="0"),
+            "another base": self.keep().replace("offset_of(a) <= s", "offset_of(b) <= s"),
+            "the states of two bases": "forall s: Int :: { hvq_m__1__a_post(s) } { hvq_m__1__b_pre(s) } ((offset_of(a) <= s) && (s < offset_of(a) + v_n)) ==> (hvq_m__1__a_post(s) == hvq_m__1__b_pre(s))",
+            "two pre states": "forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__b_pre(s) } ((offset_of(a) <= s) && (s < offset_of(a) + v_n)) ==> (hvq_m__1__a_pre(s) == hvq_m__1__b_pre(s))",
+            "one trigger set": "forall s: Int :: { hvq_m__1__a_post(s) } ((offset_of(a) <= s) && (s < offset_of(a) + v_n)) ==> (hvq_m__1__a_post(s) == hvq_m__1__a_pre(s))",
+            "the pre set only": "forall s: Int :: { hvq_m__1__a_pre(s) } ((offset_of(a) <= s) && (s < offset_of(a) + v_n)) ==> (hvq_m__1__a_post(s) == hvq_m__1__a_pre(s))",
+            "a set holding both": "forall s: Int :: { hvq_m__1__a_post(s), hvq_m__1__a_pre(s) } ((offset_of(a) <= s) && (s < offset_of(a) + v_n)) ==> (hvq_m__1__a_post(s) == hvq_m__1__a_pre(s))",
+            "a set twice": "forall s: Int :: { hvq_m__1__a_post(s) } { hvq_m__1__a_post(s) } ((offset_of(a) <= s) && (s < offset_of(a) + v_n)) ==> (hvq_m__1__a_post(s) == hvq_m__1__a_pre(s))",
+            "a count that names s": self.keep(n="s"),
+            "a count that reads the heap": self.keep(n="a.v_int"),
+            "an addition": self.keep().replace("hvq_m__1__a_post(s) == hvq_m__1__a_pre(s))", "hvq_m__1__a_post(s) == hvq_m__1__a_pre(s) + 1)"),
+            "an inequality": self.keep().replace("hvq_m__1__a_post(s) == hvq_m__1__a_pre(s))", "hvq_m__1__a_post(s) <= hvq_m__1__a_pre(s))"),
+            "a heap trigger": self.keep().replace("{ hvq_m__1__a_post(s) } { hvq_m__1__a_pre(s) }", "{ loc(block_of(a), s) }"),
+            "a binder named k": self.keep().replace("s: Int", "k: Int").replace("(s)", "(k)").replace("<= s", "<= k").replace("(s <", "(k <"),
+            "functions that are not hvq functions": "forall s: Int :: { g_post(s) } { g_pre(s) } ((offset_of(a) <= s) && (s < offset_of(a) + v_n)) ==> (g_post(s) == g_pre(s))",
+        }.items():
+            with self.subTest(mutant=label):
+                self.refused(self.wf(requires=[f]), older=label == "a binder named k")
+
+    def test_a_kept_cell_is_tied_to_a_reads_atom_its_partner_and_their_guards(self):
+        z = "hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_pre(offset_of(z))"
+        self.clean(self.wf(requires=[z, z.replace("(offset_of(z))", "(offset_of(z) + 0)")]))
+        for label, f in {
+            "a guard the atoms do not have": f"({self.GUARD} && {self.GUARD}) ==> ({z})",
+            "the pre function first": "hvq_m__1__z_pre(offset_of(z)) == hvq_m__1__z_post(offset_of(z))",
+            "another slot": "hvq_m__1__z_post(offset_of(z) + 1) == hvq_m__1__z_pre(offset_of(z) + 1)",
+            "two slots": "hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_pre(offset_of(z) + 1)",
+            "two bases": "hvq_m__1__z_post(offset_of(z)) == hvq_m__1__a_pre(offset_of(z))",
+            "two post functions": "hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_post(offset_of(z))",
+            "a base with no cell atom": "hvq_m__1__a_post(offset_of(a)) == hvq_m__1__a_pre(offset_of(a))",
+            "an owns cell": "hvq_m__1__o_post(offset_of(o)) == hvq_m__1__o_pre(offset_of(o))",
+        }.items():
+            with self.subTest(mutant=label):
+                self.refused(self.wf(requires=[f]))
+
+    def test_a_formals_field_comes_from_its_cell_atoms_too(self):
+        """`reads(*p)` and `owns(*p)` atoms give the element field of a formal whose only atoms are cells (decision-owner change after Part B's probes)."""
+        def fact(ghost, lo, hi):
+            return f"forall s: Int :: {{ {ghost}(s) }} ({lo} <= {ghost}(s)) && ({ghost}(s) <= {hi})"
+        guard = f"({self.GUARD} && {self.GUARD})"
+        self.clean(self.wf(requires=[
+            fact("hvq_m__1__z_pre", -2**31, 2**31 - 1), fact("hvq_m__1__z_post", -2**31, 2**31 - 1), fact("hvq_m__1__oc_pre", -2**31, 2**31 - 1),
+            "hvq_m__1__z_post(offset_of(z) + 0) == hv_0_post", "hvq_m__1__z_pre(offset_of(z)) == hv_0_pre", "hvq_m__1__oc_post(offset_of(oc)) == hv_0_post",
+            "(block_of(a) == block_of(z)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__z_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__z_pre(s))",
+            "(block_of(z) == block_of(oc)) ==> (forall s: Int :: { hvq_m__1__z_post(s) } { hvq_m__1__oc_post(s) } hvq_m__1__z_post(s) == hvq_m__1__oc_post(s))",
+            "hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_pre(offset_of(z))"]))
+        for label, f in {
+            "a range that is no int range for a cell of an int field": fact("hvq_m__1__z_pre", 0, 2),
+            "the long range for a cell of an int field": fact("hvq_m__1__oc_pre", -2**63, 2**63 - 1),
+            "a cell and a long field on one block": "(block_of(z) == block_of(w)) ==> (forall s: Int :: { hvq_m__1__z_pre(s) } { hvq_m__1__w_pre(s) } hvq_m__1__z_pre(s) == hvq_m__1__w_pre(s))",
+            "a cell and a pointer field on one block": "(block_of(oc) == block_of(p)) ==> (forall s: Int :: { hvq_m__1__oc_pre(s) } { hvq_m__1__p_pre(s) } hvq_m__1__oc_pre(s) == hvq_m__1__p_pre(s))",
+            "a tie in the wrong state for a cell": "hvq_m__1__z_pre(offset_of(z)) == hv_0_post",
+            "no keep for an owns cell": "hvq_m__1__oc_post(offset_of(oc)) == hvq_m__1__oc_pre(offset_of(oc))",
+            "a keep for a cell under a guard its atoms do not have": f"{guard} ==> (hvq_m__1__z_post(offset_of(z)) == hvq_m__1__z_pre(offset_of(z)))",
+        }.items():
+            with self.subTest(mutant=label):
+                self.refused(self.wf(requires=[f]))
+
+    def test_a_formal_without_an_atom_takes_its_field_from_its_quantified_read(self):
+        """Audit round 2, issue 1: `q == p` with a quantified read through q (q has no atom; p's owns_range frames it): the field of q's type range is the
+        field of its read `loc(block_of(q), q0).v_int` in the method's own clause."""
+        read = ("forall q0: Int :: { loc(block_of(al), q0) } (-2147483648 <= (q0 - offset_of(al)) && (q0 - offset_of(al)) <= 2147483647) ==> "
+                "(!(0 <= (q0 - offset_of(al)) && (q0 - offset_of(al)) < v_n) || (loc(block_of(al), q0).v_int >= 0))")
+        base = self.base(extra_req=[read])
+        base[1] = base[1].replace("amt: Perm)", "amt: Perm, al: Ref)")
+        lines = lambda req: [l.replace("amt: Perm,", "amt: Perm, al: Ref,") if isinstance(l, str) and l.startswith("method m__1__wf") else l
+                             for l in self.wf(requires=req, base=base)]
+        dom = lambda l: [x.replace("function hvq_m__1__u_pre(s: Int): Int", "function hvq_m__1__al_pre(s: Int): Int\n  function hvq_m__1__u_pre(s: Int): Int") if isinstance(x, str) else x for x in l]
+        good = "forall s: Int :: { hvq_m__1__al_pre(s) } (-2147483648 <= hvq_m__1__al_pre(s)) && (hvq_m__1__al_pre(s) <= 2147483647)"
+        bad = good.replace("-2147483648", "0").replace("2147483647", "2")
+        self.assertEqual(self.probs(dom(lines([good]))), [])
+        self.assertTrue(self.probs(dom(lines([bad]))))
+
+    def test_a_ghost_function_is_named_after_its_own_method(self):
+        range_fact = "forall s: Int :: {{ {g}(s) }} (-2147483648 <= {g}(s)) && ({g}(s) <= 2147483647)"
+        self.clean(self.wf(requires=[range_fact.format(g="hvq_m__1__a_pre")]))
+        for label, g in {
+            "another method's name": "hvq_m__2__a_pre",
+            "no method name (the unqualified form collides between functions)": "hvq_a_pre",
+            "a method name that is a prefix": "hvq_m__a_pre",
+        }.items():
+            with self.subTest(mutant=label):
+                lines = self.wf(requires=[range_fact.format(g=g)])
+                lines = [l.replace("function hvq_m__1__a_pre(", f"function {g}(") if isinstance(l, str) else l for l in lines]
+                self.refused(lines)
+
+    def test_two_parameters_on_one_block_need_the_same_cell_field(self):
+        for label, f in {
+            "another field (int and long)": "(block_of(a) == block_of(w)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__w_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__w_pre(s))",
+            "a pointer and an integer field": "(block_of(a) == block_of(p)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__p_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__p_pre(s))",
+            "a base with no atom": "(block_of(a) == block_of(u)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__u_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__u_pre(s))",
+            "one trigger set": "(block_of(a) == block_of(b)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__b_pre(s))",
+            "two states": "(block_of(a) == block_of(b)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__b_post(s) } hvq_m__1__a_pre(s) == hvq_m__1__b_post(s))",
+            "a guard of other bases": "(block_of(a) == block_of(v_n)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__b_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__b_pre(s))",
+            "no guard": "forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__b_pre(s) } hvq_m__1__a_pre(s) == hvq_m__1__b_pre(s)",
+            "a body that is no equality": "(block_of(a) == block_of(b)) ==> (forall s: Int :: { hvq_m__1__a_pre(s) } { hvq_m__1__b_pre(s) } hvq_m__1__a_pre(s) <= hvq_m__1__b_pre(s))",
+            "a nested quantifier": f"(block_of(a) == block_of(b)) ==> (forall s: Int :: {{ hvq_m__1__a_pre(s) }} {{ hvq_m__1__b_pre(s) }} ({self.RANGE_A}))",
+            "an acc": "forall s: Int :: { hvq_m__1__a_pre(s) } acc(a.v_int)",
+        }.items():
+            with self.subTest(mutant=label):
+                self.refused(self.wf(requires=[f]))
+        # the same two parameters, the same field: clean (the clean list holds the pair; here with the post states of the long field)
+        self.clean(self.wf())
+
+    def test_a_ghost_application_or_a_quantifier_in_a_clause_that_is_no_fact_is_refused(self):
+        self.refused(self.wf(ensures=["hvq_m__1__a_pre(0) > 0"]))
+        self.refused(self.wf(ensures=[self.RANGE_A]))
+        self.refused(self.wf(requires=["hvq_m__1__a_pre(0) > 0"]))
+
+    # --- the obligation rows
+    def test_the_obligation_rows_are_clean_alone_or_after_a_prior(self):
+        prior = f"({self.SHAPE} && ({self.CLAUSE}))"
+        guarded = f"({self.SHAPE} && ((c != 0) ==> ({self.CLAUSE})))"
+        two = self.oq(binders="q0: Int, q1: Int", trigger="{ hvq_m__1__a_pre(q0), hvq_m__1__b_pre(q1) }",
+                      ante="((-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) && (q1 == offset_of(b) + (q0 - offset_of(a))))")
+        prior_two = f"({self.SHAPE} && ({self.CLAUSE}) && (forall s0: Int, s1: Int :: {{ hvq_m__1__a_pre(s0), hvq_m__1__b_pre(s1) }} (-2147483648 <= (s0 - offset_of(a)) && (s0 - offset_of(a)) <= 2147483647) && (s1 == offset_of(b) + (s0 - offset_of(a))) ==> (hvq_m__1__a_pre(s0) == hvq_m__1__b_pre(s1))))"
+        inside = self.oq(ante=f"(({self.SHAPE}) && (-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) && (0 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) < v_n))")
+        self.clean(self.wf(rows=[self.oq(), f"{self.SHAPE} ==> ({self.oq()})", f"{prior} ==> ({self.oq()})", f"{guarded} ==> ({self.oq()})",
+                                 f"{prior} ==> !((hv_0_post + 1) < -2147483648)", f"{self.SHAPE} ==> ({two})", f"{prior_two} ==> ({two})",
+                                 f"{self.SHAPE} ==> ((c != 0) ==> ({self.oq()}))", f"{self.SHAPE} ==> !(hv_0_post < 0)", inside]))
+
+    def test_a_class_read_in_both_states_has_one_trigger_set_per_state(self):
+        """Question 257: `a[i]` and `old(a[i])` in one clause: the clause's rows (and the prior's quantifiers) carry `{ pre } { post }`; a row whose body reads
+        one state or neither (a framing row) keeps both sets: triggers restrict instantiation and never prove anything."""
+        both = "{ hvq_m__1__a_pre(q0) } { hvq_m__1__a_post(q0) }"
+        prior = f"({self.SHAPE} && (forall s: Int :: {{ hvq_m__1__a_pre(s) }} {{ hvq_m__1__a_post(s) }} (-2147483648 <= (s - offset_of(a)) && (s - offset_of(a)) <= 2147483647) ==> (hvq_m__1__a_post(s) == hvq_m__1__a_pre(s))))"
+        two = self.oq(binders="q0: Int, q1: Int", trigger="{ hvq_m__1__a_pre(q0), hvq_m__1__b_pre(q1) } { hvq_m__1__a_post(q0), hvq_m__1__b_pre(q1) }",
+                      ante="((-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) && (q1 == offset_of(b) + (q0 - offset_of(a))))",
+                      obl="(hvq_m__1__a_post(q0) <= hvq_m__1__b_pre(q1) + hvq_m__1__a_pre(q0))")
+        self.clean(self.wf(rows=[self.oq(obl="(hvq_m__1__a_post(q0) == hvq_m__1__a_pre(q0))", trigger=both), self.oq(obl="true", trigger=both),
+                                 self.oq(obl="(hvq_m__1__a_post(q0) >= 0)", trigger=both), f"{prior} ==> ({self.oq(trigger=both)})", two]))
+
+    def test_the_twins_of_the_obligation_rows(self):
+        for label, row in {
+            "a heap trigger": self.oq(trigger="{ loc(block_of(a), q0) }"),
+            "a trigger that is not an application of a ghost function": self.oq(trigger="{ offset_of(q0) }"),
+            "an application of a function that is no ghost function": self.oq(trigger="{ len(q0) }"),
+            "an application to a non-binder": self.oq(trigger="{ hvq_m__1__a_pre(v_n) }"),
+            "a trigger with an offset": self.oq(trigger="{ hvq_m__1__a_pre(q0 + 1) }"),
+            "no trigger set": self.oq(trigger=""),
+            "two trigger sets naming different formals": self.oq(trigger="{ hvq_m__1__a_pre(q0) } { hvq_m__1__b_post(q0) }"),
+            "two trigger sets naming different methods": self.oq(trigger="{ hvq_m__1__a_pre(q0) } { hvq_m__2__a_post(q0) }"),
+            "a second trigger set with a computed term": self.oq(trigger="{ hvq_m__1__a_pre(q0) } { hvq_m__1__a_post(q0 + 1) }"),
+            "a second trigger set of the same state": self.oq(trigger="{ hvq_m__1__a_pre(q0) } { hvq_m__1__a_pre(q0) }"),
+            "a second trigger set that is no ghost function": self.oq(trigger="{ hvq_m__1__a_pre(q0) } { len(q0) }"),
+            "a trigger set with a term twice for its binder": self.oq(trigger="{ hvq_m__1__a_pre(q0), hvq_m__1__a_pre(q0) }"),
+            "a second trigger set that misses a binder": self.oq(binders="q0: Int, q1: Int", trigger="{ hvq_m__1__a_pre(q0), hvq_m__1__b_pre(q1) } { hvq_m__1__a_post(q0) }"),
+            "a second trigger set with a term twice": self.oq(binders="q0: Int, q1: Int", trigger="{ hvq_m__1__a_pre(q0), hvq_m__1__b_pre(q1) } { hvq_m__1__a_post(q0), hvq_m__1__a_post(q0) }"),
+            "a term for one class of two": self.oq(binders="q0: Int, q1: Int", trigger="{ hvq_m__1__a_pre(q0) }"),
+            "a binder named k": self.oq(binders="k: Int", trigger="{ hvq_m__1__a_pre(k) }", obl="true", ante="(0 <= k)"),
+            "a binder that is not Int": self.oq(binders="q0: Bool"),
+            "a body that reads the heap": self.oq(obl="(loc(block_of(a), q0).v_int >= 0)"),
+            "a body with old": self.oq(obl="(old(hvq_m__1__a_pre(q0)) >= 0)"),
+            "a body with acc": self.oq(obl="acc(a.v_int)"),
+            "a body with perm": self.oq(obl="(perm(a.v_int) > none)"),
+            "a nested quantifier in the body": self.oq(obl=f"({self.CLAUSE})"),
+            "the prior's quantifier inside the antecedent": self.oq(ante=f"(({self.CLAUSE}) && (0 <= (q0 - offset_of(a))))"),
+            "no type range in the antecedent": self.oq(ante="(0 <= (q0 - offset_of(a)))"),
+            "a type range that is no integer type's": self.oq(ante="((0 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2) && (0 <= (q0 - offset_of(a))))"),
+            "a type range over another variable": self.oq(ante="((-2147483648 <= v_n && v_n <= 2147483647) && (0 <= (q0 - offset_of(a))))"),
+            "a computed application in the body": self.oq(obl="(hvq_m__1__a_pre(q0 + 1) >= 0)"),
+            "a quantifier as a conjunct of the conclusion": f"{self.SHAPE} ==> (true && ({self.oq()}))",
+            "a quantifier in a disjunction of the prior": f"({self.SHAPE} || ({self.CLAUSE})) ==> ({self.oq()})",
+            "a quantifier under a negation in the prior": f"(!({self.CLAUSE})) ==> ({self.oq()})",
+            "a prior quantifier with acc in its body": f"({self.SHAPE} && (forall s: Int :: {{ hvq_m__1__a_pre(s) }} acc(a.v_int))) ==> ({self.oq()})",
+            "a prior quantifier over the heap": f"({self.SHAPE} && (forall s: Int :: {{ loc(block_of(a), s) }} loc(block_of(a), s).v_int >= 0)) ==> ({self.oq()})",
+            "a prior condition that reads the heap": f"(a.v_int > 0) ==> ({self.oq()})",
+            "a prior mixing && and || without parentheses": f"({self.SHAPE} && (c != 0) || ({self.CLAUSE})) ==> ({self.oq()})",
+            "a quantifier outside a conjunction in a plain row": f"true && ({self.oq()})",
+            "a prior quantifier with a guard that holds a quantifier": f"({self.SHAPE} && (({self.CLAUSE}) ==> ({self.CLAUSE}))) ==> ({self.oq()})",
+        }.items():
+            with self.subTest(mutant=label):
+                self.refused(self.wf(rows=[row]), older=label == "a binder named k")
+        # a quantifier elsewhere in an f__wf method
+        self.refused(self.wf(ensures=[self.oq()]))
+        lines = self.wf()
+        lines[-1:-1] = ["  while (false)", f"    invariant {self.oq()}", "  {", "  }"]
+        self.refused(lines)
+
+    def test_a_user_quantifier_over_the_heap_in_a_wf_method_is_refused_and_a_ghost_one_outside_it(self):
+        heap = "forall q0: Int :: { loc(block_of(a), q0) } (0 <= q0) ==> (loc(block_of(a), q0).v_int >= 0)"
+        self.refused(self.wf(rows=[heap]))
+        # the same ghost quantifier in a method that is no __wf is refused (the domain's functions are used there)
+        outer = [*self.DOMAIN, "method m__1(a: Ref, v_n: Int)", "  decreases", "{", f"  assert {self.oq()}", "}"]
+        self.refused(outer)
+
+
 if __name__ == "__main__":
     unittest.main()

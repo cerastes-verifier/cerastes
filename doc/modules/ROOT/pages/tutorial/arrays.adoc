@@ -1,0 +1,144 @@
+= Arrays and quantifiers
+
+An array is many objects at once, and most facts about one are facts about all of its
+elements: every element was written, none is negative, none is larger than the result.
+This chapter indexes a local array, passes a range of elements to a function, and then
+states a fact about every element with `cerastes_forall`: in a loop that fills an array,
+and in the contract of a function that finds the largest element.
+
+== A local array
+
+[source,c]
+----
+include::example$tutorial/arrays_local.c[tag=source]
+----
+
+[source,console]
+----
+arrays_local.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The precondition keeps `i` inside the array, so the write and the read are both within its
+three elements, and the read returns what was written. Every index is checked against the
+array's bound. Let `i` reach 3, one past the end:
+
+[source,c]
+----
+include::example$tutorial/arrays_local_oob.c[tag=source]
+----
+
+[source,console]
+----
+arrays_local_oob.c:13: error: out-of-bounds: writes `a[i]`, whose index may be outside `a`
+----
+
+The error is at the write, the first access that may fall outside. In C a write one past
+the end of an array is undefined behaviour, even when nothing seems to go wrong; the address
+`&a[3]` may be formed, but never used to read or write.
+
+== A function over a range
+
+A function that works on an array receives a pointer, and its contract says how many
+elements it may use: `cerastes_reads_range(a, n)` to read the `n` elements from `a`,
+`cerastes_owns_range(a, n)` to read and write them.
+
+[source,c]
+----
+include::example$tutorial/arrays_range.c[tag=source]
+----
+
+[source,console]
+----
+arrays_range.c: verified (3 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`set_middle` owns the range, so it may write `a[1]`, and gives the range back in its
+`ensures`, with the element's new value. `middle` only reads. `caller` passes its local
+array, whose four elements cover both ranges, and learns from the two contracts that the
+result is 9. A caller that passed an array of two elements, or that held the array only for
+reading, would be reported at the call.
+
+== A fact about every element
+
+A loop that fills an array declared without an initializer has to say which elements it
+has written, or nothing is known about them after the loop. A fact about every element is
+written with `cerastes_forall(f, a, i)`: `f` is a pure function whose one `return` states
+the fact for the element `k`, and the quantifier says that it holds for every `k`.
+
+[source,c]
+----
+include::example$tutorial/arrays_fill.c[tag=source]
+----
+
+[source,console]
+----
+arrays_fill.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`filled(k, a, m)` says that if `k` is below `m`, `a[k]` holds `k`. The invariant states it
+for every element below `i`: before the loop no element is claimed, and each iteration
+writes `a[i]` and moves `i` past it. After the loop `i` is 4, so every element is claimed,
+and `a[0] + a[1]` is 1. An invariant that reads elements also says that they hold values, so
+the read after the loop is not reported as `uninitialized`.
+
+The arguments after `filled` are passed to its parameters in order, and `k` takes every
+value. `f` is not called: its body is read as part of the annotation, and it must be a pure
+function with one `return` (xref:annotations.adoc#forall[forall] has the rules).
+
+An invariant that claims one element too many fails before the loop starts:
+
+[source,c]
+----
+include::example$tutorial/arrays_fill_offbyone.c[tag=source]
+----
+
+[source,console]
+----
+arrays_fill_offbyone.c:18: error: uninitialized: in `filled`: this loop invariant reads `a[k]` before it is given a value
+arrays_fill_offbyone.c:10: note: this is the operation in `filled`
+----
+
+On entry `i` is 0, and the invariant claims `a[0]`, which nothing has written. The error is
+reported at the invariant, the place that claims too much, and the note shows the line of
+`filled` that reads the element: one pure function can serve many quantifiers.
+
+== The largest element
+
+A contract can state a fact about every element too. `max_of` promises a result that no
+element exceeds:
+
+[source,c]
+----
+include::example$tutorial/arrays_max.c[tag=source]
+----
+
+[source,console]
+----
+arrays_max.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The loop's invariant is the postcondition for the elements seen so far: every element below
+`i` is at most `m`. When the loop ends, `i` is `n`, and the invariant is the `ensures`. A
+caller that knows the elements can use the promise for any one of them.
+
+Promise a little more, that every element is *below* the result, and the proof fails: the
+element the result was taken from is equal to it, not below it.
+
+[source,c]
+----
+include::example$tutorial/arrays_max_strict.c[tag=source]
+----
+
+[source,console]
+----
+arrays_max_strict.c:31: error: postcondition: the postcondition of `max_of` may not hold
+arrays_max_strict.c:19: note: this is the postcondition
+----
+
+== What is next
+
+A loop that changes an array in place, such as adding one to every element, needs to speak
+of each element's value on entry to the function inside its invariant (`cerastes_old` in a
+loop invariant). That, pointer arithmetic (`p + i`), and a quantifier inside another are not
+supported yet. xref:memory.adoc#quantifiers[Facts about every element] has the details of
+quantifiers in contracts, loops and checks, and the limits that remain.

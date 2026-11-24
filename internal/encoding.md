@@ -92,6 +92,13 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   array local, the element address and the zero fill, and a loop's keyword position for the rows that must report one line in both modes.
 - **Ranges (M4.5e1b, decision 0060).** `AtomKind::OwnsRange`/`ReadsRange` (count in `Expr::b`), `Builder::range_atom`, `same_pure_expr`, `atom_partners` and the contract read
   `Deref(ElemAddr(Formal, index))` (§3, "Ranges in contracts").
+- **Quantifiers (M4.5e1c, record 0061).** `Expr::Kind::Forall`, `Bound` and `ForallArg` (`bound_id`, `bound_type`, `arg_index`, `forall_name`; `Builder::forall`, `bound`,
+  `forall_arg`; `LExpr::Forall` with several binders and trigger sets, §3 "Quantifiers"). The spec function is C's `cerastes_forall(f, args...)`, declared in
+  `<cerastes.h>` in both modes (C23 variadic; `bool` and `noexcept` inside `extern "C"` in C++) and named in the name lists (`SpecFn::forall`, `il_query.cpp`,
+  `annotation_checks.cpp`, `edg_args.cpp`); **cut 3:** `cerastes::forall`, with a lambda or a function, is `unsupported_annotation` ("write `cerastes_forall`", M7) in every
+  position of verify mode, because P80 (b) found that an rvalue trailing argument reaches the IL as an `enk_temp_init` the annotation reader refuses, so no single rule reads
+  every argument of the namespace spelling. `Forall::a` is the body (Bool); `args` are the encoded trailing arguments in the parameter order of `f` after the bound variable;
+  the body reads a parameter of `f` as `Bound` (the first) or `ForallArg(k)`.
 - **Contracts over memory (M4.5b1b, decision 0037).** Pointer `Param`s and a pointer `Function::ret` (P58: no
   separate copy in the IL; `Param::is_restrict` from the parameter variable's type, C only). `Expr::Kind::Atom`
   (`AtomKind` `Owns`/`Reads`/`Live`, `a` = the pointer `Formal`, `amount` = the index of the `requires` atom, 0..N-1 in
@@ -1060,6 +1067,63 @@ facts).
   secondary declaration's, P79 F3; an array against another bound, a bound against none, a bound against a pointer, in both modes; `int a[]` against `int *a` is accepted); both follow the compilers'
   default or `-Wall` warnings (the Step 0 matrix, question 240).
 
+**Quantifiers (M4.5e1c, record 0061).** `cerastes_forall(f, e_1, ..., e_m)` says that the body `E` of the `pure` function `f` holds for every value of its first parameter
+(the bound variable), the other parameters being the arguments. The Viper spikes are `tests/viper-smoke/memory/s45_*` (S45 and its addenda in `internal/il-inventory.md`,
+chapter M4.5e1c, with P80's IL facts). No Viper function is emitted for `f`: its body is read at each site (question 226), so a call of `f` elsewhere stays rejected until e1d.
+
+- **The reader (encode.cpp, §8).** `f` is `f` or `&f`, a `pure` function (not a `predicate`) with a verified body that is exactly one `return E;` (an extra block is read
+  through; C23 wraps the return in a generated `eok_bool_cast`), result `bool`, no contract, not a member, a template, a lambda or variadic; the bound variable has an integer
+  type other than `bool` and the enumerations; the other parameters are `bool`, integers, enumerations or pointers to them. In `E` the first parameter is `Bound(id, type)` and every
+  other parameter `ForallArg(id, k)`, with the encoded arguments in `Forall::args`; each argument is **evaluated once, at the site, before the binder**: `forall_expr` lowers the
+  `args` first, so an argument's own obligations (an overflow in `n + 1`, a division, a conversion) are rows of the site that exist whether or not `f` uses the parameter, and
+  an argument reads no memory. `check.cpp` (`forall_node`, `forall_shape`) re-checks what the encoder refuses, so the backstop is never a user's message.
+- **Read classes, binders, triggers.** A *read class* is a pair (pointer argument, constant `c`) of the reads `p[i + c]` of `E` (`fq_collect`; the index is exactly `i`, `i + c` or
+  `i - c`, no conversion). The first class's binder is `q0`, the absolute slot, with `i = q0 - offset_of(base_0) - c_0`; a further class `j` gets a binder `q<j>` with
+  `q<j> == offset_of(base_j) + i + c_j` in the antecedent (T2); the antecedent also holds the bound variable's type range. The quantifier has **one trigger set with one term per
+  class**, `loc(block_of(X), q<j>)` with `X` a variable (T1, one binder with computed terms, does not finish on neighbours such as `a[i] <= a[i + 1]`, S45 (b)). A listed limit
+  (question 253): a multi-class quantifier is instantiated only where the program holds a term of every class, so a correct program that uses it where one class's term occurs
+  alone fails: a false alarm, never a proof (`s45_b_t2_oneterm`; M4.5e2).
+- **Contracts.** A clause that holds a quantifier is split per top-level conjunct (`push_clauses`, `split_conjuncts`); a guard stands outside (`g ==> forall ...`; `g || forall(...)`
+  is `!g ==> forall(...)`, a quantifier left of `||` is refused, M4.8). Each read under the binder is its own `ite` chain over the framing disjuncts of the atoms seen so far, each with
+  its atom's guard (0037 item 7, 0060 item 5); a **marked** site (`must_init`, `ref_to_uninit`) frames no pre-state read, nor a post-state read where the parameter is
+  `ref_to_uninit` (0042 item 6). `cerastes_old(p[e])` under the binder is the read in the entry state, in its own chain, and is accepted in an `ensures` only.
+- **Calls and returns.** At a call, one `precondition` row **per conjunct** of a quantified clause, after the atom rows, in the caller's state; `call()` binds every pointer a callee's
+  quantifier subscripts to a local first (the range atom's local, else a variable argument as is, else a new local), so the trigger term `loc(block_of(X), q)` has a variable `X`.
+  At a return, one `postcondition` row per conjunct. The Viper call's own precondition stays the `internal` backstop.
+- **`f__wf`, variant M (`wf_method`).** The method stays heap-free. A read under a binder is the ghost function of its base formal and state at the read's absolute slot,
+  `hvq_<method>__<formal>_<pre|post>(s)`, typed `Int`, `Bool` or `Ref` after the element, in one domain `Hvq_<method>` per `__wf` method with no axiom (tagged
+  `// cerastes:domain-ok 0061`; Viper names are program wide, hence the method prefix, `kHvqUniqueNames`, question 255). Assumed beside today's `facts_`, each with one trigger
+  set per ghost application it relates: **(a)** the element type's range per state; **(b)** the scalar tie, ground (`hv_k_<st>` of `p[e]` equals `hvq_p_<st>(offset_of(p) + e)`);
+  **(c)** two parameters on one block with the same cell field have equal ghosts; **(d)** a `reads_range` atom with an `ensures` partner keeps its value, under the conjunction of
+  the two atoms' guards (the unguarded form is unsound, S45). (a) to (c) are emitted only for a formal that has an atom of that cell field (`has_atom_field`: a formal with no atom,
+  such as `q` in `requires(q == p)`, gets no range fact and keeps its framing row; the lint reads the element field from the atoms). Each obligation of `E` is one row `prior ==>
+  forall q<j> :: { hvq... } range(i) && path ==> obligation` over its own class's binder, the `prior` outside, reported at the site with the message "in `f`: ..." and a note at the
+  operation in `f` (question 247). A class read in both states (`a[i]` and `old(a[i])`) has one single-application trigger set per state on its clause and rows (question 257), so a
+  later obligation that names one state is instantiated.
+- **Loops (`CMode::Inv`; `fq_loop_read`).** A loop invariant clause that holds a quantifier is split per top-level conjunct into invariant lines of their own, each keeping the clause's
+  line and category; **in a loop invariant a quantifier is a top-level `&&` conjunct only** (question 262: under `||`, in a `?:` arm or inside a guarded conjunction `g || (A && forall)` it
+  is refused, M4.8, because `split_invariant` splits only top-level `&&` and the other forms emitted Viper the lint refuses). For each read class, before the user's clause and in evaluation
+  order: the framing `assert` against the loop's places (`permission`, "this loop invariant reads `a[i]`, which this loop does not hold", at entry and at the back edge, as
+  `framing_condition` does for a single read; `inv_reads_` entries carry `fq_class`), then, for a named array, an invariant line for the bound (`out-of-bounds`) and one for the flag
+  (`uninitialized`), the flag line's read taking the array's bound in its antecedent (N14). Every such line and framing assert is guarded by the earlier invariant clauses in evaluation
+  order, quantified ones included (`obligation_clause`, question 258; the lint admits those conjuncts in that guard). A read not indexed by the binder has its own framing and flag rows. A
+  pointer variable (not address-taken) or a named local array is the argument; for an array the argument is `AddrOf(a)` (its decay collapsed to the array, so `inv_elem` and the array rows
+  match) and an element read is `ElemAddr(AddrOf(a), i)`. A loop whose invariant holds a quantified read carries its places (`expr_touches`). Where an element's flag and value are both
+  unknown, a body that skips the write fails the flag line and `invariant-preserved`: two errors (question 254). **Several read classes** (question 261): the obligations of arithmetic are
+  rows of the first class's binder, so arithmetic (a binary operator that is no comparison or connective, a unary operator, a conversion) over the read of any other class is refused
+  in a loop invariant and a `check` (M4.5e2); comparisons of plain reads and arithmetic on the first class's reads stay accepted.
+- **Checks (`CMode::None`; `fq_check_rows`).** A `check` holds a quantifier as a top-level `&&` conjunct only (question 262, as for a loop invariant), and the check is split per conjunct.
+  Per read class the rows come in this order: for a pointer base the null row and the liveness row (`kq := perm(lvloc(...).lv)` bound first, then `forall q :: reach ==> kq > none`) (a
+  named array has no null or liveness row), the bound of a named array, the marked rows `forall q :: { loc(B, q) } reach ==> acc(loc(B, q).v_T, wildcard)` for the value field and then the
+  flag field (`permission`; `perm` may not stand under a quantifier in an `assert`, `acc(.., wildcard)` may), the flag row (`uninitialized`), then `E`'s own obligations over the binder
+  with `E`'s path, the index's own obligation (`i + c`) among them, then the fact (`check`). A failed marked row ends its path. The question 261 limit for several read classes applies
+  here too.
+- **Listed limits.** Left to M4.8: a quantifier under `!`, as an operand of `==` or arithmetic, in a `?:` condition, an atom's guard, a measure, a `do ... while (0)` invariant or on the left
+  of `||` (questions 249, 255); in a loop invariant or a `check`, a quantifier that is not a top-level `&&` conjunct (under `||`, in a `?:` arm: question 262). Left to M4.5e2: a body with no read indexed `i`, `i + c`, `i - c`, an index of another form or under a conversion; in a multi-class quantifier a guard that
+  reads memory and arithmetic over two classes' reads (255); in a loop invariant or a `check`, arithmetic over the read of a class other than the first (261); `&a[1]`, `p + 1`, a loaded or address-taken pointer as the base; in a loop or a `check`, `*p` of an array argument and a pointer
+  argument used as a value; in a `check`, a read the binder does not index and pointer elements (259); an argument that reads memory; `cerastes_old` in a loop invariant (cut 1, question 260)
+  and in a `check`; structure members and global arrays under the binder (e1e). A `pure` function with a contract or a `predicate` named by `cerastes_forall` is e1d's and M4.5f1's.
+
 ## 4. Viper shape
 
 ```
@@ -1567,3 +1631,24 @@ either side; `Var::ref_to_uninit` is set from an owning and marked local. A call
 reported by its own end row, a caller whose structure held a block keeps it and reports it at its end if the callee
 overwrote the field (`leak`: S42's `s42_5*`, which emulate an unmarked parameter, a stronger callee), and an initializer
 is `must_init`. The marked closure's flag modes are lowering's (§3).
+
+**Quantifiers in the encoder (M4.5e1c, record 0061).** *Names and tags:* `cerastes_forall` is `SpecFn::forall` (guarded by `declared_in_cerastes_header`, so a user function of that name is
+not it) and `cerastes::forall` stays `SpecFn::unsupported`; `forall_namespace` refuses the namespace spelling in a contract, an invariant and a `check` (a lambda: "the lambda form: M7"; any
+other first argument: "not read when verifying (M7)", cut 3); two tags in `diagnostics.def`, **`forall_function`** (the function named is not a `pure` function the reader accepts: its
+message says which rule) and **`forall_argument_mismatch`** (arity, or a written argument type that is not the parameter's up to top-level qualifiers; `T *` for `const T *`). *The site:*
+`forall_site` runs from `call()` for every annotation position; `mark_forall_positions` (run on each `requires`, `ensures`, invariant and `check` root) records the calls in a positive
+position (in a contract: a conjunct, an operand of `||` after `collect_forall_calls` has refused a quantifier in its left operand, an arm of `?:`; in a loop invariant or a `check`: a top-level `&&` conjunct only, a quantifier under `||` or in a `?:` arm goes to `forall_not_conjunct_`, question 262); every other position, a `decreases`, `old`,
+`owning(n)`, a nested quantifier, a measure and a `do ... while (0)` invariant are `unsupported_annotation` naming M4.8. *Reading `f`:* `read_forall_function` (a `predicate`, a contract on `f`
+and a `restrict` parameter are `unsupported_annotation`; the parameter types are classified before `check_signature`, which then gives a VLA or `[static N]` parameter its usual tag), the body
+of its one `return E;`, and `first_forall_effect` (a call, write or increment in `E` is refused before `E` is read: a body is encoded at every site that names `f`, and an effect is
+encoded once per function). *Arguments:* one per parameter after the first; the written type after **one** generated cast (C's promotion; a written cast is never peeled) must match
+(`forall_argument_type_ok`); a `&a[1]` pointer argument is refused where it is encoded, a global array too, a named local array in a loop or a `check` is collapsed to `AddrOf(a)`
+(`array_variable`), and an argument that reads memory or names `cerastes_old` is refused (`index_reads_memory` catches a cell read by name). *The body:* `Ctx::forall` (a `ForallSite`: id, site, `slot`
+map from the parameter variable, names, types, encoded arguments, `read_classes`) makes `variable()` return `Bound` / `ForallArg` (`forall_parameter`); `report_position` makes every report inside the
+body come out at the site; `contract_element_address` (contracts) and `subscript_address` / `indirect_read` (loops, checks) accept a `ForallArg` base after `forall_base_ok` (a contract: a bare
+`Formal`; a loop or a `check`: a `Local` pointer that is not address-taken, or `AddrOf` of a local array) and `forall_deref_ok` for `*p`; `bound_index_form` classifies each index (`forall_index_form`
+mirrors `check.cpp`, so the user meets the encoder's message); `forall_body_ok` is the list of node kinds a body may hold (the same as `check.cpp`'s); `forall_loop_body_ok` and
+`forall_multi_class_why` and `forall_later_class_arithmetic` mirror the narrowings `check.cpp` makes in loops, checks and multi-class quantifiers (questions 255, 259, 261), each as `unsupported_annotation` naming M4.5e2.
+`reject_marked_read` maps a `ForallArg` to its argument (0042 item 6). `cerastes_old` under the binder is `old_c`'s in an `ensures` and `old_outside_ensures` at the site elsewhere. *Truth:* a loop
+invariant or a `check` that holds a quantifier keeps its Bool tree through C's `&&` of type `int` (`holds_forall` beside `holds_atom` in `clause_bool`), as a contract does. The shape rules of
+annotation expressions (the `-Wall` shapes, R5 and R9) reach `E` through `truth_context`, reported at the site.

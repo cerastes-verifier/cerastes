@@ -782,7 +782,8 @@ Some expressions are valid C and pass:[C++] but rarely mean what they say, and
 clang or GCC warns about them by default or with `-Wall`. cerastes rejects them,
 in both modes and also in annotations, even when only one compiler warns, in one
 language (the body of a `CERASTES_PREDICATE` or `CERASTES_PURE` function is not
-verified yet, so these rules do not reach it either):
+verified yet, so these rules do not reach it either, except the `return` of a pure function
+that `cerastes_forall` names, which they reach as they reach an annotation, reported at the `forall`):
 
 * `sizeof` of a parameter written as an array (`void f(int a[4])` with `sizeof(a)`, or
   `sizeof(a) / sizeof(a[0])`), which is the size of a pointer
@@ -1295,6 +1296,10 @@ The constructs that are rejected in this version are:
 ----
 include::example$verifying/enum_arithmetic_rejected.c[tag=source]
 ----
+* *Annotations:* a call of a predicate or a pure function, `fold` and `unfold`, every
+  `cerastes::forall` (write `cerastes_forall`), and the forms and positions of `forall` that
+  xref:annotations.adoc#forall[forall] lists as rejected: a quantifier inside another, under `!`, on
+  the left of `||`, in a measure, and an `E` whose index or reads it does not accept yet.
 * *Attributes:* any attribute other than the cerastes ones and `maybe_unused`,
   `nodiscard`, `deprecated`, `likely`, `unlikely`, `fallthrough` and `noreturn`
   (some attributes, such as `assume`, would let you state an unchecked fact).

@@ -46,6 +46,22 @@ enum class BinOp
     PermDiv
 };
 
+// The Viper type of a variable: Int, Bool, Ref (a pointer; an address-taken local, which holds its cell) or Perm (a ghost amount).
+// Perm: a ghost permission amount (decision 0037 item 6): a formal `none < a && a < write`, or a local that holds one.
+enum class LType
+{
+    Int,
+    Bool,
+    Ref,
+    Perm
+};
+
+struct LVar
+{
+    std::string name;
+    LType type {LType::Int};
+};
+
 struct LExpr
 {
     // Null, Field, PermOf, Write, NoPerm, Acc and Dom are the memory model's (decision 0032 item 5; decision 0028 item 2); they appear only in
@@ -54,8 +70,10 @@ struct LExpr
     // Ite, PermOf, Write, NoPerm and PermDiv are the Perm-valued expressions (`LType::Perm` variables hold them).  ForPerm (decision 0047 item 7) is
     // `forperm t: Ref [t.tok] :: a`, the one assertion that every free token the method holds satisfies `a` (a leak row's); `a` is in `a` and mentions the
     // binder `t`, never `tok`; it appears only in a heap program (`LProgram::heap`), as the whole condition of an `Assert`.
-    // Forall (decision 0059 items 3, 7 and 8; appended, M4.5e1a part A, nothing builds one yet): `forall <text>: Int :: { t1 } { t2 } ... a`, one Int binder named
-    // `text`, one trigger set per element of `args` (each a single term over the binder), the body in `a`.  Old may carry a label in `text` (`old[lbl](a)`; empty:
+    // Forall (decision 0059 items 3, 7 and 8; generalized by record 0061 item 6, M4.5e1c part A): `forall <b1>: T1, <b2>: T2 :: { t1, t2 } { t3 } ... a`, the
+    // binders in `binders` (`text` holds the first one's name), the trigger sets over their terms, the body in `a`.  `args` holds EVERY trigger term, set after
+    // set, so a walker over `args` sees them all; `trigger_sizes[j]` is the number of terms of set j (empty: every term of `args` is a set of its own, the form
+    // every site had before part A, `forall k: Int :: { t } body`).  Old may carry a label in `text` (`old[lbl](a)`; empty:
     // `old(a)`).
     enum class Kind
     {
@@ -90,7 +108,11 @@ struct LExpr
     E a;
     E b;
     E c;
-    std::vector<E> args; // Fn, Dom; Forall: the triggers, one `{ t }` each
+    std::vector<E> args; // Fn, Dom; Forall: every trigger term, set after set (see Forall above)
+    // Forall: the binders in order (at least one, each a valid Viper identifier, all distinct) and the size of each trigger set (their sum is `args.size()`; empty:
+    // one term per set)
+    std::vector<LVar> binders;
+    std::vector<size_t> trigger_sizes;
 };
 
 E int_lit(std::string decimal);
@@ -117,6 +139,10 @@ E old_(
 // `forall binder: Int :: { t1 } { t2 } body` (decision 0059 items 3, 7 and 8): `triggers` are the terms of the trigger sets, one set each, over `binder`
 // (`var(binder)`); at least one is required, and `binder` must be a valid Viper identifier (std::logic_error otherwise).
 E forall_(std::string binder, std::vector<E> triggers, E body);
+// The general form (record 0061 item 6): `forall b1: T1, b2: T2 :: { s1.. } { s2.. } body`.  Every binder is a valid Viper identifier, the names are distinct,
+// there is at least one binder and at least one trigger set, and no set is empty (std::logic_error otherwise).  With one Int binder and every set a single
+// term it is the same expression as the form above.
+E forall_(std::vector<LVar> binders, std::vector<std::vector<E>> trigger_sets, E body);
 E for_perm(E body); // `forperm t: Ref [t.tok] :: body` (decision 0047 item 7), body over the binder `t` (`var("t")`)
 E perm_div(E a, int divisor); // `a / divisor`, a Perm over a positive Int literal (decision 0037 item 6)
 // An application of one of the Block domain's functions (`loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`,
@@ -218,26 +244,17 @@ struct LStmt
 
 // ---- methods and the program ------------------------------------------------------------------------------------
 
-// The Viper type of a variable: Int, Bool, Ref (a pointer; an address-taken local, which holds its cell) or Perm (a ghost amount).
-// Perm: a ghost permission amount (decision 0037 item 6): a formal `none < a && a < write`, or a local that holds one.
-enum class LType
-{
-    Int,
-    Bool,
-    Ref,
-    Perm
-};
-
-struct LVar
-{
-    std::string name;
-    LType type {LType::Int};
-};
-
 struct LClause
 {
     E expr;
     std::vector<Check> checks; // the failures Silicon can report at this clause's line
+};
+
+// A function of a `__wf` method's ghost domain (record 0061 item 7): `function <name>(s: Int): <result>`.
+struct LGhostFn
+{
+    std::string name;
+    LType result {LType::Int};
 };
 
 struct LMethod
@@ -246,6 +263,10 @@ struct LMethod
     std::string comment; // a `//` line above the method (the C/C++ function it stands for)
     // `//` lines above the trusted-contract line, each a lint tag (decision 0054 item 8: `cerastes:owning-global GB_<name>` on `program_start`)
     std::vector<std::string> tags;
+    // Record 0061 item 7 (variant M): the one domain of ghost functions of a `<f>__wf` method that reads under a quantifier, tagged `// cerastes:domain-ok 0061`
+    // and emitted right above the method; no axiom.  Empty `ghost_fns`: none (every other method).
+    std::string ghost_domain;
+    std::vector<LGhostFn> ghost_fns;
     std::vector<LVar> formals;
     std::vector<LVar> results; // zero or one; one per leaf for a struct result (decision 0044 item 4)
     std::vector<LClause> requires_;

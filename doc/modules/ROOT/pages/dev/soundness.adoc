@@ -40,7 +40,7 @@ self-test case, and goes further than `inhale`: its docstring lists the rules, a
 
 == The memory model's axioms
 
-The one Viper domain cerastes emits is `Block`, the model of blocks of memory and pointers into them (decision
+The Viper domain cerastes emits for memory is `Block`, the model of blocks of memory and pointers into them (decision
 {gh}/internal/decisions/0028-memory-model.md[0028], item 2). An axiom is an assumption Silicon cannot check, so each
 one is recorded and linted:
 
@@ -59,6 +59,15 @@ one is recorded and linted:
   ({gh}/internal/decisions/0050-vlibc-allocator.md[0050]).
 
 Adding an axiom needs its own decision record and lint tag first.
+
+A user quantifier adds one more kind of domain, and no axiom. A well-formedness method (`+f__wf+`) whose contract reads
+elements under a quantifier declares a domain `+Hvq_<method>+` of ghost functions (one per pointer parameter and state), under a
+`cerastes:domain-ok 0061` tag; the lint refuses an axiom there. The assumed facts about the ghost functions are
+assumptions Silicon cannot check, so each has one of four shapes, argued in decision
+{gh}/internal/decisions/0061-quantifiers.md[0061]: the element type's range, the tie to a scalar ghost of the same read, equality
+between two parameters on one block, and the keep fact of a `reads_range` atom that comes back, which the lint accepts only
+under the guards of both atoms (without them it would let a wrong contract verify). The lint also refuses a quantifier with no
+type range for the bound variable and a computed `loc` term in the body (the form with one binder, which does not finish on neighbours).
 
 == Trusted contracts
 

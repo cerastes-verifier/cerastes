@@ -777,7 +777,10 @@ A predicate returns `bool`, cannot also be `pure`, and has no `requires` or
 `ensures`. A pure function does not return `void`, and may have a contract. The
 body of either is ordinary pass:[C++] and may use the specification functions
 below. In an annotation, a call to one is an ordinary call (`cerastes verify`
-does not accept it yet, see above).
+does not accept it yet, see above). A pure function *named*, not called, as the first
+argument of `cerastes_forall` is read by `cerastes verify`: its one `return` is inlined at
+the quantifier (<<forall>>). A contract on such a function is rejected there; elsewhere a
+pure function's contract is not read yet.
 
 `fold(e)` and `unfold(e)` are statements. Their argument is a call to a
 predicate: `fold` records that the predicate's condition holds and may be used
@@ -807,7 +810,7 @@ included, even if argument-dependent lookup would find a function of yours:
 qualify your own functions there (this errs on the side of rejecting). A seventh,
 `live`, is declared for pointers, and `reads_range` beside `owns_range`. C has no
 namespaces, so `<cerastes.h>` also declares the C spellings `cerastes_owns`,
-`cerastes_reads`, `cerastes_live`, `cerastes_owns_range`, `cerastes_reads_range` and
+`cerastes_reads`, `cerastes_live`, `cerastes_owns_range`, `cerastes_reads_range`, `cerastes_forall` and
 `cerastes_old` (a macro), in C and in pass:[C++] alike, and `owns_block` with its C
 spelling `cerastes_owns_block` for allocations. The functions:
 
@@ -855,9 +858,11 @@ parameters (xref:memory.adoc#ranges[Ranges in contracts])
 | `cerastes_reads_range(p, n)`
 | `p` is not null and the function may read the `n` elements starting at `p`
 
-| `forall(body, free...)`
-| (later)
-| for every value of the first parameter of `body` (not supported yet)
+| `forall(f, free...)`
+| `cerastes_forall(f, free...)`
+| for every value of the first parameter of the pure function `f`, the body of `f` holds, its other parameters
+given the trailing arguments (<<forall>>; xref:memory.adoc#quantifiers[Facts about every element]);
+`cerastes verify` accepts the C spelling, in C and pass:[C++]
 |===
 
 `owns` and `reads` name a global variable or a member of a global structure (`+g.x+`), or, like
@@ -880,16 +885,116 @@ parameter and a count that reads no memory, in a function's `requires` and `ensu
 (an `ensures` range gives back the `requires` range of the same kind, parameter and
 count), as a conjunct, after a condition that reads no memory and `||`, or as an arm of
 `?:`; one parameter has one range and no other atom
-(xref:memory.adoc#ranges[Ranges in contracts]). `cerastes verify` does not accept
-`forall` yet, nor a range in a loop invariant, nor `owns`, `reads` and `live` in a
-measure or in a `do … while (0)` invariant.
+(xref:memory.adoc#ranges[Ranges in contracts]). `cerastes verify` accepts `cerastes_forall`
+(<<forall>>) but no `cerastes::forall`, and it does not accept a range in a loop invariant,
+nor `owns`, `reads` and `live` in a measure or in a `do … while (0)` invariant.
 
 [source,cpp]
 ----
 include::example$annotations/spec_functions.cpp[tag=spec]
 ----
 
+[[forall]]
 === forall
+
+`cerastes_forall(f, free...)` states a fact about every value of an integer. `f` names a
+pure function: its first parameter is the quantified variable, and its other parameters
+receive the trailing arguments, in order. The quantifier holds when the body of `f` holds for
+every value of the first parameter's type, with each other parameter replaced by its
+argument.
+
+[source,c]
+----
+include::example$annotations/forall_function.c[tag=pure]
+----
+
+[source,c]
+----
+include::example$annotations/forall_function.c[tag=contract]
+----
+
+What `f` must be, for `cerastes verify`:
+
+* A pure function (`CERASTES_PURE`), not a predicate, defined in a file that `cerastes
+  verify` reads (a prototype first is fine), whose body is exactly one `return E;` and whose
+  result is `bool`. It has no `requires`, `ensures` or `decreases`, and it is not a member
+  function, a template or variadic. It is named as `f` or `&f`; a cast, a function pointer,
+  a lambda, `*f`, a comma or a `?:` is not accepted.
+* Its first parameter has an integer type other than `bool` and the enumerations. Every
+  other parameter is a `bool`, an integer, an enumeration, or a pointer to one of those or to
+  a pointer.
+* `E` may compare and compute (with the usual checks) and read elements through the
+  pointer parameters of `f`, at an index that is the quantified variable `i`, `i + c` or `i - c` for
+  a constant `c`, or not the quantified variable at all; it reads at least one element at such
+  an index. Under `ensures` it may read `cerastes_old(p[i])` and `cerastes_old(*p)`. It may not
+  call a function, use an ownership atom or another `forall`, assign, increment, use a comma,
+  read a global, or take the address of a parameter. When `E` reads through two pointers or at
+  two offsets (`a[i] <= a[i + 1]`, `p[i] == q[i]`), it may compare the two reads but not compute
+  with both, and its conditions read no memory; and such a fact is used where the program
+  mentions an element of each, so `p[i] == q[i]` tells you about `p[2]` after you also read
+  `q[2]`.
+
+A function that is not such a function is reported as `cerastes-forall_function`, with the rule it breaks; a
+predicate and a contract on `f` are reported as `cerastes-unsupported_annotation` (they get their meaning later), and a
+VLA, `[static N]` or `restrict` parameter of `f` as on any function.
+
+[source,c]
+----
+include::example$annotations/errors/forall_not_pure.c[tag=bad]
+----
+
+The arguments, one per remaining parameter, have the parameter's types: `int *` may be
+passed for `const int *`, but a `long` is not passed for an `int` parameter, nor a `char`;
+otherwise `cerastes-forall_argument_mismatch`. An argument reads no memory: write the read inside
+`f`. Each argument is evaluated once, at the `forall`, and its own checks (an overflow in `n +
+1`) are made there, whether or not `f` uses it. A pointer argument whose elements `f` reads
+is a pointer parameter in a contract, and a pointer variable or a local array in a loop
+invariant or a `check`. In a loop invariant and a `check`, `E` does not dereference an array
+argument (`*a`) or use a pointer argument as a value (`p != q`), and when it reads through two
+pointers or at two offsets it computes only with the reads of the first one `E` reads (`a[k] <= a[k + 1]` is
+accepted, `a[k] < a[k + 1] + 1` is not yet). In a `check` it also reads only elements at an
+index the quantified variable names, of a type that is not a pointer.
+
+[source,c]
+----
+include::example$annotations/errors/forall_arity.c[tag=bad]
+----
+
+A `forall` may stand in a function's `requires` and `ensures`, in a loop invariant and in a
+`check`. In a contract it stands as a conjunct, after a condition and `||`, or as an arm of
+`?:`; in a loop invariant and a `check`, as a conjunct of the clause
+(`0 <= i && i <= n && cerastes_forall(f, a, i)`), not after `||` or in an arm of `?:` yet. It may not stand
+under `!`, on the left of `||`, inside `==` or arithmetic, in a measure, in a `do … while (0)`
+invariant, or inside another `forall`, and there is no `exists`; each is rejected, to be
+reviewed in a later milestone.
+
+[source,c]
+----
+include::example$annotations/forall_function.c[tag=invariant]
+----
+
+[source,c]
+----
+include::example$annotations/forall_function.c[tag=check]
+----
+
+What `cerastes verify` checks for every value of the quantified variable, the checks of
+`E` (overflow, division, an element read without permission, an index outside an array, an
+element without a value), is reported at the `forall`, with a note at the line of `f` where
+the operation is, since one `f` may serve many quantifiers. The details of each position are
+in xref:memory.adoc#quantifiers[Facts about every element].
+
+==== The lambda form
+
+The front end also accepts `cerastes::forall(body, free...)` with a lambda, as below, and
+checks it as described here, but `cerastes verify` rejects every `cerastes::forall`: the
+lambda form gets its meaning with classes and references in a later milestone, and with a
+function it is written `cerastes_forall`, which pass:[C++] code uses too.
+
+[source,cpp]
+----
+include::example$annotations/errors/forall_namespace.cpp[tag=bad]
+----
 
 `cerastes::forall(body, free...)` takes a lambda as its first argument. The
 lambda's first parameter is the quantified variable, and its other parameters
@@ -1203,7 +1308,12 @@ include::example$annotations/errors/old_in_requires.cpp[tag=bad]
 
 `old` also does not belong in the body of a predicate or a pure function, which has no entry
 state to name: that is `cerastes-old_outside_ensures` too, whether it is called, its address is
-taken, or it is named in a template.
+taken, or it is named in a template. The one exception is the C spelling: `cerastes_old(p[i])`
+and `cerastes_old(*p)` may stand in the body of a pure function that `cerastes_forall` names
+in an `ensures`, where the quantifier reads each element's value on entry (<<forall>>); named
+by a `forall` anywhere else, such a body is reported by `cerastes verify` as
+`cerastes-old_outside_ensures` at the `forall`. `cerastes::old` in a pure body stays the front
+end's error in every case.
 
 [source,cpp]
 ----
@@ -1304,7 +1414,9 @@ anywhere in the translation unit and outside `<cerastes.h>` itself, of one of th
 
 * `cerastes`, an attribute name (`requires`, `ensures`, `invariant`, `check`, `fold`, `unfold`,
   `predicate`, `pure`, `owning`, `uninit`, `must_init`, `ref_to_uninit`, `not_invalidating`) and a specification-function name (`old`, `owns`, `reads`, `forall`,
-  `owns_range`, `reads_range`): `+#define ensures requires+` would turn every postcondition into a precondition;
+  `owns_range`, `reads_range`) or its C spelling (`cerastes_owns`, `cerastes_reads`, `cerastes_live`, `cerastes_old`,
+  `cerastes_owns_block`, `cerastes_owns_range`, `cerastes_reads_range`, `cerastes_forall`): `+#define ensures requires+`
+  would turn every postcondition into a precondition;
 * `+CERASTES_H+` and every `+CERASTES_*+` macro, which are the header's own;
 * every predefined macro of the front end, among them `+__cplusplus+`,
   `+__STDC_VERSION__+`, `+__has_cpp_attribute+` and `+__has_c_attribute+`: the header uses them to

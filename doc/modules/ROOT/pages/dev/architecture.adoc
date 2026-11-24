@@ -113,7 +113,21 @@ The permission atoms over a range of elements (`owns_range` and `reads_range`, d
 {gh}/internal/decisions/0060-ranges-in-contracts.md[0060]) are the one place a contract holds a quantifier: each atom is one
 `forall k` per field over the slots of the pointer's block (`+offset_of(p) <= k < offset_of(p) + n+`, guarded by the atom's own
 guard), and a call, a return and a framed element read have their own explicit rows, so Silicon's check of the quantified
-permission never fails first. The lint admits exactly these shapes and no other `forall` in a contract.
+permission never fails first. The lint admits exactly these shapes and the quantifiers below, and no other `forall`.
+
+A user quantifier (`cerastes_forall(f, ...)`, decision
+{gh}/internal/decisions/0061-quantifiers.md[0061]) is the other: the encoder reads the body of the `pure` function `f` at the
+site, and `lower.cpp` writes one `forall` over the absolute slots of the elements it reads. Each read of the form
+`p[i]`, `p[i + 1]`, ... is a _read class_ with a binder of its own (`q0`, `q1`, ...), and the trigger set holds one term per class,
+`loc(block_of(p), q0)`. The arguments are evaluated once, before the binder, so their own checks are rows of the site. A
+quantified clause is split per conjunct in a contract, at a call, at a return and in a loop invariant, and every check the body
+needs (the permission to the elements, the bound of a named array, the flag that an element has a value, an overflow in the
+body) is a row over the binder, reported at the `cerastes_forall` with a note at the operation in the function. A function's
+well-formedness method (`+f__wf+`) stays free of heap permission: a read under a binder is a ghost function of the pointer
+parameter and the state, `+hvq_<method>__<parameter>_pre+` or `+_post+`, declared in a domain of its own with no axiom and
+related to the scalar ghosts and to the element type's range by assumed facts whose exact shapes the lint pins. In a loop
+invariant and in a `check` the quantifier's pointer argument is a pointer variable or a named local array. What is not read is
+rejected with a message naming the session that will read it (the encoding specification lists them).
 
 To keep the Viper of a run:
 
