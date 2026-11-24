@@ -12,9 +12,16 @@ at the line of the C or pass:[C++] source that causes it:
 The *category* names what could not be proved. There are twenty-one, and each has a
 section below. A *note* line follows an error when a second place matters: the
 clause of a contract that failed, or the callee's clause that a call does not
-meet. Errors are sorted by file, line and category, and the exit status is 1
-when there are any. xref:verifying.adoc[Verifying a program] describes the
+meet. For a xref:annotations.adoc#forall[`forall`], a check inside the pure function it names
+is reported at the `forall`, its message beginning "in `f`:", with a note at the line of `f`
+where the operation is (one `f` may serve many quantifiers). Errors are sorted by file, line
+and category, and the exit status is 1 when there are any. xref:verifying.adoc[Verifying a program] describes the
 command and the other exit statuses.
+
+[source,c]
+----
+include::example$error-messages/forall_note.c[tag=source]
+----
 
 Every example below is a program that fails with exactly the error named in
 its section (the example's line is the one the error points at), followed by
@@ -451,6 +458,16 @@ it one, mark the parameter `cerastes::must_init`
 [source,c]
 ----
 include::example$error-messages/uninitialized_argument_fixed.c[tag=source]
+----
+
+A loop invariant that states a fact about every element (`cerastes_forall`) states that
+each element it reads holds a value, at every iteration: an invariant that reaches an
+element the loop has not written yet is reported at the invariant
+(xref:memory.adoc#quantifiers[Facts about every element]):
+
+[source,c]
+----
+include::example$error-messages/forall_loop_flag.c[tag=source]
 ----
 
 == null-dereference

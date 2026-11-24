@@ -96,10 +96,12 @@
 // allocations).  `cerastes_owns_block(p, size)` and `cerastes_zeroed(p)` are vlibc's own (the allocation contracts of
 // `malloc` and `calloc`; the front end rejects them in a program's contracts).  `cerastes_owns_range(p, n)` and `cerastes_reads_range(p, n)` take a
 // pointer parameter and a count: the elements `p[0..n)` (decision 0060: write permission, or a read fraction; both imply `p != NULL`).
-// `cerastes_forall(f, args...)` is the quantifier of C and of C++ alike (decision 0061): `f` is a `pure` function (written `f` or `&f`)
-// whose body is one `return E;`, its first parameter the quantified variable and its other parameters, in order, the `args`; it is inlined where
-// `cerastes_forall` stands, and means that `E` holds for every value of the first parameter's type (`cerastes::forall` below is the lambda form, which
-// verification does not read yet: write this one).
+// `cerastes_forall(f, args...)` is the quantifier of C and of C++ alike (decision 0061): `f` is a `pure` function (written `f` or `&f`) that returns `bool` and whose
+// body is one `return E;`; its first parameter, an integer, is the quantified variable and its other parameters, in order, take the `args` (each of the parameter's own
+// type, reading no memory).  It is inlined where `cerastes_forall` stands and means that `E` holds for every value of the first parameter's type.  `E` reads the elements
+// `p[i]`, `p[i + c]` or `p[i - c]` of a pointer parameter, which the matching argument gives (a pointer parameter of the function in a contract; a pointer variable or a local
+// array in a loop invariant or a `check`).  It stands where a conjunct may (`g || cerastes_forall(...)` is accepted, `!cerastes_forall(...)` is not).
+// `cerastes::forall` below is the lambda form, which verification does not read yet: write this one.
 // `cerastes_old(e)` takes a place and is
 // a macro over `__typeof__` (accepted by clang,
 // gcc and the front end in both languages); it is only ever expanded inside a contract macro, which expands to nothing in another

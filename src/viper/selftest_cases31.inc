@@ -1300,7 +1300,7 @@ void define_quantifiers()
            k.done(f);
        });
 
-    // ---- the refusals that stay until Part C: a quantifier in a loop invariant, a check, code ----
+    // ---- the refusal that stays: a quantifier in code (a loop invariant and a `check` are Part C's, selftest_cases32.inc) ----
     const char* const refused {"a quantifier outside the `requires` and `ensures`"};
     auto fa_in_code = [=](Kit& k, Function* f)
     {
@@ -1313,25 +1313,6 @@ void define_quantifiers()
                                                       k.ge_c(brd(k, x[0], i), k.i32, "0"));
                                      }));
     };
-    rc("fq_rej_in_check", refused,
-       [=](Kit& k)
-       {
-           Function* f {k.fn("f", k.vd)};
-           auto [a, q] {fa_in_code(k, f)};
-           f->body = k.blk({k.decl(a, nullptr), k.chk(q)});
-           k.done(f);
-       });
-    rc("fq_rej_in_invariant", refused,
-       [=](Kit& k)
-       {
-           Function* f {k.fn("f", k.vd)};
-           auto [a, q] {fa_in_code(k, f)};
-           Var* i {k.local(f, "i", k.i32)};
-           f->body = k.blkc({k.decl(a, nullptr), k.decl(i, N(k, "0")),
-                             k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(q)}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
-                                   k.blkc({k.asg(i, k.add(k.v(i), N(k, "1")))}))});
-           k.done(f);
-       });
     rc("fq_rej_in_code", refused,
        [=](Kit& k)
        {

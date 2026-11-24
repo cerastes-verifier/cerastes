@@ -3765,8 +3765,56 @@ def _guard_problem(kind: str, guard: str | None) -> str | None:
     return None
 
 
-def contract_line_verdict(kind: str, rest: str) -> tuple[bool, str, bool]:
+def loop_prior_verdict(kind: str, rest: str, loop_clauses: frozenset[str]) -> tuple[bool, str, bool] | None:
+    """Decision 0061 item 9 (question 258): a loop's obligation `invariant` line and its framing `assert` (entry and back edge) are `PRIOR ==> CONCLUSION`
+    where the PRIOR holds the EARLIER invariant clauses of the loop as quantifier conjuncts (0037 item 7's evaluation-order prior: they are checked
+    invariants of their own).  None if `rest` has no quantifier conjunct before its first `==>`; else the verdict: every quantifier conjunct is a user
+    quantifier of item 11's shape that is the quantifier of an `invariant` line of THIS loop that `loop_clause_scopes` allows here (`loop_clauses`), the other conjuncts are plain conditions
+    (an `assert`'s read no heap), and the conclusion is a user quantifier or a plain condition."""
+    text = rest.strip()
+    if FORALL_RE.match(_strip_wrap(text)):
+        return None
+    parts = _split_top(text, "==>")
+    if len(parts) < 2:
+        return None
+    prior = parts[0]
+    try:
+        conjuncts = [_strip_wrap(c) for c in _flatten_and_keeping_quantifiers(prior)]
+    except ValueError:
+        return None
+    if not any(FORALL_RE.match(c) for c in conjuncts):
+        return None
+    refused = lambda why: (False, f"{Q11}: {why}", False)  # noqa: E731
+    if kind not in ("invariant", "assert"):
+        return refused("a quantifier in the prior of a clause is admitted only in a loop's obligation `invariant` line and its framing `assert`")
+    for c in conjuncts:
+        if FORALL_RE.match(c):
+            q = parse_quantifier(c)
+            why = None if q is None else quantifier_problem(q, None)
+            if q is None or why or OLD_LABEL_RE.search(c):
+                return refused(f"a quantifier of the prior: {why or ('a labelled `old`' if q is not None else 'not a user quantifier')}")
+            if norm_viper(c) not in loop_clauses:
+                return refused("a quantifier of the prior is not an earlier `invariant` clause of the loop this line belongs to (an obligation line names the earlier clauses of its own loop, a framing `assert` the clauses of the loop it frames; no other line has a quantifier in its prior)")
+        else:
+            if GUARD_BAD_RE.search(c) or QUANT_FORBIDDEN_RE.search(c):
+                return refused("a condition of the prior holds a permission, a quantifier or a labelled `old`")
+            if kind == "assert" and not _heap_free(c):
+                return refused("a condition of the prior of an `assert` reads the heap")
+    conclusion = _strip_wrap(text[len(prior) + len("==>"):])
+    if FORALL_RE.match(conclusion):
+        q = parse_quantifier(conclusion)
+        why = None if q is None else quantifier_problem(q, None)
+        return refused(f"the conclusion: {why or 'not a user quantifier'}") if (q is None or why) else (True, "", False)
+    if FORALL_RE.search(conclusion) or QUANT_FORBIDDEN_RE.search(conclusion):
+        return refused("the conclusion is a user quantifier or a plain condition")
+    return (True, "", False)
+
+
+def contract_line_verdict(kind: str, rest: str, loop_clauses: frozenset[str] = frozenset()) -> tuple[bool, str, bool]:
     """(ok, why, marked) for a line of a method's own clauses or body that holds a user quantifier (`forall q<j>`)."""
+    prior_form = loop_prior_verdict(kind, rest, loop_clauses)
+    if prior_form is not None:
+        return prior_form
     guard, body = split_guard(rest)
     if body is None:
         return False, f"{Q11}: a user quantifier is a clause of its own (`forall q<j>: Int :: {{ ... }} ...`, under at most a guard `g ==> `)", False
@@ -4237,6 +4285,76 @@ class QuantifiedLines:
         return frozenset(n for n, (ok, _w, marked) in self.verdicts.items() if ok and marked)
 
 
+def _brace_net(code: str) -> int:
+    return code.count("{") - code.count("}")
+
+
+def loop_clause_scopes(src: Source, d: Decl) -> dict[int, frozenset[str]]:
+    """Decision 0061 item 9 (question 258), scoped to the loop (audit round 3, issue 3): for every line of method `d` that may hold a quantifier in its
+    prior, the normalized quantifiers it may name.
+      * an `invariant` line of a `while` loop: the user quantifiers of the EARLIER `invariant` lines of that same loop (a later clause, or another
+        loop's clause, is not a prior of it);
+      * a framing `assert`: the user quantifiers of all `invariant` lines of the loop it frames.  An entry `assert` is in the run of `assert`, `label`,
+        `var` and assignment lines that ends at the loop's `while`; a back-edge `assert` is in the run of `assert` lines that ends the loop's body.
+        (The run cannot say which clause an assert checks, so every clause of that loop is admitted there.)
+    Every other line, an `assert` elsewhere included, has no entry: no quantifier may stand in its prior."""
+    out: dict[int, frozenset[str]] = {}
+    first, last = d.line, d.end_line
+    lineno = first
+    while lineno <= last:
+        code = src.code[lineno - 1]
+        if re.match(r"^\s*while\b", code) is None:
+            lineno += 1
+            continue
+        header = lineno
+        clauses: list[tuple[int, str]] = []
+        invariants: list[int] = []
+        j = header + 1
+        while j <= last:
+            m = QUANT_STMT_RE.match(src.code[j - 1])
+            if m is not None and m.group("kw") == "invariant":
+                invariants.append(j)
+                guard, body = split_guard(m.group("rest"))
+                if body is not None and USER_QUANT_RE.match(body):
+                    clauses.append((j, norm_viper(_strip_wrap(body))))
+            elif _brace_net(src.code[j - 1]) > 0:
+                break
+            j += 1
+        for n in invariants:
+            out[n] = frozenset(text for (c, text) in clauses if c < n)
+        all_clauses = frozenset(text for (_c, text) in clauses)
+        # the entry run: lines of asserts, labels, declarations and assignments before the `while`
+        n = header - 1
+        while n >= first:
+            c = src.code[n - 1]
+            kw = QUANT_STMT_RE.match(c)
+            if kw is not None and kw.group("kw") == "assert":
+                out[n] = out.get(n, frozenset()) | all_clauses
+            elif not (c.strip() == "" or re.match(r"^\s*(?:label|var)\b", c) or ":=" in c):
+                break
+            n -= 1
+        # the body: from the first line after the invariants (it opens the braces) to the line that closes them
+        depth = 0
+        close = None
+        k = j
+        while k <= last:
+            depth += _brace_net(src.code[k - 1])
+            if depth <= 0:
+                close = k
+                break
+            k += 1
+        if close is not None:
+            n = close - 1
+            while n > j:
+                kw = QUANT_STMT_RE.match(src.code[n - 1])
+                if kw is None or kw.group("kw") != "assert":
+                    break
+                out[n] = out.get(n, frozenset()) | all_clauses
+                n -= 1
+        lineno = header + 1
+    return out
+
+
 def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines:
     """Item 11's lines: a clause or statement of a method that holds a user quantifier (`forall q<j>`), and in an `f__wf` method every one
     that holds a user binder (`q<j>`, `s<j>`) or a ghost application.  Lines of the older shapes (`forall k`) are not here."""
@@ -4252,6 +4370,7 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
         if d.kind != "method":
             continue
         wf = d.name.endswith("__wf")
+        loop_scopes = None
         ctx = None
         if wf:
             base = next((b for b in decls if b.kind == "method" and b.name == d.name[:-len("__wf")]), None)
@@ -4280,7 +4399,9 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
                 if kind not in ("requires", "ensures", "invariant", "assert"):
                     out.verdicts[lineno] = (False, f"{Q11}: a user quantifier stands in a `requires`, `ensures`, `invariant` or `assert`, not an `{kind}`", False)
                 else:
-                    out.verdicts[lineno] = contract_line_verdict(kind, rest)
+                    if loop_scopes is None:
+                        loop_scopes = loop_clause_scopes(src, d)
+                    out.verdicts[lineno] = contract_line_verdict(kind, rest, loop_scopes.get(lineno, frozenset()))
     return out
 
 

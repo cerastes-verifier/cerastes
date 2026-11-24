@@ -932,6 +932,11 @@ private:
             {
                 return nullptr;
             }
+            // record 0061 items 3 and 9: in the function of a quantifier the pointer is one of its parameters, whose argument is a pointer variable or a named array
+            if (base_expr->kind == Expr::Kind::ForallArg && !forall_base_ok(*base_expr, e->position))
+            {
+                return nullptr;
+            }
             if (!base_expr->type.is_ptr() || base_expr->type.pointee == nullptr || base_expr->type.pointee->is_struct())
             {
                 reject(
@@ -969,6 +974,22 @@ private:
                    is_enum_type(ix->type) ? "an enumeration value as an array index (write a cast to an integer type)"
                                           : "an array index that is not an integer");
             return nullptr;
+        }
+        if (cx_.forall != nullptr)
+        {
+            // record 0061 item 6: an index that names the bound variable is `i`, `i + c` or `i - c`; each such read is a read class of the quantifier
+            const int form {bound_index_form(ix, cx_.forall->id)};
+            if (form == 2)
+            {
+                reject(
+                    Diag::unsupported_annotation, index->position,
+                    "an index that names the bound variable in another form than `i`, `i + c` or `i - c`, a conversion around it included (`a[2 * i]`, `a[n - i]`, `a[b[i]]`: M4.5e2, decision 0061 item 6)");
+                return nullptr;
+            }
+            if (form == 1)
+            {
+                ++cx_.forall->read_classes;
+            }
         }
         if (cx_.loop_clause && av == nullptr && index_reads_memory(ix))
         {
@@ -4784,6 +4805,31 @@ private:
         return nullptr;
     }
 
+    // a quantifier anywhere in `x` (record 0061: a loop invariant or a `check` that holds one keeps its Bool tree, as a contract does, so that check.cpp sees the
+    // positive positions through C's `&&` and `||` of type `int`)
+    static bool holds_forall(const Expr& x)
+    {
+        if (x.kind == Expr::Kind::Forall)
+        {
+            return true;
+        }
+        for (const Expr* y : {x.a, x.b, x.c})
+        {
+            if (y != nullptr && holds_forall(*y))
+            {
+                return true;
+            }
+        }
+        for (const Expr* y : x.args)
+        {
+            if (y != nullptr && holds_forall(*y))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static bool holds_atom(const Expr& x)
     {
         if (x.kind == Expr::Kind::Atom)
@@ -4821,7 +4867,9 @@ private:
         // its Bool tree, so that the position rule of decision 0037 item 5 sees the conjuncts; programs without such nodes keep their shape.
         // a loop invariant too, only when it holds an atom (decision 0040 item 5): every other clause keeps its old
         // shape
-        if ((cx_.contract || (cx_.loop_invariant && holds_atom(*x))) && x->type.is_int() && vir::reads_heap(*x))
+        if ((cx_.contract || (cx_.loop_invariant && holds_atom(*x)) ||
+             ((cx_.loop_invariant || cx_.check_clause) && holds_forall(*x))) &&
+            x->type.is_int() && vir::reads_heap(*x))
         {
             if (const Expr* t = contract_truth(x))
             {
@@ -9278,6 +9326,7 @@ private:
     std::set<an_expr_node_ptr> forall_ok_;
 
     std::set<an_expr_node_ptr> forall_left_of_or_;
+    std::set<an_expr_node_ptr> forall_not_conjunct_;
     void collect_forall_calls(an_expr_node_ptr n, std::set<an_expr_node_ptr>& out, int depth)
     {
         if (n == nullptr || n->kind != enk_operation || depth > 64)
@@ -9318,7 +9367,12 @@ private:
             return;
         }
         const std::vector<an_expr_node_ptr> ops {operands_of(n)};
-        if (k == eok_lor && ops.size() == 2U)
+        if (!cx_.contract && (k == eok_lor || k == eok_question))
+        {
+            // a loop invariant or a `check`: only a top-level `&&` conjunct is read (question 262, M4.8), so a quantifier under `||` or in an arm of `?:` is refused
+            collect_forall_calls(n, forall_not_conjunct_, 0);
+        }
+        else if (k == eok_lor && ops.size() == 2U)
         {
             // a quantifier on the left of `||` (anywhere in the left operand) is refused: the right operand's obligations would stand under `!(forall ...)`, a
             // quantifier in a guard (check.cpp mark_forall_positions; M4.8): write the plain condition first, `g || forall(...)`
@@ -9357,17 +9411,52 @@ private:
         return b_.forall_arg(q.id, it->second - 1, q.types[s], q.names[s], l);
     }
 
-    // A pointer argument the body of `f` reads through must be a bare pointer parameter of the contract (item 3): `&a[1]`, `p + 1`, a loaded pointer and
-    // the result are M4.5e2's.  Reports and returns false otherwise.
+    // A pointer argument the body of `f` reads through must be, in a contract, a bare pointer parameter; in a loop invariant or a `check`, a pointer variable
+    // that is not address-taken (`Local`) or a named local array (its decay collapsed to the array: `AddrOf` of the array local, the base the encoder gives
+    // `a[i]` of a named array) (item 3): `&a[1]`, `p + 1`, a loaded pointer, a global array and the result are M4.5e2's (e1e's).  Reports and returns false
+    // otherwise.
     bool forall_base_ok(const Expr& fa, const a_source_position& at)
     {
         const ForallSite& q {*cx_.forall};
-        if (fa.arg_index < 0 || static_cast<size_t>(fa.arg_index) >= q.args.size() ||
-            q.args[static_cast<size_t>(fa.arg_index)]->kind != Expr::Kind::Formal)
+        const Expr* a {fa.arg_index >= 0 && static_cast<size_t>(fa.arg_index) < q.args.size()
+                           ? q.args[static_cast<size_t>(fa.arg_index)]
+                           : nullptr};
+        bool ok {false};
+        if (a != nullptr)
+        {
+            if (cx_.contract)
+            {
+                ok = a->kind == Expr::Kind::Formal;
+            }
+            else
+            {
+                ok =
+                    (a->kind == Expr::Kind::Local && a->var != nullptr && !a->var->address_taken && a->type.is_ptr()) ||
+                    (a->kind == Expr::Kind::AddrOf && a->type.is_ptr() && a->type.pointee != nullptr &&
+                     a->type.pointee->is_array());
+            }
+        }
+        if (!ok)
         {
             reject(
                 Diag::unsupported_annotation, at,
-                "an element of a pointer argument of a quantifier that is not a bare pointer parameter of the contract (`&a[1]`, `p + 1`, a loaded pointer, the result: M4.5e2, decision 0061 item 1)");
+                cx_.contract
+                    ? "an element of a pointer argument of a quantifier that is not a bare pointer parameter of the contract (`&a[1]`, `p + 1`, a loaded pointer, the result: M4.5e2, decision 0061 item 1)"
+                    : "an element of a pointer argument of a quantifier that is not a pointer variable (not address-taken) or a named local array (`&a[1]`, `p + 1`, a loaded pointer, a global array, a structure's member: M4.5e2, e1e, decision 0061 item 1)");
+        }
+        return ok;
+    }
+    // `*p` of a pointer argument in a loop invariant or a `check`: a pointer variable's own cell read (the element 0 of a named array is written `a[0]`).
+    bool forall_deref_ok(const Expr& fa, const a_source_position& at)
+    {
+        if (!forall_base_ok(fa, at))
+        {
+            return false;
+        }
+        if (!cx_.contract && cx_.forall->args[static_cast<size_t>(fa.arg_index)]->kind == Expr::Kind::AddrOf)
+        {
+            reject(Diag::unsupported_annotation, at,
+                   "`*p` of a quantifier's array argument (write `a[0]`: M4.5e2, decision 0061 item 1)");
             return false;
         }
         return true;
@@ -9754,7 +9843,6 @@ private:
             case Expr::Kind::Convert:
             case Expr::Kind::ToBool:
             case Expr::Kind::BoolToInt:
-            case Expr::Kind::ReportAt:
             case Expr::Kind::Deref:
             case Expr::Kind::ElemAddr:
             case Expr::Kind::Old:
@@ -9809,6 +9897,149 @@ private:
         return nullptr;
     }
 
+    // The shapes of a quantifier's body that check.cpp refuses in a loop invariant and a `check` (record 0061 items 4 and 10, question 259: listed limits, M4.5e2),
+    // mirrored so that the user meets this diagnostic at the quantifier: the address of an element used as a value, a pointer argument used as a value (`p != q`,
+    // `p == NULL`); in a `check` also an element of pointer type and a read the bound variable does not index (`a[r]`, `*p`).  Reports once and returns false.
+    bool forall_loop_body_ok(const Expr& x, int id, bool in_check, const a_source_position& at)
+    {
+        auto refuse = [&](const char* why)
+        {
+            reject(Diag::unsupported_annotation, at,
+                   std::string("a quantifier in a loop invariant or a `check` whose function has ") + why +
+                       " (M4.5e2, decision 0061 question 259)");
+            return false;
+        };
+        if (x.kind == Expr::Kind::Deref && x.a != nullptr)
+        {
+            if (in_check && x.type.is_ptr())
+            {
+                return refuse("an element of pointer type read in a `check`");
+            }
+            const Expr* addr {x.a};
+            if (addr->kind == Expr::Kind::ElemAddr)
+            {
+                if (in_check && !mentions_bound(addr->b, id))
+                {
+                    return refuse("a read the quantified variable does not index (`a[r]`) in a `check`");
+                }
+                return (addr->a != nullptr && addr->a->kind == Expr::Kind::ForallArg
+                            ? true
+                            : forall_loop_body_ok(*addr->a, id, in_check, at)) &&
+                       forall_loop_body_ok(*addr->b, id, in_check, at);
+            }
+            if (addr->kind == Expr::Kind::ForallArg)
+            {
+                if (in_check)
+                {
+                    return refuse("a read the quantified variable does not index (`*p`) in a `check`");
+                }
+                return true; // `*p` of a pointer argument: its base is this read's own
+            }
+        }
+        if (x.kind == Expr::Kind::ElemAddr)
+        {
+            return refuse("the address of an element used as a value");
+        }
+        if (x.kind == Expr::Kind::ForallArg && x.type.is_ptr())
+        {
+            return refuse("a pointer argument used as a value (`p != q`, `p == NULL`)");
+        }
+        for (const Expr* y : {x.a, x.b, x.c})
+        {
+            if (y != nullptr && !forall_loop_body_ok(*y, id, in_check, at))
+            {
+                return false;
+            }
+        }
+        for (const Expr* y : x.args)
+        {
+            if (y != nullptr && !forall_loop_body_ok(*y, id, in_check, at))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // The read classes of a body in the order lowering numbers them (`fq_collect`: the first read met in the order node, `a`, `b`, `c`, `args`, then the next new one).
+    static void forall_class_order(const Expr* e, int id, std::vector<std::pair<int, long long>>& out)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        if (e->kind == Expr::Kind::Deref && e->a != nullptr && e->a->kind == Expr::Kind::ElemAddr &&
+            e->a->a != nullptr && e->a->a->kind == Expr::Kind::ForallArg && mentions_bound(e->a->b, id))
+        {
+            long long c {0};
+            if (forall_index_form(e->a->b, id, &c))
+            {
+                const std::pair<int, long long> k {e->a->a->arg_index, c};
+                if (std::find(out.begin(), out.end(), k) == out.end())
+                {
+                    out.push_back(k);
+                }
+            }
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            forall_class_order(x, id, out);
+        }
+        for (const Expr* x : e->args)
+        {
+            forall_class_order(x, id, out);
+        }
+    }
+    // In a loop invariant or a `check`, arithmetic (a binary operator that is no comparison or logical connective, a unary operator or a conversion) over a read of a class other than
+    // the first (question 261: the obligation of the arithmetic is a row of the first class's view, which would read the other class's slot before its own rows; M4.5e2).
+    // Comparisons of plain reads and arithmetic on the first class's reads alone are accepted.  True when `e` holds such arithmetic.
+    static bool forall_later_class_arithmetic(const Expr* e, int id, const std::pair<int, long long>& first)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        bool arithmetic {false};
+        if (e->kind == Expr::Kind::Binary)
+        {
+            arithmetic = e->bop != vir::BinaryOp::Lt && e->bop != vir::BinaryOp::Le && e->bop != vir::BinaryOp::Gt &&
+                         e->bop != vir::BinaryOp::Ge && e->bop != vir::BinaryOp::Eq && e->bop != vir::BinaryOp::Ne &&
+                         e->bop != vir::BinaryOp::LAnd && e->bop != vir::BinaryOp::LOr;
+        }
+        else if (e->kind == Expr::Kind::Unary || e->kind == Expr::Kind::Convert)
+        {
+            arithmetic =
+                true; // as check.cpp: a unary operator (`!` included) or a conversion over one other class's read
+        }
+        if (arithmetic)
+        {
+            std::vector<std::pair<int, long long>> in;
+            forall_class_order(e, id, in);
+            for (const auto& k : in)
+            {
+                if (k != first)
+                {
+                    return true;
+                }
+            }
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (forall_later_class_arithmetic(x, id, first))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (forall_later_class_arithmetic(x, id, first))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // `cerastes::forall(...)`, the namespace spelling, in every position of verify mode (record 0061 item 2, cut 3: P80 (b) found that an rvalue argument is
     // an `enk_temp_init` that the annotation reader refuses, so no one rule reads every argument).
     const Expr* forall_namespace(an_expr_node_ptr e, const std::string& name, const std::vector<an_expr_node_ptr>& ops)
@@ -9839,20 +10070,20 @@ private:
         {
             return refuse("inside the function of a quantifier (a nested quantifier: M4.8, question 249)");
         }
-        if (!cx_.contract)
+        if (cx_.loop_clause)
         {
-            if (cx_.loop_clause && !cx_.loop_invariant)
+            // a loop invariant (record 0061 item 9); a measure and the invariant of a `do ... while (0)` loop are M4.8's
+            if (!cx_.loop_invariant)
             {
                 return refuse("in a loop's `decreases` (M4.8)");
             }
-            if (cx_.loop_clause)
+            if (!cx_.invariant_atoms_ok)
             {
-                return refuse("in a loop invariant (M4.5e1c, staging: part C lifts it)");
+                return refuse("in the invariant of a `do ... while (0)` loop (M4.8)");
             }
-            if (cx_.check_clause)
-            {
-                return refuse("in a `check` (M4.5e1c, staging: part C lifts it)");
-            }
+        }
+        else if (!cx_.contract && !cx_.check_clause)
+        {
             return refuse("in this annotation");
         }
         if (cx_.owning_count)
@@ -9866,6 +10097,11 @@ private:
         if (cx_.old_depth > 0)
         {
             return refuse("under `old` (M4.8)");
+        }
+        if (forall_not_conjunct_.count(e) != 0U)
+        {
+            return refuse(
+                "that is not a top-level `&&` conjunct of a loop invariant or a `check` (under `||` or in a `?:` arm: M4.8, question 262; write `g && forall(...)` as two conjuncts or a contract)");
         }
         if (forall_left_of_or_.count(e) != 0U)
         {
@@ -9948,17 +10184,45 @@ private:
                     "a pointer argument of a quantifier that is not a bare pointer parameter of the contract (`&a[1]`: M4.5e2, decision 0061 item 1)");
                 return nullptr;
             }
-            const Expr* x {expr(use)};
-            if (x == nullptr)
+            const Expr* x {nullptr};
+            if (pm.type.is_ptr() && !cx_.contract && array_variable(use) != nullptr)
             {
-                return nullptr;
+                // a named local array in a loop invariant or a `check`: its decay collapsed to the array (`AddrOf` of the local, the base `a[i]` of a named array
+                // has), so that the array's rows (`inv_elem`, bound and flag) match in lowering (record 0061 item 3)
+                a_variable_ptr av {array_variable(use)};
+                auto it {cx_.vars.find(av)};
+                if (cx_.rejected_vars.count(av) != 0U || it == cx_.vars.end() || !it->second->type.is_array() ||
+                    cx_.declaring == av || cx_.pending.count(av) != 0U)
+                {
+                    if (it == cx_.vars.end() && cx_.rejected_vars.count(av) == 0U)
+                    {
+                        reject(
+                            Diag::unsupported_annotation, written->position,
+                            "an array argument of a quantifier that is not a local array of this function (a global array: M4.5e1e, decision 0061 item 1)");
+                    }
+                    return nullptr;
+                }
+                x = b_.addr_of(it->second, loc_of(use->position));
+                if (it->second->type.element == nullptr || !(*it->second->type.element == *pm.type.pointee))
+                {
+                    mismatch(render_type(use->type));
+                    return nullptr;
+                }
             }
-            if (x->type != pm.type)
+            else
             {
-                mismatch(render_type(use->type));
-                return nullptr;
+                x = expr(use);
+                if (x == nullptr)
+                {
+                    return nullptr;
+                }
+                if (x->type != pm.type)
+                {
+                    mismatch(render_type(use->type));
+                    return nullptr;
+                }
             }
-            if (mentions_old(x) || vir::reads_heap(*x))
+            if (mentions_old(x) || vir::reads_heap(*x) || index_reads_memory(x))
             {
                 reject(
                     Diag::unsupported_annotation, written->position,
@@ -10015,7 +10279,11 @@ private:
         cx_.forall = &q;
         truth_context(fn.body);
         const Expr* body {clause_bool(expr(fn.body), at)};
-        const bool ok {body != nullptr && forall_body_ok(*body, at)};
+        bool ok {body != nullptr && forall_body_ok(*body, at)};
+        if (ok && !cx_.contract)
+        {
+            ok = forall_loop_body_ok(*body, q.id, cx_.check_clause, at);
+        }
         cx_.forall = saved;
         if (!ok)
         {
@@ -10039,10 +10307,21 @@ private:
                 }
             }
         }
+        if (!cx_.contract)
+        {
+            std::vector<std::pair<int, long long>> order;
+            forall_class_order(body, q.id, order);
+            if (order.size() > 1U && forall_later_class_arithmetic(body, q.id, order.front()))
+            {
+                return refuse(
+                    "in a loop invariant or a `check` whose function does arithmetic on a read of a class other than the first (`a[k] < a[k + 1] + 1`, `p[k] == q[k] + 1`: compare plain reads, or "
+                    "compute on the first class's reads; M4.5e2, question 261)");
+            }
+        }
         std::string text {"forall(" + fn.name};
         for (const Expr* a : args)
         {
-            const std::string t {count_text(a)};
+            const std::string t {a->kind == Expr::Kind::AddrOf && a->var != nullptr ? a->var->name : count_text(a)};
             text += ", " + (t.empty() ? std::string("...") : t);
         }
         text += ")";
@@ -10925,22 +11204,29 @@ private:
             {
                 return forall_namespace(e, name, ops);
             }
+            if (cx_.forall != nullptr && qf != SpecFn::none)
+            {
+                // record 0061 items 4 and 8: the body of a quantifier's function holds values and reads, never an atom; `cerastes_old` under the binder is read
+                // where `old` is read (an `ensures`, through contract_read), and is `old_outside_ensures` here, in a loop invariant (M4.5e2 lifts it: record 0061 item 12, cut 1) and in a check
+                if (qf == SpecFn::old_c)
+                {
+                    reject(Diag::old_outside_ensures, e->position, "");
+                }
+                else
+                {
+                    reject(
+                        Diag::unsupported_annotation, e->position,
+                        "\"" + name +
+                            "\" in the function of a quantifier (its body is a boolean expression over its parameters and their elements, decision 0061 item 4)");
+                }
+                return nullptr;
+            }
         }
         if (cx_.contract || cx_.loop_clause)
         {
             // Decision 0037 item 5: the permission atoms, by entity, in both spellings (spec_atom refuses them outside a contract, decision 0038
             // item 10); before 0006's rejection of every other call.
             const SpecFn fn {spec_fn(callee)};
-            if (cx_.forall != nullptr && fn != SpecFn::none)
-            {
-                // record 0061 item 4: the body of a quantifier's function holds values and reads, never an atom
-                reject(
-                    Diag::unsupported_annotation, e->position,
-                    "\"" + name +
-                        "\" in the function of a quantifier (its body is a boolean expression over its parameters and their elements, "
-                        "decision 0061 item 4)");
-                return nullptr;
-            }
             if (fn == SpecFn::owns || fn == SpecFn::reads || fn == SpecFn::live)
             {
                 return spec_atom(e, fn, name, ops);
@@ -12921,6 +13207,18 @@ private:
         {
             return contract_read(e, ops); // decision 0037 items 5 and 7
         }
+        if (cx_.forall != nullptr && ops[0U]->kind == enk_operation && ops[0U]->variant.operation.kind == eok_cast &&
+            ops[0U]->variant.operation.operands != nullptr && ops[0U]->variant.operation.operands->next == nullptr)
+        {
+            // C's `cerastes_old(e)` under the binder in a loop invariant or a `check`: `old_outside_ensures` at the site (record 0061 item 8;
+            // M4.5e2 lifts it for an invariant: record 0061 item 12, cut 1)
+            a_routine_ptr callee {direct_callee(ops[0U]->variant.operation.operands)};
+            if (callee != nullptr && spec_fn(callee) == SpecFn::old_c)
+            {
+                reject(Diag::old_outside_ensures, e->position, "");
+                return nullptr;
+            }
+        }
         // A loop clause's `*p` is the attribute argument itself, unevaluated, so the front end leaves it an lvalue (P59 item 3, no conversion
         // around it): it is read as the value, as a contract's plain `*p` is (decision 0038 item 6).  `&*p` never gets here (address_of).
         if ((e->is_lvalue && !cx_.loop_clause) || cx_.contract ||
@@ -12939,6 +13237,10 @@ private:
         if (a == nullptr)
         {
             return nullptr;
+        }
+        if (a->kind == Expr::Kind::ForallArg && !forall_deref_ok(*a, e->position))
+        {
+            return nullptr; // record 0061 item 4
         }
         if (!a->type.is_ptr())
         {
@@ -15395,6 +15697,7 @@ private:
         cx_.annotation = true;
         cx_.check_clause = true;
         truth_context(arg); // decision 0023 item 5: `check(x | 4)`
+        mark_forall_positions(arg, 0);
         const Expr* c {clause_bool(expr(arg), arg->position)};
         cx_.check_clause = false;
         cx_.annotation = false;
@@ -15462,6 +15765,7 @@ private:
             cx_.loop_invariant = true;
             cx_.invariant_atoms_ok = atoms_ok;
             truth_context(arg); // decision 0023 item 5: `invariant(x | 4)`
+            mark_forall_positions(arg, 0);
             const Expr* c {clause_bool(expr(arg), arg->position)};
             const SrcLoc clause_loc {loc_of(a->position)};
             cx_.loop_invariant = false;

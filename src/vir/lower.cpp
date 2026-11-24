@@ -1736,6 +1736,14 @@ private:
         SrcLoc loc;
         std::string text; // the place as the user wrote it
         E guard;          // the condition under which the read is evaluated
+        // Record 0061 item 9: a read under a quantifier's binder.  `qvars`/`qsets`/`qante` quantify its framing (`guard` is then the quantifier's own, outside the binder); `fq_class` is the read class
+        // it belongs to (else -1); `in_fn` names `f`, whose body the read is in (`loc` is then the quantifier's site and `note_loc` the read)
+        int fq_class {-1};
+        std::vector<low::LVar> qvars;
+        std::vector<std::vector<E>> qsets;
+        E qante;
+        std::string in_fn;
+        SrcLoc note_loc;
     };
     struct Framing
     {
@@ -4149,6 +4157,7 @@ private:
         r.loc = e.loc;
         r.text = text;
         r.guard = guard;
+        r.fq_class = fq_ != nullptr ? fq_->cur_class : -1;
         inv_reads_.push_back(r);
         const E read {cell_value(p.e, t)};
         E v {inv_dummy(t)};
@@ -4207,6 +4216,17 @@ private:
     // The explicit framing condition of one read (decision 0038 item 6): `prior && guard ==> OR_i D_i`.
     E framing_condition(const InvRead& r, const E& prior)
     {
+        const E any {inv_framing_any(r)};
+        if (!r.qvars.empty())
+        {
+            // record 0061 item 9: the read is under a binder; the prior and the quantifier's guard stand outside it
+            return low::implies(low::and_(prior, r.guard), low::forall_(r.qvars, r.qsets, low::implies(r.qante, any)));
+        }
+        return low::implies(low::and_(prior, r.guard), any);
+    }
+    // The disjunction of the loop's places that frame the read `r`: what the framing assert requires
+    E inv_framing_any(const InvRead& r)
+    {
         E any;
         if (r.cell != nullptr)
         {
@@ -4261,7 +4281,26 @@ private:
                 any = low::bool_lit(false);
             }
         }
-        return low::implies(low::and_(prior, r.guard), any);
+        return any;
+    }
+    // The meta of a framing assert of a read (`what`: "invariant" or "measure"); a read inside a quantifier's body is reported at the quantifier's site, with a note at the read (question 247)
+    low::Meta inv_framing_meta(const InvRead& r, const Clause& c, const char* what)
+    {
+        low::Meta m;
+        m.category = "permission";
+        m.loc = r.loc.known() ? r.loc : c.loc;
+        m.message = r.cell != nullptr
+                        ? std::string("this loop ") + what + " reads `" + r.cell->name + "`, whose object a callee kept"
+                        : std::string("this loop ") + what + " reads " + quoted(r.text, "an object") +
+                              ", which this loop does not hold";
+        if (!r.in_fn.empty())
+        {
+            m.message = "in `" + r.in_fn + "`: " + m.message;
+            m.has_note = true;
+            m.note_loc = r.note_loc;
+            m.note_text = "this is the operation in `" + r.in_fn + "`";
+        }
+        return m;
     }
 
     // A cell written by name (`x = e;`, the declaration's initializer, `x += e;`), after the full expression of its value: the permission is
@@ -4297,6 +4336,10 @@ private:
     // 3a), the flag; the value `p.v_<t>`.
     LV deref(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
     {
+        if (fq_ != nullptr && (cmode_ == CMode::Inv || cmode_ == CMode::None))
+        {
+            return fq_loop_read(e, env, guard, gdep, full);
+        }
         if (cmode_ == CMode::Inv)
         {
             return inv_deref(e, env, guard, gdep, full);
@@ -6968,6 +7011,18 @@ private:
     // The quantifier being lowered (no nesting: check_program refuses it).  `view` -1: the joint view (the value: every class at its own binder, `i` from
     // class 0); `view` j: the one binder of class j (an obligation row: `i` from class j, the other classes' slots computed).  `cur_class`: the class of the
     // read being lowered, which every obligation made meanwhile carries.
+    // An element read of a `check`'s quantifier (record 0061 item 10): the rows of its class, written by `fq_check_rows` after the body is lowered
+    struct FqRead
+    {
+        int cls {0};
+        E base;                // the pointer variable (or the named array's block holder)
+        Type type;             // the element's
+        std::string text;      // `a[i]` as `f` spells it
+        std::string base_text; // the argument as the site spells it
+        SrcLoc loc;
+        bool array {false};
+        E guard; // the condition under which the read is evaluated, inside the body
+    };
     struct Fq
     {
         const Expr* node {nullptr};
@@ -6975,6 +7030,7 @@ private:
         std::vector<FqClass> classes;
         int view {-1};
         int cur_class {-1};
+        std::vector<FqRead> reads;
     };
     Fq* fq_ {nullptr};
     // the copies of the places of a body whose arguments are replaced by the site's (`fq_resolve`)
@@ -7027,6 +7083,49 @@ private:
             }
         }
         return false;
+    }
+    // `ToBool(BoolToInt(x))` is `x` (C's `&&` is an `int`; the encoder may leave the round trip)
+    static const Expr* bool_core(const Expr* e)
+    {
+        while (e != nullptr && e->kind == Expr::Kind::ToBool && e->a != nullptr &&
+               e->a->kind == Expr::Kind::BoolToInt && e->a->a != nullptr && e->a->a->type.is_bool())
+        {
+            e = e->a->a;
+        }
+        return e;
+    }
+    // The top-level `&&` conjuncts of `e` (through the `ToBool(BoolToInt(x))` round trip), in order
+    static void split_conjuncts_vir(const Expr* e, std::vector<const Expr*>& out)
+    {
+        const Expr* core {bool_core(e)};
+        if (core != nullptr && core->kind == Expr::Kind::Binary && core->bop == BinaryOp::LAnd)
+        {
+            split_conjuncts_vir(core->a, out);
+            split_conjuncts_vir(core->b, out);
+            return;
+        }
+        out.push_back(core);
+    }
+    // The clause `c` (its expression `e`) as invariant lines: one per top-level conjunct when it holds a quantifier, else itself
+    static void split_invariant(const Clause& c, const Expr* e, std::vector<Clause>& out)
+    {
+        const Expr* core {bool_core(e)};
+        if (!has_forall(core))
+        {
+            Clause plain {c};
+            plain.expr = e;
+            out.push_back(std::move(plain));
+            return;
+        }
+        if (core->kind == Expr::Kind::Binary && core->bop == BinaryOp::LAnd)
+        {
+            split_invariant(c, core->a, out);
+            split_invariant(c, core->b, out);
+            return;
+        }
+        Clause one {c};
+        one.expr = core;
+        out.push_back(std::move(one));
     }
     // The formals a quantifier of `e` subscripts by its bound variable (item 7: a call binds each to a local).
     static void fq_base_formals(const Expr* e, std::set<int>& out)
@@ -7281,9 +7380,9 @@ private:
     // i + c_j ==> body`; in `f__wf` the obligations of the body come out beside it, one quantified row each over their own class's binder.
     LV forall_expr(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
     {
-        if (fq_ != nullptr || cmode_ == CMode::None || cmode_ == CMode::Inv)
+        if (fq_ != nullptr)
         {
-            internal_error(e.loc, "a quantifier outside a contract, or inside another, reached lowering");
+            internal_error(e.loc, "a quantifier inside another reached lowering");
             return {low::bool_lit(true), {}};
         }
         Fq q;
@@ -7316,6 +7415,9 @@ private:
             }
         } scope(*this, &q);
         const bool wf {cmode_ == CMode::Wf};
+        // a loop invariant (Inv) or a `check` (None): the obligations are rows beside the value, the reads' framing is `inv_reads_` or `fq_check_rows` (items 9, 10)
+        const bool loop {cmode_ == CMode::Inv || cmode_ == CMode::None};
+        const size_t reads_mark {inv_reads_.size()};
         // the joint view: the value
         Full body_full;
         const LV v {lower(*e.a, env, nullptr, Deps {}, body_full)};
@@ -7365,7 +7467,7 @@ private:
                 low::and_(antecedent, low::bin(low::BinOp::Eq, low::var(q.classes[j].binder), fq_slot_from(q, j, 0U)));
         }
         const E value {low::forall_(binders, sets, low::implies(antecedent, v.e))};
-        if (wf)
+        if (wf || loop)
         {
             // one quantified row per obligation of the body, over its own class's binder (`prior` stays outside: the row is `prior && guard ==> forall ...`)
             // The ghost applications in `x`: whether one is at the view's own binder and whether one is at anything else (a computed slot: another class), so that a row holds the
@@ -7409,8 +7511,11 @@ private:
                     }
                     bool own {false};
                     bool other {false};
-                    apps(o.guard, view, &own, &other);
-                    apps(o.cond, view, &own, &other);
+                    if (wf)
+                    {
+                        apps(o.guard, view, &own, &other);
+                        apps(o.cond, view, &own, &other);
+                    }
                     // the rows of class `view`; those that read no class at all (the guard's arithmetic, a scalar read's framing) belong to view 0; an untagged row that reads one
                     // class belongs to that class's view; a row that reads two is refused by check_program, and an internal error here (never dropped)
                     const bool tagged_mine {o.fq_class == static_cast<int>(view)};
@@ -7421,6 +7526,7 @@ private:
                             "an obligation of a quantifier's body that mentions the reads of two classes reached lowering");
                         continue;
                     }
+                    // an invariant or a check has no ghost applications: an untagged obligation (arithmetic over the bound variable, a read the binder does not index) is class 0's
                     const bool mine {tagged_mine ||
                                      (o.fq_class < 0 && ((own && !other) || (view == 0U && !own && !other)))};
                     if (!mine)
@@ -7447,23 +7553,237 @@ private:
                     obl(full, guard, gdep, row, adep, fq_site_meta(o.meta, e));
                 }
             };
+            // an invariant: the framing of each read the pass recorded is quantified over its class's binder (`inv_reads_` from `from`); the reads of other classes are dropped (their own pass has them)
+            const auto quantify_reads = [&](size_t from, size_t view)
+            {
+                size_t kept {from};
+                for (size_t k {from}; k < inv_reads_.size(); ++k)
+                {
+                    InvRead r {std::move(inv_reads_[k])};
+                    if (!(r.fq_class == static_cast<int>(view) || (r.fq_class < 0 && view == 0U)))
+                    {
+                        continue;
+                    }
+                    r.qvars = {low::LVar {q.classes[view].binder, low::LType::Int}};
+                    r.qsets = {{trigger_of(view, 0U)}};
+                    r.qante = low::and_(range_check(fq_ival(q, view), *e.bound_type), r.guard);
+                    r.guard = guard;
+                    r.in_fn = e.forall_name;
+                    r.note_loc = r.loc;
+                    r.loc = e.loc;
+                    inv_reads_[kept++] = std::move(r);
+                }
+                inv_reads_.resize(kept);
+            };
             if (q.classes.size() == 1U)
             {
+                if (cmode_ == CMode::Inv)
+                {
+                    quantify_reads(reads_mark, 0U);
+                }
+                else if (cmode_ == CMode::None)
+                {
+                    fq_check_rows(q, e, 0U, guard, gdep, adep, full);
+                    q.reads.clear();
+                }
                 rows(body_full, 0U, true);
             }
             else
             {
+                if (loop)
+                {
+                    inv_reads_.resize(reads_mark); // the joint view's reads are not rows of any class
+                    q.reads.clear();
+                }
                 for (size_t view {0U}; view < q.classes.size(); ++view)
                 {
                     Full vf;
                     q.view = static_cast<int>(view);
+                    const size_t mark {inv_reads_.size()};
                     lower(*e.a, env, nullptr, Deps {}, vf);
+                    if (cmode_ == CMode::Inv)
+                    {
+                        quantify_reads(mark, view);
+                    }
+                    else if (cmode_ == CMode::None)
+                    {
+                        fq_check_rows(q, e, view, guard, gdep, adep, full);
+                        q.reads.clear();
+                    }
                     rows(vf, view, false);
                 }
             }
             q.view = -1;
         }
         return {value, adep};
+    }
+
+    // Audit round 3, note 7: the flag line of a read `inv_read_at` recorded (its last obligation) is guarded by the read's framing, as the bound guards a named array's, so a read no place
+    // holds is reported once, as `permission` at the framing assert, and not also as `uninitialized` through the chain's dummy `false`
+    void frame_flag_line(size_t reads_before, size_t obls_before, Full& full)
+    {
+        if (inv_reads_.size() > reads_before && full.obls.size() > obls_before)
+        {
+            Obl& flag {full.obls.back()};
+            flag.guard = low::and_(flag.guard, inv_framing_any(inv_reads_.back()));
+        }
+    }
+    // An element read in the body of a quantifier in a loop invariant (Inv) or a `check` (None), record 0061 items 9 and 10.  A read the binder indexes is the cell at the absolute slot of its
+    // class's binder; its obligations are tagged with the class and `forall_expr` quantifies them (an invariant: `inv_reads_` carries the framing; a check: `fq_check_rows`).  In an invariant a read the
+    // binder does not index is the plain invariant read over the site's own expressions; in a check `check_program` refuses one.
+    LV fq_loop_read(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
+    {
+        const int cls {e.a != nullptr ? fq_binder_class(*e.a) : -1};
+        if (cls < 0)
+        {
+            if (cmode_ == CMode::None)
+            {
+                internal_error(
+                    e.loc, "a read the bound variable does not index in a quantifier of a `check` reached lowering");
+                return {inv_dummy(e.type), {}};
+            }
+            fq_arena_.push_back(e);
+            Expr* copy {&fq_arena_.back()};
+            copy->a = fq_resolve(e.a);
+            const size_t reads_before {inv_reads_.size()};
+            const size_t obls_before {full.obls.size()};
+            LV r {inv_deref(*copy, env, guard, gdep, full)};
+            frame_flag_line(reads_before, obls_before, full);
+            return r;
+        }
+        struct ClassReset
+        {
+            Fq* q;
+            ~ClassReset()
+            {
+                q->cur_class = -1;
+            }
+        } class_reset {fq_};
+        fq_->cur_class = cls;
+        const FqClass& cl {fq_->classes[static_cast<size_t>(cls)]};
+        const Expr& arg {*fq_->node->args[static_cast<size_t>(cl.arg)]};
+        const E bv {fq_->args[static_cast<size_t>(cl.arg)].e};
+        const bool named {arg.kind == Expr::Kind::AddrOf && arg.var != nullptr && arg.var->type.is_array()};
+        // the index's own obligation (`i + c` may overflow) is a row of this class; the value is the slot
+        const LV idx {lower(*e.a->b, env, guard, gdep, full)};
+        const E off {fq_slot(*fq_, static_cast<size_t>(cls))};
+        const E slot {low::dom("loc", {block_of(bv), off})};
+        const std::string text {e.c_text.empty() ? std::string() : e.c_text};
+        const Type& t {e.type};
+        if (cmode_ == CMode::None)
+        {
+            if (fq_->view < 0 || fq_->view == cls)
+            {
+                FqRead r;
+                r.cls = cls;
+                r.base = bv;
+                r.type = t;
+                r.text = text;
+                r.base_text = named ? arg.var->name : arg.c_text;
+                r.loc = e.loc;
+                r.array = named;
+                r.guard = guard;
+                fq_->reads.push_back(std::move(r));
+            }
+            return {cell_value(slot, t), idx.dep};
+        }
+        if (!named)
+        {
+            const size_t reads_before {inv_reads_.size()};
+            const size_t obls_before {full.obls.size()};
+            LV r {inv_read_at(e, LV {slot, idx.dep}, text, guard, gdep, full)};
+            frame_flag_line(reads_before, obls_before, full);
+            return r;
+        }
+        // a named array: the bound is an obligation, and the flag's read takes the bound in its guard (audit round 1, N14), so a slot outside the array is reported by the bound and the framing alone
+        using low::BinOp;
+        const E in {low::not_(low::bin(BinOp::Or, low::bin(BinOp::Lt, off, low::int_lit("0")),
+                                       low::bin(BinOp::Le, low::dom("len", {block_of(bv)}), off)))};
+        const std::string place {quoted(text, "an element of the array")};
+        obl(full, guard, gdep, in, idx.dep,
+            meta("out-of-bounds", e.loc,
+                 "this loop " + inv_what_ + " reads " + place + ", whose index may be outside `" + arg.var->name +
+                     "`"));
+        obl(full, low::and_(guard, in), gdep, cell_flag(slot, t), idx.dep,
+            meta("uninitialized", e.loc, "this loop " + inv_what_ + " reads " + place + " before it is given a value"));
+        InvRead r;
+        r.ptr = slot;
+        r.type = t;
+        r.loc = e.loc;
+        r.text = text;
+        r.guard = guard;
+        r.fq_class = cls;
+        inv_reads_.push_back(std::move(r));
+        return {low::ite(in, cell_value(slot, t), inv_dummy(t)), idx.dep};
+    }
+
+    // The rows of the element reads of a `check`'s quantifier that belong to class `view` (record 0061 item 10), in order: for a pointer base the null row and the liveness row (`kq := perm(lvloc(...).lv)`
+    // first: `perm` may not stand under a quantifier), the bound of a named array, the marked wildcard rows for the value field and the flag field, the flag row.  Each is one row over the class's binder, under
+    // the site's `guard` and the read's own path, reported at the site with a note at the read (question 247).  A failed marked row ends its path.
+    void fq_check_rows(Fq& q, const Expr& site, size_t view, const E& guard, const Deps& gdep, const Deps& adep,
+                       Full& full)
+    {
+        using low::BinOp;
+        const FqClass& cl {q.classes[view]};
+        const E binder {low::var(cl.binder)};
+        for (const FqRead& r : q.reads)
+        {
+            if (r.cls != static_cast<int>(view))
+            {
+                continue;
+            }
+            const E slot {low::dom("loc", {block_of(r.base), binder})};
+            const E ante {low::and_(range_check(fq_ival(q, view), *site.bound_type), r.guard)};
+            const auto row = [&](const E& reach, const E& cond)
+            {
+                return low::forall_({low::LVar {cl.binder, low::LType::Int}}, {{slot}}, low::implies(reach, cond));
+            };
+            const std::string place {quoted(r.text, "an element")};
+            if (!r.array)
+            {
+                obl(full, guard, gdep, row(ante, low::bin(BinOp::Ne, r.base, low::null_())), adep,
+                    fq_site_meta(meta("null-dereference", r.loc,
+                                      "dereferences " + quoted(r.base_text, "the pointer") + ", which may be null"),
+                                 site));
+                const std::string kq {new_temp(low::LType::Perm)};
+                obl(full, nullptr, gdep, low::bool_lit(true), adep,
+                    meta("internal", site.loc, "internal check: the liveness of a quantifier's pointer"));
+                std::vector<low::LStmt>& st {full.obls.back().stmts};
+                assign(st, kq, live_perm(r.base));
+                emit_assert(st, low::implies(guard, row(ante, low::bin(BinOp::Gt, low::var(kq), low::no_perm()))),
+                            fq_site_meta(meta("lifetime", r.loc,
+                                              "uses " + quoted(r.base_text, "the pointer") +
+                                                  " after the object it points to may have ended"),
+                                         site));
+            }
+            else
+            {
+                const E in {low::not_(low::bin(BinOp::Or, low::bin(BinOp::Lt, binder, low::int_lit("0")),
+                                               low::bin(BinOp::Le, low::dom("len", {block_of(r.base)}), binder)))};
+                obl(full, guard, gdep, row(ante, in), adep,
+                    fq_site_meta(
+                        meta("out-of-bounds", r.loc,
+                             "reads " + place + ", whose index may be outside " + quoted(r.base_text, "the array")),
+                        site));
+            }
+            const E reach {low::and_(ante, guard)};
+            obl(full, nullptr, gdep, low::bool_lit(true), adep,
+                meta("internal", site.loc, "internal check: the marked rows of a quantifier's reads"));
+            std::vector<low::LStmt>& marked {full.obls.back().stmts};
+            for (const char* f : {"v_", "d_"})
+            {
+                emit_marked_row(
+                    marked, row(reach, low::acc(slot, f + use_cell_type(r.type), low::var("wildcard"))),
+                    fq_site_meta(meta("permission", r.loc,
+                                      "reads " + place + " without owning it: " +
+                                          (r.array ? std::string("a callee may have kept its object")
+                                                   : std::string("the object it points to may have ended"))),
+                                 site));
+            }
+            obl(full, guard, gdep, row(ante, cell_flag(slot, r.type)), adep,
+                fq_site_meta(meta("uninitialized", r.loc, place + " may be read here before it is given a value"),
+                             site));
+        }
     }
 
     // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
@@ -12187,10 +12507,23 @@ private:
                 break;
             case Stmt::Kind::Check:
             {
-                LV v {full_expr(*s.expr, out)};
-                emit_assert(
-                    out, v.e,
-                    meta("check", s.loc, s.from_assert ? "this `assert` may not hold" : "this `check` may not hold"));
+                // record 0061 item 10, question 262: a `check` that holds a quantifier is one assert per top-level conjunct, in order (each at the check's line, as the loop's lines are)
+                std::vector<const Expr*> parts;
+                if (!s.from_assert && has_forall(s.expr))
+                {
+                    split_conjuncts_vir(s.expr, parts);
+                }
+                else
+                {
+                    parts.push_back(s.expr);
+                }
+                for (const Expr* part : parts)
+                {
+                    LV v {full_expr(*part, out)};
+                    emit_assert(out, v.e,
+                                meta("check", s.loc,
+                                     s.from_assert ? "this `assert` may not hold" : "this `check` may not hold"));
+                }
                 break;
             }
             case Stmt::Kind::Block:
@@ -17045,7 +17378,14 @@ private:
         inv_places_ = &inv_all;
         inv_ranges_ = &ranges;
         inv_arrays_ = &arrays;
+        // record 0061 item 9: a clause that holds a quantifier is written as one invariant line per top-level conjunct (as `push_clauses` splits a contract clause), so each user
+        // quantifier is a line of its own and the quantifiers of a later line's prior are earlier lines; a clause with none is as written
+        std::vector<Clause> user_invariants;
         for (const Clause& c : s.invariants)
+        {
+            split_invariant(c, c.expr, user_invariants);
+        }
+        for (const Clause& c : user_invariants)
         {
             Full full;
             LV v;
@@ -17059,14 +17399,7 @@ private:
             }
             for (const InvRead& r : inv_reads_)
             {
-                low::Meta m;
-                m.category = "permission";
-                m.loc = r.loc.known() ? r.loc : c.loc;
-                m.message = r.cell != nullptr
-                                ? "this loop invariant reads `" + r.cell->name + "`, whose object a callee kept"
-                                : "this loop invariant reads " + quoted(r.text, "an object") +
-                                      ", which this loop does not hold";
-                framings.push_back(Framing {framing_condition(r, prior), std::move(m)});
+                framings.push_back(Framing {framing_condition(r, prior), inv_framing_meta(r, c, "invariant")});
             }
             inv_reads_.clear();
             pure_full(full, *c.expr, "a loop invariant");
@@ -17107,14 +17440,7 @@ private:
             }
             for (const InvRead& r : inv_reads_)
             {
-                low::Meta m;
-                m.category = "permission";
-                m.loc = r.loc.known() ? r.loc : c.loc;
-                m.message =
-                    r.cell != nullptr
-                        ? "this loop measure reads `" + r.cell->name + "`, whose object a callee kept"
-                        : "this loop measure reads " + quoted(r.text, "an object") + ", which this loop does not hold";
-                framings.push_back(Framing {framing_condition(r, prior), std::move(m)});
+                framings.push_back(Framing {framing_condition(r, prior), inv_framing_meta(r, c, "measure")});
             }
             inv_reads_.clear();
             pure_full(mfull, *c.expr, "a loop measure");

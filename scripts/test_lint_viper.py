@@ -7336,6 +7336,94 @@ class UserQuantifierTests(unittest.TestCase):
         q = self.uq(body="(loc(block_of(v_p), q0).v_int <= loc(block_of(v_p), offset_of(v_p) + v_n).v_int)")
         self.clean(self.method(requires=[q]))
 
+    def test_an_earlier_invariant_clause_may_stand_in_the_prior_of_a_loops_rows(self):
+        """Question 258 (0037 item 7's evaluation-order prior): a loop's obligation `invariant` line and its framing `assert` are `PRIOR ==> CONCLUSION` with
+        the loop's earlier quantified clauses among the conjuncts of the prior."""
+        q = self.uq()
+        q2 = self.uq(body="(loc(block_of(v_p), q0).d_int)")
+        prior = f"((v_n >= 0) && ({q}))"
+        loop = self.loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior} ==> ({q2})", f"{prior} ==> (!((v_n - i__1) < (-2147483648)))"])
+        self.clean(self.method(body=[self.row(f"{prior} ==> ({q2})"), self.row(f"{prior} ==> (!((v_n - 0) < (-2147483648)))"), *loop]))
+
+    def test_the_twins_of_the_quantifier_in_a_loop_rows_prior(self):
+        q = self.uq()
+        q2 = self.uq(body="(loc(block_of(v_p), q0).d_int)")
+        acc_q = self.uq(body="acc(loc(block_of(v_p), q0).v_int)")
+        old_q = self.uq(body="(loc(block_of(v_p), q0).v_int == old[lh_0](loc(block_of(v_p), q0).v_int))")
+        two_q = self.uq(trigger="{ loc(block_of(v_p), q0) } { loc(block_of(v_p), q0) }")
+        other = self.uq(body="(loc(block_of(v_p), q0).v_int >= 5)")
+        def prior(x):
+            return f"((v_n >= 0) && ({x}))"
+        def with_loop(invs, rows=()):
+            return self.method(body=[*rows, *self.loop(invs)])
+        cases = {
+            # a quantifier with acc in the prior of an obligation line (it is no clause of the loop either)
+            "a prior quantifier with acc": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(acc_q)} ==> ({q2})"]),
+            "a prior quantifier with a labelled old": with_loop(["0 <= i__1 && i__1 <= v_n", old_q, f"{prior(old_q)} ==> ({q2})"]),
+            "a prior quantifier with two trigger sets": with_loop(["0 <= i__1 && i__1 <= v_n", two_q, f"{prior(two_q)} ==> ({q2})"]),
+            "a prior quantifier that is no clause of a loop": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(other)} ==> ({q2})"]),
+            "a prior quantifier on a non-loop assert": self.method(body=[self.row(f"{prior(q)} ==> ({q2})")]),
+            "a prior quantifier in a requires": self.method(requires=[f"{prior(q)} ==> ({q2})"]),
+            "a prior quantifier in an ensures": self.method(ensures=[f"{prior(q)} ==> ({q2})"]),
+            "a prior quantifier in a requires beside a loop that has the clause": self.method(requires=[f"{prior(q)} ==> ({q2})"], body=self.loop(["0 <= i__1 && i__1 <= v_n", q])),
+            "a prior quantifier in an ensures beside a loop that has the clause": self.method(ensures=[f"{prior(q)} ==> ({q2})"], body=self.loop(["0 <= i__1 && i__1 <= v_n", q])),
+            "a prior condition that holds a permission": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"((perm(v_p.v_int) > none) && ({q})) ==> ({q2})"]),
+            "an assert prior condition that reads the heap": with_loop(["0 <= i__1 && i__1 <= v_n", q], rows=[self.row(f"((v_p.v_int > 0) && ({q})) ==> ({q2})")]),
+            "a conclusion with acc": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(q)} ==> {acc_q}"]),
+            "a conclusion that is a quantifier with two trigger sets": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(q)} ==> ({two_q})"]),
+            "a conclusion that holds a nested quantifier": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"{prior(q)} ==> (true && ({q2}))"]),
+            "a prior mixing && and || without parentheses": with_loop(["0 <= i__1 && i__1 <= v_n", q, f"((v_n >= 0) && (v_n >= 1) || ({q})) ==> ({q2})"]),
+        }
+        for label, lines in cases.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(lines), label)
+                self.assertTrue(any(not ok for _n, ok in self.verdicts(lines)), label)
+
+    def loop_of(self, var, invariants, back_edge=()):
+        """A `while` loop over `var` with its entry run's label, the invariants and `back_edge` asserts at the end of its body."""
+        return [f"  var {var}: Int := 0", f"  label lh_{var}", f"  while ({var} < v_n)",
+                *[Check(f"    invariant {i}", INV, "invariant-preserved") for i in invariants],
+                Check(f"    decreases v_n - {var}", "termination.failed", "termination"), "  {", f"    {var} := {var} + 1", *back_edge, "  }"]
+
+    def test_a_loops_prior_names_the_clauses_of_its_own_loop_only(self):
+        """Audit round 3, issue 3 (question 258): the quantifiers a prior may hold are the EARLIER `invariant` lines of the loop the line belongs to, and
+        for a framing `assert` the clauses of the loop it frames (its entry run, its body's last asserts); no other line has one.  An obligation
+        conditioned on another loop's clause is vacuous wherever that clause is false."""
+        q = self.uq()
+        q2 = self.uq(body="(loc(block_of(v_p), q0).d_int)")
+        other = self.uq(body="(loc(block_of(v_p), q0).v_int >= 5)")
+        other2 = self.uq(body="(loc(block_of(v_p), q0).v_int >= 6)")
+        base = "0 <= i__1 && i__1 <= v_n"
+        base2 = "0 <= j__2 && j__2 <= v_n"
+
+        def prior(x):
+            return f"((v_n >= 0) && ({x}))"
+        row = lambda x, y=q2: self.row(f"{prior(x)} ==> ({y})")  # noqa: E731
+        two_loops = lambda inv1, inv2, between=(), rows1=(), rows2=(), back1=(), back2=(): self.method(  # noqa: E731
+            body=[*rows1, *self.loop_of("i__1", inv1, back1), *between, *rows2, *self.loop_of("j__2", inv2, back2)])
+        # each loop with its own clauses, entry and back-edge asserts and obligation lines: clean
+        self.clean(two_loops([base, q, f"{prior(q)} ==> ({q2})"], [base2, other, f"{prior(other)} ==> ({other2})"],
+                             rows1=[row(q)], back1=[row(q)], rows2=[row(other, other2)], back2=[row(other, other2)]))
+        cases = {
+            "an obligation line of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other, f"{prior(q)} ==> ({other2})"]),
+            "a flag line of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other, f"{prior(q)} ==> (!((v_n - j__2) < (-2147483648)))"]),
+            "an obligation line conditioned on a LATER clause of its own loop": self.method(body=self.loop(
+                [base, f"{prior(q)} ==> ({q2})", q])),
+            "the entry assert of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other], rows2=[row(q, other2)]),
+            "the back-edge assert of loop 2 conditioned on loop 1's clause": two_loops([base, q], [base2, other], back2=[row(q, other2)]),
+            "the entry assert of loop 1 conditioned on loop 2's clause": two_loops([base, q], [base2, other], rows1=[row(other, q2)]),
+            "an assert after the loops conditioned on a loop's clause": two_loops([base, q], [base2, other], between=[self.row("v_n >= 0"), "  exhale v_n >= 0"],
+                                                                                  rows2=[row(q)]),
+            "an assert after the last loop conditioned on its own clause": self.method(body=[*self.loop_of("i__1", [base, q]), row(q)]),
+            "an assert between statements that are no framing run": self.method(body=[*self.loop_of("i__1", [base, q]), "  exhale v_n >= 0", row(q)]),
+            "an assert inside a branch of the loop's body, not its last asserts": self.method(body=self.loop_of("i__1", [base, q], back_edge=[
+                row(q), "    if (v_n > 0) {", "      ra1 := v_p", "    }"])),
+        }
+        for label, lines in cases.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(lines), label)
+                self.assertTrue(any(not ok for _n, ok in self.verdicts(lines)), label)
+
     def test_a_guard_that_holds_a_permission_a_quantifier_or_the_heap_is_refused(self):
         q = self.uq()
         for label, guard in (("a permission", "(perm(v_p.v_int) > none)"), ("a quantifier", f"({self.uq(binders='q1: Int', trigger='{ loc(block_of(v_p), q1) }')})"),

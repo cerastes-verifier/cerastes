@@ -242,6 +242,57 @@ section 10)
   `global_address_arith_cpp.cpp`, `tests/vlibc/negative/reject_vlibc_realloc.c`; 0047 item 6's `offset_of(p) == 0`
   free row gets its C test (`free(p + 1)`). [e1 planning]
 
+- **From M4.5e1c** (record 0061; questions 253, 259, 260): `cerastes_old` in loop invariants (cut 1, question 260: e1c's
+  Part D; record 0061 item 12 has the design, P80 (f) the IL (the shapes of an `ensures`), S45 (g) the Viper (an
+  unlabeled `old(…)` in a `while` invariant is the method's entry; an `OLDFRAME` obligation line; fixtures
+  `s45_g_*`), audit round 1's N17 (exclude an address-taken parameter), Step 0 R2's five further shapes (a reassigned
+  pointer parameter, a local array, a global, an assigned by-value parameter, `*p` through a reassigned pointer: each
+  two errors today, each to get a message of its own); pins `old_loop_invariant_reject_{cell,elem,scalar}.c`, retired
+  then); the `forall` index forms other than `i`, `i + c`, `i - c` and under a conversion; base forms (`&a[1]`, `p + 1`,
+  a loaded or address-taken pointer); memory-reading trailing arguments and `cerastes_old` as one; the multi-class
+  false alarm where only one class's term occurs (question 253, `forall_one_term_*`); question 259's narrowings (in a
+  `check`, a read the binder does not index and pointer elements; in loops and checks, `*p` of an array argument and a
+  pointer argument used as a value); question 255's multi-class guard that reads memory and arithmetic over two
+  classes. Part D's tutorial example, for the arrays chapter's "in-place loop" section (its off-by-one variant passes
+  `i + 1` for `i` to the first invariant's `cerastes_forall`: `invariant-entry` at that invariant):
+
+  ```c
+  // expect: verified
+  // expect: native-ok
+  // mode: c23, c++20
+  // An in-place loop: cerastes_old in the invariant names each element's value when the function was entered.
+  // tag::source[]
+  #include <cerastes.h>
+  
+  CERASTES_PURE bool small(int k, const int *a, int n)
+  {
+    return !(0 <= k && k < n) || (0 <= a[k] && a[k] < 100);
+  }
+  CERASTES_PURE bool added_one(int k, const int *a, int n)
+  {
+    return !(0 <= k && k < n) || a[k] == cerastes_old(a[k]) + 1;
+  }
+  CERASTES_PURE bool unchanged_from(int k, const int *a, int n, int i)
+  {
+    return !(i <= k && k < n) || a[k] == cerastes_old(a[k]);
+  }
+  
+  void inc_all(int *a, int n)
+      CERASTES_REQUIRES(cerastes_owns_range(a, n) && n >= 0 && cerastes_forall(small, a, n))
+      CERASTES_ENSURES(cerastes_owns_range(a, n) && cerastes_forall(added_one, a, n))
+  {
+    int i = 0;
+    CERASTES_INVARIANT(0 <= i && i <= n && cerastes_forall(added_one, a, i))
+    CERASTES_INVARIANT(cerastes_forall(unchanged_from, a, n, i))
+    CERASTES_DECREASES(n - i)
+    while (i < n) {
+      a[i] = a[i] + 1;
+      i = i + 1;
+    }
+  }
+  // end::source[]
+  ```
+
 **M4.5f1/f2 Predicates**
 - M4.5e1d takes the slice an exact array sum needs (question 227): `pure` bodies as Viper functions, calls of `pure`
   functions in annotations, recursion with `decreases`. M4.5f1 keeps predicates, `fold`/`unfold` and pure functions
@@ -1063,3 +1114,43 @@ Accept
   D to M4.5e2) unless Part D, audit round 4, the port, the docs, the re-audit and the box run (84 minutes in e1b) fit
   before the session's twelve hours end (about 10:35 UTC; 03:01 UTC at this point). The alternative was to stop after
   Commit 2 and run Parts C and D as a session of their own. Advisor checkpoint 3 agreed.
+- **258** (Part C, raised by il-analyst-3; a lint question, not soundness): the guard (`prior`) of a loop's obligation
+  line and of its framing `assert` holds the earlier quantified invariant clauses, which the lint refused (52 lines;
+  Silicon accepts them). **Recommended and built:** the lint admits user quantifiers of item 11's shape in exactly those
+  guards (0037 item 7's evaluation-order prior; each earlier clause is a checked invariant of its own). The alternative
+  was to drop quantified clauses from the prior (fail closed, but ordinary loops with two quantified invariants would
+  then report false alarms). Audit round 3 reviews it. Record 0061 items 9, 11.
+- **259** (Part C, il-analyst-3's lowering; fail closed): in a `check`, a read the binder does not index (`a[r]`) and
+  pointer elements under the binder; in a loop invariant or a `check`, `*p` of an array argument and a pointer argument
+  used as a value. **Recommended and built:** listed limits lifted by M4.5e2, each an encoder diagnostic at the `forall`
+  with a pin. The alternative was to lower them in e1c (more rows under the binder, beyond Part C's ceiling). Record 0061
+  item 1.
+- **260** (split point 2, the plan's section 7; size, time and context, not soundness): Parts A–C measured +3,245/−237
+  `src/` and `include/` lines without the VIR self-test cases (Part C +671/−66, inside question 256's ceiling of about
+  700; the plan's stop at 2,200 for A–C). Re-summed at 04:05 UTC with what is owed either way (audit round 3 and its
+  fixes, plan §11's pre-box list, advisor checkpoint 5, the box run, status and handoff), Part D would end near the
+  twelve-hour cap (10:35 UTC) with no room for a second box run, and its round-4 questions are the only soundness
+  questions left with no one to ask overnight. **Recommended and built: cut 1** — `cerastes_old` in loop invariants
+  (Part D, record 0061 item 12) moves to M4.5e2, with audit round 1's N17 (an address-taken parameter excluded) and
+  Step 0 R2's five further shapes; R2's three pins stay, re-pointed; Part D's two tutorial examples are kept below
+  (§3, M4.5e2). Advisor checkpoint 3 recommended the cut. The alternative was Part D in this session. The cut is
+  reversible: item 12, P80 (f), S45 (g) and the pins make it a short session.
+- **254, a second case** (Part C's run): `forall_invariant_unframed_read.c` fails at its invariant line twice,
+  `permission` (the framing) and `uninitialized` (the flag line of the unframed read), as question 254's skipped write
+  does: the tests expect both (record 0061 item 9). It is question 254's rule, not a question 160 correction.
+- **261** (audit round 3, its blocking item; fail closed, not unsoundness: an exit 3 on wrong programs and a 300 s
+  timeout on a wrong loop): in a loop invariant or a `check`, a multi-class `E` with arithmetic on a read of a class other
+  than the first (`a[k] < a[k + 1] + 1`) put that row in the first class's view, reading the other class's slot before
+  its rows (exit 3) or as a computed `loc` term (the lint; T1's matching loop). **Recommended and built:** rejected there
+  (M4.5e2), contracts unchanged (their rows are routed by ghost applications). The alternative was to route each
+  obligation to the classes its operands read, in loop and check modes, which is lowering work beyond Part C's ceiling.
+- **262** (audit round 3, should-fix; the lint refused correct programs' Viper, fail closed): a `forall` under `||` or in
+  a `?:` arm of a loop invariant or a `check`, and `A && forall` in a `check`, were emitted unsplit. **Recommended and
+  built:** a `check` is split per top-level conjunct as an invariant is; under `||` and in a `?:` arm of a loop
+  invariant or a `check` a `forall` is rejected (M4.8, with question 249's positions); contracts keep both. The
+  alternative was to lower those positions as contract clauses are lowered.
+- **263** (question 256's ceiling for Part C; size, not soundness): Part C's own delta reached about 900 `src/` lines
+  (`check.cpp` +203, `lower.cpp` +352 since Commit 2, `encode.cpp` about +300) against the ceiling of about 700, all of
+  the excess from audit round 3's fixes (questions 261 and 262's refusals, the `check` split, the flag line guarded by
+  the framing). **Recommended and built:** accept; nothing else enters Part C, and cut 1 (question 260) already took
+  Part D. The alternative was to revert round 3's fixes to refusals only, which would leave its lint findings open.

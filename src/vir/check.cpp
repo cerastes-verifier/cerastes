@@ -1971,7 +1971,7 @@ private:
     }
     // The positive positions of a clause (item 3): the clause itself, a conjunct, the right side of `||` (a quantifier on the left is refused, question 255: the
     // right operand's obligations would sit under `!(forall ...)`; the encoder writes `g ==> forall ...`), an arm of `?:`.  Every other `Forall` is refused where `expr` meets it.
-    void mark_forall_positions(const Expr* e)
+    void mark_forall_positions(const Expr* e, bool loop_site = false)
     {
         if (e == nullptr)
         {
@@ -1985,10 +1985,10 @@ private:
             case Expr::Kind::Binary:
                 if (e->bop == BinaryOp::LAnd)
                 {
-                    mark_forall_positions(e->a);
-                    mark_forall_positions(e->b);
+                    mark_forall_positions(e->a, loop_site);
+                    mark_forall_positions(e->b, loop_site);
                 }
-                else if (e->bop == BinaryOp::LOr)
+                else if (e->bop == BinaryOp::LOr && !loop_site)
                 {
                     // the quantifier is the right side of a disjunction: `g || forall` is `!g ==> forall`.  On the left the right operand's obligations would be asked
                     // under `!(forall ...)`, a quantifier in a guard, which `f__wf` has no row for
@@ -1998,12 +1998,24 @@ private:
                             "a quantifier on the left of `||` (record 0061 item 7: write the plain condition first, `g || forall(...)`; M4.8)");
                         return;
                     }
-                    mark_forall_positions(e->b);
+                    mark_forall_positions(e->b, loop_site);
                 }
                 return;
             case Expr::Kind::Cond:
-                mark_forall_positions(e->b);
-                mark_forall_positions(e->c);
+                if (loop_site)
+                {
+                    return; // question 262: in a loop invariant or a `check` only a top-level conjunct (the lowering splits those into lines)
+                }
+                mark_forall_positions(e->b, loop_site);
+                mark_forall_positions(e->c, loop_site);
+                return;
+            case Expr::Kind::ToBool:
+                // C's `&&` is an `int`: `ToBool(BoolToInt(x))` is `x`, in the same position
+                if (e->a != nullptr && e->a->kind == Expr::Kind::BoolToInt && e->a->a != nullptr &&
+                    e->a->a->type.is_bool())
+                {
+                    mark_forall_positions(e->a->a, loop_site);
+                }
                 return;
             default:
                 return;
@@ -2032,11 +2044,76 @@ private:
         }
         return false;
     }
-    // The shape rules of items 3 and 6 on the body of `q` (the read classes), after `expr` checked every node.
-    void forall_shape(const Expr& q, const Expr* e, std::set<std::pair<int, long long>>& classes)
+    // A `T *` parameter given the decay of a named array of `T`: the argument `AddrOf(a)` has type `Ptr(Array(T, N))` (record 0061 item 3, Part C).
+    static bool array_decay_of(const Type& param, const Expr& arg)
+    {
+        return param.is_ptr() && param.pointee != nullptr && arg.kind == Expr::Kind::AddrOf && arg.var != nullptr &&
+               arg.var->type.is_array() && arg.var->type.element != nullptr && *arg.var->type.element == *param.pointee;
+    }
+    // The base a quantifier's body subscripts in a loop invariant or a `check` (record 0061 item 3): a pointer variable that is not address-taken, or the address of a named local
+    // array (its decay).
+    static bool forall_loop_base(const Expr* a)
+    {
+        if (a == nullptr)
+        {
+            return false;
+        }
+        if (a->kind == Expr::Kind::Local)
+        {
+            return a->var != nullptr && a->type.is_ptr() && !a->var->address_taken;
+        }
+        return a->kind == Expr::Kind::AddrOf && a->var != nullptr && a->var->type.is_array();
+    }
+    // Whether a node of an argument reads a cell by name (an address-taken local's value is a read of memory: an argument reads none, question 248).
+    static bool reads_cell(const Expr* e)
     {
         if (e == nullptr)
         {
+            return false;
+        }
+        if (e->kind == Expr::Kind::Local && e->var != nullptr && e->var->address_taken)
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (reads_cell(x))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (reads_cell(x))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The shape rules of items 3 and 6 on the body of `q` (the read classes), after `expr` checked every node.  `loop_site`: a loop invariant or a `check`, whose bases are variables.
+    void forall_shape(const Expr& q, const Expr* e, std::set<std::pair<int, long long>>& classes, bool loop_site)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        if (loop_site && e->kind == Expr::Kind::ElemAddr)
+        {
+            err(e->loc,
+                "the address of an element used as a value in the body of a quantifier (record 0061 item 4: only `p[e]` is read there)");
+            return;
+        }
+        if (loop_site && e->kind == Expr::Kind::ForallArg && e->type.is_ptr())
+        {
+            err(e->loc,
+                "a pointer argument used as a value in the body of a quantifier (record 0061 item 4: a pointer is only read through; M4.5e2)");
+            return;
+        }
+        if (loop_site && e->kind == Expr::Kind::Deref && e->type.is_ptr() && in_check_)
+        {
+            err(e->loc,
+                "a quantifier in a `check` over pointer elements (record 0061 item 10: the check's rows read integers and booleans; M4.5e2)");
             return;
         }
         if (e->kind == Expr::Kind::Deref && e->a != nullptr)
@@ -2046,10 +2123,27 @@ private:
             if (base != nullptr && base->kind == Expr::Kind::ForallArg && base->bound_id == q.bound_id)
             {
                 const size_t k {static_cast<size_t>(base->arg_index)};
-                if (k >= q.args.size() || q.args[k] == nullptr || q.args[k]->kind != Expr::Kind::Formal)
+                const bool bad_base {
+                    k >= q.args.size() || q.args[k] == nullptr ||
+                    (loop_site ? !forall_loop_base(q.args[k]) : q.args[k]->kind != Expr::Kind::Formal)};
+                if (loop_site && addr->kind != Expr::Kind::ElemAddr && !bad_base &&
+                    q.args[k]->kind != Expr::Kind::Local)
                 {
                     err(e->loc,
-                        "an element read under a quantifier whose pointer argument is not a pointer parameter (record 0061 item 1: a base that is not a bare pointer parameter is M4.5e2's)");
+                        "`*p` in the body of a quantifier of an array argument (record 0061 item 3: write `p[0]`; M4.5e2)");
+                }
+                else if (bad_base)
+                {
+                    err(e->loc,
+                        loop_site
+                            ? "an element read under a quantifier whose pointer argument is not a pointer variable or a named local array (record 0061 item 3: `&a[1]`, `p + 1`, a loaded pointer are M4.5e2's)"
+                            : "an element read under a quantifier whose pointer argument is not a pointer parameter (record 0061 item 1: a base that is not a bare pointer parameter is M4.5e2's)");
+                }
+                else if (loop_site && in_check_ &&
+                         !(addr->kind == Expr::Kind::ElemAddr && mentions_bound(addr->b, q.bound_id)))
+                {
+                    err(e->loc,
+                        "a read the bound variable does not index, in a quantifier of a `check` (record 0061 item 10: the rows are per read class; M4.5e2)");
                 }
                 else if (addr->kind == Expr::Kind::ElemAddr && mentions_bound(addr->b, q.bound_id))
                 {
@@ -2065,14 +2159,28 @@ private:
                     }
                 }
             }
+            if (addr->kind == Expr::Kind::ElemAddr)
+            {
+                // the element address is this read's own: walk its parts, not the node
+                if (addr->a == nullptr || addr->a->kind != Expr::Kind::ForallArg)
+                {
+                    forall_shape(q, addr->a, classes, loop_site);
+                }
+                forall_shape(q, addr->b, classes, loop_site);
+                return;
+            }
+            if (base != nullptr && base->kind == Expr::Kind::ForallArg)
+            {
+                return; // `*p` of a pointer argument: its base is this read's own
+            }
         }
         for (const Expr* x : {e->a, e->b, e->c})
         {
-            forall_shape(q, x, classes);
+            forall_shape(q, x, classes, loop_site);
         }
         for (const Expr* x : e->args)
         {
-            forall_shape(q, x, classes);
+            forall_shape(q, x, classes, loop_site);
         }
     }
     // The read classes a subtree mentions (record 0061 item 6): the (pointer argument, constant) of every read the bound variable indexes.
@@ -2102,7 +2210,36 @@ private:
     }
     // A quantifier with several read classes: the rows of `f__wf` are one per class over that class's own binder, so no obligation may mention two classes (item 7).  The path of
     // an obligation (the left operand of `&&`, `||`, the condition of `?:`) reads no memory, and a node that computes a value (arithmetic, a conversion) holds the reads of one class.
-    void forall_multi_class(const Expr& q, const Expr* e)
+    // The first read class in the lowering's traversal order (`fq_collect`): the class whose binder the untagged obligations of a loop invariant or a `check` are rows of.
+    void forall_first_class(const Expr& q, const Expr* e, std::pair<int, long long>& out, bool& found) const
+    {
+        if (e == nullptr || found)
+        {
+            return;
+        }
+        if (e->kind == Expr::Kind::Deref && e->a != nullptr && e->a->kind == Expr::Kind::ElemAddr &&
+            e->a->a != nullptr && e->a->a->kind == Expr::Kind::ForallArg && mentions_bound(e->a->b, q.bound_id))
+        {
+            long long c {0};
+            if (forall_index_form(e->a->b, q.bound_id, &c))
+            {
+                out = {e->a->a->arg_index, c};
+                found = true;
+                return;
+            }
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            forall_first_class(q, x, out, found);
+        }
+        for (const Expr* x : e->args)
+        {
+            forall_first_class(q, x, out, found);
+        }
+    }
+    // `loop_site` (a loop invariant or a `check`, question 261): the obligations of arithmetic are rows of the first class's binder, so arithmetic over the read of any other class
+    // is refused there (contracts route each obligation to its class by its ghost applications).
+    void forall_multi_class(const Expr& q, const Expr* e, bool loop_site = false)
     {
         if (e == nullptr)
         {
@@ -2110,6 +2247,16 @@ private:
         }
         const char* why {nullptr};
         std::set<std::pair<int, long long>> in;
+        std::pair<int, long long> first {-1, 0};
+        bool have_first {false};
+        if (loop_site)
+        {
+            forall_first_class(q, q.a, first, have_first);
+        }
+        const auto other_class = [&]()
+        {
+            return loop_site && in.size() == 1U && *in.begin() != first;
+        };
         switch (e->kind)
         {
             case Expr::Kind::Binary:
@@ -2128,6 +2275,11 @@ private:
                     {
                         why = "arithmetic over the reads of two classes";
                     }
+                    else if (other_class())
+                    {
+                        why =
+                            "arithmetic over the read of a class other than the first, in a loop invariant or a `check`";
+                    }
                 }
                 break;
             case Expr::Kind::Cond:
@@ -2143,6 +2295,11 @@ private:
                 {
                     why = "a computation over the reads of two classes";
                 }
+                else if (other_class())
+                {
+                    why =
+                        "a computation over the read of a class other than the first, in a loop invariant or a `check`";
+                }
                 break;
             default:
                 break;
@@ -2156,11 +2313,11 @@ private:
         }
         for (const Expr* x : {e->a, e->b, e->c})
         {
-            forall_multi_class(q, x);
+            forall_multi_class(q, x, loop_site);
         }
         for (const Expr* x : e->args)
         {
-            forall_multi_class(q, x);
+            forall_multi_class(q, x, loop_site);
         }
     }
     void forall_node(const Expr& e, Ctx ctx)
@@ -2170,14 +2327,21 @@ private:
             err(e.loc, "a quantifier inside a quantifier (record 0061 item 3: a nested `forall` is M4.8's)");
             return;
         }
-        if (ctx != Ctx::Requires && ctx != Ctx::Ensures)
+        const bool loop_site {ctx == Ctx::Annot && (in_invariant_ || in_check_)};
+        if (ctx != Ctx::Requires && ctx != Ctx::Ensures && !loop_site)
         {
             err(e.loc,
-                "a quantifier outside the `requires` and `ensures` of a function (record 0061: loop invariants and checks are part C's, the staging gate of item 5)");
+                "a quantifier outside the `requires` and `ensures` of a function, a loop invariant and a `check` (record 0061 item 3: not in a measure, a `do ... while (0)` invariant, a constant or code)");
             return;
         }
         if (forall_ok_.count(&e) == 0U)
         {
+            if (loop_site)
+            {
+                err(e.loc,
+                    "a quantifier in a loop invariant or a `check` that is not a top-level conjunct (record 0061 item 3, question 262: under `||` or `?:`, `!`, an operand of `==`, in a guard or in a measure it is M4.8's)");
+                return;
+            }
             err(e.loc,
                 "a quantifier in a position that is not positive (record 0061 item 3: a conjunct of a clause, the right side of `||`, an arm of `?:`; under `!`, as an operand of `==` or arithmetic, in a `?:` condition, in a guard, under `old`, in a measure: M4.8)");
             return;
@@ -2196,8 +2360,13 @@ private:
                 err(e.loc, "a quantifier with a missing argument");
                 return;
             }
+            if (loop_site && x->kind == Expr::Kind::AddrOf && x->var != nullptr && x->var->type.is_array())
+            {
+                array_addr_ok_.insert(
+                    x); // the decay of a named array, the base its element reads subscript (checked by `forall_shape`)
+            }
             expr(*x, ctx, false);
-            if (reads_heap(*x) || mentions_old(x))
+            if (reads_heap(*x) || mentions_old(x) || reads_cell(x))
             {
                 err(x->loc,
                     "a trailing argument of a quantifier that reads memory or holds `old` (record 0061 item 3, question 248; M4.5e2)");
@@ -2207,7 +2376,7 @@ private:
         expr(*e.a, ctx, false);
         cur_forall_ = nullptr;
         std::set<std::pair<int, long long>> classes;
-        forall_shape(e, e.a, classes);
+        forall_shape(e, e.a, classes, loop_site);
         if (classes.empty())
         {
             err(e.loc,
@@ -2215,7 +2384,7 @@ private:
         }
         else if (classes.size() > 1U)
         {
-            forall_multi_class(e, e.a);
+            forall_multi_class(e, e.a, loop_site);
         }
     }
 
@@ -2483,6 +2652,10 @@ private:
                     // lowering gives them), so no_ptr_ stays false.  A permission atom is accepted in a loop's invariant (decision 0040 item 5), not in
                     // that of a `do ... while (0)`: it is asserted once like a `check`.
                     in_invariant_ = !once;
+                    if (!once)
+                    {
+                        mark_forall_positions(c.expr, true);
+                    }
                     expr(*c.expr, Ctx::Annot, false);
                     in_invariant_ = false;
                     if (!c.expr->type.is_bool())
@@ -2705,7 +2878,13 @@ private:
                     err(s.loc, "a check without an expression");
                     return;
                 }
+                in_check_ = !s.from_assert;
+                if (in_check_)
+                {
+                    mark_forall_positions(s.expr, true);
+                }
                 expr(*s.expr, s.from_assert ? Ctx::Assert : Ctx::Annot, false);
+                in_check_ = false;
                 if (!s.expr->type.is_bool())
                 {
                     err(s.expr->loc, "a check of type " + s.expr->type.str() + " (it must be a bool)");
@@ -3500,7 +3679,8 @@ private:
                     err(e.loc, "an argument of a quantifier past its arguments");
                 }
                 else if (cur_forall_->args[static_cast<size_t>(e.arg_index)] == nullptr ||
-                         e.type != cur_forall_->args[static_cast<size_t>(e.arg_index)]->type)
+                         (e.type != cur_forall_->args[static_cast<size_t>(e.arg_index)]->type &&
+                          !array_decay_of(e.type, *cur_forall_->args[static_cast<size_t>(e.arg_index)])))
                 {
                     err(e.loc, "an argument of a quantifier whose type is not the argument's");
                 }
@@ -4259,6 +4439,7 @@ private:
     std::set<const Expr*> seen_effects_;
     // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
     bool in_invariant_ {false};
+    bool in_check_ {false}; // a `check` statement's expression (not C's `assert`): a quantifier may stand there
     // record 0061 (M4.5e1c part B): the quantifier whose body is being checked, the quantifiers at a positive position of a contract clause
     const Expr* cur_forall_ {nullptr};
     std::set<const Expr*> forall_ok_;

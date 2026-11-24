@@ -39,6 +39,16 @@
     `f__wf` are method-qualified (item 7), and four fail-closed narrowings of the lowering are listed limits: a `forall`
     on the left of `||` (M4.8), and in a multi-class `E` a memory-reading guard, arithmetic combining two classes' reads,
     and a converted index (M4.5e2) (item 1). Cut 3 was taken by P80 (b)'s table without asking (item 2).
+  - Built overnight as recommended (the owner's instruction of 2026-11-24, handoff §8, each for review): **256** split
+    point 1 (Parts A and B +2,483 lines): continue to Part C with a ceiling for its own delta; **257** a read class read in
+    both states gets a trigger set per state in `f__wf` (item 7); **258** the guard of a loop's obligation line and
+    framing `assert` keeps the earlier quantified invariant clauses, and the lint admits them (items 9, 11); **259**
+    fail-closed narrowings in loops and checks, listed for M4.5e2 (item 1); **260** split point 2: **cut 1**, item 12
+    (`cerastes_old` in loop invariants) moves to M4.5e2; **261** (audit round 3, B1: an exit 3 on wrong programs) in a
+    loop invariant or a `check`, a multi-class `E` with arithmetic on a read of a class other than the first is
+    rejected (M4.5e2; contracts route such rows by their ghost applications and keep it); **262** (audit round 3) in a
+    loop invariant or a `check` a `forall` stands only as a top-level conjunct (a `check` is split per conjunct as an
+    invariant is), and under `||` or in a `?:` arm there it is rejected (M4.8, with question 249's positions).
   - Standing: 69 (no EDG work), 77 (one context), 160 (a new test's expect line corrected after its first run, listed in
     status), 176 (the owner handles CI).
 - **Milestone:** M4.5e1c.
@@ -73,13 +83,13 @@ plan's decision table it took.
    |---|---|
    | the lambda form `cerastes::forall([](int i, …) { … }, …)`; `cerastes::forall(f, …)` with a function in verify mode (cut 3, item 2: write `cerastes_forall`) | M7 |
    | `f` a `predicate` (M4.5f1); `f` with a `requires`, `ensures` or `decreases`; a call of a `pure` function anywhere, in `E` too; recursion | e1d |
-   | a `forall` inside `E` (nested); under `!`; as an operand of `==` or arithmetic; in a `?:` condition; in the guard of an atom; in a function's `decreases` or a loop measure; under `old`; in a `do … while (0)` invariant; an `exists`; on the left of `\|\|` (`forall(…) \|\| g`: lowering writes `\|\|` as `!left ==> right`; `g \|\| forall(…)` is accepted; question 255) | M4.8 (question 249: M4.8 must handle them) |
-   | an `E` with no element read indexed by the bound variable; an index that names the bound variable in another form than `i`, `i + c`, `i - c` (`a[2 * i]`, `a[n - i]`, `a[b[i]]`), or under a conversion; in an `E` with more than one read class, a guard that reads memory or arithmetic combining two classes' reads (`a[i] + b[i] < 100`; comparisons such as `a[i] <= a[i + 1]` and `p[i] == q[i]` are accepted; question 255) | M4.5e2 |
-   | a quantified read whose base argument is not a bare pointer parameter (contract) or a pointer variable or named local array (loop invariant, `check`): `&a[1]`, `p + 1`, a loaded pointer | M4.5e2 |
+   | in a loop invariant or a `check`, a `forall` that is not a top-level conjunct (under `\|\|`, in a `?:` arm; question 262); a `forall` inside `E` (nested); under `!`; as an operand of `==` or arithmetic; in a `?:` condition; in the guard of an atom; in a function's `decreases` or a loop measure; under `old`; in a `do … while (0)` invariant; an `exists`; on the left of `\|\|` (`forall(…) \|\| g`: lowering writes `\|\|` as `!left ==> right`; `g \|\| forall(…)` is accepted; question 255) | M4.8 (question 249: M4.8 must handle them) |
+   | an `E` with no element read indexed by the bound variable; an index that names the bound variable in another form than `i`, `i + c`, `i - c` (`a[2 * i]`, `a[n - i]`, `a[b[i]]`), or under a conversion; in an `E` with more than one read class, a guard that reads memory or arithmetic combining two classes' reads, and in a loop invariant or a `check` arithmetic, a unary operator or a conversion over a read of a class other than the first, the first being the first read in `E` (a `char` element compared through C's promotion included; question 261) (`a[i] + b[i] < 100`; comparisons such as `a[i] <= a[i + 1]` and `p[i] == q[i]` are accepted; question 255) | M4.5e2 |
+   | a quantified read whose base argument is not a bare pointer parameter (contract) or a pointer variable or named local array (loop invariant, `check`): `&a[1]`, `p + 1`, a loaded pointer, an address-taken pointer variable; in a loop invariant or a `check`, `*p` of an array argument and a pointer argument used as a value; in a `check`, a read the binder does not index and pointer elements under the binder (question 259) | M4.5e2 |
    | under the binder: structure members (`p[i].x`), array members, global arrays | e1e |
    | a trailing argument that reads memory (the read is written inside `f`; question 248) | M4.5e2 |
    | `cerastes::old` (the C++ spelling) inside a `pure` body: the front end's `old_outside_ensures` stays (question 251) | M7 |
-   | `cerastes_old` in a `check`; in a loop invariant, a place not rooted in a parameter the function never assigns | M4.5e2 |
+   | `cerastes_old` in a loop invariant (item 12, cut 1, question 260) and in a `check` | M4.5e2 |
    | `reads_range`'s minimum amount (238), `owns_range`'s row order D (242) | M4.5e1f |
 
    The one message in `src/` that names M4.5e1c (`"cerastes::forall" (a quantifier: M4.5e1c)`) is lifted for the
@@ -272,7 +282,14 @@ plan's decision table it took.
    against the loop's places (`permission`, "this loop invariant reads `a[i]`, which this loop does not hold"), a
    quantified `assert` at entry and at the back edge as `framing_condition` does today; then one invariant line per
    obligation (`obligation_clause`): a named array's bound (`out-of-bounds`) and **the flag** (`uninitialized`): a
-   quantified invariant that reads elements states that they hold values, at the head and after the loop. A read not
+   quantified invariant that reads elements states that they hold values, at the head and after the loop. Each such line and framing `assert` is
+   guarded by the earlier invariant clauses in evaluation order, quantified ones included (question 258). A loop-invariant
+   clause that holds a quantifier is split per top-level conjunct into invariant lines of their own, in evaluation
+   order, as `push_clauses` splits a contract clause (as built: `0 <= i && i <= n && cerastes_forall(…)` is the usual
+   shape); each line keeps the clause's C line and category, and the driver prints one error per line, category and
+   message, so a wrong scalar conjunct is still one error. In a loop invariant a `forall` stands only as such a
+   top-level conjunct (question 262). The flag line of a read is guarded by its framing, as by a named array's bound
+   (audit round 3, N7): an unframed read is one `permission` error, as its single-element form is. A read not
    indexed by the binder (`a[r]` in `max_index`'s `a[j] <= a[r]`) has its own framing and flag rows. A loop whose
    invariant holds a quantified read carries its places (`expr_touches`). No quantifier in a measure. This gives the
    fill loop, the `must_init` loop filler and the self-write loop their verifying forms (S45 (c): each about 2 s); the
@@ -294,7 +311,8 @@ plan's decision table it took.
     (`permission`; Silicon accepts `acc(…, wildcard)` under a quantifier in an `assert`, where `perm(…)` is refused),
     and the same row for the flag field `d_T` (audit round 1, S11: the flag row reads it, as today's `deref` checks
     `perm(v) > none && perm(d) > none`); the flag row (`uninitialized`); `E`'s own obligations (0010 item 11's), over
-    the binder with `E`'s path; then the fact (`check`). A failed marked row ends its path. Each twin is one error where
+    the binder with `E`'s path; then the fact (`check`), in this order as built (audit round 3, N5). A `check` holding a
+    quantifier is split per top-level conjunct into asserts of their own (question 262). A failed marked row ends its path. Each twin is one error where
     the flags are known; where an element's flag is unknown (after a loop with no quantified invariant), the flag row
     and the fact both fail, as in item 9.
 
@@ -321,16 +339,19 @@ plan's decision table it took.
     existing pins of "a `forall` here is refused" (binders `k`, `i`, `x`) are unchanged (no
     Flips D). Nothing else that holds a `forall` is admitted.
 
-12. **`cerastes_old` in a loop invariant** (Part D; amends 0038 item 6; P80 (f): the IL shapes of an `ensures`; S45
-    (g)). The C spelling; a place that `old` accepts in an `ensures`, rooted in a pointer parameter the function never
+12. **`cerastes_old` in a loop invariant: cut to M4.5e2** (cut 1, question 260; the plan's Part D). It stays rejected
+    (Step 0 R2: two errors at the invariant, `unsupported_expression` and `unsupported_type`, in each shape; pins
+    `old_loop_invariant_reject_{cell,elem,scalar}.c`, re-pointed to M4.5e2). P80 (f) (the IL shapes are an `ensures`'s)
+    and S45 (g) (Viper's unlabeled `old(…)` in an invariant is the method's entry; an `OLDFRAME` obligation line) are
+    what M4.5e2 builds on, with this design:
+The C spelling; a place that `old` accepts in an `ensures`, rooted in a pointer parameter the function never
     assigns and never takes the address of (an address-taken parameter lives in a cell a callee may change; audit round
     1, N17), or a by-value parameter (its entry value); an index is read in the current state and reads no memory.
     Lowered as Viper's unlabeled `old(…)` (in a method, the method's entry state, also inside a loop invariant) of the
     chain over the `requires` sites; its framing is an invariant obligation line (`permission`: "this loop invariant
     reads the entry value of `p[i]`, which the function's `requires` does not own"). A marked parameter's place is
     refused as in contracts. Not in a measure, not in a `check`. Today each of these is two errors at the invariant
-    (`unsupported_expression`, `unsupported_type`; Step 0 R2); every refused shape gets one message of its own. (Cut 1
-    moves it to M4.5e2.)
+    (`unsupported_expression`, `unsupported_type`; Step 0 R2); every refused shape gets one message of its own.
 
 13. **Categories:** none new. **Tags:** `forall_function`, `forall_argument_mismatch`. **Facts:** P80, S45.
 
