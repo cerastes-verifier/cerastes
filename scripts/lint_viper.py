@@ -150,6 +150,21 @@ status 1) on:
   `assert` rows are `[PRIOR ==> ] (forall q<j> :: { G(q<j>), ... } ...)` over ghost applications with no heap read and no computed application, the
   prior's quantifiers conjuncts of their own (a guard `g ==> ` allowed) and none inside a body; the binders of the facts and of the prior's clauses
   are `s`, `s0`, ... (the ghost functions are named after their method and the Viper formal, `hvq_<method>__<formal>_<state>`: Viper names are program-wide);
+* the Viper functions of the `pure` functions of decision 0062 item 12 (M4.5e1d): a top-level `function` whose name starts `pf_` is `pf_<name>__<id>`
+  (the pattern is `PF_NAME`, one line), bodied, with exactly one `decreases` line (a measure, or empty for a function that does not apply itself;
+  `_` and `*` stay refused by the termination rules); its `ensures` hold no `acc`, `perm`, `old`, `forperm`, `inhale` or `assume`, nor its body; every
+  application of itself in its body begins a line (the position map is keyed by line); the only cycle among `pf_` functions is such a
+  self-application (no mutual recursion, none through a `requires`, an `ensures` or a `decreases`); a user quantifier of item 11's shape stands in its
+  `requires` and `ensures`; an application of a `pf_` function stands in a `pf_` function, a method's `requires`, `ensures`, `invariant` or `assert`
+  (on the line of its keyword), never in a `__wf` method, a `decreases`, a prelude or other function or a method's statement, and its callee is a
+  `pf_` function of the file; `HEAP_READ_RE` counts an application as a read of memory, so every position that must read none refuses it; the ghost
+  functions `hva_<method>__<callee>_<pre|post>` of an `f__wf` method's domain have `Int`, `Bool` or `Ref` parameters and their callee's signature, and the
+  `requires` over them are exactly the facts (i) the type range of an application (an integer type's bounds, unguarded), (ii) the callee's `ensures` at
+  the arguments under exactly the callee's `requires` that read no memory, (iii) the keep fact under the guards of a `reads_range` atom and its
+  `ensures` partner and the inclusion of the callee's interval; the map rows of a function: each `requires` `not.wellformed` (`internal`), each
+  `ensures` `postcondition.violated` (`postcondition`) and `not.wellformed` (`internal`), a `decreases` measure `termination.failed` (`termination`),
+  each body line that begins an application of the function itself `termination.failed` (`termination`) and no other body line any entry.  What a
+  `pf_` function's `requires` lines may be (decision 0062 item 6's atoms) and what a non-`pf_` function may be wait for the owner's answers and S46;
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -232,6 +247,12 @@ KIND_IDS = {
     "decreases": {"termination.failed"},
 }
 TOKEN_RE = re.compile(r"[A-Za-z_$][\w$']*|\d+|::|:=|\S")
+# Decision 0062 item 12: the Viper function of a `pure` function is `pf_<name>__<id>`.  The pattern of that name is written here and
+# nowhere else (a change of the `<id>` rule is this line); `PF_ANY_RE` is every application of a name that starts `pf_`.
+PF_NAME = r"pf_[A-Za-z_$][\w$']*__[0-9]+"
+PF_NAME_RE = re.compile(rf"^{PF_NAME}$")
+PF_APP_RE = re.compile(rf"(?<![\w$'.])(?P<name>{PF_NAME})\s*\(")
+PF_ANY_RE = re.compile(r"(?<![\w$'.])(?P<name>pf_[\w$']*)\s*\(")
 TOP_KEYWORDS = ("method", "function", "predicate", "domain", "field", "define", "import")
 
 
@@ -3337,7 +3358,9 @@ FORALL_RE = re.compile(r"(?<![\w$'])forall(?![\w$'])")
 OLD_LABEL_RE = re.compile(r"(?<![\w$'])old\s*\[")
 QUANT_STMT_RE = re.compile(r"^\s*(?P<kw>assert|exhale|invariant|requires|ensures)\s+(?P<rest>.*)$")
 QUANT_HEAD_RE = re.compile(r"^forall\s+(?P<k>[A-Za-z_$][\w$']*)\s*:\s*Int\s*::\s*\{\s*(?P<trigger>[^{}]*?)\s*\}\s*(?P<body>.*)$", re.S)
-HEAP_READ_RE = re.compile(r"\.\s*[A-Za-z_$]|(?<![\w$'])(?:perm|acc|old|forperm|forall)(?![\w$'])")
+HEAP_READ_BASE = r"\.\s*[A-Za-z_$]|(?<![\w$'])(?:perm|acc|old|forperm|forall)(?![\w$'])"
+HEAP_READ_RE = re.compile(HEAP_READ_BASE + r"|(?<![\w$'.])pf_[\w$']*\s*\(")  # an application of a `pure` function counts as a read (decision 0062)
+HEAP_READ_NO_APPLICATION_RE = re.compile(HEAP_READ_BASE)
 INT_BOUND_RE = re.compile(r"^\(*\s*-?\s*\d+\s*\)*$")
 
 
@@ -3576,6 +3599,7 @@ BINDERS_RE = re.compile(r"^forall\s+(?P<binders>" + r"[A-Za-z_$][\w$']*\s*:\s*[A
 GHOST_DOMAIN_RE = re.compile(rf"^\s*domain\s+{IDENT}\s*\{{\s*$")
 GHOST_FUNCTION_RE = re.compile(rf"^\s*function\s+(?P<name>{IDENT})\s*\((?P<params>[^()]*)\)\s*:\s*(?P<ret>Int|Bool|Ref)\s*$")
 GHOST_PARAM_RE = re.compile(rf"^\s*{IDENT}\s*:\s*(?:Int|Block)\s*$")
+HVA_PARAM_RE = re.compile(rf"^\s*{IDENT}\s*:\s*(?:Int|Bool|Ref)\s*$")  # decision 0062 item 8: one parameter per C parameter
 HVQ_TAIL_RE = re.compile(r"^(?P<p>.+)_(?P<state>pre|post)$")
 HV_NAME_RE = re.compile(r"^hv_.+_(?P<state>pre|post)$")
 GHOST_DOMAIN_RECORD = "0061"
@@ -3855,6 +3879,18 @@ class RangeAtom:
     guard: str | None
 
 
+@dataclasses.dataclass(frozen=True)
+class PfInfo:
+    """What the lint knows of one `pf_` function of the file (decision 0062 item 12): its formals, its result type and the conjuncts of its
+    `requires` and `ensures` that read no memory (the facts (ii) of an `f__wf` method are exactly these, at the arguments)."""
+    name: str
+    params: tuple[tuple[str, str], ...]
+    ret: str
+    requires: tuple[str, ...]
+    ensures: tuple[str, ...]
+    opaque_requires: bool = False  # a `requires` conjunct applies a `pure` function: it is no conjunct of a guard V the lint can compare
+
+
 @dataclasses.dataclass
 class WfContext:
     """What the facts of an `f__wf` method are checked against (record 0061 item 11): the ghost functions (name -> Viper result type), the
@@ -3863,6 +3899,7 @@ class WfContext:
     formals: frozenset[str]
     atoms: list[RangeAtom]
     method: str = ""  # the `__wf` method's own name without `__wf`: ghost functions are named `hvq_<method>__<formal>_<state>`
+    pfs: dict[str, PfInfo] = dataclasses.field(default_factory=dict)  # the `pf_` functions of the file (decision 0062 item 12)
 
     @property
     def names(self) -> frozenset[str]:
@@ -4224,7 +4261,15 @@ def lint_ghost_domain(src: Source, d: Decl, add: Callable[[int, str], None]) -> 
         if not line.strip():
             continue
         m = GHOST_FUNCTION_RE.match(line)
-        if m and all(GHOST_PARAM_RE.match(p) for p in m.group("params").split(",") if p.strip()) and m.group("params").strip():
+        if m and m.group("name").startswith("hva_"):
+            # decision 0062 item 8: an application of a `pure` function: `Int`, `Bool` or `Ref` parameters (none allowed: a `pure` function
+            # without parameters); its result is its callee's (`Int` or `Bool`: a `pure` function returns an integer, an enumeration or `bool`),
+            # which `lint_ghost_domain_use` compares with the callee's signature
+            if not all(HVA_PARAM_RE.match(p) for p in m.group("params").split(",") if p.strip()):
+                add(lineno, f"{what}: the ghost function `{m.group('name')}` of an application (decision 0062 item 8) has `Int`, `Bool` or `Ref` "
+                            "parameters")
+            count += 1
+        elif m and all(GHOST_PARAM_RE.match(p) for p in m.group("params").split(",") if p.strip()) and m.group("params").strip():
             count += 1
         else:
             add(lineno, f"{what}: a ghost domain holds bodiless `function <name>(<arg>: Int|Block, ...): Int` declarations and nothing "
@@ -4235,8 +4280,42 @@ def lint_ghost_domain(src: Source, d: Decl, add: Callable[[int, str], None]) -> 
         add(d.line, f"{what}: no ghost function")
 
 
+def ghost_signature(src: Source, lineno: int) -> tuple[list[str], str]:
+    """(parameter types, result type) of the ghost function declared on `lineno`."""
+    m = GHOST_FUNCTION_RE.match(src.code[lineno - 1])
+    params = [p.split(":")[1].strip() for p in m.group("params").split(",") if p.strip()] if m else []
+    return params, m.group("ret") if m else ""
+
+
+def hva_callee(fn: str, method: str, pfs: dict[str, PfInfo]) -> tuple[str, str] | None:
+    """(callee, state) of the ghost function `hva_<method>__<callee>_<pre|post>` when `callee` is a `pf_` function of the file."""
+    prefix = f"hva_{method}__"
+    if not fn.startswith(prefix):
+        return None
+    m = HVQ_TAIL_RE.match(fn[len(prefix):])
+    if m is None or m.group("p") not in pfs:
+        return None
+    return m.group("p"), m.group("state")
+
+
+def hva_function_problem(src: Source, fn: str, method: str, signature: tuple[list[str], str], pfs: dict[str, PfInfo]) -> str | None:
+    """Why the ghost function `fn` is not an application ghost of `method`'s `__wf` (named `hva_<method>__<callee>_<pre|post>` after a `pf_` function
+    of the file, with that function's parameter types and result type), or None."""
+    found = hva_callee(fn, method, pfs)
+    if found is None:
+        return (f"it is not named `hva_{method}__<callee>_<pre|post>` with `<callee>` a `pf_<name>__<id>` function of this file (Viper names are "
+                "program-wide: the method's name qualifies the function)")
+    info = pfs[found[0]]
+    want_params, want_ret = [t for _n, t in info.params], info.ret
+    if signature != (want_params, want_ret):
+        return (f"its signature ({', '.join(signature[0])}): {signature[1]} is not its callee `{found[0]}`'s "
+                f"({', '.join(want_params)}): {want_ret}")
+    return None
+
+
 def lint_ghost_domain_use(src: Source, decls: list[Decl], domains: dict[str, Decl], add: Callable[[int, str], None]) -> None:
     """One domain per `f__wf` method: a ghost function is used only in a `__wf` method, each domain by one method, each method with one domain."""
+    pfs = pf_infos(src, decls)
     method_of: dict[int, Decl] = {}
     for d in decls:
         if d.kind == "method":
@@ -4262,7 +4341,12 @@ def lint_ghost_domain_use(src: Source, decls: list[Decl], domains: dict[str, Dec
             domains_of.setdefault(owner.name, set()).add(name)
         for lineno, fn in ghost_domain_functions(src, d):
             for owner in sorted(users[name]):
-                if not fn.startswith(f"hvq_{owner[:-len('__wf')]}__"):
+                base = owner[:-len('__wf')]
+                if fn.startswith("hva_"):
+                    why = hva_function_problem(src, fn, base, ghost_signature(src, lineno), pfs)
+                    if why:
+                        add(lineno, f"the ghost function `{fn}` of `domain {name}` (decision 0062 item 8): {why}")
+                elif not fn.startswith(f"hvq_{base}__"):
                     add(lineno, f"the ghost function `{fn}` of `domain {name}` is not named `hvq_<method>__<formal>_<pre|post>` after the method `{owner[:-len('__wf')]}` "
                                 "that uses its domain (Viper names are program-wide: the method's name qualifies the function, decision 0061 item 7)")
         if not users[name]:
@@ -4366,15 +4450,19 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
     ghost_types = ghost_function_types(src, decls)
     ghosts = frozenset(ghost_types)
     ghost_re = re.compile(r"(?<![\w$'])(?:" + "|".join(map(re.escape, sorted(ghosts))) + r")\s*\(") if ghosts else None
+    pfs = pf_infos(src, decls)
+    hva_re = re.compile(r"(?<![\w$'])(?:" + "|".join(map(re.escape, sorted(g for g in ghosts if g.startswith("hva_")))) + r")\s*\(") \
+        if any(g.startswith("hva_") for g in ghosts) else None
     for d in decls:
-        if d.kind != "method":
+        pure_function = d.kind == "function" and PF_NAME_RE.match(d.name) is not None
+        if d.kind != "method" and not pure_function:
             continue
-        wf = d.name.endswith("__wf")
+        wf = d.name.endswith("__wf") and not pure_function
         loop_scopes = None
         ctx = None
         if wf:
             base = next((b for b in decls if b.kind == "method" and b.name == d.name[:-len("__wf")]), None)
-            ctx = WfContext(ghost_types, frozenset(_formal_names(src, d)), method_atoms(src, base) if base is not None else [], d.name[:-len("__wf")])
+            ctx = WfContext(ghost_types, frozenset(_formal_names(src, d)), method_atoms(src, base) if base is not None else [], d.name[:-len("__wf")], pfs)
         for lineno in range(d.line, d.end_line + 1):
             if lineno in domain_lines:
                 continue
@@ -4383,9 +4471,21 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
             if m is None:
                 continue
             kind, rest = m.group("kw"), m.group("rest")
+            if pure_function:
+                # decision 0062 item 12: a user quantifier of 0061's shape stands in a `pf_` function's `requires` and `ensures` (its body and
+                # measure hold none: the fallback refuses them)
+                if USER_QUANT_RE.search(code):
+                    out.verdicts[lineno] = contract_line_verdict(kind, rest) if kind in ("requires", "ensures") else \
+                        (False, f"{Q11}: a `pf_` function holds a user quantifier in a `requires` or an `ensures` (decision 0062 item 12), not in a `{kind}`", False)
+                continue
             if wf:
                 has_user = WF_QUANT_RE.search(code) is not None
                 has_ghost = ghost_re is not None and ghost_re.search(code) is not None
+                has_hva = hva_re is not None and hva_re.search(code) is not None
+                if has_hva:
+                    why = hva_line_problem(kind, rest, code, ctx, ghosts)
+                    out.verdicts[lineno] = (why is None, "" if why is None else f"a line of an `f__wf` method over an application ghost (decision 0062 item 8): {why}", False)
+                    continue
                 if not (has_user or (has_ghost and kind in ("requires", "ensures", "invariant"))):
                     continue
                 if kind == "requires":
@@ -4417,7 +4517,7 @@ def user_wildcard_row(code: str) -> bool:
 def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry] | None, add: Callable[[int, str], None],
                          map_name: str = "", user: QuantifiedLines | None = None) -> None:
     """Decision 0059 items 7, 8 and 12: where `forall` and `old[label]` may stand, the shape of a marked row, and the marks."""
-    skip: set[int] = set()
+    skip: set[int] = set(pf_requires_problems(src, decls))  # decision 0062 item 6: reported by `lint_pf_requires`
     for d in decls:
         if d.kind == "domain" or (d.kind == "method" and d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX))):
             skip.update(range(d.line, d.end_line + 1))
@@ -4530,6 +4630,577 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                             "k < hi ==> acc(loc(B, k).f)`, one field, B, lo, hi and the amount reading no heap)")
 
 
+# ---------------------------------------------------------------------------
+# Pure functions (decision 0062 item 12)
+# ---------------------------------------------------------------------------
+
+PF_FORBIDDEN_RE = re.compile(r"(?<![\w$'.])(?:acc|perm|old|forperm|inhale|assume)(?![\w$'])")
+HVA_APP_START_RE = re.compile(r"(?<![\w$'.])hva_[\w$']*\s*\(")
+FUNCTION_SIGNATURE_RE = re.compile(r"^\s*(?P<params>.*?)\)\s*:\s*(?P<ret>Int|Bool|Ref|Perm)\b", re.S)
+
+
+def pf_signature(src: Source, d: Decl) -> tuple[tuple[tuple[str, str], ...], str]:
+    """((formal, type) ..., result type) of the function `d`, from its header; ("", ...) parts are empty when it does not parse."""
+    text = method_header_text(src, d)
+    start = text.find("(", text.find(d.name) + len(d.name))
+    if start < 0:
+        return (), ""
+    params: list[tuple[str, str]] = []
+    for part in parenthesized_list(text, start):
+        m = re.match(rf"^\s*({IDENT})\s*:\s*([A-Za-z]+)\s*$", part)
+        if m is None:
+            return (), ""
+        params.append((m.group(1), m.group(2)))
+    after = text[start:]
+    depth, end = 0, -1
+    for i, ch in enumerate(after):
+        depth += (ch == "(") - (ch == ")")
+        if depth == 0:
+            end = i
+            break
+    rm = re.match(r"\s*:\s*([A-Za-z]+)", after[end + 1:]) if end >= 0 else None
+    return tuple(params), rm.group(1) if rm else ""
+
+
+def _memory_free_conjuncts(text: str) -> list[str]:
+    """The conjuncts of the clause `text` that read no memory (no heap read, permission, quantifier or application of a `pure` function)."""
+    try:
+        parts = _flatten_and(text)
+    except ValueError:
+        parts = [text.strip()]
+    return [p for p in parts if _heap_free(p) and not FORALL_RE.search(p) and not PF_ANY_RE.search(p)]
+
+
+def pf_infos(src: Source, decls: list[Decl]) -> dict[str, PfInfo]:
+    """The `pf_` functions of the file with their signatures and the memory-free conjuncts of their `requires` and `ensures`."""
+    out: dict[str, PfInfo] = {}
+    for d in decls:
+        if d.kind != "function" or PF_NAME_RE.match(d.name) is None:
+            continue
+        params, ret = pf_signature(src, d)
+        requires: list[str] = []
+        ensures: list[str] = []
+        opaque = False
+        for kw, _line, text in clause_texts(src, d):
+            if kw == "requires":
+                requires += _memory_free_conjuncts(text)
+                opaque = opaque or PF_ANY_RE.search(text) is not None
+            elif kw == "ensures":
+                ensures += _memory_free_conjuncts(text)
+        out[d.name] = PfInfo(d.name, params, ret, tuple(requires), tuple(ensures), opaque)
+    return out
+
+
+def decreases_line_set(src: Source) -> set[int]:
+    """Every line of a `decreases` clause (its keyword line and the lines that continue it, as `decreases_measures` reads it)."""
+    out: set[int] = set()
+    for lineno, code in enumerate(src.code, start=1):
+        if not DECREASES_LINE_RE.match(code):
+            continue
+        out.add(lineno)
+        for k, more in enumerate(src.code[lineno:], start=lineno + 1):
+            if more.strip() and CLAUSE_END_RE.match(more):
+                break
+            out.add(k)
+    return out
+
+
+def _pf_applications(text: str) -> list[tuple[str, int, int]]:
+    """(callee, start, end) of every application of a `pf_` name in `text` (end: just after the closing parenthesis)."""
+    out = []
+    for m in PF_ANY_RE.finditer(text):
+        end = _group_end(text, m.end() - 1)
+        out.append((m.group("name"), m.start(), end + 1 if end >= 0 else len(text)))
+    return out
+
+
+def _pf_body_text(src: Source, d: Decl) -> list[tuple[int, str]]:
+    """(line, text) of the body of the function `d`; on the line of the opening brace, what follows it."""
+    out = []
+    for n in range(d.body_line, d.end_line + 1):
+        code = src.code[n - 1]
+        if n == d.body_line:
+            code = code.split("{", 1)[1] if "{" in code else code
+        out.append((n, code))
+    return out
+
+
+PRELUDE_SIMPLE = frozenset({"c_pow2", "c_shr", "c_div", "c_rem", "c_udiv", "c_urem"})
+
+
+def prelude_function_name(name: str) -> bool:
+    """A name the prelude emits (src/viper/prelude.cpp): the powers of two, the shift, the divisions and remainders, the bitwise functions and the
+    `^` constant-mask functions."""
+    return name in PRELUDE_SIMPLE or BIT_FUNCTION_RE.match(name) is not None or xor_mask_function_ok(name)
+
+
+def lint_inert_functions(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0062 item 12 (the owner's H', question 273): a top-level `function` that is neither a prelude function nor `pf_<name>__<id>` applies
+    only prelude functions, so it can neither recurse nor reach a `pf_` function (the cycle rules and the `decreases` lines are those of `pf_`
+    functions alone)."""
+    functions = {d.name for d in decls if d.kind == "function"}
+    for d in decls:
+        if d.kind != "function" or prelude_function_name(d.name) or PF_NAME_RE.match(d.name):
+            continue
+        for n in range(d.line, d.end_line + 1):
+            code = src.code[n - 1]
+            for m in re.finditer(r"(?<![\w$'.])([A-Za-z_$][\w$']*)\s*\(", code):
+                name = m.group(1)
+                if name == d.name and code[:m.start()].rstrip().endswith("function"):
+                    continue
+                if name in functions and not prelude_function_name(name):
+                    add(n, f"`function {d.name}` is neither a prelude function nor `pf_<name>__<id>`, so it applies only prelude functions: "
+                           f"it applies `{name}` (decision 0062 item 12)")
+
+
+def lint_prelude_decreases(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0062 item 12: lowering prints an empty `decreases` line on every prelude function of a program that holds a `pf_` function, and only
+    there (Silicon's termination check of a `pf_` function that applies a prelude function would otherwise fail, S46 (a)); in any other program an
+    empty `decreases` on a prelude function is refused.  (A prelude function's measure is refused by the position-map rule: it has no entry.)"""
+    if any(d.kind == "function" and PF_NAME_RE.match(d.name) for d in decls):
+        return
+    measures = decreases_measures(src)
+    for d in decls:
+        if d.kind == "function" and prelude_function_name(d.name):
+            for kw, line, _text in clause_texts(src, d):
+                if kw == "decreases" and measures.get(line) == "":
+                    add(line, f"`function {d.name}`: an empty `decreases` on a prelude function only stands in a program that holds a `pf_` function "
+                              "(decision 0062 item 12)")
+
+
+def pf_requires_problems(src: Source, decls: list[Decl]) -> dict[int, tuple[str | None, bool]]:
+    """Decision 0062 item 6, form Min (S46 (a), `tests/viper-smoke/memory/s46_a_min.vpr`): line -> (why not, whether it is an admitted `acc(..., wildcard)`
+    line) for each `requires` line of a `pf_` function that holds no user quantifier (`forall q<j>`: item 11's, read by `classify_quantified_lines`).
+    The lines, one conjunct each (`push_clauses` splits them): a parameter's type range (an integer's bounds, a pointer's well-formedness
+    `p == null || WF`); a value clause (no memory, permission, quantifier or flag; it may apply another `pure` function); for a range atom on a
+    pointer parameter `p` with count `n` the pure lines `p != null`, the well-formedness of `p`, `0 <= n`, `offset_of(p) + n <= len(block_of(p))` (the
+    combined line is read too), then `forall k: Int :: { loc(block_of(p), k) } offset_of(p) <= k && k < offset_of(p) + n ==> acc(loc(block_of(p), k).v_<t>,
+    wildcard)`, then the element range (the type's bounds of `loc(block_of(p), k).v_<t>`, none for `bool`: a `bool` element has no such line, so it is
+    not required); for a cell atom the same of one slot (`offset_of(p) < len(block_of(p))`, `acc(p.v_<t>, wildcard)`, the bounds of `p.v_<t>`).  No
+    `d_<t>` line, no `lv` line, no flag line (form Full is not admitted), and `wildcard` stands only in the `acc` line."""
+    out: dict[int, tuple[str | None, bool]] = {}
+    for d in decls:
+        if d.kind != "function" or PF_NAME_RE.match(d.name) is None or not d.has_body:
+            continue
+        params = dict(pf_signature(src, d)[0])
+        refs = [n for n, t in params.items() if t == "Ref"]
+        notnull: set[str] = set()
+        wf: set[str] = set()
+        nonneg: set[str] = set()
+        bound: set[tuple[str, str]] = set()
+        cell_bound: set[str] = set()
+        acc_rows: dict[tuple[str, str, str], int] = {}  # (pointer, count or "", field) -> its line
+        elements: set[tuple[str, str, str]] = set()  # the atoms whose element-range line was read
+        for kw, line, text in clause_texts(src, d):
+            if kw != "requires" or USER_QUANT_RE.search(text):
+                continue
+            flat = norm_viper(text)
+            why: str | None = None
+            wild = False
+            if re.search(r"(?<![\w$'])(?:lvloc|lv)(?![\w$'])|\.\s*d_|(?<![\w$'])d_", text):
+                why = "a flag or a liveness line (`d_<t>`, `lv`) is no line of form Min: every flag and the liveness are rows at the application"
+            elif WILDCARD_RE.search(text):
+                q = parse_range_quantifier_full(text)
+                cell = re.fullmatch(rf"acc\(({IDENT})\.(v_[\w$']+),wildcard\)", flat)
+                if cell and params.get(cell.group(1)) == "Ref":
+                    x = cell.group(1)
+                    acc_rows[(x, "", cell.group(2))] = line
+                    if not (x in notnull and x in wf and x in cell_bound):
+                        why = f"the cell atom of `{x}` needs its pure lines first: `{x} != null`, the well-formedness of `{x}` and `offset_of({x}) < len(block_of({x}))`"
+                    wild = why is None
+                elif q is not None and not q[2]:
+                    k, b, _extra, cons, lo, hi = q
+                    x = BLOCK_BASE_RE.match(_squash(b)).group(1)
+                    acc = _range_acc(cons, k, b)
+                    high = _squash(_strip_wrap(hi))
+                    n = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
+                    if x not in refs or acc is None or not acc[0].startswith("v_") or acc[1] is None or acc[1].strip() != "wildcard" \
+                            or _squash(_strip_wrap(lo)) != f"offset_of({x})" or not n:
+                        why = ("`wildcard` stands only in `forall k: Int :: { loc(block_of(p), k) } offset_of(p) <= k && k < offset_of(p) + n ==> "
+                               "acc(loc(block_of(p), k).v_<t>, wildcard)` of a pointer parameter `p`")
+                    else:
+                        acc_rows[(x, n, acc[0])] = line
+                        if not (x in notnull and x in wf and norm_viper(n) in nonneg and (x, norm_viper(n)) in bound):
+                            why = (f"the range atom of `{x}` needs its pure lines first: `{x} != null`, the well-formedness of `{x}`, `0 <= n` and "
+                                   f"`offset_of({x}) + n <= len(block_of({x}))`")
+                        wild = why is None
+                else:
+                    why = "`wildcard` stands only in the `acc` line of an atom's `forall` or cell (form Min)"
+            elif FORALL_RE.search(text):
+                q = parse_range_quantifier_full(text)
+                if q is None or q[2]:
+                    why = "a quantified `requires` of a `pure` function is the range atom's `acc` or element-range line, or item 11's user quantifier"
+                else:
+                    k, b, _extra, cons, lo, hi = q
+                    x = BLOCK_BASE_RE.match(_squash(b)).group(1)
+                    high = _squash(_strip_wrap(hi))
+                    n = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
+                    cell = f"loc({_squash(b)},{k})"
+                    fields = [f for (px, pn, f) in acc_rows if px == x and pn == n]
+                    m = re.search(re.escape(cell) + r"\.v_(" + IDENT + ")", _squash(cons))
+                    if x not in refs or not n or _squash(_strip_wrap(lo)) != f"offset_of({x})" or m is None:
+                        why = ("the element-range line of a range atom: `forall k: Int :: { loc(block_of(p), k) } offset_of(p) <= k && k < offset_of(p) + n "
+                               "==> <the type's bounds of loc(block_of(p), k).v_<t>>`")
+                    elif f"v_{m.group(1)}" not in fields:
+                        why = f"the element range of `{x}`'s `v_{m.group(1)}` comes after its `acc(..., wildcard)` line (form Min)"
+                    elif not _std_type_range(_strip_wrap(cons), cell, m.group(1)):
+                        why = f"the consequent is not the type's range of `v_{m.group(1)}`"
+                    else:
+                        elements.add((x, n, f"v_{m.group(1)}"))
+            elif (cell_read := next((x for x in refs if re.search(rf"(?<![\w$'.]){re.escape(x)}\.v_", flat)), None)) is not None \
+                    and not PF_FORBIDDEN_RE.search(text) and "acc(" not in flat:
+                # the element range of a cell atom: the type's bounds of `p.v_<t>`, after the atom's `acc(p.v_<t>, wildcard)`
+                t = re.search(rf"{re.escape(cell_read)}\.v_({IDENT})", flat).group(1)
+                if not _std_type_range(text.strip(), cell_read, t):
+                    why = f"the consequent is not the type's range of `{cell_read}.v_{t}`"
+                elif (cell_read, "", f"v_{t}") not in acc_rows:
+                    why = f"the element range of `{cell_read}.v_{t}` comes after its `acc({cell_read}.v_{t}, wildcard)` line (form Min)"
+                else:
+                    elements.add((cell_read, "", f"v_{t}"))
+            elif HEAP_READ_NO_APPLICATION_RE.search(text) or PF_FORBIDDEN_RE.search(text) or "acc(" in flat:
+                why = ("a `requires` of a `pure` function is a value clause (no heap read, permission, `old`), a type range or an atom's line "
+                       "(`owns`, `live`, guards over atoms and markers are not read, M4.5f1)")
+            else:
+                # a plain line: it may be a pure line of an atom (collected for the `acc` lines after it) or a cell atom's element range
+                for pn in refs:
+                    if flat == f"{pn}!=null":
+                        notnull.add(pn)
+                    elif flat == norm_viper(_view_wf(pn)):
+                        wf.add(pn)
+                    elif (m := re.fullmatch(rf"offset_of\({re.escape(pn)}\)\+(.+)<=len\(block_of\({re.escape(pn)}\)\)", flat)):
+                        bound.add((pn, m.group(1)))
+                    elif flat in (f"offset_of({pn})<len(block_of({pn}))", f"offset_of({pn})+1<=len(block_of({pn}))"):
+                        cell_bound.add(pn)
+                    elif (m := re.fullmatch(rf"{re.escape(pn)}!=null&&{re.escape(pn)}==loc\(block_of\({re.escape(pn)}\),offset_of\({re.escape(pn)}\)\)&&"
+                                            rf"0<=offset_of\({re.escape(pn)}\)&&offset_of\({re.escape(pn)}\)<=len\(block_of\({re.escape(pn)}\)\)&&"
+                                            rf"0<=(.+)&&offset_of\({re.escape(pn)}\)\+\1<=len\(block_of\({re.escape(pn)}\)\)", flat)):
+                        notnull.add(pn)
+                        wf.add(pn)
+                        nonneg.add(m.group(1))
+                        bound.add((pn, m.group(1)))
+                m = re.fullmatch(r"0<=(.+)", flat)
+                if m:
+                    nonneg.add(m.group(1))
+            out[line] = (why, wild)
+        for key, line in acc_rows.items():
+            if key not in elements and key[2] != "v_bool" and out.get(line, (None, False))[0] is None:
+                out[line] = (f"the atom of `{key[0]}` needs its element-range line (the type's bounds of its `{key[2]}`) after its `acc(..., wildcard)` line (form Min)", False)
+    return out
+
+
+def lint_pf_requires(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> dict[int, tuple[str | None, bool]]:
+    """Report `pf_requires_problems`; returns them for the rules that exempt those lines (`wildcard`, the older quantifier rules)."""
+    verdicts = pf_requires_problems(src, decls)
+    for line, (why, _wild) in sorted(verdicts.items()):
+        if why is not None:
+            add(line, f"`requires` of a `pure` function (decision 0062 item 6, form Min): {why}")
+    return verdicts
+
+
+def lint_pure_functions(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0062 item 12: a `pf_<name>__<id>` function is bodied, with exactly one `decreases` line (a measure, or empty for a function that does
+    not apply itself; `_` and `*` are refused by the termination rules for every function); its `ensures` lines hold no `acc`, `perm`, `old`,
+    `inhale` or `assume`, nor its body; every application of the function itself in its body begins a line (the position map is keyed by line); a
+    function that applies itself has a measure; the only cycle is such a self-application of the body (no mutual recursion, no cycle through a
+    `requires`, an `ensures` or a `decreases`).  A name that starts `pf_` is a `pf_<name>__<id>`."""
+    pfs = {d.name: d for d in decls if d.kind == "function" and PF_NAME_RE.match(d.name)}
+    for d in decls:
+        if d.kind == "function" and d.name.startswith("pf_") and d.name not in pfs:
+            add(d.line, f"`function {d.name}`: a function whose name starts `pf_` is a `pf_<name>__<id>` (decision 0062 item 12)")
+    measures = decreases_measures(src)
+    body_edges: dict[str, set[str]] = {}
+    contract_edges: dict[str, set[str]] = {}
+    for name, d in pfs.items():
+        what = f"`function {name}` (decision 0062 item 12)"
+        clauses = clause_texts(src, d)
+        decreases = [c for c in clauses if c[0] == "decreases"]
+        if len(decreases) != 1:
+            add(d.line, f"{what}: exactly one `decreases` line, a measure or empty (Silicon checks the termination of a function only where one is "
+                        f"present), found {len(decreases)}")
+        for kw, line, text in clauses:
+            if kw == "ensures" and PF_FORBIDDEN_RE.search(text):
+                add(line, f"{what}: an `ensures` of a `pure` function reads no permission: no `acc`, `perm`, `old`, `forperm`, `inhale` or `assume`")
+        body_edges[name], contract_edges[name] = set(), set()
+        for kw, line, text in clauses:
+            contract_edges[name] |= {a for a, _s, _e in _pf_applications(text)}
+        if not d.has_body:
+            continue
+        for n, code in _pf_body_text(src, d):
+            if PF_FORBIDDEN_RE.search(code):
+                add(n, f"{what}: the body of a `pure` function holds no `acc`, `perm`, `old`, `forperm`, `inhale` or `assume`")
+            apps = _pf_applications(code)
+            body_edges[name] |= {a for a, _s, _e in apps}
+            own = [(s, e) for a, s, e in apps if a == name]
+            if own and (len(own) > 1 or code[:own[0][0]].replace("(", "").strip()):
+                add(n, f"{what}: an application of `{name}` in its own body begins a line of its own (the position map is keyed by line: "
+                       "each such application has its own `termination.failed` entry)")
+        if name in body_edges[name]:
+            if decreases and measures.get(decreases[0][1], "") in ("", "_"):
+                add(decreases[0][1], f"{what}: it applies itself, so its `decreases` has a measure (an empty one would not check its termination)")
+    # the graph of applications: the only cycle is a function applying itself in its own body
+    nodes = list(pfs)
+    edges = {n: {a for a in body_edges.get(n, set()) | contract_edges.get(n, set()) if a in pfs} for n in nodes}
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    stack: list[str] = []
+    on: set[str] = set()
+    components: list[list[str]] = []
+    counter = [0]
+
+    def connect(v: str) -> None:
+        index[v] = low[v] = counter[0]
+        counter[0] += 1
+        stack.append(v)
+        on.add(v)
+        for w in sorted(edges[v]):
+            if w not in index:
+                connect(w)
+                low[v] = min(low[v], low[w])
+            elif w in on:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            comp = []
+            while True:
+                w = stack.pop()
+                on.discard(w)
+                comp.append(w)
+                if w == v:
+                    break
+            components.append(comp)
+
+    for n in nodes:
+        if n not in index:
+            connect(n)
+    for comp in components:
+        if len(comp) > 1:
+            for n in sorted(comp):
+                add(pfs[n].line, f"`function {n}` (decision 0062 item 12): it is part of a cycle of `pure` functions ({', '.join(sorted(comp))}): "
+                                 "the only cycle is a function applying itself in its own body")
+        elif comp[0] in contract_edges[comp[0]]:
+            add(pfs[comp[0]].line, f"`function {comp[0]}` (decision 0062 item 12): it applies itself in a `requires`, an `ensures` or a `decreases`: "
+                                   "the only cycle is a function applying itself in its own body")
+
+
+def lint_pf_applications(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0062 item 12: an application of a `pf_` function stands in a `pf_` function (never in its `decreases`), in a method's `requires`,
+    `ensures`, `invariant` or `assert` (on the line of its keyword) and never in a `__wf` method, a prelude or other function, or a `decreases`;
+    its callee is a `pf_` function of the file."""
+    funcs = {d.name for d in decls if d.kind == "function"}
+    decreases_lines = decreases_line_set(src)
+    owner_of: dict[int, Decl] = {}
+    for d in decls:
+        for n in range(d.line, d.end_line + 1):
+            owner_of[n] = d
+    for lineno, code in enumerate(src.code, start=1):
+        for m in PF_ANY_RE.finditer(code):
+            name = m.group("name")
+            if code[:m.start()].rstrip().endswith(("function", "method")):
+                continue  # the declaration of the function itself, or of the `__wf` method of one (`pf_<name>__<id>__wf`)
+            owner = owner_of.get(lineno)
+            where = f"an application of `{name}` (decision 0062 item 12)"
+            if PF_NAME_RE.match(name) is None or name not in funcs:
+                add(lineno, f"{where}: the callee is a `pf_<name>__<id>` function of this file")
+            if owner is None or owner.kind not in ("method", "function"):
+                add(lineno, f"{where}: stands in a `pf_` function or a method's clause")
+            elif lineno in decreases_lines:
+                add(lineno, f"{where}: stands in no `decreases` (a measure calls nothing)")
+            elif owner.kind == "function":
+                if PF_NAME_RE.match(owner.name) is None:
+                    add(lineno, f"{where}: stands in a `pf_` function, not in `function {owner.name}`")
+            elif owner.name.endswith("__wf"):
+                add(lineno, f"{where}: stands in no `__wf` method (variant M's method applies the ghost functions `hva_<method>__<callee>_<pre|post>`)")
+            elif not re.match(r"^\s*(?:requires|ensures|invariant|assert)\b", code):
+                add(lineno, f"{where}: stands in a method's `requires`, `ensures`, `invariant` or `assert`, on the line of its keyword")
+
+
+def _split_args(text: str) -> list[str]:
+    return [a.strip() for a in _split_commas(text)]
+
+
+def _hva_applications(text: str) -> list[tuple[str, list[str], str]]:
+    """(name, arguments, text) of every application of an `hva_` ghost function in `text`."""
+    out = []
+    for m in HVA_APP_START_RE.finditer(text):
+        end = _group_end(text, m.end() - 1)
+        if end < 0:
+            out.append((m.group().rstrip("( \t"), [], text[m.start():]))
+            continue
+        name = m.group().rstrip("( \t")
+        out.append((name, _split_args(text[m.end():end]), text[m.start():end + 1]))
+    return out
+
+
+def _substitute(text: str, mapping: dict[str, str]) -> str:
+    if not mapping:
+        return text
+    pattern = re.compile(r"(?<![\w$'.])(" + "|".join(map(re.escape, sorted(mapping, key=len, reverse=True))) + r")(?![\w$'])")
+    return pattern.sub(lambda m: mapping[m.group(1)], text)
+
+
+def _conjunct_set(text: str) -> list[str]:
+    try:
+        parts = _flatten_and(text)
+    except ValueError:
+        parts = [text.strip()]
+    return sorted(norm_viper(p) for p in parts)
+
+
+def hva_fact_problem(rest: str, ctx: WfContext) -> str | None:
+    """Why the `requires` of an `f__wf` method that holds an application ghost `hva_<method>__<callee>_<pre|post>` is none of decision 0062 item 8's
+    facts, or None: (i) the type range of an application (an integer type's bounds, unguarded); (ii) the callee's `ensures` at the arguments, under
+    exactly the callee's `requires` that read no memory at those arguments (no guard when it has none); (iii) the keep fact
+    `G ==> post(args) == pre(args)` under the guards of a `reads_range` atom of the method and its `ensures` partner and the interval inclusion."""
+    text = rest.strip()
+    if FORALL_RE.search(text):
+        return "a quantified fact over application ghosts (decision 0062 item 7, cut 2) is not one of the facts (i) to (iii)"
+    parts = _split_top(text, "==>")
+    if len(parts) > 2:
+        return "a fact has at most one guard `G ==> `"
+    guard = parts[0].strip() if len(parts) == 2 else None
+    body = _strip_wrap(text[len(parts[0]) + len("==>"):]) if len(parts) == 2 else _strip_wrap(text)
+    if guard is not None and (not guard or not _heap_free(guard) or QUANT_FORBIDDEN_RE.search(guard)):
+        return "the guard of a fact is a plain condition (no heap read, permission or quantifier)"
+    apps = _hva_applications(body)
+    if not apps or not _heap_free(body) or QUANT_FORBIDDEN_RE.search(body):
+        return "the body of a fact reads no heap and holds no permission or quantifier"
+    keys = set()
+    for name, args, full in apps:
+        found = hva_callee(name, ctx.method, ctx.pfs)
+        if found is None or name not in ctx.ghosts:
+            return f"`{name}` is not an application ghost `hva_{ctx.method}__<callee>_<pre|post>` of this method's domain with a `pf_` callee of this file"
+        info = ctx.pfs[found[0]]
+        if len(args) != len(info.params):
+            return f"`{name}` takes {len(info.params)} arguments, found {len(args)}"
+        if not all(_heap_free(a) and not QUANT_FORBIDDEN_RE.search(a) for a in args):
+            return "the arguments of an application in a fact read no heap"
+        keys.add((found[0], tuple(norm_viper(a) for a in args)))
+    if len(keys) != 1:
+        return "a fact is about one application (one callee, one list of arguments)"
+    callee, args_n = next(iter(keys))
+    info = ctx.pfs[callee]
+    args_raw = apps[0][1]
+    flat = norm_viper(body)
+    # (iii) the keep fact
+    keep = re.fullmatch(rf"({IDENT})\((.*)\)==({IDENT})\((.*)\)", flat)
+    if keep and len(apps) == 2 and keep.group(1) in ctx.ghosts and keep.group(3) in ctx.ghosts:
+        (n1, _a1, _t1), (n2, _a2, _t2) = apps
+        s1, s2 = hva_callee(n1, ctx.method, ctx.pfs)[1], hva_callee(n2, ctx.method, ctx.pfs)[1]
+        if (s1, s2) != ("post", "pre") or flat != norm_viper(f"{n1}({', '.join(_a1)}) == {n2}({', '.join(_a2)})"):
+            return "the keep fact is `post(args) == pre(args)` of one callee at the same arguments (the post-state application on the left)"
+        if guard is None:
+            return ("the keep fact is guarded by the guards of a `reads_range` atom of the method and its `ensures` partner and the interval inclusion "
+                    "(an unguarded fact lets a wrong contract's `__wf` verify: it holds on every path, even where an `owns_range` alias may change the "
+                    "place)")
+        have = set(_conjunct_set(guard))
+        for r in ctx.atoms:
+            if r.kind != "range" or r.clause != "requires" or r.amount is None:
+                continue
+            for e in ctx.atoms:
+                if (e.kind, e.clause, e.formal, e.field, e.amount, e.count) == ("range", "ensures", r.formal, r.field, r.amount, r.count):
+                    need = set(_expected_guard(r, e))
+                    extra = have - need
+                    count_word = re.compile(rf"(?<![\w$']){re.escape(r.count or '')}(?![\w$'])")
+                    if need <= have and len(extra) >= 2 and any("offset_of(" in x for x in extra) and any(count_word.search(x) for x in extra):
+                        return None
+        return ("the keep fact is guarded by the guards of a `reads_range(p, n)` `requires` atom of the method and its `ensures` partner "
+                "(same field, amount and count) and the inclusion of the callee's interval in the atom's (two conjuncts over `offset_of(...)`, "
+                "the second bounding by the atom's count `n`)")
+    # (i) the type range of an application
+    app_text = norm_viper(apps[0][2])
+    rng = [norm_viper(x) for x in (_flatten_and(body) if "&&" in body else [body])]
+    if len(rng) == 2 and all(app_text in r for r in rng) and len(apps) == 2:
+        lo = re.fullmatch(rf"(-?[0-9]+)<={re.escape(app_text)}", rng[0])
+        hi = re.fullmatch(rf"{re.escape(app_text)}<=(-?[0-9]+)", rng[1])
+        if lo and hi and guard is None:
+            # an unguarded range is the type's (item 8 (i)); any other unguarded bound would be an `ensures` fact (ii) without its guard
+            if info.ret != "Int":
+                return f"`{callee}` returns `{info.ret}`: a `Bool` result has no type range to assume"
+            if (int(lo.group(1)), int(hi.group(1))) in VIEW_STANDARD_RANGES:
+                return None
+            # any other bound is read as fact (ii): the callee's `ensures`, guarded by the callee's `requires` unless it has none
+    # (ii) the callee's ensures at the arguments, under the callee's value requires and pure lines
+    if info.opaque_requires:
+        return (f"`{callee}`'s `requires` applies a `pure` function: its value clauses are not comparable, so fact (ii) is not assumed for it "
+                "(a false alarm, never a proof)")
+    mapping = {pname: f"({a})" for (pname, _t), a in zip(info.params, args_raw)}
+    full_app = apps[0][2]
+    mapping["result"] = full_app
+    if any(a[2] != full_app and norm_viper(a[2]) != norm_viper(full_app) for a in apps):
+        return "a fact (ii) is about one application"
+    want = {norm_viper(_substitute(c, mapping)) for c in info.ensures}
+    got = _conjunct_set(body)
+    if not got or not all(g in want for g in got):
+        return (f"the body of a fact (ii) is conjuncts of `{callee}`'s `ensures` that read no memory, at the arguments, `result` being the application "
+                "(a clause that reads memory, holds a quantifier or an application is left out)")
+    need_v = {norm_viper(_substitute(c, {k: v for k, v in mapping.items() if k != "result"})) for c in info.requires}
+    if guard is None:
+        if need_v:
+            return (f"fact (ii) is guarded by `{callee}`'s `requires` that read no memory, at the arguments: the `ensures` of a function may be false "
+                    "where its `requires` does not hold, and an unguarded fact would make every row of the method vacuous there")
+        return None
+    if set(_conjunct_set(guard)) != need_v:
+        return f"the guard of fact (ii) is exactly `{callee}`'s `requires` that read no memory (its parameters' ranges, its pure lines and value clauses), at the arguments"
+    return None
+
+
+def hva_line_problem(kind: str, rest: str, code: str, ctx: WfContext, ghosts: frozenset[str]) -> str | None:
+    """Why a line of an `f__wf` method that applies an `hva_` ghost is not one of decision 0062 item 8's: its `requires` are the facts (i) to (iii)
+    (never mixed with an `hvq_` ghost), a plain `assert` row reads no heap, a quantified one is item 11's."""
+    if any(g.startswith("hvq_") and re.search(rf"(?<![\w$']){re.escape(g)}\s*\(", code) for g in ghosts):
+        return "a line applies both an `hvq_` and an `hva_` ghost function"
+    if kind == "requires":
+        return hva_fact_problem(rest, ctx)
+    if kind == "assert":
+        if WF_QUANT_RE.search(code):
+            return wf_assert_verdict(rest, ghosts)
+        if not _heap_free(rest) or QUANT_FORBIDDEN_RE.search(rest):
+            return "a row of an `f__wf` method reads no heap and holds no permission"
+        return None
+    return f"a `{kind}` of an `f__wf` method holds no application ghost (the facts are `requires`, its rows `assert`)"
+
+
+def lint_pf_rows(src: Source, decls: list[Decl], by_line: dict[int, list[MapEntry]], add: Callable[[int, str], None], map_name: str) -> None:
+    """Decision 0062 item 12, the map rows of a `pf_` function: each `requires` line `not.wellformed` (`internal`); each `ensures` line
+    `postcondition.violated` (`postcondition`) and `not.wellformed` (`internal`); its `decreases` line with a measure `termination.failed`
+    (`termination`); each body line that begins with an application of the function itself `termination.failed` (`termination`) and no other line
+    of the body any entry."""
+    measures = decreases_measures(src)
+
+    def problem(e: MapEntry, why: str) -> None:
+        add(e.vpr_line, f"the map entry `{map_name}:{e.map_line}`: {why}")
+
+    for d in decls:
+        if d.kind != "function" or PF_NAME_RE.match(d.name) is None or not d.has_body:
+            continue
+        for kw, line, _text in clause_texts(src, d):
+            ids = {e.error_id: e for e in by_line.get(line, [])}
+            if kw == "requires":
+                for e in by_line.get(line, []):
+                    if e.category != "internal":
+                        problem(e, f"a `requires` of a `pure` function is checked for well-formedness only: its entry is `internal`, found `{e.category}`")
+            elif kw == "ensures":
+                need = {"postcondition.violated": "postcondition", "not.wellformed": "internal"}
+                for error_id, category in need.items():
+                    if error_id not in ids:
+                        add(line, f"an `ensures` of `function {d.name}` needs a position-map entry with the Viper error id `{error_id}` "
+                                  f"(category `{category}`, decision 0062 item 12)")
+                    elif ids[error_id].category != category:
+                        problem(ids[error_id], f"its category is `{category}`, found `{ids[error_id].category}` (decision 0062 item 12)")
+            elif kw == "decreases" and measures.get(line, "") not in ("", "_"):
+                for e in by_line.get(line, []):
+                    if e.category != "termination":
+                        problem(e, f"the entry of a `decreases` measure is `termination`, found `{e.category}`")
+        for n, code in _pf_body_text(src, d):
+            own = [m for m in PF_APP_RE.finditer(code) if m.group("name") == d.name]
+            starts = bool(own) and not code[:own[0].start()].replace("(", "").strip()
+            for e in by_line.get(n, []):
+                if not (starts and e.error_id == "termination.failed" and e.category == "termination"):
+                    problem(e, "a body line of a `pure` function has an entry only when it begins an application of the function itself, "
+                               "and then `termination.failed` (`termination`)")
+            if starts and not any(e.error_id == "termination.failed" for e in by_line.get(n, [])):
+                add(n, f"a body line of `function {d.name}` that begins an application of itself needs the `termination.failed` entry of that call")
+
+
 def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
              map_name: str | None = None) -> list[str]:
     """Problems of one Viper file with its position map (None: the map is missing)."""
@@ -4613,6 +5284,11 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                             "call is a statement of its own (decision 0012 item 13)")
 
     lint_termination_clauses(src, decls, add, measures)
+    lint_pure_functions(src, decls, add)
+    lint_pf_applications(src, decls, add)
+    lint_inert_functions(src, decls, add)
+    lint_prelude_decreases(src, decls, add)
+    pf_requires = lint_pf_requires(src, decls, add)
     lint_jumps(src, decls, add)
     lint_flags(src, add)
     lint_remainders(src, decls, add)
@@ -4620,7 +5296,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_array_allocations(src, decls, add)
     has_globals, global_facts = lint_globals(src, decls, add)
     quantified = classify_quantified_lines(src, decls)
-    lint_ghost_amounts(src, decls, add, quantified.wildcard_rows)
+    lint_ghost_amounts(src, decls, add, quantified.wildcard_rows | frozenset(n for n, (why, wild) in pf_requires.items() if wild and why is None))
     lint_ghost_domain_use(src, decls, ghost_domain_decls, add)
     lint_perm_locals(src, decls, add)
     lint_owner_loop_ghosts(src, decls, add)
@@ -4656,6 +5332,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
                                 f"{name} line {lineno} has the Viper error id `{e.error_id}`, "
                                 f"which a `{kind}` line cannot produce (expected "
                                 + " or ".join(f"`{i}`" for i in sorted(allowed)) + ")")
+    lint_pf_rows(src, decls, by_line, add, map_name or name + MAP_SUFFIX)
     for lineno in sorted(forperm_lines):
         for e in by_line.get(lineno, []):
             if e.category != "leak":

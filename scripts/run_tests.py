@@ -1077,6 +1077,7 @@ class SiliconResult:
     verified: bool
     errors: list[ReportedError]
     problem: str | None  # set when the output is not a clean verdict
+    warnings: list[str] = dataclasses.field(default_factory=list)  # the accepted axiomatisation warnings, in order
 
 
 def classify(message: str) -> tuple[str, str, str | None, int | None]:
@@ -1105,14 +1106,25 @@ def classify(message: str) -> tuple[str, str, str | None, int | None]:
 _BANNER_RE = re.compile(r"^Silicon \S+( \(.*\))?\s*$")
 _SUCCESS_LINE_RE = re.compile(r"^Silicon finished verification successfully\b.*$")
 _FOUND_LINE_RE = re.compile(r"^Silicon found (\d+) errors? in .*:\s*$")
+# Decision 0062 item 11, "One accepted warning" (owner, question 275): Silicon prints, before its verdict, that it could not resolve an
+# expression during the axiomatisation of a function, when a read or an application of a `pure` function stands on a branch no path of the
+# function's `requires` reaches.  Exactly this line, for a `pf_<name>__<id>` function, is no stray line whatever the verdict (the driver,
+# src/driver/silicon_output.cpp, accepts the same line); any other warning, and this one for another function or in another text, is not.
+_AXIOMATISATION_WARNING_RE = re.compile(
+    r"^Could not resolve expression .+ \([^)]*@\d+\.\d+(--\d+\.\d+)?\) during the axiomatisation of function "
+    r"(?P<function>pf_[A-Za-z_][A-Za-z0-9_]*__[0-9]+)\. "
+    r"This typically happens if the expression is on an infeasible path, i\.e\. is dead code\. "
+    r"The unresolved expression will be replaced by a fresh symbol, i\.e\. an arbitrary value\.$")
 
 
 def parse_silicon_output(output: str, returncode: int) -> SiliconResult:
     """Silicon's output as a verdict.  The output is accepted only if it is the banner, exactly one verdict
     line and its error list, nothing else: a warning, a stack trace or a second verdict means that something
     else happened and is "no verdict" (decision 0011 item 11; src/driver/silicon_output.cpp reads it the
-    same way, and the self-test requires the two to agree)."""
+    same way, and the self-test requires the two to agree).  The one exception is decision 0062 item 11's
+    axiomatisation warning of a `pf_<name>__<id>` function, before the verdict (`_AXIOMATISATION_WARNING_RE`)."""
     entries: list[str] = []
+    warnings: list[str] = []
     stray = ""  # the first line that is neither part of a verdict nor of an error message
     banners = successes = founds = 0
     found_count = ""
@@ -1121,6 +1133,8 @@ def parse_silicon_output(output: str, returncode: int) -> SiliconResult:
             entries.append(m.group(2))
         elif not raw.strip():
             continue
+        elif successes + founds == 0 and _AXIOMATISATION_WARNING_RE.match(raw):
+            warnings.append(raw)  # before the verdict only: Silicon prints it while it axiomatises, never after
         elif _SUCCESS_LINE_RE.match(raw):
             successes += 1
         elif m := _FOUND_LINE_RE.match(raw):
@@ -1141,19 +1155,19 @@ def parse_silicon_output(output: str, returncode: int) -> SiliconResult:
 
     no_verdict = f"Silicon did not produce a verdict (exit status {returncode})"
     if successes + founds == 0:
-        return SiliconResult(False, errors, no_verdict)
+        return SiliconResult(False, errors, no_verdict, warnings)
     if stray or banners != 1 or successes + founds != 1:
         unexpected = f" (unexpected line: {stray[:120]})" if stray else ""
         return SiliconResult(False, errors, "Silicon's output is not a banner and one verdict"
-                             f"{unexpected} (exit status {returncode})")
+                             f"{unexpected} (exit status {returncode})", warnings)
     if successes == 1 and not entries and returncode == 0:
-        return SiliconResult(True, [], None)
+        return SiliconResult(True, [], None, warnings)
     problem = None
     if founds != 1 or returncode != 1:
         problem = no_verdict
     elif int(found_count) != len(errors):
         problem = f"Silicon reported {found_count} errors but {len(errors)} were parsed"
-    return SiliconResult(False, errors, problem)
+    return SiliconResult(False, errors, problem, warnings)
 
 
 def same_file(a: str | None, b: str | None) -> bool:

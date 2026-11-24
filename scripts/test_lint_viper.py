@@ -7973,5 +7973,775 @@ class WfQuantifierTests(unittest.TestCase):
         self.refused(outer)
 
 
+class Row:
+    """A line of a fixture with several position-map entries (an `ensures` of a `pure` function has two: its user row and its internal one)."""
+
+    def __init__(self, text, *entries):
+        self.text, self.entries = text, entries
+
+
+def build_rows(lines):
+    """(vpr text, map text) of a fixture of strings, `Check`s (one entry) and `Row`s (several)."""
+    text, entries = [], []
+    for i, item in enumerate(lines, start=1):
+        if isinstance(item, Check):
+            text.append(item.text)
+            pairs = [(item.error_id, item.category)]
+        elif isinstance(item, Row):
+            text.append(item.text)
+            pairs = list(item.entries)
+        else:
+            text.append(item)
+            continue
+        for error_id, category in pairs:
+            entries.append("\t".join([str(i), error_id, category, "t.c", str(i + 100), "5", f"message of line {i}"]))
+    return "\n".join(text) + "\n", "\n".join(entries) + "\n"
+
+
+def sub(lines, old, new, keep_entry=True):
+    """`lines` with the one line that holds `old` rewritten to `new` (its entries stay)."""
+    hits = [i for i, l in enumerate(lines) if old in (l if isinstance(l, str) else l.text)]
+    assert len(hits) == 1, (old, hits)
+    out = list(lines)
+    item = out[hits[0]]
+    if isinstance(item, str):
+        out[hits[0]] = item.replace(old, new)
+    else:
+        item = type(item).__new__(type(item))
+        item.__dict__.update(lines[hits[0]].__dict__)
+        item.text = item.text.replace(old, new)
+        out[hits[0]] = item
+    return out
+
+
+def drop(lines, fragment):
+    hits = [i for i, l in enumerate(lines) if fragment in (l if isinstance(l, str) else l.text)]
+    assert len(hits) == 1, (fragment, hits)
+    return lines[:hits[0]] + lines[hits[0] + 1:]
+
+
+def at(lines, fragment, *more):
+    """`lines` with `more` inserted right after the one line that holds `fragment`."""
+    hits = [i for i, l in enumerate(lines) if fragment in (l if isinstance(l, str) else l.text)]
+    assert len(hits) == 1, (fragment, hits)
+    return lines[:hits[0] + 1] + list(more) + lines[hits[0] + 1:]
+
+
+TERM = ("termination.failed", "termination")
+POSTCONDITION_ROW = (("postcondition.violated", "postcondition"), ("not.wellformed", "internal"))
+
+
+class PureFunctionTests(unittest.TestCase):
+    """Decision 0062 item 12 (M4.5e1d): the Viper function of a `pure` function, `pf_<name>__<id>`.  Bodied; one `decreases` line (a measure, or
+    empty); `ensures` and body without permissions, `old`, `inhale` or `assume`; the applications of itself begin a line; the only cycle is such a
+    self-application; the positions of an application (a `pf_` function, a method's `requires`, `ensures`, `invariant`, `assert`; not a `__wf`
+    method, a `decreases`, a prelude or other function, a method's statement); `HEAP_READ_RE` counts an application as a read of memory; the map
+    rows of a function.  Every twin changes one thing of the clean program."""
+
+    FUNCTION = [
+        "function pf_tri__1(n: Int): Int",
+        Check("  requires -2147483648 <= n && n <= 2147483647", WF, "internal"),
+        Check("  requires 0 <= n && n <= 1000", WF, "internal"),
+        Row("  ensures 0 <= result && result <= 500500", *POSTCONDITION_ROW),
+        Check("  decreases n", *TERM[:1], category="termination"),
+        "{",
+        "  (n <= 0) ? 0 :",
+        Check("  pf_tri__1(n - 1) + n", *TERM[:1], category="termination"),
+        "}",
+    ]
+    METHOD = [
+        "method m__1(n: Int) returns (res: Int)",
+        Check("  requires -2147483648 <= n && n <= 2147483647", WF, "internal"),
+        Check("  requires 0 <= n && n <= 1000", WF, "internal"),
+        Check("  ensures res == pf_tri__1(n)", P, "postcondition"),
+        "  decreases",
+        "{",
+        "  var i__1: Int := 0",
+        Check("  assert pf_tri__1(n) <= 500500", A, "check"),
+        "  while (i__1 < n)",
+        Check("    invariant pf_tri__1(i__1) <= 500500", INV, "invariant-preserved"),
+        Check("    decreases 1000 - i__1", *TERM[:1], category="termination"),
+        "  {",
+        "    i__1 := i__1 + 1",
+        "  }",
+        "  res := n",
+        "}",
+    ]
+
+    @classmethod
+    def program(cls):
+        return [*cls.FUNCTION, *cls.METHOD]
+
+    @staticmethod
+    def problems(lines):
+        return lv.lint_vpr(*build_rows(lines), "t.vpr", "t.vpr.map")
+
+    def refused(self, lines, fragment, label=""):
+        probs = self.problems(lines)
+        self.assertTrue(any(fragment in p for p in probs), (label, fragment, probs))
+        return probs
+
+    def test_the_clean_program_is_clean_under_every_rule(self):
+        self.assertEqual(self.problems(self.program()), [])
+
+    def test_a_non_recursive_function_has_an_empty_decreases_and_no_entry(self):
+        lines = [
+            "function pf_two__2(x: Int): Int",
+            Check("  requires -2147483648 <= x && x <= 2147483647", WF, "internal"),
+            Row("  ensures result == x + x", *POSTCONDITION_ROW),
+            "  decreases",
+            "{",
+            "  x + x",
+            "}",
+        ]
+        self.assertEqual(self.problems(lines), [])
+        # the function needs the decreases line even with an empty measure
+        self.refused(drop(lines, "decreases"), "exactly one `decreases` line")
+
+    # --- the `decreases` line
+    def test_the_decreases_line_is_exactly_one(self):
+        lines = self.program()
+        self.refused(drop(lines, "  decreases n"), "exactly one `decreases` line", "none")
+        twice = at(lines, "  decreases n", Check("  decreases n", *TERM[:1], category="termination"))
+        self.refused(twice, "exactly one `decreases` line", "two")
+
+    def test_decreases_underscore_and_star_are_refused_on_a_function(self):
+        lines = self.program()
+        for measure, fragment in (("_", "`decreases _` assumes termination"), ("*", "`decreases *` assumes termination"),
+                                  ("n if n > 0", "conditional `decreases")):
+            with self.subTest(measure=measure):
+                self.refused(sub(lines, "  decreases n", f"  decreases {measure}"), fragment)
+
+    def test_a_self_application_needs_a_measure(self):
+        lines = sub(self.program(), "  decreases n", "  decreases")
+        probs = self.refused(lines, "so its `decreases` has a measure")
+        self.assertFalse(any("exactly one" in p for p in probs))
+
+    # --- the contents of an ensures and of the body
+    def test_an_ensures_holds_no_permission_old_or_inhale(self):
+        for text in ("acc(loc(block_of(n), 0).v_int)", "perm(n.v_int) > none", "old(n) == n", "forperm x: Ref [x.f] :: true"):
+            with self.subTest(ensures=text):
+                lines = sub(self.program(), "ensures 0 <= result && result <= 500500", f"ensures {text}")
+                self.refused(lines, "an `ensures` of a `pure` function reads no permission")
+
+    def test_the_body_holds_no_permission_old_forperm_inhale_or_assume(self):
+        for text in ("perm(n.v_int) > none ? 0 : 1", "old(n)", "acc(n.v_int) ? 0 : 1", "forperm x: Ref [x.f] :: true ? 0 : 1"):
+            with self.subTest(body=text):
+                lines = sub(self.program(), "  (n <= 0) ? 0 :", f"  {text} :")
+                self.refused(lines, "the body of a `pure` function holds no `acc`")
+        for word in ("inhale", "assume"):
+            with self.subTest(word=word):
+                # a tagged `inhale`/`assume` is still refused in a function's body (the generic rule is for methods that carry the tag)
+                lines = sub(self.program(), "  (n <= 0) ? 0 :", f"  {word} true // cerastes:inhale-ok test")
+                self.refused(lines, "the body of a `pure` function holds no `acc`")
+
+    def test_words_that_only_contain_the_keywords_are_fine(self):
+        lines = sub(self.program(), "  (n <= 0) ? 0 :", "  (n <= 0) ? hold : accent :")
+        self.assertFalse(any("holds no `acc`" in p for p in self.problems(lines)))
+
+    # --- the shape of the application of itself
+    def test_an_application_of_itself_begins_a_line_of_its_own(self):
+        lines = sub(self.program(), "  (n <= 0) ? 0 :", "  (n <= 0) ? pf_tri__1(0) :")
+        self.refused(lines, "begins a line of its own")
+        both = sub(self.program(), "  pf_tri__1(n - 1) + n", "  pf_tri__1(n - 1) + pf_tri__1(n - 2)")
+        self.refused(both, "begins a line of its own")
+        parens = sub(self.program(), "  pf_tri__1(n - 1) + n", "  (pf_tri__1(n - 1)) + n")
+        self.assertEqual(self.problems(parens), [])  # a leading group does not move the application off its line
+
+    # --- the cycles
+    def test_mutual_recursion_is_refused(self):
+        a = ["function pf_a__3(n: Int): Int", "  decreases n", "{", "  (n <= 0) ? 0 :", Check("  pf_b__4(n - 1)", *TERM[:1], category="termination"), "}"]
+        b = ["function pf_b__4(n: Int): Int", "  decreases n", "{", "  (n <= 0) ? 0 :", Check("  pf_a__3(n - 1)", *TERM[:1], category="termination"), "}"]
+        probs = self.refused(a + b, "part of a cycle of `pure` functions")
+        self.assertEqual(len([p for p in probs if "part of a cycle" in p]), 2)
+        # the same two functions, one calling the other only: clean
+        c = ["function pf_c__5(n: Int): Int", "  decreases", "{", "  n", "}"]
+        d = ["function pf_d__6(n: Int): Int", "  decreases", "{", "  pf_c__5(n)", "}"]
+        self.assertEqual(self.problems(c + d), [])
+
+    def test_a_function_that_reaches_itself_through_a_contract_is_refused(self):
+        for where, lines in (
+                ("an ensures", sub(self.FUNCTION, "ensures 0 <= result && result <= 500500", "ensures result <= pf_tri__1(n)")),
+                ("a requires", sub(self.FUNCTION, "requires 0 <= n && n <= 1000", "requires pf_tri__1(n) <= 1000")),
+                ("a measure", sub(self.FUNCTION, "  decreases n", "  decreases pf_tri__1(n)"))):
+            with self.subTest(where=where):
+                self.refused(lines, "applies itself in a `requires`, an `ensures` or a `decreases`")
+        # through another function's contract
+        other = ["function pf_e__7(n: Int): Int", "  decreases", Check("  ensures result == pf_tri__1(n)", "postcondition.violated", "postcondition"), "{", "  n", "}"]
+        through = sub(self.FUNCTION, "ensures 0 <= result && result <= 500500", "ensures result <= pf_e__7(n)")
+        self.refused(other + through, "part of a cycle of `pure` functions")
+
+    # --- the name
+    def test_a_name_that_starts_pf_is_pf_name_id(self):
+        for name in ("pf_x", "pf_x__", "pf_x__a", "pf__1"):
+            with self.subTest(name=name):
+                lines = [f"function {name}(n: Int): Int", "  decreases", "{", "  n", "}"]
+                self.refused(lines, "a function whose name starts `pf_` is a `pf_<name>__<id>`")
+
+    # --- the positions of an application
+    def test_where_an_application_may_stand(self):
+        method = [
+            "method m__2(n: Int) returns (res: Int)",
+            Check("  requires pf_tri__1(n) <= 1000", WF, "internal"),
+            Check("  ensures res == pf_tri__1(n)", P, "postcondition"),
+            "  decreases",
+            "{",
+            Check("  assert pf_tri__1(n) <= 500500", A, "check"),
+            "  res := n",
+            "}",
+        ]
+        self.assertEqual(self.problems(self.FUNCTION + method), [])
+
+    def test_an_application_in_a_wf_method_a_decreases_or_a_statement_is_refused(self):
+        lines = self.program()
+        cases = {
+            "a __wf method": (lines + ["method m__9__wf(n: Int)", "  decreases", "{", Check("  assert pf_tri__1(n) <= 500500", A, "check"), "}"],
+                              "stands in no `__wf` method"),
+            "a method's decreases": (sub(lines, "    decreases 1000 - i__1", "    decreases pf_tri__1(n) - i__1"), "stands in no `decreases`"),
+            "a method statement": (sub(lines, "  res := n", "  res := pf_tri__1(n)"), "on the line of its keyword"),
+            "the function's own decreases": (sub(lines, "  decreases n", "  decreases pf_tri__1(n)"), "stands in no `decreases`"),
+            "a prelude function": (lines + ["function c_abs(x: Int): Int", "{", "  pf_tri__1(x)", "}"], "stands in a `pf_` function"),
+        }
+        for label, (program, fragment) in cases.items():
+            with self.subTest(case=label):
+                self.refused(program, fragment, label)
+
+    def test_the_wf_method_of_a_pure_function_is_no_application_of_it(self):
+        # S46 (b): the definition check of `pf_<name>__<id>` is a method `pf_<name>__<id>__wf`; its declaration line is no application
+        wf = ["method pf_tri__1__wf(n: Int)", "  decreases", "{", "}"]
+        probs = self.problems(self.program() + wf)
+        self.assertFalse(any("an application of" in p for p in probs), probs)
+        self.assertFalse(any("pf_tri__1__wf" in p for p in probs), probs)
+
+    def test_the_callee_is_a_pf_function_of_the_file(self):
+        self.refused(sub(self.program(), "assert pf_tri__1(n) <= 500500", "assert pf_nope__9(n) <= 500500"), "the callee is a `pf_<name>__<id>` function of this file")
+        self.refused(sub(self.program(), "assert pf_tri__1(n) <= 500500", "assert pf_nope(n) <= 500500"), "the callee is a `pf_<name>__<id>` function of this file")
+
+    # --- HEAP_READ_RE
+    def test_an_application_counts_as_a_heap_read_in_every_heap_free_position(self):
+        self.assertFalse(lv._heap_free("pf_tri__1(v_n)"))
+        self.assertFalse(lv._heap_free("v_n + pf_tri__1(v_n) + 1"))
+        self.assertTrue(lv._heap_free("v_n + 1"))
+        self.assertTrue(lv._heap_free("hva_m__1__pf_tri__1_post(v_n)"))  # a ghost function is not an application
+        ok = "forall k: Int :: { loc(block_of(v_a), k) } ((offset_of(v_a) <= k) && (k < offset_of(v_a) + %s)) ==> acc(loc(block_of(v_a), k).v_int, %s)"
+        self.assertIsNotNone(lv.parse_range_quantifier_full(ok % ("v_n", "wildcard")))
+        self.assertIsNone(lv.parse_range_quantifier_full(ok % ("pf_tri__1(v_n)", "wildcard")))  # the count
+        self.assertIsNone(lv.parse_range_quantifier_full(
+            "forall k: Int :: { loc(block_of(v_a), k) } ((pf_tri__1(v_n) <= k) && (k < offset_of(v_a) + v_n)) ==> acc(loc(block_of(v_a), k).v_int)"))  # the bound
+        self.assertIsNone(lv.parse_range_quantifier_full(
+            "forall k: Int :: { loc(block_of(pf_tri__1(v_a)), k) } ((offset_of(v_a) <= k) && (k < offset_of(v_a) + v_n)) ==> acc(loc(block_of(v_a), k).v_int)"))  # the base
+
+    def test_an_application_in_a_guard_of_an_assert_is_refused(self):
+        guard = "(pf_tri__1(n) > 0) ==> (forall q0: Int :: { loc(block_of(v_p), q0) } (-2147483648 <= (q0 - offset_of(v_p)) && (q0 - offset_of(v_p)) <= 2147483647) ==> (loc(block_of(v_p), q0).v_int >= 0))"
+        lines = [*self.FUNCTION, "method m__3(v_p: Ref, n: Int)", "  decreases", "{", Check(f"  assert {guard}", A, "check"), "}"]
+        self.assertTrue(any("`forall`" in p or "decision 0061" in p for p in self.problems(lines)))
+
+    # --- quantifiers
+    def test_a_user_quantifier_stands_in_the_requires_and_ensures_of_a_pure_function_only(self):
+        q = ("forall q0: Int :: { loc(block_of(a), q0) } (-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) ==> "
+             "(!(0 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) < n) || (loc(block_of(a), q0).v_int >= 0))")
+        lines = ["function pf_q__8(a: Ref, n: Int): Int", Check(f"  requires {q}", WF, "internal"),
+                 Row(f"  ensures {q}", *POSTCONDITION_ROW), "  decreases", "{", "  n", "}"]
+        self.assertEqual(self.problems(lines), [])
+        in_body = ["function pf_q__8(a: Ref, n: Int): Int", "  decreases", "{", f"  ({q}) ? n : 0", "}"]
+        self.refused(in_body, "`forall` outside")
+        bad_shape = sub(lines, "ensures forall q0: Int :: { loc(block_of(a), q0) }", "ensures forall q0: Int :: { n }")
+        self.refused(bad_shape, "decision 0061")
+
+    # --- the position map
+    def test_the_rows_of_a_function(self):
+        lines = self.program()
+        ensures_row = next(l for l in lines if isinstance(l, Row))
+
+        def with_entries(*entries):
+            return [Row(l.text, *entries) if l is ensures_row else l for l in lines]
+
+        self.refused(with_entries(("not.wellformed", "internal")), "needs a position-map entry with the Viper error id `postcondition.violated`")
+        self.refused(with_entries(("postcondition.violated", "postcondition")), "needs a position-map entry with the Viper error id `not.wellformed`")
+        self.refused(with_entries(("postcondition.violated", "overflow"), ("not.wellformed", "internal")), "its category is `postcondition`, found `overflow`")
+        self.refused(with_entries(("postcondition.violated", "postcondition"), ("not.wellformed", "check")), "its category is `internal`, found `check`")
+
+        def retarget(fragment, error_id, category):
+            return [Check(l.text, error_id, category) if isinstance(l, Check) and fragment in l.text else l for l in lines]
+
+        # a requires is checked for well-formedness only
+        self.refused(retarget("requires 0 <= n && n <= 1000", WF, "check"), "a `requires` of a `pure` function is checked for well-formedness only")
+        # a measure's entry is a termination row
+        self.refused(retarget("  decreases n", "termination.failed", "overflow"), "the entry of a `decreases` measure is `termination`")
+        # the self-application's entry, missing, on another body line, and with another id or category
+        self.refused([l.text if isinstance(l, Check) and "pf_tri__1(n - 1) + n" in l.text else l for l in lines], "needs the `termination.failed` entry of that call")
+        self.refused([Check(l, A, "overflow") if l == "  (n <= 0) ? 0 :" else l for l in lines], "has an entry only when it begins an application of the function itself")
+        self.refused(retarget("pf_tri__1(n - 1) + n", "assert.failed", "termination"), "has an entry only when it begins an application")
+        self.refused(retarget("pf_tri__1(n - 1) + n", "termination.failed", "overflow"), "has an entry only when it begins an application")
+
+
+class ApplicationGhostTests(unittest.TestCase):
+    """Decision 0062 item 12, item 8: the application ghosts `hva_<method>__<callee>_<pre|post>` of an `f__wf` method (`Int`, `Bool` and `Ref`
+    parameters, the callee's signature) and the three kinds of fact the method assumes over them: (i) the type range of an application, unguarded;
+    (ii) the callee's `ensures` at the arguments, under exactly the callee's `requires` that read no memory (the guard is what makes it sound: S46
+    (c) (2u)); (iii) the keep fact under the guards of a `reads_range` atom and its `ensures` partner and the interval inclusion (S45 / S46 (c) (4)).
+    Each unguarded or weaker form is a must-fail twin."""
+
+    APP = "hva_m__1__pf_tri__1_post"
+    DOMAIN = ["// cerastes:domain-ok 0061", "domain Hvq_m {", f"  function {APP}(a: Int): Int", "}"]
+    RANGE = f"(-9223372036854775808 <= {APP}(n)) && ({APP}(n) <= 9223372036854775807)"
+    ENSURES = f"((-2147483648 <= n) && (n <= 2147483647) && (0 <= n) && (n <= 1000)) ==> ((0 <= {APP}(n)) && ({APP}(n) <= 500500))"
+
+    @classmethod
+    def program(cls, requires=None, domain=None, rows=("assert " + "hva_m__1__pf_tri__1_post(n) <= 500500",)):
+        requires = (cls.RANGE, cls.ENSURES) if requires is None else requires
+        out = [*PureFunctionTests.FUNCTION, *PureFunctionTests.METHOD, *(cls.DOMAIN if domain is None else domain),
+               "method m__1__wf(n: Int, res: Int)"]
+        out += [Check(f"  requires {r}", WF, "internal") for r in requires]
+        out += ["  decreases", "{"] + [Check(f"  {r}", A, "check") for r in rows] + ["}"]
+        return out
+
+    @staticmethod
+    def problems(lines):
+        return lv.lint_vpr(*build_rows(lines), "t.vpr", "t.vpr.map")
+
+    def refused(self, lines, fragment="decision 0062", label=""):
+        probs = self.problems(lines)
+        self.assertTrue(any(fragment in p for p in probs), (label, fragment, probs))
+        return probs
+
+    def test_the_clean_program_is_clean_under_every_rule(self):
+        self.assertEqual(self.problems(self.program()), [])
+
+    def test_each_fact_is_clean_on_its_own(self):
+        for facts in ((self.RANGE,), (self.ENSURES,), ()):
+            with self.subTest(facts=facts):
+                self.assertEqual(self.problems(self.program(requires=facts)), [])
+
+    # --- (i) the type range
+    def test_the_type_range_of_an_application(self):
+        a = self.APP
+        for lo, hi in ((-2147483648, 2147483647), (0, 4294967295), (-128, 127), (-(2**127), 2**127 - 1)):
+            with self.subTest(range=(lo, hi)):
+                self.assertEqual(self.problems(self.program(requires=(f"({lo} <= {a}(n)) && ({a}(n) <= {hi})",))), [])
+
+    def test_the_twins_of_the_type_range(self):
+        a = self.APP
+        cases = {
+            "guarded": f"(n > 0) ==> ((-9223372036854775808 <= {a}(n)) && ({a}(n) <= 9223372036854775807))",
+            "a range that excludes zero": f"(1 <= {a}(n)) && ({a}(n) <= 5)",
+            "one bound only": f"(-9223372036854775808 <= {a}(n))",
+            "two applications": f"(-9223372036854775808 <= {a}(n)) && ({a}(n + 1) <= 9223372036854775807)",
+            "not heap free": f"(-9223372036854775808 <= {a}(n)) && ({a}(v_p.v_int) <= 9223372036854775807)",
+        }
+        for label, fact in cases.items():
+            with self.subTest(case=label):
+                self.refused(self.program(requires=(fact,)), label=label)
+
+    def test_a_bool_function_has_no_type_range(self):
+        function = ["function pf_ok__3(x: Int): Bool", "  decreases", "{", "  x > 0", "}"]
+        domain = ["// cerastes:domain-ok 0061", "domain Hvq_m {", "  function hva_m__1__pf_ok__3_post(a: Int): Bool", "}"]
+        method = ["method m__1(n: Int) returns (res: Int)", "  decreases", "{", "  res := n", "}"]
+        lines = [*function, *method, *domain, "method m__1__wf(n: Int, res: Int)",
+                 Check("  requires (-9223372036854775808 <= hva_m__1__pf_ok__3_post(n)) && (hva_m__1__pf_ok__3_post(n) <= 9223372036854775807)", WF, "internal"),
+                 "  decreases", "{", "}"]
+        self.refused(lines, "a `Bool` result has no type range")
+
+    # --- (ii) the callee's ensures
+    def test_an_ensures_fact_with_arguments_that_are_expressions(self):
+        a = self.APP
+        fact = (f"((-2147483648 <= (n - 1)) && ((n - 1) <= 2147483647) && (0 <= (n - 1)) && ((n - 1) <= 1000)) ==> "
+                f"((0 <= {a}(n - 1)) && ({a}(n - 1) <= 500500))")
+        self.assertEqual(self.problems(self.program(requires=(fact,))), [])
+
+    def test_the_twins_of_the_ensures_fact(self):
+        a = self.APP
+        v = "(-2147483648 <= n) && (n <= 2147483647) && (0 <= n) && (n <= 1000)"
+        e = f"(0 <= {a}(n)) && ({a}(n) <= 500500)"
+        cases = {
+            "unguarded (the ensures holds only under the requires: S46 (c) (2u))": e,
+            "a guard that lacks a conjunct": f"((-2147483648 <= n) && (n <= 2147483647) && (0 <= n)) ==> ({e})",
+            "a guard with one conjunct too many": f"({v} && (n <= 10)) ==> ({e})",
+            "a guard that is not the callee's": f"(n > 5) ==> ({e})",
+            "a conclusion that is not the callee's ensures": f"({v}) ==> ({a}(n) <= 500)",
+            "a second guard": f"(n > 0) ==> (({v}) ==> ({e}))",
+            "arguments the guard does not substitute": f"({v}) ==> ((0 <= {a}(n - 1)) && ({a}(n - 1) <= 500500))",
+            "two applications": f"({v}) ==> ((0 <= {a}(n)) && ({a}(n - 1) <= 500500))",
+            "the guard reads the heap": f"({v} && (v_p.v_int > 0)) ==> ({e})",
+        }
+        for label, fact in cases.items():
+            with self.subTest(case=label):
+                self.refused(self.program(requires=(fact,)), label=label)
+
+    def test_the_guard_of_fact_ii_is_a_set_of_conjuncts(self):
+        # the callee's requires write `0 <= n` and the well-formedness twice (the clause's and the atom's): a guard that repeats or omits the repeat is the same set
+        a = self.APP
+        e = f"(0 <= {a}(n)) && ({a}(n) <= 500500)"
+        for v in ("(-2147483648 <= n) && (n <= 2147483647) && (0 <= n) && (n <= 1000) && (0 <= n)", "(n <= 1000) && (0 <= n) && (n <= 2147483647) && (-2147483648 <= n)"):
+            with self.subTest(guard=v):
+                self.assertEqual(self.problems(self.program(requires=(f"({v}) ==> ({e})",))), [])
+
+    def test_a_function_without_requires_has_an_unguarded_ensures_fact(self):
+        function = ["function pf_cl__3(x: Int): Int", Row("  ensures -100 <= result && result <= 100", *POSTCONDITION_ROW), "  decreases", "{", "  x", "}"]
+        domain = ["// cerastes:domain-ok 0061", "domain Hvq_m {", "  function hva_m__1__pf_cl__3_post(a: Int): Int", "}"]
+        fact = "(-100 <= hva_m__1__pf_cl__3_post(n)) && (hva_m__1__pf_cl__3_post(n) <= 100)"
+        method = ["method m__1(n: Int) returns (res: Int)", "  decreases", "{", "  res := n", "}"]
+        lines = [*function, *method, *domain, "method m__1__wf(n: Int, res: Int)", Check(f"  requires {fact}", WF, "internal"),
+                 "  decreases", "{", "}"]
+        self.assertEqual(self.problems(lines), [])
+        guarded = sub(lines, f"requires {fact}", f"requires (n > 0) ==> ({fact})")
+        self.refused(guarded, label="a guard where the callee has no requires")
+
+    # --- the ghost functions
+    def test_the_twins_of_the_ghost_function(self):
+        a = self.APP
+        decl = f"  function {a}(a: Int): Int"
+        cases = {
+            "another method's name": ("hva_other__pf_tri__1_post", f"  function hva_other__pf_tri__1_post(a: Int): Int"),
+            "a callee that is no pf_ function": ("hva_m__1__nope_post", "  function hva_m__1__nope_post(a: Int): Int"),
+            "no state": ("hva_m__1__pf_tri__1", "  function hva_m__1__pf_tri__1(a: Int): Int"),
+            "a parameter of another type than the callee's": (a, f"  function {a}(a: Bool): Int"),
+            "a parameter too many": (a, f"  function {a}(a: Int, b: Int): Int"),
+            "no parameter": (a, f"  function {a}(): Int"),
+            "a Perm parameter": (a, f"  function {a}(a: Perm): Int"),
+            "a result of another type": (a, f"  function {a}(a: Int): Bool"),
+            "a Ref result": (a, f"  function {a}(a: Int): Ref"),
+        }
+        for label, (name, line) in cases.items():
+            with self.subTest(case=label):
+                domain = sub(self.DOMAIN, decl, line)
+                lines = sub(self.program(domain=domain), f"requires {self.RANGE}", f"requires {self.RANGE}".replace(a, name))
+                lines = sub(lines, f"requires {self.ENSURES}", f"requires {self.ENSURES}".replace(a, name))
+                lines = sub(lines, "assert hva_m__1__pf_tri__1_post(n) <= 500500", f"assert {name}(n) <= 500500")
+                probs = self.problems(lines)
+                self.assertTrue(any("decision 0062" in p or "ghost function" in p for p in probs), (label, probs))
+
+    def test_the_domain_holds_int_bool_and_ref_parameters_only(self):
+        domain = sub(self.DOMAIN, f"  function {self.APP}(a: Int): Int", f"  function {self.APP}(a: Perm): Int")
+        probs = self.problems(self.program(domain=domain))
+        self.assertTrue(any("has `Int`, `Bool` or `Ref` parameters" in p for p in probs), probs)
+
+    def test_an_application_ghost_stands_in_a_wf_method_only(self):
+        lines = sub(self.program(), "  res := n", "  res := hva_m__1__pf_tri__1_post(n)")
+        probs = self.problems(lines)
+        self.assertTrue(any("outside a `__wf` method" in p for p in probs), probs)
+
+    def test_a_line_with_both_kinds_of_ghost_is_refused(self):
+        domain = ["// cerastes:domain-ok 0061", "domain Hvq_m {", f"  function {self.APP}(a: Int): Int", "  function hvq_m__1__a_pre(s: Int): Int", "}"]
+        lines = self.program(requires=(self.RANGE, f"hvq_m__1__a_pre(0) == {self.APP}(n)"), domain=domain)
+        self.refused(lines, "applies both an `hvq_` and an `hva_` ghost function")
+
+    def test_a_quantified_fact_over_application_ghosts_waits_for_cut_2(self):
+        fact = f"forall s: Int :: {{ {self.APP}(s) }} (-2147483648 <= {self.APP}(s)) && ({self.APP}(s) <= 2147483647)"
+        self.refused(self.program(requires=(fact,)), "decision 0062 item 7, cut 2")
+
+    # --- the rows of the method
+    def test_a_row_over_an_application_ghost_reads_no_heap(self):
+        self.assertEqual(self.problems(self.program(rows=("assert hva_m__1__pf_tri__1_post(n) <= 500500",))), [])
+        self.refused(self.program(rows=("assert hva_m__1__pf_tri__1_post(n) <= v_p.v_int",)), label="a heap read in a row")
+        probs = self.problems(self.program(rows=("exhale hva_m__1__pf_tri__1_post(n) <= 500500",)))
+        self.assertTrue(any("holds no application ghost" in p for p in probs), probs)
+
+
+class KeepFactTests(unittest.TestCase):
+    """Decision 0062 item 8 (iii): the keep fact `G ==> post(args) == pre(args)` of an application whose callee interval lies inside a `reads_range`
+    atom of the method that has an `ensures` partner.  `G` is the atoms' guards and the inclusion of the interval; an unguarded fact lets a wrong
+    contract pass (an `owns_range` alias under a false guard), as the unguarded keep fact of 0061 does (S45)."""
+
+    PRE, POST = "hva_m__2__pf_sum__2_pre", "hva_m__2__pf_sum__2_post"
+    INCLUSION = "(offset_of(a) <= offset_of(a)) && ((offset_of(a) + v_n) <= (offset_of(a) + v_n))"
+
+    @classmethod
+    def program(cls, keep=None, guard=None):
+        atom = WfQuantifierTests.atom
+        keep = f"({cls.INCLUSION}) ==> ({cls.POST}(a, v_n) == {cls.PRE}(a, v_n))" if keep is None else keep
+        return [
+            "function pf_sum__2(a: Ref, n: Int): Int",
+            Check("  requires 0 <= n", WF, "internal"),
+            "  decreases",
+            "{",
+            "  n",
+            "}",
+            "// cerastes:trusted-contract test",
+            "method m__2(a: Ref, v_n: Int, c: Int, amt: Perm)",
+            Check("  requires none < amt && amt < write", WF, "internal"),
+            Check(f"  requires {atom('a', guard=guard)}", WF, "internal"),
+            Check(f"  ensures {atom('a', guard=guard)}", P, "postcondition"),
+            "  decreases _",
+            "// cerastes:domain-ok 0061",
+            "domain Hvq_m2 {",
+            f"  function {cls.PRE}(a: Ref, n: Int): Int",
+            f"  function {cls.POST}(a: Ref, n: Int): Int",
+            "}",
+            "method m__2__wf(a: Ref, v_n: Int, c: Int, amt: Perm)",
+            Check("  requires none < amt && amt < write", WF, "internal"),
+            Check(f"  requires {keep}", WF, "internal"),
+            "  decreases",
+            "{",
+            "}",
+        ]
+
+    @staticmethod
+    def problems(lines):
+        return lv.lint_vpr(*build_rows(lines), "t.vpr", "t.vpr.map")
+
+    def refused(self, lines, label=""):
+        probs = self.problems(lines)
+        self.assertTrue(any("decision 0062" in p for p in probs), (label, probs))
+
+    def test_the_keep_fact_under_the_inclusion_is_clean(self):
+        self.assertEqual(self.problems(self.program()), [])
+
+    def test_the_keep_fact_under_the_atoms_guard_and_the_inclusion_is_clean(self):
+        keep = f"((c != 0) && {self.INCLUSION}) ==> ({self.POST}(a, v_n) == {self.PRE}(a, v_n))"
+        self.assertEqual(self.problems(self.program(keep=keep, guard="(c != 0)")), [])
+
+    def test_the_twins_of_the_keep_fact(self):
+        eq = f"{self.POST}(a, v_n) == {self.PRE}(a, v_n)"
+        cases = {
+            "unguarded (the fact holds on every path: a wrong contract passes)": (eq, None),
+            "only the inclusion's first half": (f"(offset_of(a) <= offset_of(a)) ==> ({eq})", None),
+            "no inclusion, only a plain condition": (f"(v_n >= 0) ==> ({eq})", None),
+            "the atom's guard missing": (f"({self.INCLUSION}) ==> ({eq})", "(c != 0)"),
+            "a guard of another atom": (f"((c == 0) && {self.INCLUSION}) ==> ({eq})", "(c != 0)"),
+            "the states swapped": (f"({self.INCLUSION}) ==> ({self.PRE}(a, v_n) == {self.POST}(a, v_n))", None),
+            "two pre-state applications": (f"({self.INCLUSION}) ==> ({self.PRE}(a, v_n) == {self.PRE}(a, v_n))", None),
+            "other arguments in the two applications": (f"({self.INCLUSION}) ==> ({self.POST}(a, v_n) == {self.PRE}(a, v_n + 1))", None),
+            "an equality that is no keep fact": (f"({self.INCLUSION}) ==> ({self.POST}(a, v_n) == 0)", None),
+        }
+        for label, (keep, guard) in cases.items():
+            with self.subTest(case=label):
+                self.refused(self.program(keep=keep, guard=guard), label)
+
+    def test_a_method_with_no_reads_range_atom_has_no_keep_fact(self):
+        lines = self.program()
+        lines = [l for l in lines if not (isinstance(l, Check) and "acc(loc" in l.text and "ensures" in l.text)]
+        self.refused(lines, "no partner")
+
+    def test_the_atom_needs_its_ensures_partner(self):
+        lines = [l for l in self.program() if not (isinstance(l, Check) and l.text.startswith("  requires forall"))]
+        self.refused(lines, "no reads atom")
+
+
+UDIV = ["function c_udiv(a: Int, b: Int): Int", "{", r"  ((a >= 0 && b > 0) ? (a \ b) : 0)", "}"]
+
+
+class InertFunctionTests(unittest.TestCase):
+    """Decision 0062 item 12 (the owner's H', question 273): a top-level `function` that is neither a prelude function nor `pf_<name>__<id>` applies
+    only prelude functions, so it can neither recurse nor reach a `pf_` function."""
+
+    @staticmethod
+    def problems(lines):
+        return lv.lint_vpr(*build_rows(lines), "t.vpr", "t.vpr.map")
+
+    def refused(self, lines, label=""):
+        probs = self.problems(lines)
+        self.assertTrue(any("so it applies only prelude functions" in p for p in probs), (label, probs))
+
+    def test_a_function_that_applies_only_prelude_functions_is_admitted(self):
+        self.assertEqual(self.problems([*UDIV, "function other(x: Int): Int", "{", "  c_udiv(x, 3) + c_udiv(x, 5)", "}"]), [])
+        self.assertEqual(self.problems(["function other(x: Int): Int", "{", "  x < 0 ? -x : x", "}"]), [])  # a function that applies nothing
+        # a domain function or a built-in is not a function of the file
+        self.assertEqual(self.problems(["function other(x: Int): Int", "{", "  len(block_of(loc(x, 0)))", "}"]), [])
+
+    def test_the_twins_of_the_inert_function(self):
+        cases = {
+            "it applies itself": ["function other(x: Int): Int", "{", "  x == 0 ? 0 : other(x - 1)", "}"],
+            "it applies itself on its signature line": ["function other(x: Int): Int { other(x) }"],
+            "it applies a pf_ function": [*PureFunctionTests.FUNCTION, "function other(x: Int): Int", "{", "  pf_tri__1(x)", "}"],
+            "it applies another such function": ["function one(x: Int): Int", "{", "  x", "}", "function other(x: Int): Int", "{", "  one(x)", "}"],
+            "it applies another in a requires": ["function one(x: Int): Int", "{", "  x", "}", "function other(x: Int): Int", "  requires one(x) > 0", "{", "  x", "}"],
+        }
+        for label, lines in cases.items():
+            with self.subTest(case=label):
+                self.refused(lines, label)
+
+    def test_a_pf_function_and_a_prelude_function_are_not_inert_functions(self):
+        # a `pf_` function may apply anything the application rules admit; a prelude function by name is the prelude's
+        self.assertFalse(any("applies only prelude functions" in p for p in self.problems([*PureFunctionTests.FUNCTION])))
+        mutual = ["function one(x: Int): Int", "{", "  x", "}", *UDIV]
+        self.assertEqual(self.problems(mutual), [])
+
+
+class PreludeDecreasesTests(unittest.TestCase):
+    """Decision 0062 item 12 (S46 (a)): lowering prints an empty `decreases` line on every prelude function of a program that holds a `pf_` function,
+    and only there; in any other program an empty `decreases` on a prelude function is refused."""
+
+    @staticmethod
+    def problems(lines):
+        return lv.lint_vpr(*build_rows(lines), "t.vpr", "t.vpr.map")
+
+    @staticmethod
+    def udiv(decreases="  decreases"):
+        return ["function c_udiv(a: Int, b: Int): Int", decreases, "{", r"  ((a >= 0 && b > 0) ? (a \ b) : 0)", "}"]
+
+    def test_an_empty_decreases_is_admitted_in_a_program_that_holds_a_pf_function(self):
+        self.assertEqual(self.problems([*self.udiv(), *PureFunctionTests.FUNCTION]), [])
+        applies = ["function pf_use__4(n: Int): Int", "  decreases", "{", "  c_udiv(n, 3)", "}"]
+        self.assertEqual(self.problems([*self.udiv(), *applies]), [])
+
+    def test_an_empty_decreases_is_refused_in_a_program_without_one(self):
+        probs = self.problems(self.udiv())
+        self.assertTrue(any("only stands in a program that holds a `pf_` function" in p for p in probs), probs)
+        # a bitwise and a mask function too
+        bit = ["function c_and_32(a: Int, b: Int): Int", "  ensures (-2147483648) <= result && result <= 2147483647", "  decreases", "{", "  a", "}"]
+        self.assertTrue(any("only stands in a program that holds a `pf_` function" in p for p in self.problems(bit)))
+        # a function whose name only starts `pf_` is not one
+        fake = ["function pf_x(n: Int): Int", "  decreases", "{", "  n", "}"]
+        self.assertTrue(any("only stands in a program" in p for p in self.problems([*self.udiv(), *fake])))
+
+    def test_a_measure_on_a_prelude_function_is_still_the_position_map_rules(self):
+        probs = self.problems([*self.udiv("  decreases a"), *PureFunctionTests.FUNCTION])
+        self.assertTrue(any("`decreases` line has no entry in the position map" in p for p in probs), probs)
+
+    def test_a_prelude_function_needs_no_decreases_either_way(self):
+        plain = ["function c_udiv(a: Int, b: Int): Int", "{", r"  ((a >= 0 && b > 0) ? (a \ b) : 0)", "}"]
+        self.assertEqual(self.problems(plain), [])
+        self.assertEqual(self.problems([*plain, *PureFunctionTests.FUNCTION]), [])
+
+
+class PureRequiresMinTests(unittest.TestCase):
+    """Decision 0062 item 6, form Min (S46 (a)): the `requires` lines of a `pf_` function, as `tests/viper-smoke/memory/s46_a_min.vpr` has them: a
+    parameter's type range, the value clauses, the pure lines of an atom, its `acc(..., wildcard)` line and its element range; no `d_<t>` line, no
+    `lv` line, no flag line; `wildcard` stands there and on 0061's marked row only."""
+
+    WF = "(a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))"
+    QUANT = "forall k: Int :: {{ loc(block_of(a), k) }} ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> {}"
+    ACC = QUANT.format("acc(loc(block_of(a), k).v_int, wildcard)")
+    ELEMENT = QUANT.format("((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))")
+    CELL_WF = "(p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))"
+
+    @classmethod
+    def requires(cls):
+        return ["(-2147483648 <= n) && (n <= 2147483647)", cls.WF, "0 <= n", "a != null", cls.WF, "0 <= n", "(offset_of(a) + n) <= len(block_of(a))", cls.ACC, cls.ELEMENT]
+
+    @classmethod
+    def function(cls, requires=None, name="pf_sum__3"):
+        requires = cls.requires() if requires is None else requires
+        return ([f"function {name}(a: Ref, n: Int): Int"] + [Check(f"  requires {r}", WF, "internal") for r in requires]
+                + [Row("  ensures (-2147483648 * n <= result) && (result <= 2147483647 * n)", *POSTCONDITION_ROW),
+                   Check("  decreases n", *TERM[:1], category="termination"), "{", "  (n == 0) ? 0 :",
+                   Check(f"  {name}(a, n - 1)", *TERM[:1], category="termination"), "}"])
+
+    @classmethod
+    def cell_function(cls, requires=None):
+        requires = (["(-2147483648 <= n) && (n <= 2147483647)", cls.CELL_WF, "p != null", cls.CELL_WF, "offset_of(p) < len(block_of(p))",
+                     "acc(p.v_int, wildcard)", "((-2147483648 <= p.v_int) && (p.v_int <= 2147483647))"]) if requires is None else requires
+        return (["function pf_cell__5(p: Ref, n: Int): Int"] + [Check(f"  requires {r}", WF, "internal") for r in requires]
+                + ["  decreases", "{", "  n", "}"])
+
+    @staticmethod
+    def problems(lines):
+        return lv.lint_vpr(*build_rows(lines), "t.vpr", "t.vpr.map")
+
+    def refused(self, lines, fragment="decision 0062 item 6, form Min", label=""):
+        probs = self.problems(lines)
+        self.assertTrue(any(fragment in p for p in probs), (label, fragment, probs))
+        return probs
+
+    def test_the_range_atom_of_form_min_is_clean_under_every_rule(self):
+        self.assertEqual(self.problems(self.function()), [])
+
+    def test_the_cell_atom_of_form_min_is_clean_under_every_rule(self):
+        self.assertEqual(self.problems(self.cell_function()), [])
+
+    def test_the_combined_pure_line_is_read_too(self):
+        combined = ("(((a != null) && ((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a)) && (offset_of(a) <= len(block_of(a)))) && (0 <= n)"
+                    " && (offset_of(a) + n <= len(block_of(a)))))")
+        reqs = ["(-2147483648 <= n) && (n <= 2147483647)", combined, self.ACC, self.ELEMENT]
+        self.assertEqual(self.problems(self.function(reqs)), [])
+
+    def test_value_clauses_and_a_pure_function_in_a_requires(self):
+        other = ["function pf_g__8(x: Int): Int", "  decreases", "{", "  x", "}"]
+        lines = self.function(self.requires() + ["n < 1000 && n != 7", "pf_g__8(n) > 0"])
+        self.assertEqual(self.problems(other + lines), [])
+
+    def test_the_twins_of_the_atom_lines(self):
+        base = self.requires()
+        drop_at = lambda i: base[:i] + base[i + 1:]  # noqa: E731
+        cases = {
+            "the flag line (form Full)": base[:-1] + [self.QUANT.format("acc(loc(block_of(a), k).d_int, wildcard)"), base[-1]],
+            "a flag line without a permission": base[:-1] + [self.QUANT.format("loc(block_of(a), k).d_int"), base[-1]],
+            "the liveness line (form Full)": base + ["acc(lvloc(block_of(a)).lv, wildcard)"],
+            "no a != null": drop_at(3),
+            "no well-formedness line (the parameter's and the atom's)": [base[0], base[2], base[3]] + base[5:],
+            "no 0 <= n (the clause's and the atom's)": [base[0], base[1], base[3], base[4]] + base[6:],
+            "no upper bound line": drop_at(6),
+            "the acc line before the pure lines": [base[0], base[7]] + base[1:7] + [base[8]],
+            "no element-range line": base[:-1],
+            "an element range of another type": base[:-1] + [base[-1].replace("2147483647", "2147483646")],
+            "the element range before the acc line": base[:7] + [base[8], base[7]],
+            "an amount that is not wildcard": base[:7] + [self.QUANT.format("acc(loc(block_of(a), k).v_int, write)")] + base[8:],
+            "the acc line of another pointer": base[:7] + [self.ACC.replace("block_of(a)", "block_of(b)").replace("offset_of(a)", "offset_of(b)")] + base[8:],
+            "a guard over the atom": base[:7] + [f"(n > 0) ==> ({self.ACC})"] + base[8:],
+            "a value clause that reads memory": base + ["loc(block_of(a), 0).v_int > 0"],
+            "an old in a requires": base + ["old(n) > 0"],
+            "an owns-style permission": base + ["acc(loc(block_of(a), 0).v_int)"],
+        }
+        for label, requires in cases.items():
+            with self.subTest(case=label):
+                probs = self.problems(self.function(requires))
+                self.assertTrue(any("decision 0062 item 6, form Min" in p for p in probs), (label, probs))
+
+    def test_a_flag_or_liveness_line_is_named_as_form_full(self):
+        flag = self.QUANT.format("acc(loc(block_of(a), k).d_int, wildcard)")
+        for label, line in (("a flag permission", flag), ("a flag", self.QUANT.format("loc(block_of(a), k).d_int")),
+                            ("the liveness", "acc(lvloc(block_of(a)).lv, wildcard)")):
+            with self.subTest(case=label):
+                self.refused(self.function(self.requires() + [line]), "is no line of form Min", label)
+
+    def test_the_amount_of_the_acc_line_is_wildcard_alone(self):
+        for amount in ("wildcard + write", "(wildcard * 2)", "wildcard ? write : write"):
+            with self.subTest(amount=amount):
+                line = self.QUANT.format(f"acc(loc(block_of(a), k).v_int, {amount})")
+                self.refused(self.function(self.requires()[:7] + [line] + self.requires()[8:]), "`wildcard` stands only in", amount)
+
+    def test_the_twins_of_the_cell_atom(self):
+        base = ["(-2147483648 <= n) && (n <= 2147483647)", self.CELL_WF, "p != null", self.CELL_WF, "offset_of(p) < len(block_of(p))",
+                "acc(p.v_int, wildcard)", "((-2147483648 <= p.v_int) && (p.v_int <= 2147483647))"]
+        cases = {
+            "no slot bound": base[:4] + base[5:],
+            "no p != null": base[:2] + base[3:],
+            "the flag": base + ["acc(p.d_int, wildcard)"],
+            "no element range": base[:-1],
+            "the element range before the acc": base[:5] + [base[6], base[5]],
+            "an element range of another type": base[:-1] + [base[-1].replace("2147483647", "2147483646")],
+            "an amount that is not wildcard": base[:5] + ["acc(p.v_int, write)"] + base[6:],
+        }
+        for label, requires in cases.items():
+            with self.subTest(case=label):
+                probs = self.problems(self.cell_function(requires))
+                self.assertTrue(any("decision 0062 item 6, form Min" in p for p in probs) or any("`wildcard`" in p for p in probs), (label, probs))
+
+    def test_wildcard_stands_in_the_acc_line_and_on_the_marked_row_only(self):
+        # the Min acc line is exempt from the ghost-amount rule; the same text in a method, an ensures, or as a Perm local is not
+        method = ["method m__1(a: Ref, n: Int)", Check(f"  requires {self.ACC}", WF, "internal"), "  decreases", "{", "}"]
+        self.assertTrue(any("`wildcard`: an amount Silicon chooses" in p for p in self.problems(method)))
+        ensures = self.function() + ["function pf_e__6(a: Ref, n: Int): Int",
+                                     Row(f"  ensures {self.ACC}", *POSTCONDITION_ROW), "  decreases", "{", "  n", "}"]
+        self.assertTrue(any("`wildcard`: an amount Silicon chooses" in p for p in self.problems(ensures)))
+        other = self.function(self.requires() + ["wildcard == n"])
+        self.assertTrue(any("`wildcard`" in p for p in self.problems(other)))
+
+    def test_a_user_quantifier_still_stands_in_a_requires(self):
+        q = ("forall q0: Int :: { loc(block_of(a), q0) } (-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) ==> "
+             "(!(0 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) < n) || (loc(block_of(a), q0).v_int >= 0))")
+        self.assertEqual(self.problems(self.function(self.requires() + [q])), [])
+
+    def test_a_callee_whose_requires_applies_a_function_has_no_ensures_fact(self):
+        # fact (ii) is guarded by the callee's memory-free requires; one that holds an application cannot be compared, so the fact is not admitted
+        a = "hva_m__1__pf_tri__1_post"
+        other = ["function pf_g__8(x: Int): Int", "  decreases", "{", "  x", "}"]
+        function = [
+            *other,
+            "function pf_tri__1(n: Int): Int",
+            Check("  requires pf_g__8(n) > 0", WF, "internal"),
+            Row("  ensures 0 <= result", *POSTCONDITION_ROW),
+            "  decreases",
+            "{", "  n", "}",
+        ]
+        fact = f"(n > 0) ==> (0 <= {a}(n))"
+        lines = [*function, "method m__1(n: Int) returns (res: Int)", "  decreases", "{", "  res := n", "}", "// cerastes:domain-ok 0061",
+                 "domain Hvq_m {", f"  function {a}(a: Int): Int", "}", "method m__1__wf(n: Int, res: Int)", Check(f"  requires {fact}", WF, "internal"),
+                 "  decreases", "{", "}"]
+        probs = self.problems(lines)
+        self.assertTrue(any("applies a `pure` function: its value clauses are not comparable" in p for p in probs), probs)
+
+
 if __name__ == "__main__":
     unittest.main()

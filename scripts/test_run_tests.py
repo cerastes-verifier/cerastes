@@ -288,6 +288,129 @@ class StrictSiliconVerdictTests(unittest.TestCase):
         self.assertEqual(len(result.errors), 2)
 
 
+# The line Silicon prints, verbatim (S46 (b), build/m4.5e1d/s46/warn/m1i_dead_branch_app.vpr.out), with its function renamed.
+def axiomatisation_warning(function="pf_dead_app__4", expression="pf_sum_to__1(a, n)", where="t.vpr@57.505--57.520"):
+    return (f"Could not resolve expression {expression} ({where}) during the axiomatisation of function {function}. "
+            "This typically happens if the expression is on an infeasible path, i.e. is dead code. "
+            "The unresolved expression will be replaced by a fresh symbol, i.e. an arbitrary value.")
+
+
+def with_warnings(output, *warnings):
+    """`output` with the warning lines right after its banner (where Silicon prints them: before the verdict)."""
+    banner, rest = output.split("\n", 1)
+    return banner + "\n" + "".join(w + "\n" for w in warnings) + rest
+
+
+class AxiomatisationWarningTests(unittest.TestCase):
+    """Decision 0062 item 11, "One accepted warning" (owner, question 275): the one line Silicon prints, before its verdict, when it cannot resolve an
+    expression during the axiomatisation of a `pf_<name>__<id>` function is no stray line, whatever the verdict; every other line, and this one for
+    another function, in another text or after the verdict, stays "no verdict".  The driver accepts exactly the same line (src/driver/silicon_output.cpp)."""
+
+    def problem(self, output, code):
+        result = rt.parse_silicon_output(output, code)
+        self.assertFalse(result.verified, output)
+        self.assertIsNotNone(result.problem, output)
+        return result.problem
+
+    def test_the_warning_beside_a_verdict_of_verified_is_accepted(self):
+        result = rt.parse_silicon_output(with_warnings(SUCCESS, axiomatisation_warning()), 0)
+        self.assertTrue(result.verified)
+        self.assertIsNone(result.problem)
+        self.assertEqual(result.warnings, [axiomatisation_warning()])
+
+    def test_the_warning_beside_errors_is_accepted_and_the_errors_are_kept(self):
+        result = rt.parse_silicon_output(with_warnings(TWO_ERRORS, axiomatisation_warning()), 1)
+        self.assertFalse(result.verified)
+        self.assertIsNone(result.problem)
+        self.assertEqual([(e.category, e.line) for e in result.errors], [("postcondition", 5), ("assignment", 9)])
+        self.assertEqual(len(result.warnings), 1)
+
+    def test_several_warnings_are_accepted(self):
+        lines = [axiomatisation_warning(), axiomatisation_warning("pf_other__12", "loc(block_of(a), offset_of(a)).v_int", "t.vpr@60.3--60.39")]
+        for output, code in ((SUCCESS, 0), (TWO_ERRORS, 1)):
+            with self.subTest(code=code):
+                result = rt.parse_silicon_output(with_warnings(output, *lines), code)
+                self.assertIsNone(result.problem)
+                self.assertEqual(result.warnings, lines)
+
+    def test_the_names_of_a_pf_function(self):
+        for name in ("pf_sum_to__1", "pf_x__12", "pf_a_b__3", "pf_A1__0", "pf__x__7", "pf_x__1__2"):
+            with self.subTest(name):
+                self.assertIsNone(rt.parse_silicon_output(with_warnings(SUCCESS, axiomatisation_warning(name)), 0).problem)
+
+    def test_an_expression_and_a_position_of_any_shape(self):
+        for expression, where in (("loc(block_of(a), offset_of(a)).v_int", "m1ii_dead_branch_guarded_read.vpr@57.86--57.122"),
+                                  ("(n < 0) ? a : b", "/tmp/a dir/t.vpr@1.1--1.9"), ("f((g(x)))", "t.vpr@3.4--3.30"),
+                                  ("f(x)", "t.vpr@3.4")):  # the end position is optional (the driver's group)
+            with self.subTest(expression=expression):
+                output = with_warnings(SUCCESS, axiomatisation_warning(expression=expression, where=where))
+                self.assertIsNone(rt.parse_silicon_output(output, 0).problem)
+
+    def test_another_function_name_is_refused(self):
+        for name in ("pf_dead_app", "pf_sum_to", "sum_to", "f_sum__1", "c_and_32", "pf_x__a", "pf_x__", "pf__1", "pf_", "Pf_x__1",
+                     "pf_x__1 extra", "xpf_x__1", "pf_x-y__1", "m__1"):
+            with self.subTest(name):
+                self.assertIn("unexpected line", self.problem(with_warnings(SUCCESS, axiomatisation_warning(name)), 0))
+
+    def test_an_altered_text_is_refused(self):
+        good = axiomatisation_warning()
+        altered = {
+            "a different first word": good.replace("Could not resolve", "Could not evaluate"),
+            "lower case": good.replace("Could", "could"),
+            "another phase": good.replace("axiomatisation", "axiomatization"),
+            "no 'function'": good.replace("of function", "of method"),
+            "the second sentence changed": good.replace("infeasible path", "feasible path"),
+            "the third sentence changed": good.replace("a fresh symbol", "a symbol"),
+            "no final full stop": good[:-1],
+            "text after it": good + " Please report this.",
+            "text before it": "Warning: " + good,
+            "a position of another shape": good.replace("t.vpr@57.505--57.520", "t.vpr:57"),
+            "a position with a half end": good.replace("t.vpr@57.505--57.520", "t.vpr@57.505--57"),
+            "a position with two ends": good.replace("t.vpr@57.505--57.520", "t.vpr@57.505--57.520--58.1"),
+            "a position with no column": good.replace("t.vpr@57.505--57.520", "t.vpr@57"),
+            "a position with a closing parenthesis inside": good.replace("t.vpr@57.505--57.520", "t.v)pr@57.505--57.520"),
+            "no position": good.replace(" (t.vpr@57.505--57.520)", ""),
+            "no expression": good.replace("expression pf_sum_to__1(a, n) (", "expression  ("),
+            "indented": "  " + good,
+            "the sentences joined": good.replace(". This", " This"),
+        }
+        for label, line in altered.items():
+            with self.subTest(label):
+                self.assertIn("unexpected line", self.problem(with_warnings(SUCCESS, line), 0))
+                self.assertIn("unexpected line", self.problem(with_warnings(TWO_ERRORS, line), 1))
+
+    def test_another_warning_is_refused_beside_an_accepted_one(self):
+        output = with_warnings(SUCCESS, axiomatisation_warning(), "warning: something else")
+        self.assertIn("unexpected line", self.problem(output, 0))
+        output = with_warnings(SUCCESS, axiomatisation_warning("pf_x"), axiomatisation_warning())
+        self.assertIn("unexpected line", self.problem(output, 0))
+
+    def test_the_warning_after_the_verdict_is_refused(self):
+        self.assertIn("unexpected line", self.problem(SUCCESS + axiomatisation_warning() + "\n", 0))
+        banner, rest = SUCCESS.split("\n", 1)
+        self.assertIn("unexpected line", self.problem(banner + "\n" + rest + axiomatisation_warning() + "\n", 0))
+
+    def test_the_warning_does_not_replace_the_banner_or_the_verdict(self):
+        only = "".join(w + "\n" for w in (axiomatisation_warning(),))
+        self.assertIn("did not produce a verdict", self.problem(only, 1))
+        no_banner = axiomatisation_warning() + "\n" + SUCCESS.split("\n", 1)[1]
+        self.assertIn("not a banner and one verdict", self.problem(no_banner, 0))
+        two = with_warnings(SUCCESS, axiomatisation_warning()) + SUCCESS
+        self.assertIn("not a banner and one verdict", self.problem(two, 0))
+
+    def test_the_exit_status_still_has_to_agree(self):
+        self.assertIn("did not produce a verdict", self.problem(with_warnings(SUCCESS, axiomatisation_warning()), 1))
+        self.assertIn("did not produce a verdict", self.problem(with_warnings(TWO_ERRORS, axiomatisation_warning()), 0))
+
+    def test_the_count_of_errors_is_still_checked(self):
+        out = with_warnings(TWO_ERRORS.replace("found 2 errors", "found 3 errors"), axiomatisation_warning())
+        self.assertIn("reported 3 errors but 2", rt.parse_silicon_output(out, 1).problem)
+
+    def test_a_clean_output_has_no_warnings(self):
+        self.assertEqual(rt.parse_silicon_output(SUCCESS, 0).warnings, [])
+        self.assertEqual(rt.parse_silicon_output(TWO_ERRORS, 1).warnings, [])
+
+
 class CompareTests(unittest.TestCase):
     def setUp(self):
         self.reported = rt.parse_silicon_output(TWO_ERRORS, 1).errors
@@ -15345,6 +15468,57 @@ def classify_cases():
         ("success and an error", SUCCESS + TWO_ERRORS, 1),
         ("found zero errors", "Silicon found 0 errors in 0.1s:\n", 1),
     ]
+    cases += warning_cases()
+    return cases
+
+
+def warning_cases():
+    """Decision 0062 item 11's accepted warning (question 275): the line beside both verdicts, and each way of being a different line; the two
+    readers must agree on all of them (the harness's `_AXIOMATISATION_WARNING_RE` and the driver's port)."""
+    good = axiomatisation_warning()
+    cases = [
+        ("warning beside success", with_warnings(SUCCESS, good), 0),
+        ("warning beside errors", with_warnings(TWO_ERRORS, good), 1),
+        ("two warnings beside success", with_warnings(SUCCESS, good, axiomatisation_warning("pf_other__12", "f(x)", "t.vpr@3.4")), 0),
+        ("two warnings beside errors", with_warnings(TWO_ERRORS, good, axiomatisation_warning("pf_other__12", "f(x)", "t.vpr@3.4")), 1),
+        ("warning with an end-less position", with_warnings(SUCCESS, axiomatisation_warning(where="t.vpr@3.4")), 0),
+        ("warning with a path with spaces", with_warnings(SUCCESS, axiomatisation_warning(where="/tmp/a dir/t.vpr@1.1--1.9")), 0),
+        ("warning with a long name", with_warnings(SUCCESS, axiomatisation_warning("pf_A_b1__x__0")), 0),
+        ("warning after success (a stray line)", SUCCESS + good + "\n", 0),
+        ("warning after errors (a continuation of the last entry)", TWO_ERRORS + good + "\n", 1),
+        ("warning between the errors", TWO_ERRORS.replace("\n  [1]", "\n" + good + "\n  [1]"), 1),
+        ("warning without a banner", good + "\n" + SUCCESS.split("\n", 1)[1], 0),
+        ("warning alone", good + "\n", 1),
+        ("warning beside success with exit 1", with_warnings(SUCCESS, good), 1),
+        ("warning beside errors with exit 0", with_warnings(TWO_ERRORS, good), 0),
+        ("warning, another warning", with_warnings(SUCCESS, good, "warning: something else"), 0),
+        ("warning with a wrong error count", with_warnings(TWO_ERRORS.replace("found 2 errors", "found 3 errors"), good), 1),
+    ]
+    for name in ("pf_dead_app", "pf_sum_to", "sum_to", "f_sum__1", "c_and_32", "pf_x__a", "pf_x__", "pf__1", "pf_", "Pf_x__1"):
+        cases.append((f"warning of function {name}", with_warnings(SUCCESS, axiomatisation_warning(name)), 0))
+    altered = {
+        "another first word": good.replace("Could not resolve", "Could not evaluate"),
+        "lower case": good.replace("Could", "could"),
+        "axiomatization": good.replace("axiomatisation", "axiomatization"),
+        "method for function": good.replace("of function", "of method"),
+        "second sentence": good.replace("infeasible path", "feasible path"),
+        "third sentence": good.replace("a fresh symbol", "a symbol"),
+        "no final full stop": good[:-1],
+        "text after": good + " Please report this.",
+        "text before": "Warning: " + good,
+        "indented": "  " + good,
+        "sentences joined": good.replace(". This", " This"),
+        "no position": good.replace(" (t.vpr@57.505--57.520)", ""),
+        "colon position": good.replace("t.vpr@57.505--57.520", "t.vpr:57"),
+        "half end": good.replace("t.vpr@57.505--57.520", "t.vpr@57.505--57"),
+        "no column": good.replace("t.vpr@57.505--57.520", "t.vpr@57"),
+        "parenthesis in the position": good.replace("t.vpr@57.505--57.520", "t.v)pr@57.505--57.520"),
+        "two ends": good.replace("t.vpr@57.505--57.520", "t.vpr@57.505--57.520--58.1"),
+        "no expression": good.replace("expression pf_sum_to__1(a, n) (", "expression  ("),
+    }
+    for name, line in altered.items():
+        cases.append((f"warning altered: {name} (success)", with_warnings(SUCCESS, line), 0))
+        cases.append((f"warning altered: {name} (errors)", with_warnings(TWO_ERRORS, line), 1))
     return cases
 
 
@@ -15434,6 +15608,31 @@ class ClassifySamplesTests(unittest.TestCase):
         self.assertEqual(views["timeout"][0][0][2], rt.TIMEOUT)
         self.assertEqual(views["no position"][0][0][3:], ("", 0))
         self.assertEqual(len(views["ten errors, padded indices"][0]), 11)
+
+
+class ClassifyWarningSamplesTests(unittest.TestCase):
+    """The warning cases mean what they say for the harness's reader, whether or not a driver is built: the accepted lines leave a clean verdict, each
+    refused one is a problem (or, after errors, a continuation of the last entry's text, the shared rule for any line there)."""
+
+    def test_the_accepted_lines_leave_a_clean_verdict(self):
+        views = {name: harness_view(out, code) for name, out, code in warning_cases()}
+        for name in ("warning beside success", "two warnings beside success", "warning with an end-less position",
+                     "warning with a path with spaces", "warning with a long name"):
+            self.assertEqual(views[name][1:], ("verified", ""), name)
+        for name in ("warning beside errors", "two warnings beside errors"):
+            self.assertEqual(views[name][1:], ("errors", ""), name)
+            self.assertEqual(len(views[name][0]), 2, name)
+
+    def test_every_refused_line_is_a_problem_beside_success(self):
+        for name, out, code in warning_cases():
+            if name.startswith("warning of function") or (name.startswith("warning altered") and name.endswith("(success)")):
+                self.assertEqual(harness_view(out, code)[1], "problem", name)
+
+    def test_a_warning_after_the_errors_is_absorbed_like_any_continuation_line(self):
+        views = {name: harness_view(out, code) for name, out, code in warning_cases()}
+        for name in ("warning after errors (a continuation of the last entry)", "warning between the errors"):
+            self.assertEqual(views[name][1:], ("errors", ""), name)
+        self.assertEqual(views["warning after success (a stray line)"][1], "problem")
 
 
 @e2e_gate(_real_verifier_available(), "CERASTES_VERIFY missing; run scripts/bootstrap.sh")

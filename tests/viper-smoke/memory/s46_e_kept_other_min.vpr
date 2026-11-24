@@ -1,0 +1,104 @@
+// expect: verified
+// S46 (e) sum_to(a, 4) read before and after a write to another array, form min: the value is kept
+// S46 hand-written fixture of the target shapes of record 0062 (draft; plan .claude/plans/m4-5e1d-pure-functions.md section 5), written from the emitted shapes of e1b and e1c (build/m4.5e1d/baseline/vpr) and the S45 fixtures. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+function pf_sum_to__1(a: Ref, n: Int): Int
+  requires (-2147483648 <= n) && (n <= 2147483647)
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires 0 <= n
+  requires a != null
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires 0 <= n
+  requires (offset_of(a) + n) <= len(block_of(a))
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, wildcard)
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))
+  ensures (-2147483648 * n <= result) && (result <= 2147483647 * n)
+  decreases n
+{
+  (n == 0) ? 0 :
+    ((((-2147483648 <= (n - 1)) && ((n - 1) <= 2147483647) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && 0 <= (n - 1) && (a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= (n - 1)) && ((offset_of(a) + (n - 1)) <= len(block_of(a))) && ((block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && (offset_of(a) + (n - 1) <= offset_of(a) + n))) ? pf_sum_to__1(a, n - 1) : 0) + ((((offset_of(a) <= (offset_of(a) + n - 1)) && ((offset_of(a) + n - 1) < offset_of(a) + n))) ? loc(block_of(a), (offset_of(a) + n - 1)).v_int : 0))
+}
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1): a fresh block of n slots, every element uninitialized, the block's liveness token; full permission to both fields of every slot in [0, n), each its own quantifier over the absolute slot (record 0059 item 3, draft)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+method f_e3__29() returns (res: Int)
+  decreases
+{
+  var v_a: Ref
+  var v_b: Ref
+  var g0: Int
+  var c0: Ref
+  var c1: Int
+  var c2: Perm
+  var w: Ref
+  var t0: Ref
+  var t1: Ref
+  var t2: Ref
+  var t3: Ref
+  var u0: Ref
+  v_a := alloc_arr_int(4)
+  assert !(((offset_of(v_a) + 0) < 0) || (len(block_of(v_a)) <= (offset_of(v_a) + 0)))
+  t0 := loc(block_of(v_a), offset_of(v_a) + 0)
+  assert !((perm(t0.v_int) != write) || (perm(t0.d_int) != write))
+  t0.v_int := 1
+  t0.d_int := true
+  assert !(((offset_of(v_a) + 1) < 0) || (len(block_of(v_a)) <= (offset_of(v_a) + 1)))
+  t1 := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((perm(t1.v_int) != write) || (perm(t1.d_int) != write))
+  t1.v_int := 2
+  t1.d_int := true
+  assert !(((offset_of(v_a) + 2) < 0) || (len(block_of(v_a)) <= (offset_of(v_a) + 2)))
+  t2 := loc(block_of(v_a), offset_of(v_a) + 2)
+  assert !((perm(t2.v_int) != write) || (perm(t2.d_int) != write))
+  t2.v_int := 3
+  t2.d_int := true
+  assert !(((offset_of(v_a) + 3) < 0) || (len(block_of(v_a)) <= (offset_of(v_a) + 3)))
+  t3 := loc(block_of(v_a), offset_of(v_a) + 3)
+  assert !((perm(t3.v_int) != write) || (perm(t3.d_int) != write))
+  t3.v_int := 4
+  t3.d_int := true
+  g0 := pf_sum_to__1(v_a, 4)
+  v_b := alloc_arr_int(2)
+  assert !(((offset_of(v_b) + 0) < 0) || (len(block_of(v_b)) <= (offset_of(v_b) + 0)))
+  u0 := loc(block_of(v_b), offset_of(v_b) + 0)
+  assert !((perm(u0.v_int) != write) || (perm(u0.d_int) != write))
+  u0.v_int := 5
+  u0.d_int := true
+  assert pf_sum_to__1(v_a, 4) == g0 //ROW:e3:f_kept__34
+  res := 0
+}

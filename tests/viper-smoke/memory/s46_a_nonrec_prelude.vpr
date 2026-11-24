@@ -1,0 +1,51 @@
+// expect: error termination:termination.condition.false @ L50
+// S46 (a) recorded: a non-recursive function with an empty decreases that applies a prelude function (c_and_32, which has no decreases)
+// S46 hand-written fixture of the target shapes of record 0062 (draft; plan .claude/plans/m4-5e1d-pure-functions.md section 5), written from the emitted shapes of e1b and e1c (build/m4.5e1d/baseline/vpr) and the S45 fixtures. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+function c_and_32(a: Int, b: Int): Int
+  ensures (-2147483648) <= result && result <= 2147483647
+{
+  let qa1 == (a \ 2) in let qb1 == (b \ 2) in let qa2 == (qa1 \ 2) in let qb2 == (qb1 \ 2) in let qa3 == (qa2 \ 2) in let qb3 == (qb2 \ 2) in let qa4 == (qa3 \ 2) in let qb4 == (qb3 \ 2) in let qa5 == (qa4 \ 2) in let qb5 == (qb4 \ 2) in let qa6 == (qa5 \ 2) in let qb6 == (qb5 \ 2) in let qa7 == (qa6 \ 2) in let qb7 == (qb6 \ 2) in let qa8 == (qa7 \ 2) in let qb8 == (qb7 \ 2) in let qa9 == (qa8 \ 2) in let qb9 == (qb8 \ 2) in let qa10 == (qa9 \ 2) in let qb10 == (qb9 \ 2) in let qa11 == (qa10 \ 2) in let qb11 == (qb10 \ 2) in let qa12 == (qa11 \ 2) in let qb12 == (qb11 \ 2) in let qa13 == (qa12 \ 2) in let qb13 == (qb12 \ 2) in let qa14 == (qa13 \ 2) in let qb14 == (qb13 \ 2) in let qa15 == (qa14 \ 2) in let qb15 == (qb14 \ 2) in let qa16 == (qa15 \ 2) in let qb16 == (qb15 \ 2) in let qa17 == (qa16 \ 2) in let qb17 == (qb16 \ 2) in let qa18 == (qa17 \ 2) in let qb18 == (qb17 \ 2) in let qa19 == (qa18 \ 2) in let qb19 == (qb18 \ 2) in let qa20 == (qa19 \ 2) in let qb20 == (qb19 \ 2) in let qa21 == (qa20 \ 2) in let qb21 == (qb20 \ 2) in let qa22 == (qa21 \ 2) in let qb22 == (qb21 \ 2) in let qa23 == (qa22 \ 2) in let qb23 == (qb22 \ 2) in let qa24 == (qa23 \ 2) in let qb24 == (qb23 \ 2) in let qa25 == (qa24 \ 2) in let qb25 == (qb24 \ 2) in let qa26 == (qa25 \ 2) in let qb26 == (qb25 \ 2) in let qa27 == (qa26 \ 2) in let qb27 == (qb26 \ 2) in let qa28 == (qa27 \ 2) in let qb28 == (qb27 \ 2) in let qa29 == (qa28 \ 2) in let qb29 == (qb28 \ 2) in let qa30 == (qa29 \ 2) in let qb30 == (qb29 \ 2) in let qa31 == (qa30 \ 2) in let qb31 == (qb30 \ 2) in let qa32 == (qa31 \ 2) in let qb32 == (qb31 \ 2) in (((a - 2 * qa1) + (b - 2 * qb1) == 2) ? 1 : 0) + 2 * (((qa1 - 2 * qa2) + (qb1 - 2 * qb2) == 2) ? 1 : 0) + 4 * (((qa2 - 2 * qa3) + (qb2 - 2 * qb3) == 2) ? 1 : 0) + 8 * (((qa3 - 2 * qa4) + (qb3 - 2 * qb4) == 2) ? 1 : 0) + 16 * (((qa4 - 2 * qa5) + (qb4 - 2 * qb5) == 2) ? 1 : 0) + 32 * (((qa5 - 2 * qa6) + (qb5 - 2 * qb6) == 2) ? 1 : 0) + 64 * (((qa6 - 2 * qa7) + (qb6 - 2 * qb7) == 2) ? 1 : 0) + 128 * (((qa7 - 2 * qa8) + (qb7 - 2 * qb8) == 2) ? 1 : 0) + 256 * (((qa8 - 2 * qa9) + (qb8 - 2 * qb9) == 2) ? 1 : 0) + 512 * (((qa9 - 2 * qa10) + (qb9 - 2 * qb10) == 2) ? 1 : 0) + 1024 * (((qa10 - 2 * qa11) + (qb10 - 2 * qb11) == 2) ? 1 : 0) + 2048 * (((qa11 - 2 * qa12) + (qb11 - 2 * qb12) == 2) ? 1 : 0) + 4096 * (((qa12 - 2 * qa13) + (qb12 - 2 * qb13) == 2) ? 1 : 0) + 8192 * (((qa13 - 2 * qa14) + (qb13 - 2 * qb14) == 2) ? 1 : 0) + 16384 * (((qa14 - 2 * qa15) + (qb14 - 2 * qb15) == 2) ? 1 : 0) + 32768 * (((qa15 - 2 * qa16) + (qb15 - 2 * qb16) == 2) ? 1 : 0) + 65536 * (((qa16 - 2 * qa17) + (qb16 - 2 * qb17) == 2) ? 1 : 0) + 131072 * (((qa17 - 2 * qa18) + (qb17 - 2 * qb18) == 2) ? 1 : 0) + 262144 * (((qa18 - 2 * qa19) + (qb18 - 2 * qb19) == 2) ? 1 : 0) + 524288 * (((qa19 - 2 * qa20) + (qb19 - 2 * qb20) == 2) ? 1 : 0) + 1048576 * (((qa20 - 2 * qa21) + (qb20 - 2 * qb21) == 2) ? 1 : 0) + 2097152 * (((qa21 - 2 * qa22) + (qb21 - 2 * qb22) == 2) ? 1 : 0) + 4194304 * (((qa22 - 2 * qa23) + (qb22 - 2 * qb23) == 2) ? 1 : 0) + 8388608 * (((qa23 - 2 * qa24) + (qb23 - 2 * qb24) == 2) ? 1 : 0) + 16777216 * (((qa24 - 2 * qa25) + (qb24 - 2 * qb25) == 2) ? 1 : 0) + 33554432 * (((qa25 - 2 * qa26) + (qb25 - 2 * qb26) == 2) ? 1 : 0) + 67108864 * (((qa26 - 2 * qa27) + (qb26 - 2 * qb27) == 2) ? 1 : 0) + 134217728 * (((qa27 - 2 * qa28) + (qb27 - 2 * qb28) == 2) ? 1 : 0) + 268435456 * (((qa28 - 2 * qa29) + (qb28 - 2 * qb29) == 2) ? 1 : 0) + 536870912 * (((qa29 - 2 * qa30) + (qb29 - 2 * qb30) == 2) ? 1 : 0) + 1073741824 * (((qa30 - 2 * qa31) + (qb30 - 2 * qb31) == 2) ? 1 : 0) + (-2147483648) * (((qa31 - 2 * qa32) + (qb31 - 2 * qb32) == 2) ? 1 : 0)
+}
+
+function pf_other(a: Ref, n: Int): Int
+  requires (-2147483648 <= n) && (n <= 2147483647)
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires 0 <= n
+  requires a != null
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires 0 <= n
+  requires (offset_of(a) + n) <= len(block_of(a))
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, wildcard)
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))
+  decreases
+{
+  c_and_32(n, 3)
+}

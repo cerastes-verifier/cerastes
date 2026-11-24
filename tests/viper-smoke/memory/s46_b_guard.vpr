@@ -1,0 +1,99 @@
+// expect: verified
+// S46 (b) a bodiless method whose ensures applies pf_sum_to under the guard G, with its __wf: the framing row, the rows of G's conjuncts, the ghost application and facts (i), (ii)
+// S46 hand-written fixture of the target shapes of record 0062 (draft; plan .claude/plans/m4-5e1d-pure-functions.md section 5), written from the emitted shapes of e1b and e1c (build/m4.5e1d/baseline/vpr) and the S45 fixtures. No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+function pf_sum_to(a: Ref, n: Int): Int
+  requires (-2147483648 <= n) && (n <= 2147483647)
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires 0 <= n
+  requires a != null
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires 0 <= n
+  requires (offset_of(a) + n) <= len(block_of(a))
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, wildcard)
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))
+  ensures (-2147483648 * n <= result) && (result <= 2147483647 * n)
+  decreases n
+{
+  (n == 0) ? 0 :
+    ((((-2147483648 <= (n - 1)) && ((n - 1) <= 2147483647) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && 0 <= (n - 1) && (a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= (n - 1)) && ((offset_of(a) + (n - 1)) <= len(block_of(a))) && ((block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && (offset_of(a) + (n - 1) <= offset_of(a) + n))) ? pf_sum_to(a, n - 1) : 0) + ((((offset_of(a) <= (offset_of(a) + n - 1)) && ((offset_of(a) + n - 1) < offset_of(a) + n))) ? loc(block_of(a), (offset_of(a) + n - 1)).v_int : 0))
+}
+
+method kern(a: Ref, n: Int, amt: Perm) returns (r: Int)
+  requires ((-2147483648) <= n) && (n <= 2147483647)
+  requires none < amt && amt < write
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires a != null
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires 0 <= n
+  requires (offset_of(a) + n) <= len(block_of(a))
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, amt)
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).d_int, amt)
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> loc(block_of(a), k).d_int
+  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))
+  requires acc(lvloc(block_of(a)).lv, amt)
+  requires 0 <= n
+  ensures ((-9223372036854775808) <= r) && (r <= 9223372036854775807)
+  ensures a != null
+  ensures (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  ensures 0 <= n
+  ensures (offset_of(a) + n) <= len(block_of(a))
+  ensures forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, amt)
+  ensures forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).d_int, amt)
+  ensures forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> loc(block_of(a), k).d_int
+  ensures forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))
+  ensures acc(lvloc(block_of(a)).lv, amt)
+  ensures r == (((block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && ((offset_of(a) + n) <= (offset_of(a) + n))) && (((-2147483648) <= n) && (n <= 2147483647)) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && (a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a))) ? pf_sum_to(a, n) : 0)
+  decreases _
+
+// cerastes:domain-ok 0061
+domain Hvq_kern {
+  function hva_kern__pf_sum_to_post(a: Ref, n: Int): Int
+}
+
+// well-formedness of the contract of `kern` (variant M: heap-free)
+method kern__wf(a: Ref, n: Int, amt: Perm, res: Int)
+  requires none < amt && amt < write
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires ((-2147483648) <= n) && (n <= 2147483647)
+  requires ((-9223372036854775808) <= res) && (res <= 9223372036854775807)
+  requires ((-9223372036854775808) <= hva_kern__pf_sum_to_post(a, n)) && (hva_kern__pf_sum_to_post(a, n) <= 9223372036854775807)
+  requires ((((-2147483648) <= n) && (n <= 2147483647)) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && (a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> (((-2147483648) * n <= hva_kern__pf_sum_to_post(a, n)) && (hva_kern__pf_sum_to_post(a, n) <= 2147483647 * n))
+  decreases
+{
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> ((block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && ((offset_of(a) + n) <= (offset_of(a) + n))) //ROW:sum:frame
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> (((-2147483648) <= n) && (n <= 2147483647)) //ROW:sum:range
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) //ROW:sum:shape
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> (0 <= n) //ROW:sum:nonneg
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> (a != null) //ROW:sum:null
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) //ROW:sum:wf
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> (0 <= n) //ROW:sum:nn2
+  assert ((a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))) ==> ((offset_of(a) + n) <= len(block_of(a))) //ROW:sum:bound
+}
