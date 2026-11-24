@@ -100,7 +100,8 @@
 // body is one `return E;`; its first parameter, an integer, is the quantified variable and its other parameters, in order, take the `args` (each of the parameter's own
 // type, reading no memory).  It is inlined where `cerastes_forall` stands and means that `E` holds for every value of the first parameter's type.  `E` reads the elements
 // `p[i]`, `p[i + c]` or `p[i - c]` of a pointer parameter, which the matching argument gives (a pointer parameter of the function in a contract; a pointer variable or a local
-// array in a loop invariant or a `check`).  It stands where a conjunct may (`g || cerastes_forall(...)` is accepted, `!cerastes_forall(...)` is not).
+// array in a loop invariant or a `check`).  In a contract it stands as a conjunct, after a condition and `||`, or as an arm of `?:`; in a loop
+// invariant or a `check`, only as a top-level `&&` conjunct; `!cerastes_forall(...)` stands nowhere.
 // `cerastes::forall` below is the lambda form, which verification does not read yet: write this one.
 // `cerastes_old(e)` takes a place and is
 // a macro over `__typeof__` (accepted by clang,

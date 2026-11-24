@@ -467,7 +467,14 @@ element the loop has not written yet is reported at the invariant
 
 [source,c]
 ----
-include::example$error-messages/forall_loop_flag.c[tag=source]
+include::example$error-messages/forall_loop_flag_error.c[tag=source]
+----
+
+The invariant states only what the loop has written:
+
+[source,c]
+----
+include::example$error-messages/forall_loop_flag_fixed.c[tag=source]
 ----
 
 == null-dereference

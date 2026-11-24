@@ -67,7 +67,7 @@ assumptions Silicon cannot check, so each has one of four shapes, argued in deci
 {gh}/internal/decisions/0061-quantifiers.md[0061]: the element type's range, the tie to a scalar ghost of the same read, equality
 between two parameters on one block, and the keep fact of a `reads_range` atom that comes back, which the lint accepts only
 under the guards of both atoms (without them it would let a wrong contract verify). The lint also refuses a quantifier with no
-type range for the bound variable and a computed `loc` term in a trigger.
+type range for the bound variable and a computed `loc` term in the body (the form with one binder, which does not finish on neighbours).
 
 == Trusted contracts
 

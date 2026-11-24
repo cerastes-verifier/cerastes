@@ -719,7 +719,7 @@ before the fact itself (xref:error-messages.adoc#_check[`check`]). In a loop inv
 `check` a quantifier stands as a conjunct of the clause, it does not dereference an array
 argument or compare pointer arguments, and over two reads it computes only with the first;
 in a `check` it reads only elements at the quantified index, of a type that is not a pointer
-(known limits, lifted with pointer arithmetic).
+(known limits; the positions in a later milestone, the rest with pointer arithmetic).
 
 Every check of the body of `f` (an overflow, a division, an element read without permission) is
 made for every value of the index and reported at the `forall`, with a note at the line of

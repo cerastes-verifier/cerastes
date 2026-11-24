@@ -226,3 +226,5 @@ S28 (Silicon's loops with permissions, frames at out-edges, scope exits at jumps
 *2026-11-11, amended by 0059 (M4.5e1a): items 3 and 4 — a loop takes each array in an open scope as a range place: marked entry rows, the label, quantified conjuncts (permissions, flags kept, the type's range, values kept when no write can reach it) and marked back-edge rows, positioned at the loop keyword (0059 item 8).*
 
 *2026-11-12, amended by 0060 (M4.5e1b): item 3 — the `requires` ranges of a parameter the function never assigns are loop places, beside cell places guarded by "not inside the range" (0060 item 11). Item 6 — `p[e]` of any pointer and an array used as a pointer are read in invariants and measures, framed by range, array and cell places.*
+
+*2026-11-24, amended by 0061 (M4.5e1c): item 6 — a loop invariant may hold a quantified read: framing asserted at entry and back edge, bound and flag lines per read class, the clause split per top-level conjunct (0061 item 9).*

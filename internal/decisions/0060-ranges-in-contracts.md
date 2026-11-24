@@ -409,3 +409,5 @@ its decision table, and the item it revised. An outcome outside its table stops 
 - A contract whose `ensures` returns a range on a path where its `requires` did not take it is reported in `f__wf`, as
   for cells (0039 item 7).
 - Programs accepted before e1b keep their Viper and maps byte for byte.
+
+*2026-11-24, amended by 0061 (M4.5e1c): item 1 — `cerastes_forall` and the full `carrays.c` port are lifted; items 11 and 12 — loops over ranges carry quantified invariants, and a `must_init` filler states its writes with one (`range_marker_pin_loop_filler.c`'s sibling); item 16 — the lint admits the user quantifiers and `f__wf` shapes of 0061 item 11.*

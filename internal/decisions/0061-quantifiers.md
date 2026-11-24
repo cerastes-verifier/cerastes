@@ -1,11 +1,16 @@
 # 0061 — Quantifiers (M4.5e1c)
 
-- **Status:** draft (2026-11-23, M4.5e1c), written before code (invariant 6) from the plan's section 6
+- **Status:** accepted (2026-11-24, M4.5e1c), written before code (invariant 6) from the plan's section 6
   (`.claude/plans/m4-5e1c-quantifiers.md`, approved 2026-11-23); to be revised by P80's and S45's decision tables (the
   plan's section 5; `internal/il-inventory.md`, chapter M4.5e1c; fixtures `tests/viper-smoke/memory/s45_*.vpr`), by
   Step 0's runs, by advisor checkpoint 1 (the guards of item 7's fact (d), the one-field restriction of facts (b) and
   (c), `f`'s `bool` result, reads through marked parameters, and an S45 addendum: two read classes through `f__wf`, the
-  one-term workaround, the guarded fact), by audit round 2 (Opus, on the snapshot `2dfc88d` of Parts A and B: no soundness hole; one
+  one-term workaround, the guarded fact), by audit round 4 (Opus, on Commit 3 `4689b7b`, also the plan's re-audit of every blocking fix:
+  no soundness hole, no blocking item; every blocking item of rounds 1-3 re-verified; text fixes to this record, the
+  header comment, `internal/encoding.md`, the plan and the handoff, all taken; `build/m4.5e1c/auditor-report-4.md`), by
+  audit round 3 (Opus, on the snapshot `49b2bf9` of Part C: no soundness hole; one blocking item, an exit 3 on wrong
+  programs, question 261; should-fix: positions in loops and checks, question 262, the lint's scope of question 258,
+  the docs of question 259; notes taken; `build/m4.5e1c/auditor-report-3.md`), by audit round 2 (Opus, on the snapshot `2dfc88d` of Parts A and B: no soundness hole; one
   blocking item, the lint refusing the type-range fact of a formal with no atom of its own in an accepted program's
   Viper, fixed by emitting facts (a)-(c) only for formals with an atom, item 7; one should-fix item, six pins of item
   4's refusals; notes 3-10 taken where they name a fix; `build/m4.5e1c/auditor-report-2.md`) and by audit round 1 (Opus,
@@ -113,9 +118,10 @@ plan's decision table it took.
    change `annotation_checks.cpp` and front-end expectations, which the plan fences (Flips E).
 
 3. **The quantifier** `forall(f, e_1, …, e_m)`.
-   - **Positions:** a function's `requires` and `ensures`, a loop's invariant, a `check`; as a conjunct, as the right
-     operand of `||` or as an arm of `?:` (a positive position; the left operand of `||`, which question 249 allowed, is
-     narrowed to M4.8 by question 255). Every other position is rejected (`unsupported_annotation`, item 1's M4.8 row).
+   - **Positions:** a function's `requires` and `ensures`, a loop's invariant, a `check`. In a contract, as a conjunct,
+     as the right operand of `||` or as an arm of `?:` (a positive position; the left operand of `||`, which question 249
+     allowed, is narrowed to M4.8 by question 255); in a loop invariant or a `check`, as a top-level conjunct of the
+     clause only (question 262). Every other position is rejected (`unsupported_annotation`, item 1's M4.8 row).
    - **`f`** is named as `f` or `&f` and nothing else (audit round 1, S5): a lambda (`enk_lambda`), `+lambda`, a written
      cast (`(fp_t)g`, which can name a function of another signature), `*f`, a function-pointer parameter or variable, a
      comma and a `?:` are each `forall_function`, each pinned, the written cast in particular. `f` is a `pure` function
@@ -178,8 +184,8 @@ plan's decision table it took.
    value inside. Ids need not be unique in the program: nesting is refused, so a `Bound` or `ForallArg` is always under
    exactly the `Forall` that `check.cpp` matches it to. `check.cpp` backstops items 3,
    6 and 8: positions, no nesting, no atom, call or write inside, `Bound` only under its `Forall`, the read classes'
-   shape, `Old` inside only where item 8 or 12 allows. Until Part C lifts it, `check.cpp` refuses a `Forall` in a loop
-   invariant or a `check` (fail closed between parts).
+   shape, `Old` inside only where item 8 allows (an `ensures`), the positions of item 3, and questions 259, 261 and 262's
+   refusals in loops and checks.
 
 6. **Binders and triggers** (lowering; amends 0028 item 2).
    - A **read class** is a pair (base, constant `c`) of the reads `base[i + c]` in `E`. `E` has at least one class, and
@@ -252,7 +258,7 @@ plan's decision table it took.
      a[r]`; audit round 1, S12) is a scalar ghost of today's form (0037 item 7; tied to its parameter's function by fact
      (b)); its framing row is quantified like `E`'s other obligations, over the first class's binder and trigger with
      `E`'s path, so that a read no `i` reaches is never asked. A failed row is assumed afterwards, as every `f__wf` row is. A
-     contract without a quantifier keeps its `f__wf` byte for byte. Facts (a) and (c) are emitted only for formals that
+     contract without a quantifier keeps its `f__wf` byte for byte. Facts (a), (b) and (c) are emitted only for formals that
      have an atom of that cell field in the method's contract (as built after the lint's run over the emitted Viper: a
      formal with no atom, such as `q` in `requires(q == p)`, has no element field the lint can check, and a read
      through it is framed by another parameter's atom or reported unframed; losing its range fact can only add a false
@@ -270,7 +276,7 @@ plan's decision table it took.
 
 8. **`old` under the binder** (amends 0006 item 9's `old` rule). `cerastes_old(p[e])` and `cerastes_old(*p)` in `E`
    (the C spelling, in both modes; `cerastes::old` there stays the front end's error, question 251). A `forall` whose `f`
-   holds one is accepted where `old` is accepted: in an `ensures` (and by item 12 in a loop invariant); elsewhere
+   holds one is accepted where `old` is accepted: in an `ensures` (in a loop invariant only with item 12, cut to M4.5e2); elsewhere
    `old_outside_ensures`, at the site. `cerastes_old` of a parameter of `f` (`cerastes_old(n)`) or of the bound
    variable is rejected with the generic message of `old` on a place other than a parameter (audit round 2, N7;
    pinned). The read is the entry state's, framed by the `requires` atoms: in the method's contract the post read and `old(…)`
@@ -337,7 +343,10 @@ plan's decision table it took.
     **what the lint cannot check** (audit round 2, N5): that a scalar tie's ghost `hv_eK_<st>` is the read of that
     parameter at that index (ghost names do not encode the place); only the encoder's construction guarantees it. The
     existing pins of "a `forall` here is refused" (binders `k`, `i`, `x`) are unchanged (no
-    Flips D). Nothing else that holds a `forall` is admitted.
+    Flips D). In a loop's obligation `invariant` line and its framing `assert`, the guard may hold user quantifiers of
+    this shape that are earlier `invariant` lines of the same loop, and nothing else that holds a quantifier (question
+    258; scoped to the line's own loop after audit round 3, `loop_clause_scopes`). Nothing else that holds a `forall` is
+    admitted.
 
 12. **`cerastes_old` in a loop invariant: cut to M4.5e2** (cut 1, question 260; the plan's Part D). It stays rejected
     (Step 0 R2: two errors at the invariant, `unsupported_expression` and `unsupported_type`, in each shape; pins
@@ -389,4 +398,6 @@ its decision table, and the item it revised. An outcome outside its table stops 
   invariant that says what they did.
 - No `pure` body becomes a Viper function; e1d gives `pure` functions their own meaning and their calls.
 - Every obligation inside `f` is reported at the `forall` site, with a note in `f`.
-- Programs accepted before e1c keep their Viper and maps byte for byte.
+- Programs accepted before e1c keep their Viper and maps byte for byte, except `tests/memory/verifast/carrays.c`, whose
+  contracts the port strengthened (Flips C; its expectations unchanged).
+- `cerastes_old` in loop invariants (item 12) is M4.5e2's, by cut 1.

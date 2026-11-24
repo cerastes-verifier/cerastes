@@ -1101,20 +1101,26 @@ chapter M4.5e1c, with P80's IL facts). No Viper function is emitted for `f`: its
   operation in `f` (question 247). A class read in both states (`a[i]` and `old(a[i])`) has one single-application trigger set per state on its clause and rows (question 257), so a
   later obligation that names one state is instantiated.
 - **Loops (`CMode::Inv`; `fq_loop_read`).** A loop invariant clause that holds a quantifier is split per top-level conjunct into invariant lines of their own, each keeping the clause's
-  line and category. For each read class, before the user's clause and in evaluation order: the framing `assert` against the loop's places (`permission`, "this loop invariant reads
-  `a[i]`, which this loop does not hold", at entry and at the back edge, as `framing_condition` does for a single read; `inv_reads_` entries carry `fq_class`), then, for a named array, an
-  invariant line for the bound (`out-of-bounds`) and one for the flag (`uninitialized`), the flag line's read taking the array's bound in its antecedent (N14). Every such line and framing
-  assert is guarded by the earlier invariant clauses in evaluation order, quantified ones included (`obligation_clause`, question 258; the lint admits those conjuncts in that guard). A read
-  not indexed by the binder has its own framing and flag rows. A pointer variable (not address-taken) or a named local array is the argument; for an array the argument is `AddrOf(a)` (its
-  decay collapsed to the array, so `inv_elem` and the array rows match) and an element read is `ElemAddr(AddrOf(a), i)`. A loop whose invariant holds a quantified read carries its places
-  (`expr_touches`). Where an element's flag and value are both unknown, a body that skips the write fails the flag line and `invariant-preserved`: two errors (question 254).
-- **Checks (`CMode::None`; `fq_check_rows`).** Per read class, in this order: for a pointer base the null row and the liveness row (`kq := perm(lvloc(...).lv)` bound first, then `forall q ::
-  reach ==> kq > none`), the bound of a named array, the marked rows `forall q :: { loc(B, q) } reach ==> acc(loc(B, q).v_T, wildcard)` for the value field and the flag field (`permission`;
-  `perm` may not stand under a quantifier in an `assert`, `acc(.., wildcard)` may), the flag row (`uninitialized`), `E`'s own obligations over the binder with `E`'s path, then the fact
-  (`check`). The index's own obligation (`i + c`) comes before the read's rows. A failed marked row ends its path.
+  line and category; **in a loop invariant a quantifier is a top-level `&&` conjunct only** (question 262: under `||`, in a `?:` arm or inside a guarded conjunction `g || (A && forall)` it
+  is refused, M4.8, because `split_invariant` splits only top-level `&&` and the other forms emitted Viper the lint refuses). For each read class, before the user's clause and in evaluation
+  order: the framing `assert` against the loop's places (`permission`, "this loop invariant reads `a[i]`, which this loop does not hold", at entry and at the back edge, as
+  `framing_condition` does for a single read; `inv_reads_` entries carry `fq_class`), then, for a named array, an invariant line for the bound (`out-of-bounds`) and one for the flag
+  (`uninitialized`), the flag line's read taking the array's bound in its antecedent (N14). Every such line and framing assert is guarded by the earlier invariant clauses in evaluation
+  order, quantified ones included (`obligation_clause`, question 258; the lint admits those conjuncts in that guard). A read not indexed by the binder has its own framing and flag rows. A
+  pointer variable (not address-taken) or a named local array is the argument; for an array the argument is `AddrOf(a)` (its decay collapsed to the array, so `inv_elem` and the array rows
+  match) and an element read is `ElemAddr(AddrOf(a), i)`. A loop whose invariant holds a quantified read carries its places (`expr_touches`). Where an element's flag and value are both
+  unknown, a body that skips the write fails the flag line and `invariant-preserved`: two errors (question 254). **Several read classes** (question 261): the obligations of arithmetic are
+  rows of the first class's binder, so arithmetic (a binary operator that is no comparison or connective, a unary operator, a conversion) over the read of any other class is refused
+  in a loop invariant and a `check` (M4.5e2); comparisons of plain reads and arithmetic on the first class's reads stay accepted.
+- **Checks (`CMode::None`; `fq_check_rows`).** A `check` holds a quantifier as a top-level `&&` conjunct only (question 262, as for a loop invariant), and the check is split per conjunct.
+  Per read class the rows come in this order: for a pointer base the null row and the liveness row (`kq := perm(lvloc(...).lv)` bound first, then `forall q :: reach ==> kq > none`) (a
+  named array has no null or liveness row), the bound of a named array, the marked rows `forall q :: { loc(B, q) } reach ==> acc(loc(B, q).v_T, wildcard)` for the value field and then the
+  flag field (`permission`; `perm` may not stand under a quantifier in an `assert`, `acc(.., wildcard)` may), the flag row (`uninitialized`), then `E`'s own obligations over the binder
+  with `E`'s path, the index's own obligation (`i + c`) among them, then the fact (`check`). A failed marked row ends its path. The question 261 limit for several read classes applies
+  here too.
 - **Listed limits.** Left to M4.8: a quantifier under `!`, as an operand of `==` or arithmetic, in a `?:` condition, an atom's guard, a measure, a `do ... while (0)` invariant or on the left
-  of `||` (questions 249, 255). Left to M4.5e2: a body with no read indexed `i`, `i + c`, `i - c`, an index of another form or under a conversion; in a multi-class quantifier a guard that
-  reads memory and arithmetic over two classes' reads (255); `&a[1]`, `p + 1`, a loaded or address-taken pointer as the base; in a loop or a `check`, `*p` of an array argument and a pointer
+  of `||` (questions 249, 255); in a loop invariant or a `check`, a quantifier that is not a top-level `&&` conjunct (under `||`, in a `?:` arm: question 262). Left to M4.5e2: a body with no read indexed `i`, `i + c`, `i - c`, an index of another form or under a conversion; in a multi-class quantifier a guard that
+  reads memory and arithmetic over two classes' reads (255); in a loop invariant or a `check`, arithmetic over the read of a class other than the first (261); `&a[1]`, `p + 1`, a loaded or address-taken pointer as the base; in a loop or a `check`, `*p` of an array argument and a pointer
   argument used as a value; in a `check`, a read the binder does not index and pointer elements (259); an argument that reads memory; `cerastes_old` in a loop invariant (cut 1, question 260)
   and in a `check`; structure members and global arrays under the binder (e1e). A `pure` function with a contract or a `predicate` named by `cerastes_forall` is e1d's and M4.5f1's.
 
@@ -1631,7 +1637,7 @@ not it) and `cerastes::forall` stays `SpecFn::unsupported`; `forall_namespace` r
 other first argument: "not read when verifying (M7)", cut 3); two tags in `diagnostics.def`, **`forall_function`** (the function named is not a `pure` function the reader accepts: its
 message says which rule) and **`forall_argument_mismatch`** (arity, or a written argument type that is not the parameter's up to top-level qualifiers; `T *` for `const T *`). *The site:*
 `forall_site` runs from `call()` for every annotation position; `mark_forall_positions` (run on each `requires`, `ensures`, invariant and `check` root) records the calls in a positive
-position (a conjunct, an operand of `||` after `collect_forall_calls` has refused a quantifier in its left operand, an arm of `?:`); every other position, a `decreases`, `old`,
+position (in a contract: a conjunct, an operand of `||` after `collect_forall_calls` has refused a quantifier in its left operand, an arm of `?:`; in a loop invariant or a `check`: a top-level `&&` conjunct only, a quantifier under `||` or in a `?:` arm goes to `forall_not_conjunct_`, question 262); every other position, a `decreases`, `old`,
 `owning(n)`, a nested quantifier, a measure and a `do ... while (0)` invariant are `unsupported_annotation` naming M4.8. *Reading `f`:* `read_forall_function` (a `predicate`, a contract on `f`
 and a `restrict` parameter are `unsupported_annotation`; the parameter types are classified before `check_signature`, which then gives a VLA or `[static N]` parameter its usual tag), the body
 of its one `return E;`, and `first_forall_effect` (a call, write or increment in `E` is refused before `E` is read: a body is encoded at every site that names `f`, and an effect is
@@ -1642,7 +1648,7 @@ map from the parameter variable, names, types, encoded arguments, `read_classes`
 body come out at the site; `contract_element_address` (contracts) and `subscript_address` / `indirect_read` (loops, checks) accept a `ForallArg` base after `forall_base_ok` (a contract: a bare
 `Formal`; a loop or a `check`: a `Local` pointer that is not address-taken, or `AddrOf` of a local array) and `forall_deref_ok` for `*p`; `bound_index_form` classifies each index (`forall_index_form`
 mirrors `check.cpp`, so the user meets the encoder's message); `forall_body_ok` is the list of node kinds a body may hold (the same as `check.cpp`'s); `forall_loop_body_ok` and
-`forall_multi_class_why` mirror the narrowings `check.cpp` makes in loops, checks and multi-class quantifiers (questions 255, 259), each as `unsupported_annotation` naming M4.5e2.
+`forall_multi_class_why` and `forall_later_class_arithmetic` mirror the narrowings `check.cpp` makes in loops, checks and multi-class quantifiers (questions 255, 259, 261), each as `unsupported_annotation` naming M4.5e2.
 `reject_marked_read` maps a `ForallArg` to its argument (0042 item 6). `cerastes_old` under the binder is `old_c`'s in an `ensures` and `old_outside_ensures` at the site elsewhere. *Truth:* a loop
 invariant or a `check` that holds a quantifier keeps its Bool tree through C's `&&` of type `int` (`holds_forall` beside `holds_atom` in `clause_bool`), as a contract does. The shape rules of
 annotation expressions (the `-Wall` shapes, R5 and R9) reach `E` through `truth_context`, reported at the site.

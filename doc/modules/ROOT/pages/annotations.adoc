@@ -934,7 +934,9 @@ What `f` must be, for `cerastes verify`:
   mentions an element of each, so `p[i] == q[i]` tells you about `p[2]` after you also read
   `q[2]`.
 
-A function that is not such a function is reported as `cerastes-forall_function`, with the rule it breaks.
+A function that is not such a function is reported as `cerastes-forall_function`, with the rule it breaks; a
+predicate and a contract on `f` are reported as `cerastes-unsupported_annotation` (they get their meaning later), and a
+VLA, `[static N]` or `restrict` parameter of `f` as on any function.
 
 [source,c]
 ----
@@ -949,7 +951,7 @@ otherwise `cerastes-forall_argument_mismatch`. An argument reads no memory: writ
 is a pointer parameter in a contract, and a pointer variable or a local array in a loop
 invariant or a `check`. In a loop invariant and a `check`, `E` does not dereference an array
 argument (`*a`) or use a pointer argument as a value (`p != q`), and when it reads through two
-pointers or at two offsets it computes only with the reads of the first (`a[k] <= a[k + 1]` is
+pointers or at two offsets it computes only with the reads of the first one `E` reads (`a[k] <= a[k + 1]` is
 accepted, `a[k] < a[k + 1] + 1` is not yet). In a `check` it also reads only elements at an
 index the quantified variable names, of a type that is not a pointer.
 

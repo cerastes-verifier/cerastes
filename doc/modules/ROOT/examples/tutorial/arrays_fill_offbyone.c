@@ -15,7 +15,7 @@ int first_two(void)
 {
   int a[4];
   int i = 0;
-  CERASTES_INVARIANT(0 <= i && i <= 3 && cerastes_forall(filled, a, i + 1)) // <- error
+  CERASTES_INVARIANT(0 <= i && i <= 4 && cerastes_forall(filled, a, i + 1)) // <- error
   CERASTES_DECREASES(4 - i)
   while (i < 4) {
     a[i] = i;

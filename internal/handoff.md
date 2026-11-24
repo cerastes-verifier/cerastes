@@ -69,6 +69,11 @@ approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes m
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
 
+**M4.8, from M4.5e1c** (record 0061 item 1; question 249: "M4.8 must handle them"): `forall` outside a positive
+position (nested, under `!`, as an operand of `==` or arithmetic, in a `?:` condition, in an atom's guard, in a measure,
+under `old`, in a `do … while (0)` invariant, an `exists`); on the left of `||` (question 255); in a loop invariant or a
+`check`, under `||` or in a `?:` arm (question 262: lower them as contract clauses are lowered).
+
 **M4.8 C parity close-out, from M4.5d2b2b and M4.5d2b2c's planning** (with questions 66 and 189):
 - N2: a `static` cache cannot hand out a pointer into the buffer its leaf owns (0054 item 7's cover does not reach
   blocks owned by a static leaf; `cov_of` covers only by implicit permission atoms). The cover already timed out
@@ -253,7 +258,11 @@ section 10)
   false alarm where only one class's term occurs (question 253, `forall_one_term_*`); question 259's narrowings (in a
   `check`, a read the binder does not index and pointer elements; in loops and checks, `*p` of an array argument and a
   pointer argument used as a value); question 255's multi-class guard that reads memory and arithmetic over two
-  classes. Part D's tutorial example, for the arrays chapter's "in-place loop" section (its off-by-one variant passes
+  classes; question 261 (in loops and checks, arithmetic, a unary operator or a conversion over a read of a class other
+  than the first, which lowering would route to the first class's view: an exit 3 before the refusal); audit round 4's
+  notes: `carrays.c`'s line map has been off by one since e1b (VeriFast's lines 1, 10, 22 are the port's 11, 23, 39;
+  Flips C left it unchanged), and a `check`'s marked row for a pointer base says "the object it points to may have
+  ended" when a callee kept the element. Part D's tutorial example, for the arrays chapter's "in-place loop" section (its off-by-one variant passes
   `i + 1` for `i` to the first invariant's `cerastes_forall`: `invariant-entry` at that invariant):
 
   ```c
