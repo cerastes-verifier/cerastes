@@ -15,11 +15,12 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
 `git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, M4.5e1a's `git show 685034b:internal/status.md`, and M4.5e1b's `git show 7964d33:internal/status.md`.
 
-## M4.5e1c — Quantifiers (2026-11-23/24): done on branch `m4.5e1c-quantifiers`, not merged
+## M4.5e1c — Quantifiers (2026-11-23/24): done, merged into local `main` (`9ab9a1e`), not pushed
 
 Plan: `.claude/plans/m4-5e1c-quantifiers.md` (approved 2026-11-23; executed without re-planning). Record 0061 (accepted;
 amends 0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060). Read `internal/handoff.md` next: §1, §2, §3 (the sessions
-this one feeds: M4.5e1f, M4.5e1d, M4.5e2, M4.8), §8 (questions 253-263, **the overnight ones for review**). Branched
+this one feeds: M4.5e1f, M4.5e1d, M4.5e2, M4.8), §8 (questions 253-263; the overnight ones, 256-263, were answered "All
+stand as built" at M4.5e1d's planning, 2026-11-24). Branched
 from local `main` = `bf820fe` (`origin/main` = `aa4a9fe` plus one commit holding the owner's inline answers to
 247-252, committed at the session's start so that a fast-forward is not blocked). Session from 2026-11-23 about 22:35
 UTC to 2026-11-24 about 07:15 UTC.
@@ -102,10 +103,12 @@ message for a kept element); the S45 fixtures' ghost names.
   `plan.md`, which `check.sh` does not read. Report `build/m4.5e1c/box-report.md`, log
   `~/cerastes-s8/p-ubuntu-26.04/e1c-check.log`.
 
-**First step for the next session:** the owner reviews handoff §8's overnight questions (256-263, cut 1 above all),
-merges the branch (`git merge --ff-only m4.5e1c-quantifiers` in the main checkout, then removes the worktree), and
-starts the next session from `plan.md` (M4.5e1d, M4.5e1e or M4.5e1f; M4.5e1f is short and planned in the umbrella plan's
-section 10 with S45 (r)'s result in handoff §3).
+**First step for the next session** (rewritten at M4.5e1d's planning, 2026-11-24): the owner answered the overnight
+questions ("All stand as built") and merged the branch into local `main` (`9ab9a1e`). M4.5e1d is planned in full,
+`.claude/plans/m4-5e1d-pure-functions.md` (pure functions and the exact sum, record 0062; questions 264-272
+answered there): the owner pushes `main`, removes this session's worktree and branch, and starts M4.5e1d with the
+opening prompt in handoff §2. M4.5e1f (short, planned in the umbrella plan's section 10 with S45 (r)'s result in
+handoff §3) and M4.5e1e may run before or after it.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
