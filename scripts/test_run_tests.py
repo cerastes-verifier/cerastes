@@ -45,6 +45,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_doc_examples as cde  # noqa: E402
 import ci_profile  # noqa: E402
+import rejections as rj  # noqa: E402
 import run_tests as rt  # noqa: E402
 
 REAL_ROOT = rt.ROOT  # before any test patches it
@@ -17152,6 +17153,492 @@ class DefaultJobsTests(FakeFrontEndCase):
         self.assertEqual(source.count("os.cpu_count()"), 1, "only default_jobs() knows the CPU count")
         self.assertRegex(source, r'(?m)^ *args\.jobs = default_jobs\(\)$')
         self.assertRegex(source, r'"-j", "--jobs", type=int, default=None')
+
+
+
+# ---------------------------------------------------------------------------
+# scripts/rejections.py (M4.5e1c, Step 0): the record of what every rejection test reports
+# ---------------------------------------------------------------------------
+
+FAKE_REJECTION_TOOL = r"""#!@PYTHON@
+import json, os, re, sys, time
+args = sys.argv[1:]
+KIND = "@KIND@"
+log = os.environ.get("FAKE_REJ_LOG")
+if log:
+    with open(log, "a") as f:
+        f.write(json.dumps({"kind": KIND, "dir": os.path.dirname(os.path.abspath(__file__)), "argv": args,
+                            "cwd": os.getcwd()}) + "\n")
+if KIND == "verify":
+    assert args[0] == "verify", args
+    path = args[1]
+    std = [a.split("=", 1)[1] for a in args if a.startswith("--std=")][0]
+else:
+    path = args[-1]
+    std = "c23" if "--c23" in args else "c++20"
+DIRECTIVE = re.compile(r"^// (?:(c\+\+20|c23) )?([a-z]+)(?:: ?(.*?))?\n?$")
+code = None
+rejects = 0
+flags = set()
+with open(path) as f:
+    for line in f:
+        m = DIRECTIVE.match(line)
+        if not m or m.group(1) not in (None, std):
+            continue
+        word, text = m.group(2), m.group(3)
+        if word == "out":
+            sys.stdout.write((text or "") + "\n")
+        elif word == "err":
+            sys.stderr.write((text or "") + "\n")
+        elif word == "exit":
+            code = int(text)
+        elif word == "reject":  # an EDG-format error: <id> @ <line>[ @ <file>]
+            ident, where = text.split(" @ ", 1)
+            where = where.split(" @ ")
+            sys.stderr.write('"%s", line %s: error #%s: a message\n' % (where[1] if len(where) > 1 else path,
+                                                                        where[0], ident))
+            rejects += 1
+        elif word == "verror":  # a verification error: <category> @ <line>
+            category, line_no = text.split(" @ ")
+            sys.stdout.write("%s:%s: error: %s: a message\n" % (path, line_no, category))
+        elif word == "verified":
+            sys.stdout.write("%s: verified (1 function; one translation unit: assumes that functions defined "
+                             "elsewhere satisfy the contracts declared here)\n" % path)
+        elif word in ("crash", "sleep", "nosummary", "wrongsummary"):
+            flags.add(word)
+if rejects and "nosummary" not in flags:
+    n = rejects + (1 if "wrongsummary" in flags else 0)
+    sys.stderr.write('%d error%s detected in the compilation of "%s".\n' % (n, "" if n == 1 else "s", path))
+sys.stdout.flush()
+sys.stderr.flush()
+if "crash" in flags:
+    os.kill(os.getpid(), 9)
+if "sleep" in flags:
+    time.sleep(30)
+sys.exit(code if code is not None else (2 if rejects else 0))
+"""
+
+
+class RejectionsCase(RootedCase):
+    """scripts/rejections.py on a temporary tree, with fake binaries in a bin directory (a fake `cerastes` and a
+    fake `cerastes-fe.sh`): the record is what they print, never what the headers say."""
+
+    REGISTRY = rt.TagRegistry({"edg_tag": 7}, {7: "edg_tag"})
+
+    def setUp(self):
+        super().setUp()
+        self.bin = self.make_bin("bin")
+        self.log = self.root.parent / (self.root.name + ".rej.log")
+        patcher = mock.patch.dict(os.environ, {"FAKE_REJ_LOG": str(self.log)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(lambda: self.log.unlink(missing_ok=True))
+        # a positive twin for the must-fail tests
+        self.put("tests/scalar/pos.cpp", "// expect: verified\n// expect: native-ok\n")
+        for d in ("tests/scalar/negative", "tests/memory/negative", "tests/vlibc/negative",
+                  "tests/annotations/negative"):
+            (self.root / d).mkdir(parents=True, exist_ok=True)
+        self.out = self.root / "record.txt"
+
+    def make_bin(self, name, verify=True, front_end=True):
+        directory = self.root / name
+        directory.mkdir(parents=True, exist_ok=True)
+        for tool, kind, wanted in (("cerastes", "verify", verify), ("cerastes-fe.sh", "fe", front_end)):
+            if wanted:
+                exe = directory / tool
+                exe.write_text(FAKE_REJECTION_TOOL.replace("@PYTHON@", sys.executable).replace("@KIND@", kind))
+                exe.chmod(0o755)
+        return directory
+
+    def rejected(self, name, expects, *directives, modes=None, area="tests/scalar/negative"):
+        header = [f"// expect: rejected {e}" for e in expects]
+        if modes:
+            header.append(f"// mode: {modes}")
+        header.append("// twin: tests/scalar/pos.cpp")
+        return self.put(f"{area}/{name}", "".join(l + "\n" for l in (*header, *directives)))
+
+    def frontend(self, name, expects, *directives):
+        header = [f"// expect: frontend-error {e}" for e in expects] + ["// twin: tests/scalar/pos.cpp"]
+        return self.put(f"tests/annotations/negative/{name}", "".join(l + "\n" for l in (*header, *directives)))
+
+    def run_tool(self, *args, bin_dir=None, out=None):
+        argv = [str(out or self.out), "--bin-dir", str(bin_dir or self.bin), "-j", "2", *map(str, args)]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            status = rj.main(argv, env=dict(os.environ), registry=self.REGISTRY)
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def calls(self):
+        if not self.log.exists():
+            return []
+        return [json.loads(l) for l in self.log.read_text().splitlines()]
+
+    def record(self, out=None):
+        return (out or self.out).read_text().splitlines()
+
+
+class RejectionsRecordTests(RejectionsCase):
+    def test_the_record_is_what_the_binary_printed_not_what_the_header_says(self):
+        # the header expects cerastes-a at L5; the binary reports cerastes-b at L7
+        self.rejected("t.cpp", ["cerastes-a @ L5"], "// reject: cerastes-b @ 7")
+        status, out, err = self.run_tool()
+        self.assertEqual(self.record(), ["tests/scalar/negative/t.cpp\tc++20\tcerastes-b\t7"])
+        self.assertEqual(status, 1, err)  # a mismatch with the header: listed, the record complete
+        self.assertIn("MISMATCH", err)
+        self.assertIn("missing error", err + out)
+
+    def test_a_record_that_agrees_with_its_headers_exits_zero(self):
+        self.rejected("t.cpp", ["cerastes-a @ L4", "edg_tag @ L6"], "// reject: cerastes-a @ 4", "// reject: 7 @ 6")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 0, err + out)
+        self.assertEqual(self.record(), ["tests/scalar/negative/t.cpp\tc++20\tcerastes-a\t4",
+                                         "tests/scalar/negative/t.cpp\tc++20\tedg_tag\t6"])
+        self.assertNotIn("MISMATCH", err)
+
+    def test_the_record_follows_the_binary_when_the_binary_changes(self):
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        self.assertEqual(self.run_tool()[0], 0)
+        first = self.record()
+        # the same tree, another binary directory that reports another line: the records differ
+        other = self.make_bin("bin2")
+        (self.root / "tests/scalar/negative/t.cpp").write_text(
+            "// expect: rejected cerastes-a @ L4\n// twin: tests/scalar/pos.cpp\n// reject: cerastes-a @ 4\n")
+        text = FAKE_REJECTION_TOOL.replace("@PYTHON@", sys.executable).replace("@KIND@", "verify").replace(
+            'rejects += 1', 'rejects += 1; sys.stderr.write("")').replace(
+            "where[0], ident", "str(int(where[0]) + 1), ident")
+        (other / "cerastes").write_text(text)
+        self.assertEqual(self.run_tool(bin_dir=other, out=self.root / "r2.txt")[0], 1)
+        self.assertNotEqual(self.record(self.root / "r2.txt"), first)
+
+    def test_one_line_per_error_and_one_run_per_mode(self):
+        self.rejected("two.c", ["cerastes-a @ L5", "cerastes-b @ L5"], "// reject: cerastes-a @ 5",
+                      "// reject: cerastes-b @ 5", modes="c23, c++20")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 0, err)
+        self.assertEqual(self.record(), [
+            "tests/scalar/negative/two.c\tc++20\tcerastes-a\t5", "tests/scalar/negative/two.c\tc++20\tcerastes-b\t5",
+            "tests/scalar/negative/two.c\tc23\tcerastes-a\t5", "tests/scalar/negative/two.c\tc23\tcerastes-b\t5"])
+        self.assertIn("tests/scalar/negative (rejected): 2 runs, 4 lines", out)
+
+    def test_an_error_in_an_included_file_is_recorded_with_that_file(self):
+        self.put("tests/scalar/negative/h.h", "// header\n")
+        self.rejected("t.cpp", ["cerastes-a @ tests/scalar/negative/h.h:L3"],
+                      "// reject: cerastes-a @ 3 @ tests/scalar/negative/h.h")
+        status, out, err = self.run_tool()
+        self.assertEqual(self.record(), ["tests/scalar/negative/t.cpp\tc++20\tcerastes-a\ttests/scalar/negative/h.h:3"])
+        self.assertEqual(status, 0, err)
+
+    def test_a_run_that_is_no_rejection_is_recorded_as_what_it_did_and_listed(self):
+        self.rejected("v.cpp", ["cerastes-a @ L4"], "// verified")
+        self.rejected("e.cpp", ["cerastes-a @ L4"], "// verror: postcondition @ 9", "// exit: 1")
+        status, out, err = self.run_tool()
+        self.assertEqual(self.record(), ["tests/scalar/negative/e.cpp\tc++20\t<error:postcondition>\t9",
+                                         "tests/scalar/negative/v.cpp\tc++20\t<verified>\t0"])
+        self.assertEqual(status, 1)
+        self.assertEqual(err.count("expected a rejection"), 2, err)
+
+    def test_front_end_errors_are_recorded_and_a_front_end_that_accepts_is_listed(self):
+        self.frontend("f.cpp", ["cerastes-fe_err @ L4"], "// reject: cerastes-fe_err @ 4")
+        self.frontend("ok.cpp", ["cerastes-fe_err @ L4"], "// exit: 0")
+        status, out, err = self.run_tool()
+        self.assertEqual(self.record(), ["tests/annotations/negative/f.cpp\tc++20\tcerastes-fe_err\t4",
+                                         "tests/annotations/negative/ok.cpp\tc++20\t<frontend-ok>\t0"])
+        self.assertEqual(status, 1)
+        self.assertIn("tests/annotations (frontend-error): 2 runs, 2 lines", out)
+
+    def test_a_front_end_test_without_an_expected_error_is_not_run(self):
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        self.put("tests/annotations/negative/w.cpp",
+                 "// expect: frontend-warning cerastes-w @ L3\n// expect: frontend-error cerastes-e @ L9\n"
+                 "// twin: tests/scalar/pos.cpp\n")
+        self.put("tests/annotations/warn.cpp", "// expect: frontend-warning cerastes-w @ L3\n")
+        self.run_tool()
+        self.assertEqual([c["argv"][-1] for c in self.calls() if c["kind"] == "fe"],
+                         ["tests/annotations/negative/w.cpp"])
+        self.assertIn("a front-end test with no expected error: not run", self.run_tool()[1])
+
+    def test_a_platform_test_of_another_platform_is_noted_not_run(self):
+        other = "linux" if rt.HOST_PLATFORM == "macos" else "macos"
+        self.rejected("p.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4", modes=f"c++20; platform: {other}")
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 0, err)
+        self.assertIn(f"p.cpp: runs on {other} only: not run here", out)
+        self.assertEqual(self.record(), ["tests/scalar/negative/t.cpp\tc++20\tcerastes-a\t4"])
+
+
+class RejectionsFailureTests(RejectionsCase):
+    """A run that is not a rejection, nor an outcome the tool can read, FAILS the tool and leaves no record."""
+
+    def assert_fails(self, *directives, expect="no record written", area="tests/scalar/negative", extra=()):
+        self.rejected("bad.cpp", ["cerastes-a @ L4"], *directives, area=area)
+        self.rejected("good.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4", area=area)
+        status, out, err = self.run_tool(*extra)
+        self.assertEqual(status, 1, out + err)
+        self.assertIn(expect, err)
+        self.assertIn("bad.cpp", err)
+        self.assertNotIn("good.cpp:", err)
+        self.assertFalse(self.out.exists(), "a failed run left a record")
+        return err
+
+    def test_a_timeout_fails(self):
+        self.assertIn("timed out", self.assert_fails("// sleep", extra=("--timeout", 1)))
+
+    def test_a_crash_fails(self):
+        self.assertIn("crashed", self.assert_fails("// crash"))
+
+    def test_exit_three_fails(self):
+        self.assertIn("exit status 3 (a tool failure)", self.assert_fails("// err: internal", "// exit: 3"))
+
+    def test_another_exit_status_fails(self):
+        self.assertIn("exit status 7", self.assert_fails("// exit: 7"))
+
+    def test_output_on_stdout_of_a_rejection_fails(self):
+        self.assertIn("printed on stdout", self.assert_fails("// reject: cerastes-a @ 4", "// out: something"))
+
+    def test_an_unknown_stderr_format_fails(self):
+        self.assertIn("does not parse", self.assert_fails("// err: not a diagnostic", "// exit: 2"))
+
+    def test_a_fatal_diagnostic_fails(self):
+        self.assertIn("always fails", self.assert_fails(
+            '// err: "x", line 4: catastrophic error #7: gone', "// exit: 2"))
+
+    def test_a_summary_that_disagrees_with_the_errors_fails(self):
+        self.assertIn("summary says 2 errors but 1", self.assert_fails("// reject: cerastes-a @ 4", "// wrongsummary"))
+
+    def test_a_missing_summary_fails(self):
+        self.assertIn("no `N errors detected` summary", self.assert_fails("// reject: cerastes-a @ 4", "// nosummary"))
+
+    def test_a_rejection_with_no_error_fails(self):
+        self.assertIn("exit status 2 but no error parsed", self.assert_fails("// exit: 2"))
+
+    def test_a_front_end_failure_fails(self):
+        self.frontend("f.cpp", ["cerastes-e @ L4"], "// exit: 4")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 1, err)
+        self.assertIn("front end exit status 4", err)
+        self.assertFalse(self.out.exists())
+
+    def test_a_front_end_that_prints_on_stdout_fails(self):
+        self.frontend("f.cpp", ["cerastes-e @ L4"], "// reject: cerastes-e @ 4", "// out: noise")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 1, err)
+        self.assertIn("printed on stdout", err)
+
+    def test_a_failure_does_not_replace_an_earlier_record(self):
+        self.out.write_text("an earlier\trecord\tstays\t1\n")
+        self.assert_fails_keeping()
+
+    def assert_fails_keeping(self):
+        self.rejected("bad.cpp", ["cerastes-a @ L4"], "// crash")
+        self.assertEqual(self.run_tool()[0], 1)
+        self.assertEqual(self.out.read_text(), "an earlier\trecord\tstays\t1\n")
+        self.assertEqual([p.name for p in self.root.iterdir() if p.name.startswith("record.txt.")], [])
+
+    def test_the_record_is_written_whole_or_not_at_all(self):
+        self.out.write_text("an earlier\trecord\tstays\t1\n")
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        with mock.patch.object(rj.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.run_tool()
+        self.assertEqual(self.out.read_text(), "an earlier\trecord\tstays\t1\n")
+        self.assertEqual([p.name for p in self.root.iterdir() if p.name.startswith("record.txt.")], [])
+
+    def test_every_failing_run_is_listed_not_only_the_first(self):
+        self.rejected("a.cpp", ["cerastes-a @ L4"], "// crash")
+        self.rejected("b.cpp", ["cerastes-a @ L4"], "// exit: 3")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 1)
+        self.assertIn("2 of 2 runs", err)
+        self.assertIn("a.cpp", err)
+        self.assertIn("b.cpp", err)
+
+    def test_a_bad_header_is_a_usage_error(self):
+        self.put("tests/scalar/negative/h.cpp", "// expect: rejected cerastes-a @ L4\n")  # no twin
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 2, err)
+        self.assertIn("bad header", err)
+        self.assertFalse(self.out.exists())
+
+    def test_a_missing_directory_is_a_usage_error(self):
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        shutil.rmtree(self.root / "tests/vlibc/negative")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 2, err)
+        self.assertIn("tests/vlibc/negative: the directory is missing", err)
+
+    def test_no_test_at_all_is_a_usage_error(self):
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 2, err)
+        self.assertIn("no rejection test found", err)
+        self.assertFalse(self.out.exists())
+
+    def test_a_missing_binary_is_a_usage_error(self):
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        status, out, err = self.run_tool(bin_dir=self.root / "nowhere")
+        self.assertEqual(status, 2, err)
+        self.assertIn("does not exist", err)
+
+
+class RejectionsBinaryTests(RejectionsCase):
+    """Which binary ran, with which arguments."""
+
+    def test_the_binaries_of_bin_dir_are_the_ones_that_ran(self):
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        self.frontend("f.cpp", ["cerastes-e @ L4"], "// reject: cerastes-e @ 4")
+        self.assertEqual(self.run_tool()[0], 0)
+        calls = self.calls()
+        self.assertEqual({c["kind"] for c in calls}, {"verify", "fe"})
+        self.assertEqual({c["dir"] for c in calls}, {str(self.bin.resolve())})
+
+    def test_a_front_end_without_a_wrapper_in_another_directory_is_refused(self):
+        self.frontend("f.cpp", ["cerastes-e @ L4"], "// reject: cerastes-e @ 4")
+        bare = self.make_bin("bare", front_end=False)
+        status, out, err = self.run_tool(bin_dir=bare)
+        self.assertEqual(status, 2, err)
+        self.assertIn("has no cerastes-fe.sh", err)
+        self.assertEqual(self.calls(), [])
+
+    def test_the_default_directory_without_a_wrapper_uses_the_scripts_wrapper(self):
+        build = self.make_bin("build", front_end=False)
+        scripts = self.root / "scripts"
+        scripts.mkdir()
+        wrapper = scripts / "cerastes-fe.sh"
+        wrapper.write_text(FAKE_REJECTION_TOOL.replace("@PYTHON@", sys.executable).replace("@KIND@", "fe"))
+        wrapper.chmod(0o755)
+        self.frontend("f.cpp", ["cerastes-e @ L4"], "// reject: cerastes-e @ 4")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            status = rj.main([str(self.out), "-j", "1"], env=dict(os.environ), registry=self.REGISTRY)
+        self.assertEqual(status, 0, stderr.getvalue())
+        self.assertEqual([c["dir"] for c in self.calls()], [str(scripts.resolve())])
+
+    def test_verify_runs_from_the_root_with_the_std_option_options_and_no_keep_vpr(self):
+        self.put("tests/memory/negative/o.c",
+                 "// expect: rejected cerastes-a @ L5\n// mode: c23, c++20\n// verify-options: --strict-init\n"
+                 "// twin: tests/scalar/pos.cpp\n// reject: cerastes-a @ 5\n")
+        status, out, err = self.run_tool()
+        self.assertEqual(status, 0, err)
+        calls = self.calls()
+        self.assertEqual(len(calls), 2)
+        for c in calls:
+            self.assertEqual(os.path.realpath(c["cwd"]), str(self.root))
+            self.assertEqual(c["argv"][:2], ["verify", "tests/memory/negative/o.c"])
+            self.assertIn("--strict-init", c["argv"])
+            self.assertFalse([a for a in c["argv"] if a.startswith("--keep-vpr")], c["argv"])
+        self.assertEqual(sorted(a for c in calls for a in c["argv"] if a.startswith("--std=")),
+                         ["--std=c++20", "--std=c23"])
+
+    def test_a_relative_bin_dir_is_taken_from_the_callers_directory_not_the_root(self):
+        self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        self.frontend("f.cpp", ["cerastes-e @ L4"], "// reject: cerastes-e @ 4")
+        # two levels down: a relative path that is right from here is wrong from the root (and the other way round)
+        elsewhere = self.root.parent / (self.root.name + ".elsewhere") / "deeper"
+        elsewhere.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, elsewhere.parent, True)
+        old_cwd = os.getcwd()
+        os.chdir(elsewhere)
+        self.addCleanup(os.chdir, old_cwd)
+        relative = os.path.relpath(self.bin, elsewhere)
+        self.assertFalse(os.path.isabs(relative))
+        status, out, err = self.run_tool(bin_dir=relative)
+        self.assertEqual(status, 0, out + err)
+        self.assertEqual({c["dir"] for c in self.calls()}, {str(self.bin.resolve())})
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_the_front_end_gets_the_mode_option_and_the_diagnostic_options(self):
+        self.frontend("f.cpp", ["cerastes-e @ L4"], "// reject: cerastes-e @ 4")
+        self.run_tool()
+        (call,) = [c for c in self.calls() if c["kind"] == "fe"]
+        self.assertEqual(call["argv"], ["--c++20", *rt.DIAG_OPTIONS, "tests/annotations/negative/f.cpp"])
+
+    def test_nothing_is_written_to_the_vpr_directory(self):
+        vpr = self.root / "build" / "vpr"
+        with mock.patch.object(rt, "VPR_DIR", vpr):
+            self.rejected("t.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+            self.assertEqual(self.run_tool()[0], 0)
+        self.assertFalse(vpr.exists())
+
+
+class RejectionsBaseTests(RejectionsCase):
+    def setUp(self):
+        super().setUp()
+        self.rejected("a.cpp", ["cerastes-a @ L4"], "// reject: cerastes-a @ 4")
+        self.rejected("b.cpp", ["cerastes-b @ L4"], "// reject: cerastes-b @ 4")
+        self.assertEqual(self.run_tool()[0], 0)
+        self.base = self.root / "base.txt"
+        shutil.copy(self.out, self.base)
+
+    def test_an_identical_record_exits_zero(self):
+        status, out, err = self.run_tool("--base", self.base, out=self.root / "again.txt")
+        self.assertEqual(status, 0, out + err)
+        self.assertIn("identical to", out)
+
+    def test_a_changed_tag_exits_one_and_prints_both_sides(self):
+        (self.root / "tests/scalar/negative/a.cpp").write_text(
+            "// expect: rejected cerastes-a @ L4\n// twin: tests/scalar/pos.cpp\n// reject: cerastes-z @ 4\n")
+        status, out, err = self.run_tool("--base", self.base, out=self.root / "new.txt")
+        self.assertEqual(status, 1)
+        self.assertIn("changed: tests/scalar/negative/a.cpp [c++20]", out)
+        self.assertIn("  - cerastes-a\t4", out)
+        self.assertIn("  + cerastes-z\t4", out)
+        self.assertNotIn("b.cpp", out)
+
+    def test_an_added_test_and_a_removed_test_are_each_printed(self):
+        (self.root / "tests/scalar/negative/b.cpp").unlink()
+        self.rejected("c.cpp", ["cerastes-c @ L4"], "// reject: cerastes-c @ 4")
+        status, out, err = self.run_tool("--base", self.base, out=self.root / "new.txt")
+        self.assertEqual(status, 1)
+        self.assertIn("removed: tests/scalar/negative/b.cpp [c++20]", out)
+        self.assertIn("added: tests/scalar/negative/c.cpp [c++20]", out)
+
+    def test_a_different_line_of_the_same_tag_is_a_difference(self):
+        (self.root / "tests/scalar/negative/a.cpp").write_text(
+            "// expect: rejected cerastes-a @ L4\n// twin: tests/scalar/pos.cpp\n// reject: cerastes-a @ 5\n")
+        status, out, err = self.run_tool("--base", self.base, out=self.root / "new.txt")
+        self.assertEqual(status, 1)
+        self.assertIn("  + cerastes-a\t5", out)
+
+    def test_a_base_that_is_not_a_record_is_a_usage_error(self):
+        self.base.write_text("not a record\n")
+        status, out, err = self.run_tool("--base", self.base, out=self.root / "new.txt")
+        self.assertEqual(status, 2, err)
+        self.assertIn("not a record line", err)
+
+    def test_a_missing_base_is_a_usage_error(self):
+        status, out, err = self.run_tool("--base", self.root / "nope.txt", out=self.root / "new.txt")
+        self.assertEqual(status, 2, err)
+
+    def test_a_failed_run_with_a_base_does_not_report_identical(self):
+        (self.root / "tests/scalar/negative/a.cpp").write_text(
+            "// expect: rejected cerastes-a @ L4\n// twin: tests/scalar/pos.cpp\n// crash\n")
+        status, out, err = self.run_tool("--base", self.base, out=self.root / "new.txt")
+        self.assertEqual(status, 1)
+        self.assertNotIn("identical", out)
+
+
+class RejectionsToolStaticTests(unittest.TestCase):
+    """The tool's own constants say what the plan says."""
+
+    def test_the_directories_are_the_four_negative_directories_and_annotations(self):
+        self.assertEqual([d.as_posix() for d in rj.REJECTED_DIRS],
+                         ["tests/scalar/negative", "tests/memory/negative", "tests/vlibc/negative",
+                          "tests/annotations/negative"])
+        self.assertEqual(rj.FRONTEND_DIR.as_posix(), "tests/annotations")
+
+    def test_the_tool_never_passes_keep_vpr_and_never_touches_the_runner_lock(self):
+        text = (REAL_ROOT / "scripts" / "rejections.py").read_text()
+        code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+        self.assertNotIn('"--keep-vpr', code)
+        self.assertNotIn("lock_vpr_dir", code)
+        self.assertNotIn("reset_vpr_dir", code)
+        self.assertNotIn("VPR_DIR", code)
+
+    def test_the_readme_documents_the_tool(self):
+        text = (REAL_ROOT / "tests" / "README.md").read_text()
+        for needle in ("scripts/rejections.py", "--bin-dir", "--base", "<verified>", "MISMATCH"):
+            with self.subTest(needle):
+                self.assertIn(needle, text)
 
 
 class DocumentationTests(unittest.TestCase):

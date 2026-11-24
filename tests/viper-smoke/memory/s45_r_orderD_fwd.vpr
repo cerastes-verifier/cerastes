@@ -1,0 +1,288 @@
+// expect: error assert:insufficient.permission @ L106
+// S45 (r) (recorded, for M4.5e1f): the same program with order D applied to every owns_range call (the marked rows, then the shape row, then the liveness row and the amount, then the flags, the range and the liveness sum): the forwarded (p, n + 1) twin gives ONE error (the first marked row).
+// S45 (r) (recorded, for M4.5e1f; nothing is built from it): the program is the frozen build's kept Viper of tests/memory/negative/range_call_reads_unequal_pin.c (c23), with the minimum amount of the call to peek taken over the range instead of from its first slot. Hand-modified, not lint-checked; the two `inhale` lines carry the tag `// cerastes:inhale-ok` as record invariant 4 would require.
+// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// C/C++ function `touch`
+method f_touch__0(p_p__0: Ref, p_n__1: Int, amt_0: Perm)
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires p_p__0 != null
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires 0 <= p_n__1
+  requires (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  requires acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  ensures p_p__0 != null
+  ensures (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  ensures 0 <= p_n__1
+  ensures (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  ensures acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  decreases
+{
+  var v_p__0: Ref
+  var v_n__1: Int
+  v_p__0 := p_p__0
+  v_n__1 := p_n__1
+  assert (v_p__0 != null) ==> (perm(lvloc(block_of(v_p__0)).lv) > none)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  assert (((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (0 <= p_n__1)) && ((offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0)))
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+  label l_end
+}
+
+// C/C++ function `whole`
+method f_whole__1(p_p__0: Ref, p_n__1: Int, amt_0: Perm)
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires p_p__0 != null
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires 0 <= p_n__1
+  requires (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  requires acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  requires ((p_n__1 < 100) ? 1 : 0) != 0
+  ensures p_p__0 != null
+  ensures (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  ensures 0 <= p_n__1
+  ensures (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  ensures acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  decreases
+{
+  var v_p__0: Ref
+  var v_n__1: Int
+  var t__0: Ref
+  var t__1: Int
+  var t__2: Perm
+  v_p__0 := p_p__0
+  v_n__1 := p_n__1
+  assert !(((v_n__1 + 1) < (-2147483648)) || (2147483647 < (v_n__1 + 1)))
+  t__0 := v_p__0
+  t__1 := v_n__1 + 1
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> acc(loc(block_of(t__0), k).v_int)
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> acc(loc(block_of(t__0), k).d_int)
+  assert (((t__0 != null) && ((t__0 == null) || (((t__0 == loc(block_of(t__0), offset_of(t__0))) && (0 <= offset_of(t__0))) && (offset_of(t__0) <= len(block_of(t__0)))))) && (0 <= t__1)) && ((offset_of(t__0) + t__1) <= len(block_of(t__0)))
+  assert perm(lvloc(block_of(t__0)).lv) > none
+  t__2 := perm(lvloc(block_of(t__0)).lv) / 2
+  assert none < t__2
+  assert t__2 < write
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> loc(block_of(t__0), k).d_int
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> (loc(block_of(t__0), k).d_int ==> (((-2147483648) <= loc(block_of(t__0), k).v_int) && (loc(block_of(t__0), k).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(t__0)).lv) >= t__2
+  assert (v_p__0 != null) ==> (perm(lvloc(block_of(v_p__0)).lv) > none)
+  f_touch__0(t__0, t__1, t__2)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  assert (((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (0 <= p_n__1)) && ((offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0)))
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+  label l_end
+}
+
+// C/C++ function `shorter`
+method f_shorter__2(p_p__0: Ref, p_n__1: Int, amt_0: Perm)
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires p_p__0 != null
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires 0 <= p_n__1
+  requires (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  requires acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  requires ((p_n__1 > 0) ? 1 : 0) != 0
+  ensures p_p__0 != null
+  ensures (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  ensures 0 <= p_n__1
+  ensures (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  ensures acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  decreases
+{
+  var v_p__0: Ref
+  var v_n__1: Int
+  var t__0: Ref
+  var t__1: Int
+  var t__2: Perm
+  v_p__0 := p_p__0
+  v_n__1 := p_n__1
+  assert !(((v_n__1 - 1) < (-2147483648)) || (2147483647 < (v_n__1 - 1)))
+  t__0 := v_p__0
+  t__1 := v_n__1 - 1
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> acc(loc(block_of(t__0), k).v_int)
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> acc(loc(block_of(t__0), k).d_int)
+  assert (((t__0 != null) && ((t__0 == null) || (((t__0 == loc(block_of(t__0), offset_of(t__0))) && (0 <= offset_of(t__0))) && (offset_of(t__0) <= len(block_of(t__0)))))) && (0 <= t__1)) && ((offset_of(t__0) + t__1) <= len(block_of(t__0)))
+  assert perm(lvloc(block_of(t__0)).lv) > none
+  t__2 := perm(lvloc(block_of(t__0)).lv) / 2
+  assert none < t__2
+  assert t__2 < write
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> loc(block_of(t__0), k).d_int
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> (loc(block_of(t__0), k).d_int ==> (((-2147483648) <= loc(block_of(t__0), k).v_int) && (loc(block_of(t__0), k).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(t__0)).lv) >= t__2
+  assert (v_p__0 != null) ==> (perm(lvloc(block_of(v_p__0)).lv) > none)
+  f_touch__0(t__0, t__1, t__2)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  assert (((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (0 <= p_n__1)) && ((offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0)))
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+  label l_end
+}
+
+// C/C++ function `tail`
+method f_tail__3(p_p__0: Ref, p_n__1: Int, p_k__2: Int, amt_0: Perm)
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  requires ((-2147483648) <= p_k__2) && (p_k__2 <= 2147483647)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires p_p__0 != null
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires 0 <= p_n__1
+  requires (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  requires forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  requires acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  requires ((0 <= p_k__2) ? 1 : 0) != 0
+  requires ((p_k__2 <= p_n__1) ? 1 : 0) != 0
+  ensures p_p__0 != null
+  ensures (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  ensures 0 <= p_n__1
+  ensures (offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0))
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  ensures forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  ensures acc(lvloc(block_of(p_p__0)).lv, amt_0)
+  decreases
+{
+  var v_p__0: Ref
+  var v_n__1: Int
+  var v_k__2: Int
+  var t__0: Ref
+  var t__1: Int
+  var t__2: Perm
+  v_p__0 := p_p__0
+  v_n__1 := p_n__1
+  v_k__2 := p_k__2
+  assert v_p__0 != null
+  assert (v_p__0 != null) ==> (perm(lvloc(block_of(v_p__0)).lv) > none)
+  assert !(((offset_of(v_p__0) + v_k__2) < 0) || (len(block_of(v_p__0)) < (offset_of(v_p__0) + v_k__2)))
+  assert !(((v_n__1 - v_k__2) < (-2147483648)) || (2147483647 < (v_n__1 - v_k__2)))
+  t__0 := loc(block_of(v_p__0), offset_of(v_p__0) + v_k__2)
+  t__1 := v_n__1 - v_k__2
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> acc(loc(block_of(t__0), k).v_int)
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> acc(loc(block_of(t__0), k).d_int)
+  assert (((t__0 != null) && ((t__0 == null) || (((t__0 == loc(block_of(t__0), offset_of(t__0))) && (0 <= offset_of(t__0))) && (offset_of(t__0) <= len(block_of(t__0)))))) && (0 <= t__1)) && ((offset_of(t__0) + t__1) <= len(block_of(t__0)))
+  assert perm(lvloc(block_of(t__0)).lv) > none
+  t__2 := perm(lvloc(block_of(t__0)).lv) / 2
+  assert none < t__2
+  assert t__2 < write
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> loc(block_of(t__0), k).d_int
+  assert forall k: Int :: { loc(block_of(t__0), k) } ((offset_of(t__0) <= k) && (k < (offset_of(t__0) + t__1))) ==> (loc(block_of(t__0), k).d_int ==> (((-2147483648) <= loc(block_of(t__0), k).v_int) && (loc(block_of(t__0), k).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(t__0)).lv) >= t__2
+  assert (loc(block_of(v_p__0), offset_of(v_p__0) + v_k__2) != null) ==> (perm(lvloc(block_of(loc(block_of(v_p__0), offset_of(v_p__0) + v_k__2))).lv) > none)
+  f_touch__0(t__0, t__1, t__2)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).v_int)
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> acc(loc(block_of(p_p__0), k).d_int)
+  assert (((p_p__0 != null) && ((p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0)))))) && (0 <= p_n__1)) && ((offset_of(p_p__0) + p_n__1) <= len(block_of(p_p__0)))
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> loc(block_of(p_p__0), k).d_int
+  assert forall k: Int :: { loc(block_of(p_p__0), k) } ((offset_of(p_p__0) <= k) && (k < (offset_of(p_p__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_p__0), k).v_int) && (loc(block_of(p_p__0), k).v_int <= 2147483647))
+  assert perm(lvloc(block_of(p_p__0)).lv) >= amt_0
+  label l_end
+}
+
+// well-formedness of the contract of C/C++ function `touch`
+method f_touch__0__wf(p_p__0: Ref, p_n__1: Int, amt_0: Perm)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+
+// well-formedness of the contract of C/C++ function `whole`
+method f_whole__1__wf(p_p__0: Ref, p_n__1: Int, amt_0: Perm)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+
+// well-formedness of the contract of C/C++ function `shorter`
+method f_shorter__2__wf(p_p__0: Ref, p_n__1: Int, amt_0: Perm)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+
+// well-formedness of the contract of C/C++ function `tail`
+method f_tail__3__wf(p_p__0: Ref, p_n__1: Int, p_k__2: Int, amt_0: Perm)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (p_p__0 == null) || (((p_p__0 == loc(block_of(p_p__0), offset_of(p_p__0))) && (0 <= offset_of(p_p__0))) && (offset_of(p_p__0) <= len(block_of(p_p__0))))
+  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)
+  requires ((-2147483648) <= p_k__2) && (p_k__2 <= 2147483647)
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+

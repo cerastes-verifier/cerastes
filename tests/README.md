@@ -438,6 +438,33 @@ and the harness self-test compares this table with the decision record.
 | `leak` | a function returns while it still owns an allocation it does not hand back (decision 0047 item 7; `main`'s return included, question 123), or a loop iteration ends owning an allocation the loop does not carry | the function's closing brace; for an iteration, the loop body's closing brace |
 | `out-of-bounds` | an index or a formed address may be outside the object it is taken from: `a[i]` read or written with `i` outside `[0, N)`, `&a[i]` with `i` outside `[0, N]` (one past the end is formed, never accessed; decision 0059 item 4, decision 0028 item 10); a constant index outside a named array is not this category but is rejected (EDG's `subscript_out_of_range`) | the subscript |
 
+## Rejection records (`scripts/rejections.py`)
+
+A session that lifts rejections (a construct a test pins as `rejected`) needs to know, per part, exactly which rejection
+runs changed. `python3 scripts/rejections.py <out-file> [--base <file>] [--bin-dir <dir>] [-j N] [--timeout S]` runs
+every `rejected` test under `tests/scalar/negative`, `tests/memory/negative`, `tests/vlibc/negative` and
+`tests/annotations/negative` (`cerastes verify`, in each mode the test declares, with its `// verify-options:`) and every
+`frontend-error` test under `tests/annotations` (`scripts/cerastes-fe.sh`'s command line, as the harness runs it), and
+writes what the **binaries printed**, never what the headers say: one line per error diagnostic of a run, tab-separated
+and sorted, `<test file>`, `<mode>`, `<tag>`, `<line>` (`<header>:<line>` for an error in an included file). A run that
+is no rejection is recorded as what it did, so that a lifted rejection shows in the diff: `<verified>` (line 0), one
+`<error:<category>>` per verification error, `<frontend-ok>`; each is also listed as a `MISMATCH` with the test's header
+(as is a rejection whose diagnostics differ from the expected ones), and the exit status is then 1 with the record
+complete.
+
+The tool **fails** (exit status 1, every failing run listed, no out-file written: the old file stays) on a timeout, a
+crash, exit status 3 or any other unexpected status, output that does not parse (stdout of a rejection, an unknown
+format, a fatal diagnostic, a summary that disagrees with the errors printed, a rejection with no error); a bad header, a
+missing directory, a missing binary and no test at all are usage errors (exit status 2). Tests of the other platform
+(`platform:`) and front-end tests with no expected error are noted and not run.
+
+`--bin-dir` (default `build/`) names the directory of `cerastes` and, for the front-end tests, of `cerastes-fe.sh`; the
+default directory without a wrapper uses `scripts/cerastes-fe.sh`, any other directory without one is a usage error (a
+record must not silently come from a different front end). The tool passes no `--keep-vpr` and never touches `build/vpr`
+or its lock: it can run beside the harness. `--base <file>` prints what differs from an earlier record (`added`,
+`removed`, `changed`, per test and mode, with `-`/`+` lines) and exits 1 on any difference. The per-directory counts are
+printed. The self-test is in `scripts/test_run_tests.py` (`Rejections*Tests`).
+
 ## Every back-end diagnostic has a test
 
 `src/backend/diagnostics.def` lists the tags of the cerastes back end
