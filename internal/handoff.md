@@ -1027,3 +1027,22 @@ Accept
   names the function. **Recommended:** accept; e1d gives such contracts their meaning.
 
 Accept
+
+**Answered in M4.5e1c (2026-11-23/24, in session, the owner's choices):**
+- **253** (S45 (b), "recorded, not gating": a multi-class quantifier is instantiated only where the program holds a term
+  of every class, so `requires p[i] == q[i] && q[i] >= 0` with a body that reads only `p[2]` fails to prove `p[2] >= 0`;
+  a false alarm, fail closed): "M4.5e2 lifts it" (the recommendation was M4.8). Pinned; a read of `q[2]` at the same
+  slot avoids it (record 0061 item 6).
+- **254** (S45 (c), outside the one-error rule: the fill loop's skipped-write twin fails at the flag line and at the
+  user's clause, two real errors): "Expect both, add 1-error twin (Recommended)" (item 9).
+- **255** (raised by il-analyst-2 in Part B): f__wf's ghost functions are method-qualified, `hvq_<method>__<formal>_<state>`
+  ("Method-qualified (Recommended)"); four fail-closed narrowings are listed limits, a `forall` on the left of `||`
+  (M4.8) and, in a multi-class `E`, a memory-reading guard, arithmetic combining two classes' reads and a converted
+  index (M4.5e2) ("Accept; (1) to M4.8, (2)(3) M4.5e2 (Recommended)") (items 1, 3, 7).
+- **The owner's instruction for the rest of M4.5e1c** (2026-11-24, about 02:30 UTC): "I'm going to bed so for the rest
+  of the session accept what the recommended answer on a question would be after following your normal question and
+  answer generation process and then add to the handoff so I can see if these need relooked tomorrow". Every question
+  after it is below, each built as its recommendation; a recommendation is always the fail-closed option (reject, pin
+  or cut), and a stop with no fail-closed option is parked for the owner instead of chosen.
+
+**Built overnight as recommended, for the owner's review (M4.5e1c, from 2026-11-24 02:30 UTC):**

@@ -31,7 +31,10 @@
   - In this session (2026-11-23), each the recommendation unless said: **253** the false alarm of a multi-class
     quantifier used where only one class's term occurs (S45 (b), "recorded") is pinned and **M4.5e2 lifts it** (the
     owner chose M4.5e2 over the recommended M4.8; item 6); **254** the skipped-write twin's two errors are expected, and
-    each loop also gets a one-error twin (item 9). Cut 3 was taken by P80 (b)'s table without asking (item 2).
+    each loop also gets a one-error twin (item 9); **255** (raised by il-analyst-2 in Part B): the ghost functions of
+    `f__wf` are method-qualified (item 7), and four fail-closed narrowings of the lowering are listed limits: a `forall`
+    on the left of `||` (M4.8), and in a multi-class `E` a memory-reading guard, arithmetic combining two classes' reads,
+    and a converted index (M4.5e2) (item 1). Cut 3 was taken by P80 (b)'s table without asking (item 2).
   - Standing: 69 (no EDG work), 77 (one context), 160 (a new test's expect line corrected after its first run, listed in
     status), 176 (the owner handles CI).
 - **Milestone:** M4.5e1c.
@@ -66,8 +69,8 @@ plan's decision table it took.
    |---|---|
    | the lambda form `cerastes::forall([](int i, …) { … }, …)`; `cerastes::forall(f, …)` with a function in verify mode (cut 3, item 2: write `cerastes_forall`) | M7 |
    | `f` a `predicate` (M4.5f1); `f` with a `requires`, `ensures` or `decreases`; a call of a `pure` function anywhere, in `E` too; recursion | e1d |
-   | a `forall` inside `E` (nested); under `!`; as an operand of `==` or arithmetic; in a `?:` condition; in the guard of an atom; in a function's `decreases` or a loop measure; under `old`; in a `do … while (0)` invariant; an `exists` | M4.8 (question 249: M4.8 must handle them) |
-   | an `E` with no element read indexed by the bound variable; an index that names the bound variable in another form than `i`, `i + c`, `i - c` (`a[2 * i]`, `a[n - i]`, `a[b[i]]`) | M4.5e2 |
+   | a `forall` inside `E` (nested); under `!`; as an operand of `==` or arithmetic; in a `?:` condition; in the guard of an atom; in a function's `decreases` or a loop measure; under `old`; in a `do … while (0)` invariant; an `exists`; on the left of `\|\|` (`forall(…) \|\| g`: lowering writes `\|\|` as `!left ==> right`; `g \|\| forall(…)` is accepted; question 255) | M4.8 (question 249: M4.8 must handle them) |
+   | an `E` with no element read indexed by the bound variable; an index that names the bound variable in another form than `i`, `i + c`, `i - c` (`a[2 * i]`, `a[n - i]`, `a[b[i]]`), or under a conversion; in an `E` with more than one read class, a guard that reads memory or arithmetic combining two classes' reads (`a[i] + b[i] < 100`; comparisons such as `a[i] <= a[i + 1]` and `p[i] == q[i]` are accepted; question 255) | M4.5e2 |
    | a quantified read whose base argument is not a bare pointer parameter (contract) or a pointer variable or named local array (loop invariant, `check`): `&a[1]`, `p + 1`, a loaded pointer | M4.5e2 |
    | under the binder: structure members (`p[i].x`), array members, global arrays | e1e |
    | a trailing argument that reads memory (the read is written inside `f`; question 248) | M4.5e2 |
@@ -96,9 +99,9 @@ plan's decision table it took.
    change `annotation_checks.cpp` and front-end expectations, which the plan fences (Flips E).
 
 3. **The quantifier** `forall(f, e_1, …, e_m)`.
-   - **Positions:** a function's `requires` and `ensures`, a loop's invariant, a `check`; as a conjunct, on either side
-     of `||` or as an arm of `?:` (a positive position). Every other position is rejected (`unsupported_annotation`,
-     item 1's M4.8 row).
+   - **Positions:** a function's `requires` and `ensures`, a loop's invariant, a `check`; as a conjunct, as the right
+     operand of `||` or as an arm of `?:` (a positive position; the left operand of `||`, which question 249 allowed, is
+     narrowed to M4.8 by question 255). Every other position is rejected (`unsupported_annotation`, item 1's M4.8 row).
    - **`f`** is named as `f` or `&f` and nothing else (audit round 1, S5): a lambda (`enk_lambda`), `+lambda`, a written
      cast (`(fp_t)g`, which can name a function of another signature), `*f`, a function-pointer parameter or variable, a
      comma and a `?:` are each `forall_function`, each pinned, the written cast in particular. `f` is a `pure` function
@@ -154,7 +157,12 @@ plan's decision table it took.
      an invariant has its flag obligation).
 
 5. **VIR.** `Expr::Kind::Forall` (the bound variable's id and `IntType`, the body, the site's spelling `forall(f, a, n)`
-   as `c_text`, `f`'s name) and `Expr::Kind::Bound`; `Builder::forall`, `Builder::bound`. `check.cpp` backstops items 3,
+   as `c_text`, `f`'s name, and the encoded trailing arguments as its `args`, in `f`'s parameter order), `Expr::Kind::Bound`
+   (the bound variable) and `Expr::Kind::ForallArg` (its `Forall`'s id and an argument index: inside the body every
+   parameter of `f` other than the bound variable, pointer bases included); `Builder::forall`, `Builder::bound`,
+   `Builder::forall_arg`. Lowering emits each argument's obligations once before the quantifier (item 3) and uses its
+   value inside. Ids need not be unique in the program: nesting is refused, so a `Bound` or `ForallArg` is always under
+   exactly the `Forall` that `check.cpp` matches it to. `check.cpp` backstops items 3,
    6 and 8: positions, no nesting, no atom, call or write inside, `Bound` only under its `Forall`, the read classes'
    shape, `Old` inside only where item 8 or 12 allows. Until Part C lifts it, `check.cpp` refuses a `Forall` in a loop
    invariant or a `check` (fail closed between parts).
@@ -193,13 +201,15 @@ plan's decision table it took.
      `ite` chain nor in `f__wf`'s permission row does a marked atom's site frame a pre-state read, nor a post-state read
      where the parameter is `ref_to_uninit` without `must_init`. Twin: `requires(q == p)
      requires(cerastes_forall(nonneg, q, n))` with `p` marked.
-   - **A call:** the clause's `precondition` row, as today (one per clause, after `call_atoms`' rows, in the caller's
-     state, the bases bound); the Viper call's own precondition stays the `internal` backstop. **A return:** the
-     clause's `postcondition` row. Callers learn an `ensures` from the method's postcondition, as today.
+   - **A call:** the clause's `precondition` rows, after `call_atoms`' rows, in the caller's state, the bases bound; a
+     clause that holds a quantifier gives one row per conjunct, as `push_clauses` splits it in the method (as built);
+     the Viper call's own precondition stays the `internal` backstop. **A return:** the `postcondition` rows, split
+     likewise. Callers learn an `ensures` from the method's postcondition, as today.
    - **`f__wf`** (amends 0037 item 7; S45 (d), branch **M**). The method stays heap-free and keeps every row it writes
      today (framing, 0010 item 11's obligations, partners by path, the overlap obligations, the ties, the
      `not_invalidating` rows). A read under a binder is the ghost function of its base parameter and state at the read's
-     absolute slot, `hvq_<p>_pre(s)` and `hvq_<p>_post(s)`, declared in one domain per `__wf` method with no axiom
+     absolute slot, `hvq_<m>__<p>_pre(s)` and `hvq_<m>__<p>_post(s)` (`m` the method, since Viper names are program-wide
+     and formal names repeat across functions; question 255), declared in one domain per `__wf` method with no axiom
      (`// cerastes:domain-ok 0061`). Assumed beside today's `facts_` (`requires` of the `__wf` method), each argued as
      0037 item 7 argues today's, each with **one trigger set per ghost application it relates** (S45 (d): a one-set form
      leaves the other application uninstantiated, and a correct contract fails):
@@ -221,14 +231,21 @@ plan's decision table it took.
      and return: 0060 item 5's argument; on a path where either atom is off, another parameter may own the same slots
      and write them), and for `reads(*p)` the ground form at its slot under the same guards. S45 addendum: the guarded
      fact verifies (`s45_d_m_guard_fact*`; today's scalar fact already conjoins both sites' guards), and the
-     unguarded one lets a wrong contract's `__wf` verify (`s45_d_m_unguarded_wrong_contract.vpr`, kept as the
+     unguarded one lets a wrong contract's `__wf` verify (`s45_d_m_unsound_evidence_unguarded_keep.vpr`, kept as the
      evidence, against `s45_d_m_guarded_wrong_contract_fail.vpr`).
      Every obligation under a binder is one row `prior ==> (forall q0 :: { hvq_p_st(q0) } range(i) && path ==>
      obligation)`, the `prior` outside the binder. **A read in `E` that the binder does not index** (`a[r]` in `a[i] <=
      a[r]`; audit round 1, S12) is a scalar ghost of today's form (0037 item 7; tied to its parameter's function by fact
      (b)); its framing row is quantified like `E`'s other obligations, over the first class's binder and trigger with
      `E`'s path, so that a read no `i` reaches is never asked. A failed row is assumed afterwards, as every `f__wf` row is. A
-     contract without a quantifier keeps its `f__wf` byte for byte. (Variant H, a heap form with a bodiless `f__wfp`,
+     contract without a quantifier keeps its `f__wf` byte for byte. Facts (a) and (c) are emitted only for formals that
+     have an atom of that cell field in the method's contract (as built after the lint's run over the emitted Viper: a
+     formal with no atom, such as `q` in `requires(q == p)`, has no element field the lint can check, and a read
+     through it is framed by another parameter's atom or reported unframed; losing its range fact can only add a false
+     alarm). **Listed limit** (as built): a read class read in both states (`a[i]` and `old(a[i])`) triggers its
+     obligations on its first read's ghost, so where no keep fact bridges the states (`owns_range`) a later obligation
+     that names only the other state's read may not be instantiated: a false alarm, fail closed (S45 (d)'s one-set
+     pattern; a VIR case pins it if it occurs). (Variant H, a heap form with a bodiless `f__wfp`,
      also passed S45 (d); the table builds M, and H's boundary of rejections is not needed.)
    - **Obligations of `E`** (0010 item 11's, framing, and in loops and checks the bound and the flag): each is one
      quantified row over its own read class's binder (an arithmetic obligation: over `q0`), under the site's `prior` and
@@ -287,7 +304,7 @@ plan's decision table it took.
     (`Int` bounds, none for `Bool`, a pointer's for `Ref`); fact (c) only between formals of the same cell field; the
     ground forms of (b) over any index and of (d) for `reads(*p)`. A user quantifier carries the bound variable's type
     range in its antecedent and holds no computed `loc` term (T1's form; audit round 1, N15). The unguarded keep fact
-    and the state-crossing tie are must-fail self-tests. The ghost functions are named `hvq_<Viper formal>_pre` and `_post`, the facts'
+    and the state-crossing tie are must-fail self-tests. The ghost functions are named `hvq_<method>__<Viper formal>_pre` and `_post` (the lint strips and checks the method prefix), the facts'
     binders `s`, `s<j>`; obligation rows put the `prior` outside the binder. Each rule with twins (as built in Commit 1:
     six rules, 22 tests); the existing pins of "a `forall` here is refused" (binders `k`, `i`, `x`) are unchanged (no
     Flips D). Nothing else that holds a `forall` is admitted.
