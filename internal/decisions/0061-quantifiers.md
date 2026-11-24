@@ -5,7 +5,14 @@
   plan's section 5; `internal/il-inventory.md`, chapter M4.5e1c; fixtures `tests/viper-smoke/memory/s45_*.vpr`), by
   Step 0's runs, by advisor checkpoint 1 (the guards of item 7's fact (d), the one-field restriction of facts (b) and
   (c), `f`'s `bool` result, reads through marked parameters, and an S45 addendum: two read classes through `f__wf`, the
-  one-term workaround, the guarded fact) and by audit round 1. Owner decisions:
+  one-term workaround, the guarded fact) and by audit round 1 (Opus, on Commit 1 `cbd3386`: every S45 fixture and the
+  decisive P80 rows reproduced; two blocking items, both taken: B1 a trailing argument's own obligations (item 3), B2
+  the lint admitting the unguarded keep fact and a state-crossing tie (item 11); eleven should-fix items, all taken:
+  typed ghost functions (item 7), the guard's `i + 1` (item 6), the other forms of `f` (item 3), every
+  `cerastes::forall` under cut 3 (item 2), marked sites (item 7), the lint against the record's (b) and (d), the
+  guard-false fixture, the unsound-evidence fixture, the check's flag-field row (item 10), reads not indexed by the
+  binder (item 7), `&` of `f`'s parameters and `f`'s signature (items 3, 4); notes 14 (item 9), 15 (item 11), 16 and 17
+  (item 12) taken; `build/m4.5e1c/auditor-report-1.md`). Owner decisions:
   - At M4.5e1's planning (2026-11-11): **226** `cerastes_forall(f, free...)` names a `pure` function whose body is one
     `return E;`, inlined at the site; no Viper function is emitted for `f`, and a call of `f` anywhere else stays
     rejected until e1d. **232** `cerastes_old(p[i])` is allowed in the body of a `pure` function that only an `ensures`
@@ -81,28 +88,45 @@ plan's decision table it took.
    modes. **Cut 3 (P80 (b), the table's "If not", taken without asking):** in `cerastes::forall(f, …)` an rvalue
    trailing argument (`n + 1`, a literal) reaches the IL as `reference_to(enk_temp_init → dynamic_init → expression)`,
    which `annotation_checks.cpp` refuses today (`unsupported_annotation_expression`, in `cerastes-fe` too), so no single
-   peel rule reads every argument. In verify mode `cerastes::forall` with a function is `unsupported_annotation`
-   ("write `cerastes_forall`"; M7, with the lambda form), pinned with an lvalue and an rvalue argument (the rvalue form
-   keeps the front end's diagnostic); **`cerastes_forall` is the spelling in both modes**. A second peel rule would
+   peel rule reads every argument. In verify mode **every** `cerastes::forall`, in each of the four positions, is
+   `unsupported_annotation` (audit round 1, S6): with a lambda, the lambda form's message re-pointed to M7; with
+   anything else (a function, a function pointer), "write `cerastes_forall`" (M7). Pins: each position (`requires`,
+   `ensures`, an invariant, a `check`, where today the call is `call_in_annotation` and no test pins it), and an rvalue
+   argument (which keeps the front end's diagnostic). **`cerastes_forall` is the spelling in both modes**. A second peel rule would
    change `annotation_checks.cpp` and front-end expectations, which the plan fences (Flips E).
 
 3. **The quantifier** `forall(f, e_1, …, e_m)`.
    - **Positions:** a function's `requires` and `ensures`, a loop's invariant, a `check`; as a conjunct, on either side
      of `||` or as an arm of `?:` (a positive position). Every other position is rejected (`unsupported_annotation`,
      item 1's M4.8 row).
-   - **`f`** is named as `f` or `&f`: a `pure` function (not a `predicate`), defined in a verified file of the unit,
+   - **`f`** is named as `f` or `&f` and nothing else (audit round 1, S5): a lambda (`enk_lambda`), `+lambda`, a written
+     cast (`(fp_t)g`, which can name a function of another signature), `*f`, a function-pointer parameter or variable, a
+     comma and a `?:` are each `forall_function`, each pinned, the written cast in particular. `f` is a `pure` function
+     (not a `predicate`), defined in a verified file of the unit,
      whose body is exactly one `return E;` (an extra block around it is read through; P80 (c)) and whose return type
      is `bool` (`_Bool` in C); no `requires`, `ensures` or `decreases`; not a member function, a template instance or
      variadic. In C the returned expression is under a compiler-generated conversion to `bool` (P80 (c): `eok_bool_cast`
      over an `int` comparison); it keeps its meaning, `E != 0`, and is never peeled away. Its first parameter, the
      **bound variable**, has an integer type other than `bool` and the enumerations; every other parameter is a `bool`,
-     an integer, an enumeration, or a pointer to one of those or to a pointer. A function that is not such a function:
+     an integer, an enumeration, or a pointer to one of those or to a pointer. `f`'s parameters get `check_signature`'s
+     rules (spec routines skip it today; audit round 1, S13): a VLA or `[static N]` parameter and `restrict` are
+     rejected on `f` with the tags they have on any function. A function that is not such a function:
      **`forall_function`** (new tag; its message says which rule). A contract on `f` (question 252) and a `predicate`:
      `unsupported_annotation` (e1d, M4.5f1).
    - **Arguments:** exactly one per remaining parameter; the written argument's type (under at most one
      compiler-generated conversion: C's promotions, C++'s reference binding; P80 (e)) is its parameter's type up
      to top-level qualifiers, `T *` for `const T *` allowed: **`forall_argument_mismatch`** (new tag) otherwise. An
-     argument reads no memory (question 248). A pointer argument whose parameter `E` subscripts with the bound variable
+     argument reads no memory (question 248); `cerastes_old(…)` as a trailing argument is rejected
+   (`unsupported_annotation`, M4.5e2, with the memory-reading arguments).
+   - **An argument's own obligations** (audit round 1, B1). Each trailing argument is evaluated once, at the site,
+     outside the binder. Its obligations (0010 item 11's: overflow, division, shift, conversion; in a loop invariant
+     or a `check`, the flag row of a local declared without an initializer) are rows of their own at the site, before
+     the quantifier, in evaluation order, under the site's `prior` and path and never under `E`'s path or the binder.
+     They are written in the site's mode: an `f__wf` row in a contract, an `obligation_clause` line in a loop
+     invariant, an `assert` in a `check`. Inside `E` the parameter stands for the argument's value. So `n + 1` that
+     may overflow is reported whether or not `f` uses its parameter, and whether or not any `i` reaches the use.
+     Tests: an overflowing argument whose parameter `f` never uses, and one used only on a path no `i` reaches.
+   - A pointer argument whose parameter `E` subscripts with the bound variable
      is, in a contract, a bare pointer parameter; in a loop invariant or a `check`, a pointer variable that is not
      address-taken or a named local array (its decay collapsed to the array, so `inv_elem` and the array rows still
      match). The rest is rejected (item 1).
@@ -114,7 +138,9 @@ plan's decision table it took.
    are `enk_variable`s mapped by position, P80 (c)). `E` may hold what an annotation expression of the site may
    hold, element reads `p[e]` and `*p` through `f`'s pointer parameters, and `cerastes_old` by item 8. Refused in `E`, at
    the site, each with the tag the same construct has in an annotation and a pin: a call (a `pure` function: e1d), an
-   atom, a `forall`, an assignment, `++`, `--`, a comma, a global (0041 item 12 holds for the inlined body). The shape
+   atom, a `forall`, an assignment, `++`, `--`, a comma, a global (0041 item 12 holds for the inlined body), and `&` of
+   a parameter of `f` (`&i`, `&n`: the substitution maps a parameter to a value, which has no address;
+   `unsupported_expression`, as 0038 item 6's `&x`; audit round 1, S13). The shape
    rules that reach annotation expressions (R5, R9) reach `E`; `static_assert_pure_body.c`'s exemption is unchanged. A
    `pure` function that no `forall` names is still not read (0011 item 4).
    P80 (d): the front end raises nothing on naming `f` as an argument in an annotation, on `cerastes_old(a[i])` in a
@@ -155,11 +181,18 @@ plan's decision table it took.
      no heap term exists: the trigger terms are the ghost applications `hvq_<p>_<state>(q_j)`.
    - User quantifiers bind `q0`, `q1`, … (the range quantifiers keep `k`); `LExpr::Forall` takes several binders and
      trigger sets of several terms.
+   - **The guard of `E` has its own obligations** (audit round 1, S4): `i + 1` in `0 <= i && i + 1 < n` is an `overflow`
+     at `i == INT_MAX`, a row like every other obligation of `E`. The neighbour fixtures of S45 (b) and (d) leave it
+     out: their trigger results stand, and the encoder writes the row. Tests write `0 <= i && i < n - 1` under `n >= 1`.
 
 7. **Meaning by mode.**
    - **The method's contract:** a clause that holds a quantifier is split per conjunct (`push_clauses`); a guard stands
      outside (`g ==> forall …`); each read under the binder is its own `ite` chain over the framing disjuncts (0037 item
-     7, 0060 item 5), with `old(…)` by item 8.
+     7, 0060 item 5), each disjunct with its atom's guard, with `old(…)` by item 8.
+   - **Marked sites frame no quantified read** (0042 item 6's alias rule; audit round 1, S7): neither in the method's
+     `ite` chain nor in `f__wf`'s permission row does a marked atom's site frame a pre-state read, nor a post-state read
+     where the parameter is `ref_to_uninit` without `must_init`. Twin: `requires(q == p)
+     requires(cerastes_forall(nonneg, q, n))` with `p` marked.
    - **A call:** the clause's `precondition` row, as today (one per clause, after `call_atoms`' rows, in the caller's
      state, the bases bound); the Viper call's own precondition stays the `internal` backstop. **A return:** the
      clause's `postcondition` row. Callers learn an `ensures` from the method's postcondition, as today.
@@ -171,11 +204,13 @@ plan's decision table it took.
      0037 item 7 argues today's, each with **one trigger set per ghost application it relates** (S45 (d): a one-set form
      leaves the other application uninstantiated, and a correct contract fails):
      (a) **its type's range**, per state, `forall s :: { hvq_p_st(s) } lo_T <= hvq_p_st(s) && hvq_p_st(s) <= hi_T` (a
-     location in one state holds a value of its type; none for `bool`);
+     location in one state holds a value of its type). A ghost function's result is the element's Viper type, `Int`,
+     `Bool` or `Ref` (audit round 1, S3: `f` may read `bool *` and `T **` parameters), and its range is the one today's
+     scalar ghost of that type has: an integer type's bounds, none for `Bool`, a pointer's as today;
      (b) **the scalar tie**, ground: a scalar ghost `hv_k_st` of a read `p[e]` (or `*p`, `e = 0`) of the same parameter,
-     state and cell field, `e` any index expression the contract may write, is `hvq_p_st(offset_of(p) + e)` (one location
-     in one state has one value);
-     (c) **two parameters on one block**, per state, only between parameters whose pointees have one cell field (0028
+     state and cell field, `e` any index expression the contract may write (keyed over formals, as today's ties are), is
+     `hvq_p_st(offset_of(p) + e)` (one location in one state has one value; the ghost's state suffix is the function's);
+     (c) **two parameters on one block**, per state, only between parameters whose pointees have the same cell field (0028
      item 1: another field is another location): `block_of(p) == block_of(q) ==> forall s :: { hvq_p_st(s) } {
      hvq_q_st(s) } hvq_p_st(s) == hvq_q_st(s)` (both functions are indexed by the absolute slot, so on one block they
      name the same locations);
@@ -189,7 +224,10 @@ plan's decision table it took.
      unguarded one lets a wrong contract's `__wf` verify (`s45_d_m_unguarded_wrong_contract.vpr`, kept as the
      evidence, against `s45_d_m_guarded_wrong_contract_fail.vpr`).
      Every obligation under a binder is one row `prior ==> (forall q0 :: { hvq_p_st(q0) } range(i) && path ==>
-     obligation)`, the `prior` outside the binder. A failed row is assumed afterwards, as every `f__wf` row is. A
+     obligation)`, the `prior` outside the binder. **A read in `E` that the binder does not index** (`a[r]` in `a[i] <=
+     a[r]`; audit round 1, S12) is a scalar ghost of today's form (0037 item 7; tied to its parameter's function by fact
+     (b)); its framing row is quantified like `E`'s other obligations, over the first class's binder and trigger with
+     `E`'s path, so that a read no `i` reaches is never asked. A failed row is assumed afterwards, as every `f__wf` row is. A
      contract without a quantifier keeps its `f__wf` byte for byte. (Variant H, a heap form with a bodiless `f__wfp`,
      also passed S45 (d); the table builds M, and H's boundary of rejections is not needed.)
    - **Obligations of `E`** (0010 item 11's, framing, and in loops and checks the bound and the flag): each is one
@@ -220,13 +258,20 @@ plan's decision table it took.
    both the flag line and the user's clause fail: two errors at the invariant, `uninitialized` and
    `invariant-preserved`, both real (the element holds no value, and not the stated one), as today's single-element
    invariant read already gives where the flag is unknown (Step 0 R1). The tests expect both, and each such loop also
-   has a twin that writes a wrong value (one error) (owner, 2026-11-23, question 254).
+   has a twin that writes a wrong value (one error) (owner, 2026-11-23, question 254). **An index outside a named
+   array** (audit round 1, N14): the flag line's read takes the array's bound in its antecedent, as `inv_elem` guards
+   today's single read, so the flag line does not also fail at a slot outside the array; the framing and bound rows
+   report it, and Part C's twins expect the count Silicon gives (question 254's rule).
 
 10. **`check`** (S45 (f), "Expected"). Per read class, in this order: for a pointer base the null row and the liveness
     row (`kq := perm(lvloc(…).lv)` bound first, then `forall q0 :: reach ==> kq > none`); the bound (`out-of-bounds`,
     a named array); the marked row `assert forall q0 :: { loc(B, q0) } reach(q0) ==> acc(loc(B, q0).v_T, wildcard)`
-    (`permission`; Silicon accepts `acc(…, wildcard)` under a quantifier in an `assert`, where `perm(…)` is refused);
-    the flag row (`uninitialized`); then the fact (`check`). A failed marked row ends its path; each twin is one error.
+    (`permission`; Silicon accepts `acc(…, wildcard)` under a quantifier in an `assert`, where `perm(…)` is refused),
+    and the same row for the flag field `d_T` (audit round 1, S11: the flag row reads it, as today's `deref` checks
+    `perm(v) > none && perm(d) > none`); the flag row (`uninitialized`); `E`'s own obligations (0010 item 11's), over
+    the binder with `E`'s path; then the fact (`check`). A failed marked row ends its path. Each twin is one error where
+    the flags are known; where an element's flag is unknown (after a loop with no quantified invariant), the flag row
+    and the fact both fail, as in item 9.
 
 11. **The lint** (amends 0060 item 16). A user quantifier: binders `q<j>: Int`, one trigger set of `loc(block_of(X),
     q<j>)` terms with `X` a variable, a body with no `acc`, `perm`, `forperm`, `inhale` or `forall`; admitted in a
@@ -234,14 +279,23 @@ plan's decision table it took.
     `f__wf` (variant M): one domain per function, tagged `// cerastes:domain-ok 0061`, holding ghost functions and no
     axiom; in a `__wf` method a user quantifier's trigger terms are ghost applications, and the assumed facts over the
     ghost functions have exactly the shapes (a)–(d) of item 7, each with one trigger set per application it relates, the
-    keep fact (d) under its guards. The ghost functions are named `hvq_<Viper formal>_pre` and `_post`, the facts'
+    keep fact (d) under its guards. **What the lint checks of each fact** (audit round 1, B2: the first rules admitted
+    the unguarded keep fact S45 proved unsound and a state-crossing tie that gives a vacuous `prior`): a keep fact is
+    tied to a `reads_range` (or `reads`) `requires` atom of the method on the same formal that has an `ensures` partner,
+    its bounds that atom's, its guard exactly the conjunction of the two atoms' guards as the `__wf` method reads them;
+    a scalar tie's ghost has the function's state suffix; a type range is the element type's, from the method's atoms
+    (`Int` bounds, none for `Bool`, a pointer's for `Ref`); fact (c) only between formals of the same cell field; the
+    ground forms of (b) over any index and of (d) for `reads(*p)`. A user quantifier carries the bound variable's type
+    range in its antecedent and holds no computed `loc` term (T1's form; audit round 1, N15). The unguarded keep fact
+    and the state-crossing tie are must-fail self-tests. The ghost functions are named `hvq_<Viper formal>_pre` and `_post`, the facts'
     binders `s`, `s<j>`; obligation rows put the `prior` outside the binder. Each rule with twins (as built in Commit 1:
     six rules, 22 tests); the existing pins of "a `forall` here is refused" (binders `k`, `i`, `x`) are unchanged (no
     Flips D). Nothing else that holds a `forall` is admitted.
 
 12. **`cerastes_old` in a loop invariant** (Part D; amends 0038 item 6; P80 (f): the IL shapes of an `ensures`; S45
     (g)). The C spelling; a place that `old` accepts in an `ensures`, rooted in a pointer parameter the function never
-    assigns, or a by-value parameter (its entry value); an index is read in the current state and reads no memory.
+    assigns and never takes the address of (an address-taken parameter lives in a cell a callee may change; audit round
+    1, N17), or a by-value parameter (its entry value); an index is read in the current state and reads no memory.
     Lowered as Viper's unlabeled `old(…)` (in a method, the method's entry state, also inside a loop invariant) of the
     chain over the `requires` sites; its framing is an invariant obligation line (`permission`: "this loop invariant
     reads the entry value of `p[i]`, which the function's `requires` does not own"). A marked parameter's place is
