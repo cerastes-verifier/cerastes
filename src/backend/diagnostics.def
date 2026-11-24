@@ -139,7 +139,10 @@ CERASTES_DIAG(call_without_contract, error,
               "the call to \"%s\" cannot be verified: the function has no body in a verified file and no "
               "contract (\"cerastes::requires\" or \"cerastes::ensures\") on a visible declaration")
 CERASTES_DIAG(call_in_annotation, error,
-              "a call to \"%s\" is not allowed in an annotation: only \"cerastes::old\" can be called here")
+              "a call to \"%s\" is not allowed in an annotation: only \"cerastes::old\" and \"pure\" functions can be called here")
+// A `pure` function that cannot be read as a Viper function (decision 0062 item 3): the first argument is the function, the second the rule it breaks.
+CERASTES_DIAG(pure_function, error,
+              "\"%s\" cannot be read as a pure function: %s (decision 0062)")
 CERASTES_DIAG(system_header_pragma_in_verify, error,
               "a \"#pragma ... system_header\" is not allowed in a file that \"cerastes verify\" checks: it would "
               "make the rest of the file a system header, which is never verified (decision 0011 item 4)")

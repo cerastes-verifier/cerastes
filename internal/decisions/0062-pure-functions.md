@@ -49,7 +49,9 @@
     before the bound and the marked rows (item 7), as e1b's shape row comes first at a call (0060 item 8); **280**
     (test-mechanics, raised by test-mutator-2) two rejection pins of a function rule call from a `check`, which Part B
     accepts, not from an ordinary `requires`; **281** "Count read pure functions": a read `pure` function counts as one
-    function verified (item 9; amends 0011 item 9). **279**
+    function verified (item 9; amends 0011 item 9); **282** "Keep fix + add pin": item 8's listed false alarm (a
+    callee known only through its `ensures`) has a pinned negative test beside the positive that gives the callee an
+    `ensures`. **279**
     (the test-mutator's lint found two facts of item 8 that `f__wf` cannot assume safely, outside the plan: fact
     (i) for an enumeration result, fact (ii) for a callee whose `requires` holds an application) "Accept, M4.8": both
     are listed limits, fail closed (item 8).
@@ -196,7 +198,8 @@ the branch of the plan's decision table it took.
      in the **minimal shape** (S46 (a), form **Min**, `s46_a_min.vpr`): for a range atom its pure line split into one
      `requires` per conjunct (`p != null`, the shape line, `0 <= n`, `offset_of(p) + n <= len(block_of(p))`), then
      `forall k: Int :: { loc(block_of(p), k) } in-range ==> acc(loc(block_of(p), k).v_<t>, wildcard)` and the
-     element-range quantifier; for a cell atom the same lines for one slot. **No `acc` of the flag field `d_<t>`
+     element-range quantifier; for a cell atom the same lines for one slot, unquantified (`acc(p.v_<t>, wildcard)` and
+     the element's range; as built in Part B, the lint admits it). **No `acc` of the flag field `d_<t>`
      or of the liveness cell `lv`, and no flag line:** every `acc` line widens the snapshot the function's value depends
      on, and the flags and the liveness are explicit rows at every application (item 7). (Form **Full**, a method's lines
      for the atom with `wildcard` for the amount, is the fallback of S46 (a).) Each line has its `internal` map row
@@ -232,7 +235,12 @@ the branch of the plan's decision table it took.
      other line of the callee's Viper precondition that reads no memory, at the arguments: the parameters' ranges, each
      atom's pure line, each value clause. The callee's element-range line follows from (i): a site that frames an
      application promises it. **One helper computes `G`'s conjuncts for the guard and for the rows**, so the guard can
-     never be stronger than what the rows assert.
+     never be stronger than what the rows assert (as built: one list of `requires` lines per function, `pf_lines`, is
+     the function's own Viper `requires`, the guard `G` at an application and fact (ii)'s `V`). **The rows'
+     categories** (as built): a framing row `permission`; an atom's pure line and a callee's value clause
+     `precondition`, with a note at the callee's clause; the parameters' ranges and pointer shapes `internal` (the
+     arguments' own obligations come first, so they hold). Where several rows of one application fail at one line
+     (a count past an array fails four pure lines and a value clause), the first reports and is assumed afterwards.
    - **A `cerastes_forall` clause of the callee's `requires`** (cut 2) is, at an application, **the quantifier it would
      be if it were written at the site with the arguments in place of the parameters**: lowered by 0061 in the site's
      mode (a contract's quantifier with its `ite` chains; in `f__wf` over the enclosing method's `hvq` ghosts; in a loop
@@ -353,7 +361,8 @@ the branch of the plan's decision table it took.
     method.
 
 11. **The two native rows.** On each `ensures` line of a Viper function: `postcondition.violated` → `postcondition`, at
-    the function's `return`, with a note at the clause ("`g` may not satisfy its `ensures`"). On each line of its body
+    the function's `return` (as built: the position of the returned expression; the measure's map entry is there
+    too), with a note at the clause ("`g` may not satisfy its `ensures`"). On each line of its body
     that begins with an application of the function itself: `termination.failed` → `termination` (item 10). Both through
     the existing reasons (`assertion.false`; the three termination reasons); `report.cpp` and the map's format do not
     change. Every other row on a function is `internal`.

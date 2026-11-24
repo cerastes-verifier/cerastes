@@ -445,6 +445,10 @@ void function(Printer& p, const low::LFunction& f, std::vector<std::string>& pro
         head += (i != 0U ? ", " : "") + decl(f.formals[i]);
     }
     head += std::string("): ") + type_name(f.result);
+    if (!f.result_tag.empty())
+    {
+        head += " // cerastes:result " + f.result_tag;
+    }
     p.line(0, head);
     for (const low::LClause& c : f.requires_)
     {
@@ -524,7 +528,8 @@ Emitted emit(const low::LProgram& program, const EmitOptions& options)
         }
         p.raw(memory_prelude_text(cells, program.globals, program.heap));
     }
-    const std::string prelude {prelude_text(program.prelude_used)};
+    // a program that holds a `pf_` function prints an empty `decreases` on each prelude function (record 0062 item 6); no other program's Viper changes
+    const std::string prelude {prelude_text(program.prelude_used, !program.functions.empty())};
     p.raw(prelude);
     std::vector<std::string> function_problems;
     for (const low::LFunction& f : program.functions)

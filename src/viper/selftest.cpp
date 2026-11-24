@@ -1540,6 +1540,7 @@ void define_quantifier_loops();
 #include "selftest_cases30.inc"
 #include "selftest_cases31.inc"
 #include "selftest_cases32.inc"
+#include "selftest_cases33.inc"
 
 namespace {
 
@@ -1831,6 +1832,8 @@ int main(int argc, char** argv)
     define_range_markers();
     define_quantifiers();
     define_quantifier_loops();
+    define_pure_functions();
+    define_pure_function_rejections();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

@@ -233,13 +233,13 @@ domain Block {
     return t;
 }
 
-std::string prelude_text(const std::set<std::string>& used)
+std::string prelude_text(const std::set<std::string>& used, bool empty_decreases)
 {
     const std::set<std::string> all {prelude_closure(used)};
     std::string t;
     auto fn = [&](const std::string& head, const std::string& body)
     {
-        t += "function " + head + "\n{\n  " + body + "\n}\n";
+        t += "function " + head + (empty_decreases ? "\n  decreases" : "") + "\n{\n  " + body + "\n}\n";
     };
     if (all.count("c_pow2") != 0U)
     {

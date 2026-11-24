@@ -159,12 +159,16 @@ status 1) on:
   (on the line of its keyword), never in a `__wf` method, a `decreases`, a prelude or other function or a method's statement, and its callee is a
   `pf_` function of the file; `HEAP_READ_RE` counts an application as a read of memory, so every position that must read none refuses it; the ghost
   functions `hva_<method>__<callee>_<pre|post>` of an `f__wf` method's domain have `Int`, `Bool` or `Ref` parameters and their callee's signature, and the
-  `requires` over them are exactly the facts (i) the type range of an application (an integer type's bounds, unguarded), (ii) the callee's `ensures` at
-  the arguments under exactly the callee's `requires` that read no memory, (iii) the keep fact under the guards of a `reads_range` atom and its
-  `ensures` partner and the inclusion of the callee's interval; the map rows of a function: each `requires` `not.wellformed` (`internal`), each
+  `requires` over them are exactly the facts (i) the type range of an application (the callee's result tag `// cerastes:result <lo> <hi>` on its signature
+  line, itself a standard C integer range; unguarded), (ii) the callee's `ensures` at the arguments under V, exactly the callee's `requires` that read
+  no memory and its user quantifiers over the method's `hvq` ghosts at the arguments (a V without the quantified clause proves what the callee never
+  promised), (iii) the keep fact under the guards of a `reads_range` atom and its `ensures` partner, the same block and the inclusion of every range atom
+  of the callee at the arguments in that atom's interval (read from the callee's own atoms; none: refused); every `pf_` function has its `__wf` method;
+  the prelude functions apply only prelude functions, in no cycle; the map rows of a function: each `requires` `not.wellformed` (`internal`), each
   `ensures` `postcondition.violated` (`postcondition`) and `not.wellformed` (`internal`), a `decreases` measure `termination.failed` (`termination`),
   each body line that begins an application of the function itself `termination.failed` (`termination`) and no other body line any entry.  What a
-  `pf_` function's `requires` lines may be (decision 0062 item 6's atoms) and what a non-`pf_` function may be wait for the owner's answers and S46;
+  `pf_` function's `requires` lines may be is decision 0062 item 6's form Min (`pf_requires_problems`); a non-`pf_`, non-prelude function applies only
+  prelude functions (the owner's H');
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -3889,6 +3893,9 @@ class PfInfo:
     requires: tuple[str, ...]
     ensures: tuple[str, ...]
     opaque_requires: bool = False  # a `requires` conjunct applies a `pure` function: it is no conjunct of a guard V the lint can compare
+    quantified: tuple[str, ...] = ()  # the user quantifiers (`forall q<j>`) of its `requires`: fact (ii)'s guard V holds each over the `hvq` ghosts (B1)
+    atoms: tuple[tuple[str, str, str], ...] = ()  # its range atoms: (pointer parameter, count, field `v_<t>`), read from the `acc(..., wildcard)` lines (S1)
+    result_tag: tuple[int, int] | None = None  # the `// cerastes:result <lo> <hi>` tag of its signature line (S2)
 
 
 @dataclasses.dataclass
@@ -3944,12 +3951,12 @@ def method_atoms(src: Source, d: Decl) -> list[RangeAtom]:
             high = norm_viper(hi)
             if acc is not None and acc[0].startswith("v_") and norm_viper(lo) == f"offset_of({x})" and high.startswith(f"offset_of({x})+"):
                 amount = acc[1].strip() if acc[1] is not None else None
-                if amount is None or amount in perm_formals:
+                if amount is None or amount in perm_formals or (d.kind == "function" and amount == "wildcard"):
                     out.append(RangeAtom(clause, "range", x, acc[0], amount, high[len(f"offset_of({x})+"):],
                                          None if guard is None else norm_viper(guard)))
             continue
         for cell in re.finditer(rf"acc\(\s*({IDENT})\.(v_[\w$']+)\s*(?:,\s*({IDENT})\s*)?\)", rest):
-            if cell.group(3) is None or cell.group(3) in perm_formals:  # an owns(*p) atom has no amount
+            if cell.group(3) is None or cell.group(3) in perm_formals or (d.kind == "function" and cell.group(3) == "wildcard"):  # an owns(*p) atom has no amount
                 parts = _split_top(rest.strip(), "==>")
                 out.append(RangeAtom(clause, "cell", cell.group(1), cell.group(2), cell.group(3), None,
                                      norm_viper(parts[0]) if len(parts) > 1 else None))
@@ -4439,6 +4446,54 @@ def loop_clause_scopes(src: Source, d: Decl) -> dict[int, frozenset[str]]:
     return out
 
 
+def _reads_as_markers(norm_text: str, counts: dict[str, str]) -> str:
+    """The normalized text with each read `(membership ? loc(block_of(p), q<j>).v_<t> : 0)` whose membership is the interval of the atom of `p` (count
+    `counts[p]`) replaced by the marker `@rd(p,q<j>)`, and a bare `loc(block_of(p), q<j>).v_<t>` too."""
+    def site(m: re.Match) -> str:
+        return f"@rd({m.group(1)},{m.group(2)})" if counts.get(m.group(1)) == norm_viper(m.group(3)) else m.group(0)
+
+    text = re.sub(rf"block_of\(loc\(block_of\(({IDENT})\),(q[0-9]+)\)\)==block_of\(\1\)&&offset_of\(\1\)<=offset_of\(loc\(block_of\(\1\),\2\)\)"
+                  rf"&&offset_of\(loc\(block_of\(\1\),\2\)\)<offset_of\(\1\)\+([^?]+?)\?loc\(block_of\(\1\),\2\)\.v_[\w$']+:0", site, norm_text)
+    return text
+
+
+def pf_body_quantifier_problem(src: Source, d: Decl, pfs: dict[str, PfInfo], code: str) -> str | None:
+    """Decision 0062 item 12, last bullets: a body line of a `pf_` function holds a user quantifier (`forall q<j>`) only as a conjunct of an application's
+    guard, and then it is the quantified clause of the applied callee's `requires` at that application's arguments (cut 2), its element reads written in
+    the form of the function's own contract: `(membership of the function's own atom ? loc(block_of(p), q<j>).v_<t> : 0)`, so that the callee's reads
+    and the body's compare equal as markers.  None when each quantifier of the line is one of those; else why not."""
+    body = "\n".join(src.code[max(d.body_line, 1) - 1:d.end_line])
+    own = pfs.get(d.name)
+    own_counts = {pname: cnt for pname, cnt, _f in own.atoms} if own is not None else {}
+    expected: set[str] = set()
+    for m in PF_ANY_RE.finditer(body):
+        info = pfs.get(m.group("name"))
+        if info is None or not info.quantified:
+            continue
+        args = parenthesized_list(body, m.end() - 1)
+        if len(args) != len(info.params):
+            continue
+        counts = {pname: cnt for pname, cnt, _f in info.atoms}
+        mapping = {pname: f"({a.strip()})" for (pname, _t), a in zip(info.params, args)}
+        expected |= {norm_viper(_substitute(_reads_as_markers(norm_viper(q), counts), mapping)) for q in info.quantified}
+    for m in re.finditer(r"(?<![\w$'])forall\s+q[0-9]+\s*:", code):
+        before = code[:m.start()].rstrip()
+        if not before.endswith("("):
+            return "a quantifier of a `pf_` body stands parenthesized, as a conjunct of an application's guard"
+        depth, end = 1, -1
+        for i in range(m.start(), len(code)):
+            depth += (code[i] == "(") - (code[i] == ")")
+            if depth == 0:
+                end = i
+                break
+        if end < 0:
+            return "a quantifier of a `pf_` body is not closed on its line"
+        if _reads_as_markers(norm_viper(code[m.start():end]), own_counts) not in expected:
+            return ("a quantifier of a `pf_` body is the quantified clause of the `requires` of a function the body applies, at that application's "
+                    "arguments, its reads in the form of the function's own contract (the guard of the application, cut 2)")
+    return None
+
+
 def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines:
     """Item 11's lines: a clause or statement of a method that holds a user quantifier (`forall q<j>`), and in an `f__wf` method every one
     that holds a user binder (`q<j>`, `s<j>`) or a ghost application.  Lines of the older shapes (`forall k`) are not here."""
@@ -4461,7 +4516,8 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
         loop_scopes = None
         ctx = None
         if wf:
-            base = next((b for b in decls if b.kind == "method" and b.name == d.name[:-len("__wf")]), None)
+            # the definition check of a `pf_` function (decision 0062 item 9) reads its atoms from the function's own `requires` lines
+            base = next((b for b in decls if b.name == d.name[:-len("__wf")] and (b.kind == "method" or PF_NAME_RE.match(b.name))), None)
             ctx = WfContext(ghost_types, frozenset(_formal_names(src, d)), method_atoms(src, base) if base is not None else [], d.name[:-len("__wf")], pfs)
         for lineno in range(d.line, d.end_line + 1):
             if lineno in domain_lines:
@@ -4469,6 +4525,9 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
             code = src.code[lineno - 1]
             m = QUANT_STMT_RE.match(code)
             if m is None:
+                if pure_function and lineno > d.body_line > 0 and USER_QUANT_RE.search(code):
+                    why = pf_body_quantifier_problem(src, d, pfs, code)
+                    out.verdicts[lineno] = (why is None, "" if why is None else f"{Q11}: {why}", False)
                 continue
             kind, rest = m.group("kw"), m.group("rest")
             if pure_function:
@@ -4671,8 +4730,33 @@ def _memory_free_conjuncts(text: str) -> list[str]:
     return [p for p in parts if _heap_free(p) and not FORALL_RE.search(p) and not PF_ANY_RE.search(p)]
 
 
+PF_RESULT_TAG_RE = re.compile(r"//\s*cerastes:result\s+(-?[0-9]+)\s+(-?[0-9]+)\s*$")
+
+
+def _pf_atom(text: str, params: dict[str, str]) -> tuple[str, str, str] | None:
+    """(pointer parameter, count, field) of an `acc(loc(block_of(p), k).v_<t>, wildcard)` range line of a `pf_` function, else None."""
+    if not WILDCARD_RE.search(text):
+        return None
+    q = parse_range_quantifier_full(text)
+    if q is None or q[2]:
+        return None
+    k, b, _extra, cons, lo, hi = q
+    m = BLOCK_BASE_RE.match(_squash(b))
+    if m is None:
+        return None
+    x = m.group(1)
+    acc = _range_acc(cons, k, b)
+    high = _squash(_strip_wrap(hi))
+    n = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
+    if params.get(x) != "Ref" or acc is None or not acc[0].startswith("v_") or acc[1] is None or acc[1].strip() != "wildcard" \
+            or _squash(_strip_wrap(lo)) != f"offset_of({x})" or not n:
+        return None
+    return (x, n, acc[0])
+
+
 def pf_infos(src: Source, decls: list[Decl]) -> dict[str, PfInfo]:
-    """The `pf_` functions of the file with their signatures and the memory-free conjuncts of their `requires` and `ensures`."""
+    """The `pf_` functions of the file with their signatures, the memory-free conjuncts of their `requires` and `ensures`, their user quantifiers and
+    range atoms, and the result tag of the signature line."""
     out: dict[str, PfInfo] = {}
     for d in decls:
         if d.kind != "function" or PF_NAME_RE.match(d.name) is None:
@@ -4680,14 +4764,31 @@ def pf_infos(src: Source, decls: list[Decl]) -> dict[str, PfInfo]:
         params, ret = pf_signature(src, d)
         requires: list[str] = []
         ensures: list[str] = []
+        quantified: list[str] = []
+        atoms: list[tuple[str, str, str]] = []
         opaque = False
         for kw, _line, text in clause_texts(src, d):
             if kw == "requires":
                 requires += _memory_free_conjuncts(text)
                 opaque = opaque or PF_ANY_RE.search(text) is not None
+                try:
+                    parts = _flatten_and(text)
+                except ValueError:
+                    parts = [text.strip()]
+                for part in parts:
+                    if USER_QUANT_RE.search(part):
+                        quantified.append(part.strip())
+                    else:
+                        atom = _pf_atom(part, dict(params))
+                        if atom is not None:
+                            atoms.append(atom)
             elif kw == "ensures":
                 ensures += _memory_free_conjuncts(text)
-        out[d.name] = PfInfo(d.name, params, ret, tuple(requires), tuple(ensures), opaque)
+        tag = None
+        m = PF_RESULT_TAG_RE.search(src.comments[d.line - 1]) if d.line - 1 < len(src.comments) else None
+        if m is not None:
+            tag = (int(m.group(1)), int(m.group(2)))
+        out[d.name] = PfInfo(d.name, params, ret, tuple(requires), tuple(ensures), opaque, tuple(quantified), tuple(atoms), tag)
     return out
 
 
@@ -4751,6 +4852,63 @@ def lint_inert_functions(src: Source, decls: list[Decl], add: Callable[[int, str
                 if name in functions and not prelude_function_name(name):
                     add(n, f"`function {d.name}` is neither a prelude function nor `pf_<name>__<id>`, so it applies only prelude functions: "
                            f"it applies `{name}` (decision 0062 item 12)")
+
+
+def lint_pf_wf_methods(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0062 item 9 (S3): every `pf_<name>__<id>` function has its definition-check method `pf_<name>__<id>__wf` (a function whose `__wf` is
+    missing is a function whose body and contract no row checked, and facts (i) and (ii) about its applications rest on those rows)."""
+    methods = {d.name for d in decls if d.kind == "method"}
+    for d in decls:
+        if d.kind == "function" and PF_NAME_RE.match(d.name) and d.name + "__wf" not in methods:
+            add(d.line, f"`function {d.name}` has no definition-check method `{d.name}__wf`: its body and contract would be checked by no row "
+                        "(decision 0062 item 9)")
+
+
+def lint_pf_result_tags(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0062 item 12 (S2): the `// cerastes:result <lo> <hi>` tag of a `pf_` signature line is a standard C integer range (fact (i)'s range is
+    compared with it)."""
+    for d in decls:
+        if d.kind == "function" and PF_NAME_RE.match(d.name):
+            m = PF_RESULT_TAG_RE.search(src.comments[d.line - 1]) if d.line - 1 < len(src.comments) else None
+            if m is not None and (int(m.group(1)), int(m.group(2))) not in VIEW_STANDARD_RANGES:
+                add(d.line, f"`function {d.name}`: the result tag `{m.group(1)} {m.group(2)}` is no standard C integer range (decision 0062 item 12)")
+
+
+def lint_prelude_closure(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0062 item 12 (N9): a prelude function applies only prelude functions, and the application graph of the prelude functions has no cycle
+    (H' rests on it: a `pf_` function that applies a prelude function reaches no `pf_` function through it and no recursion that the `decreases`
+    lines would miss)."""
+    functions = {d.name for d in decls if d.kind == "function"}
+    prelude = {d.name for d in decls if d.kind == "function" and prelude_function_name(d.name)}
+    edges: dict[str, set[str]] = {n: set() for n in prelude}
+    for d in decls:
+        if d.name not in prelude or d.kind != "function":
+            continue
+        for n in range(d.line, d.end_line + 1):
+            code = src.code[n - 1]
+            for m in re.finditer(r"(?<![\w$'.])([A-Za-z_$][\w$']*)\s*\(", code):
+                name = m.group(1)
+                if name == d.name and code[:m.start()].rstrip().endswith("function"):
+                    continue
+                if name in functions:
+                    if name not in prelude:
+                        add(n, f"the prelude `function {d.name}` applies `{name}`, which is no prelude function (decision 0062 item 12)")
+                    else:
+                        edges[d.name].add(name)
+    state: dict[str, int] = {}
+
+    def visit(node: str) -> bool:
+        state[node] = 1
+        for nxt in sorted(edges[node]):
+            if state.get(nxt) == 1 or (nxt not in state and visit(nxt)):
+                return True
+        state[node] = 2
+        return False
+
+    for d in decls:
+        if d.kind == "function" and d.name in prelude and d.name not in state and visit(d.name):
+            add(d.line, f"the prelude functions apply each other in a cycle through `{d.name}` (decision 0062 item 12: the prelude has no recursion)")
+            break
 
 
 def lint_prelude_decreases(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
@@ -5045,21 +5203,71 @@ def _conjunct_set(text: str) -> list[str]:
     return sorted(norm_viper(p) for p in parts)
 
 
+def _callee_quantifier(qtext: str, info: PfInfo, args_raw: list[str], ctx: WfContext, state: str) -> str | None:
+    """The user quantifier `qtext` of a `pf_` callee's `requires` as fact (ii)'s guard V holds it: the callee's quantified clause at the arguments over the
+    `hvq_<method>__<formal>_<state>` ghost of the method's pointer formal that the argument of the pointer parameter `p` is.  The callee's own text reads
+    an element as `(site membership ? loc(block_of(p), q<j>).v_<t> : 0)` (its contract form, the membership being `p`'s atom's interval, which the
+    quantifier's antecedent makes true) or as `loc(block_of(p), q<j>).v_<t>`; both become the ghost; the trigger too; the other parameters become the
+    arguments; normalized.  None when an argument it reads through is no formal of the method with such a ghost, or a membership is not the callee's
+    own atom's interval."""
+    amap = {pname: _strip_wrap(a.strip()) for (pname, _t), a in zip(info.params, args_raw)}
+    counts = {pname: cnt for pname, cnt, _field in info.atoms}
+    failed = False
+
+    def ghost(pointer: str) -> str:
+        nonlocal failed
+        arg = amap.get(pointer, "")
+        name = f"hvq_{ctx.method}__{arg}_{state}"
+        if re.fullmatch(IDENT, arg) is None or arg not in ctx.formals or name not in ctx.ghosts:
+            failed = True
+        return name
+
+    def site(m: re.Match) -> str:
+        nonlocal failed
+        if counts.get(m.group(1)) != norm_viper(m.group(3)):
+            failed = True
+        return f"{ghost(m.group(1))}({m.group(2)})"
+
+    text = norm_viper(qtext)
+    text = re.sub(rf"block_of\(loc\(block_of\(({IDENT})\),(q[0-9]+)\)\)==block_of\(\1\)&&offset_of\(\1\)<=offset_of\(loc\(block_of\(\1\),\2\)\)"
+                  rf"&&offset_of\(loc\(block_of\(\1\),\2\)\)<offset_of\(\1\)\+([^?]+?)\?loc\(block_of\(\1\),\2\)\.v_[\w$']+:0", site, text)
+    text = re.sub(rf"loc\(block_of\(({IDENT})\),(q[0-9]+)\)\.v_[\w$']+", lambda m: f"{ghost(m.group(1))}({m.group(2)})", text)
+    text = re.sub(rf"\{{loc\(block_of\(({IDENT})\),(q[0-9]+)\)\}}", lambda m: f"{{{ghost(m.group(1))}({m.group(2)})}}", text)
+    if failed:
+        return None
+    return norm_viper(_substitute(text, {pname: f"({a})" for pname, a in amap.items()}))
+
+
 def hva_fact_problem(rest: str, ctx: WfContext) -> str | None:
     """Why the `requires` of an `f__wf` method that holds an application ghost `hva_<method>__<callee>_<pre|post>` is none of decision 0062 item 8's
     facts, or None: (i) the type range of an application (an integer type's bounds, unguarded); (ii) the callee's `ensures` at the arguments, under
     exactly the callee's `requires` that read no memory at those arguments (no guard when it has none); (iii) the keep fact
     `G ==> post(args) == pre(args)` under the guards of a `reads_range` atom of the method and its `ensures` partner and the interval inclusion."""
     text = rest.strip()
-    if FORALL_RE.search(text):
-        return "a quantified fact over application ghosts (decision 0062 item 7, cut 2) is not one of the facts (i) to (iii)"
     parts = _split_top(text, "==>")
     if len(parts) > 2:
         return "a fact has at most one guard `G ==> `"
     guard = parts[0].strip() if len(parts) == 2 else None
     body = _strip_wrap(text[len(parts[0]) + len("==>"):]) if len(parts) == 2 else _strip_wrap(text)
-    if guard is not None and (not guard or not _heap_free(guard) or QUANT_FORBIDDEN_RE.search(guard)):
-        return "the guard of a fact is a plain condition (no heap read, permission or quantifier)"
+    quant_conj: list[str] = []
+    if guard is not None:
+        if not guard:
+            return "the guard of a fact is a plain condition (no heap read, permission or quantifier)"
+        try:
+            gparts = _flatten_and(guard)
+        except ValueError:
+            gparts = [guard.strip()]
+        quant_conj = [g for g in gparts if FORALL_RE.search(g)]
+        plain = " && ".join(g for g in gparts if not FORALL_RE.search(g))
+        if re.search(r"(?<![\w$'])hvq_", plain):
+            return "a line applies both an `hvq_` and an `hva_` ghost function (only fact (ii)'s guard V holds `hvq_` ghosts, inside the callee's quantified clauses)"
+        if plain and (not _heap_free(plain) or QUANT_FORBIDDEN_RE.search(plain)):
+            return ("the guard of a fact is a plain condition (no heap read, permission or quantifier; fact (ii)'s guard V also holds the callee's "
+                    "quantified clauses over the method's `hvq` ghosts, decision 0062 item 8)")
+    if FORALL_RE.search(body):
+        return "a quantified fact over application ghosts (decision 0062 item 7, cut 2) is not one of the facts (i) to (iii)"
+    if re.search(r"(?<![\w$'])hvq_", body):
+        return "a line applies both an `hvq_` and an `hva_` ghost function (only fact (ii)'s guard V holds `hvq_` ghosts, inside the callee's quantified clauses)"
     apps = _hva_applications(body)
     if not apps or not _heap_free(body) or QUANT_FORBIDDEN_RE.search(body):
         return "the body of a fact reads no heap and holds no permission or quantifier"
@@ -5091,20 +5299,35 @@ def hva_fact_problem(rest: str, ctx: WfContext) -> str | None:
             return ("the keep fact is guarded by the guards of a `reads_range` atom of the method and its `ensures` partner and the interval inclusion "
                     "(an unguarded fact lets a wrong contract's `__wf` verify: it holds on every path, even where an `owns_range` alias may change the "
                     "place)")
+        if quant_conj:
+            return "the keep fact's guard holds no quantifier"
         have = set(_conjunct_set(guard))
+        if not info.atoms:
+            return (f"the keep fact is about a callee that names memory: `{callee}` has no range atom in its `requires`, so its value does not depend "
+                    "on a place the method's `reads_range` atom keeps")
+        amap = {pname: a.strip() for (pname, _t), a in zip(info.params, args_raw)}
+        cmap = {pname: f"({a})" for pname, a in amap.items()}
         for r in ctx.atoms:
             if r.kind != "range" or r.clause != "requires" or r.amount is None:
                 continue
             for e in ctx.atoms:
                 if (e.kind, e.clause, e.formal, e.field, e.amount, e.count) == ("range", "ensures", r.formal, r.field, r.amount, r.count):
                     need = set(_expected_guard(r, e))
-                    extra = have - need
-                    count_word = re.compile(rf"(?<![\w$']){re.escape(r.count or '')}(?![\w$'])")
-                    if need <= have and len(extra) >= 2 and any("offset_of(" in x for x in extra) and any(count_word.search(x) for x in extra):
+                    ok = True
+                    for pname, cnt, field in info.atoms:
+                        arg = _strip_wrap(amap.get(pname, ""))
+                        if field != r.field or re.fullmatch(IDENT, arg) is None:
+                            ok = False
+                            break
+                        need.add(norm_viper(f"(block_of({arg}) == block_of({r.formal}))"))
+                        need.add(norm_viper(f"(offset_of({r.formal}) <= offset_of({arg}))"))
+                        need.add(norm_viper(f"((offset_of({arg}) + {_substitute(cnt, cmap)}) <= (offset_of({r.formal}) + {r.count}))"))
+                    if ok and have == need:
                         return None
-        return ("the keep fact is guarded by the guards of a `reads_range(p, n)` `requires` atom of the method and its `ensures` partner "
-                "(same field, amount and count) and the inclusion of the callee's interval in the atom's (two conjuncts over `offset_of(...)`, "
-                "the second bounding by the atom's count `n`)")
+        return ("the keep fact is guarded by exactly the guards of a `reads_range(p, n)` `requires` atom of the method and its `ensures` partner "
+                "(same field, amount and count), the same block, and for every range atom of the callee its interval at the arguments inside the "
+                "method's atom's interval (`offset_of(p) <= offset_of(arg)` and `offset_of(arg) + count <= offset_of(p) + n`), read from the "
+                "callee's own atoms (decision 0062 item 12)")
     # (i) the type range of an application
     app_text = norm_viper(apps[0][2])
     rng = [norm_viper(x) for x in (_flatten_and(body) if "&&" in body else [body])]
@@ -5115,8 +5338,17 @@ def hva_fact_problem(rest: str, ctx: WfContext) -> str | None:
             # an unguarded range is the type's (item 8 (i)); any other unguarded bound would be an `ensures` fact (ii) without its guard
             if info.ret != "Int":
                 return f"`{callee}` returns `{info.ret}`: a `Bool` result has no type range to assume"
-            if (int(lo.group(1)), int(hi.group(1))) in VIEW_STANDARD_RANGES:
-                return None
+            got_range = (int(lo.group(1)), int(hi.group(1)))
+            if info.result_tag is None:
+                if got_range in VIEW_STANDARD_RANGES:
+                    return (f"fact (i) is about `{callee}`, whose signature line carries no `// cerastes:result <lo> <hi>` tag (an integer, non-enumeration "
+                            "result always has one): its range is checked against the tag")
+            else:
+                if got_range in VIEW_STANDARD_RANGES and got_range != info.result_tag:
+                    return (f"fact (i)'s range {list(got_range)} is not the result type's of `{callee}`, whose signature line tags "
+                            f"`// cerastes:result {info.result_tag[0]} {info.result_tag[1]}`")
+                if got_range == info.result_tag and got_range in VIEW_STANDARD_RANGES:
+                    return None
             # any other bound is read as fact (ii): the callee's `ensures`, guarded by the callee's `requires` unless it has none
     # (ii) the callee's ensures at the arguments, under the callee's value requires and pure lines
     if info.opaque_requires:
@@ -5133,23 +5365,32 @@ def hva_fact_problem(rest: str, ctx: WfContext) -> str | None:
         return (f"the body of a fact (ii) is conjuncts of `{callee}`'s `ensures` that read no memory, at the arguments, `result` being the application "
                 "(a clause that reads memory, holds a quantifier or an application is left out)")
     need_v = {norm_viper(_substitute(c, {k: v for k, v in mapping.items() if k != "result"})) for c in info.requires}
+    state = hva_callee(apps[0][0], ctx.method, ctx.pfs)[1]
+    for qtext in info.quantified:
+        expected = _callee_quantifier(qtext, info, args_raw, ctx, state)
+        if expected is None:
+            return (f"`{callee}`'s `requires` holds a quantified clause that fact (ii)'s guard V must hold over the `hvq_{ctx.method}__<formal>_{state}` "
+                    "ghosts of the method's own pointer formals at the arguments: an argument is no formal of this method, or it has no such ghost")
+        need_v.add(expected)
     if guard is None:
         if need_v:
             return (f"fact (ii) is guarded by `{callee}`'s `requires` that read no memory, at the arguments: the `ensures` of a function may be false "
                     "where its `requires` does not hold, and an unguarded fact would make every row of the method vacuous there")
         return None
     if set(_conjunct_set(guard)) != need_v:
-        return f"the guard of fact (ii) is exactly `{callee}`'s `requires` that read no memory (its parameters' ranges, its pure lines and value clauses), at the arguments"
+        return (f"the guard of fact (ii) is exactly `{callee}`'s `requires` that read no memory (its parameters' ranges, its pure lines and value clauses) "
+                "and its quantified clauses over the method's `hvq` ghosts, at the arguments (decision 0062 item 8: a V without the quantified clause "
+                "proves what the callee never promised)")
     return None
 
 
 def hva_line_problem(kind: str, rest: str, code: str, ctx: WfContext, ghosts: frozenset[str]) -> str | None:
     """Why a line of an `f__wf` method that applies an `hva_` ghost is not one of decision 0062 item 8's: its `requires` are the facts (i) to (iii)
     (never mixed with an `hvq_` ghost), a plain `assert` row reads no heap, a quantified one is item 11's."""
-    if any(g.startswith("hvq_") and re.search(rf"(?<![\w$']){re.escape(g)}\s*\(", code) for g in ghosts):
-        return "a line applies both an `hvq_` and an `hva_` ghost function"
     if kind == "requires":
         return hva_fact_problem(rest, ctx)
+    if kind != "assert" and any(g.startswith("hvq_") and re.search(rf"(?<![\w$']){re.escape(g)}\s*\(", code) for g in ghosts):
+        return "a line applies both an `hvq_` and an `hva_` ghost function"
     if kind == "assert":
         if WF_QUANT_RE.search(code):
             return wf_assert_verdict(rest, ghosts)
@@ -5288,6 +5529,9 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_pf_applications(src, decls, add)
     lint_inert_functions(src, decls, add)
     lint_prelude_decreases(src, decls, add)
+    lint_prelude_closure(src, decls, add)
+    lint_pf_wf_methods(src, decls, add)
+    lint_pf_result_tags(src, decls, add)
     pf_requires = lint_pf_requires(src, decls, add)
     lint_jumps(src, decls, add)
     lint_flags(src, add)

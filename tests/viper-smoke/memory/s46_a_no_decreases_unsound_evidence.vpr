@@ -1,0 +1,15 @@
+// expect: verified
+// S46 (a) unsound evidence (audit round 1, S6; kept as s46_c_unsound_evidence_* are): a recursive function with no decreases line and ensures false proves false: m's assert false verifies. This is why item 12 asks every pf_ function for one decreases line, and why this fixture is never emitted
+// S46 hand-written fixture of the target shapes of record 0062 (draft; plan .claude/plans/m4-5e1d-pure-functions.md section 5). No inhale or assume.
+// (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py)
+function pf_bad__1(n: Int): Int
+  ensures false
+{
+  pf_bad__1(n)
+}
+
+method m__1()
+{
+  var x: Int := pf_bad__1(0)
+  assert false
+}

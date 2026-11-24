@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "check.h"
 
+#include <functional>
 #include <map>
 #include <set>
+#include <vector>
 #include <string>
 #include <unordered_set>
 
@@ -307,6 +309,7 @@ public:
         {
             function(f);
         }
+        application_graph();
         return std::move(diags_);
     }
 
@@ -863,7 +866,11 @@ private:
             }
             else
             {
+                // Record 0062 items 4 and 5 (M4.5e1d part B): an application may stand in the value of a `pure` function; an old value, an atom, a quantifier and a write may not
+                apply_ok_ = true;
                 expr(*f.pure_body, Ctx::Requires, false);
+                apply_ok_ = false;
+                pure_body_rules(f, *f.pure_body);
                 if (f.pure_body->type != f.ret)
                 {
                     err(f.pure_body->loc, "the value of the `pure` function '" + f.c_name + "' is a " +
@@ -887,12 +894,15 @@ private:
         }
         for (const NamedConst& c : f.local_consts())
         {
-            if (f.body == nullptr)
+            // a static assertion in the body of a read `pure` function is a local constant of it (record 0062 item 3): its `__wf` method's prologue checks it
+            if (f.body == nullptr && !f.pure)
             {
                 err(c.loc, "a local constant of '" + f.c_name + "', which has no body");
             }
             named_const(c, "the local constant");
         }
+        apply_ok_ =
+            f.pure; // record 0062 item 4: an application stands in the `requires` and `ensures` of a `pure` function (a measure: never)
         for (const Clause& c : f.requires_)
         {
             clause(c, Ctx::Requires, "requires");
@@ -901,11 +911,16 @@ private:
         {
             clause(c, Ctx::Ensures, "ensures");
         }
+        apply_ok_ = false;
         for (const Clause& c : f.decreases_)
         {
             measure(c, Ctx::Requires, "decreases", /*memory_ok=*/true);
         }
         atoms(f);
+        if (f.pure)
+        {
+            pure_contract_rules(f);
+        }
         if (f.noreturn && !f.ensures_.empty())
         {
             err(f.ensures_.front().loc,
@@ -3685,9 +3700,7 @@ private:
                 call(e, ctx);
                 break;
             case Expr::Kind::Apply:
-                // Record 0062 item 5, M4.5e1d part A: refused in every position (fail closed) until part B admits it in a `check` and in the contract and body
-                // of a `pure` function, part C in an ordinary function's contract, part D in a loop invariant.
-                err(e.loc, "an application of a `pure` function (record 0062 item 4: not accepted here yet)");
+                apply(e, ctx);
                 break;
             case Expr::Kind::AssignE:
                 assign_value(e, ctx);
@@ -4473,6 +4486,353 @@ private:
         }
     }
 
+    // ---- applications of `pure` functions (record 0062 items 4 and 5; M4.5e1d part B) ----
+
+    // An application `g(args)`: in a `check` and in the body, `requires` and `ensures` of a `pure` function (a loop invariant is part D's, an ordinary function's contract part C's: both
+    // stay refused here, fail closed between the parts), never under a quantifier's binder, in a measure or under `old`.  The callee is a `pure` function with a value expression, with
+    // the arity and parameter types of the arguments.  A pointer argument that an atom of the callee names is, in a contract or a `pure` function, a parameter of the function and, in a
+    // `check`, a pointer variable or the decay of a named array: the rows of the application name that pointer as a variable (item 4).
+    void apply(const Expr& e, Ctx ctx)
+    {
+        const bool in_check {ctx == Ctx::Annot && in_check_ && !in_invariant_};
+        const bool in_pure {apply_ok_ && (ctx == Ctx::Requires || ctx == Ctx::Ensures)};
+        if (!in_check && !in_pure)
+        {
+            err(e.loc,
+                "an application of a `pure` function outside a `check` and the body, `requires` and `ensures` of a `pure` function (record 0062 item 4: an ordinary function's contract is part C's, a loop invariant part D's, a measure, a guard and code never)");
+            return;
+        }
+        if (cur_forall_ != nullptr)
+        {
+            err(e.loc, "an application of a `pure` function under a quantifier's binder (record 0062 item 1: M4.5e2)");
+            return;
+        }
+        if (old_depth_ > 0)
+        {
+            err(e.loc, "an application of a `pure` function under `old` (record 0062 item 4: M4.5e2)");
+            return;
+        }
+        if (e.callee == nullptr || functions_.count(e.callee) == 0U)
+        {
+            err(e.loc, "an application of a function that is not in the program");
+            return;
+        }
+        const Function& g {*e.callee};
+        if (!g.pure || g.pure_body == nullptr)
+        {
+            err(e.loc, "an application of '" + g.c_name +
+                           "', which is not a `pure` function with a value expression (record 0062 item 5)");
+            return;
+        }
+        if (e.args.size() != g.params.size())
+        {
+            err(e.loc, "an application of '" + g.c_name + "' with " + std::to_string(e.args.size()) + " arguments, " +
+                           std::to_string(g.params.size()) + " expected");
+            return;
+        }
+        if (e.type != g.ret)
+        {
+            err(e.loc, "an application of '" + g.c_name + "' with the wrong result type");
+        }
+        // the parameters the callee's atoms name
+        std::set<int> named;
+        for (const AtomSite& s : contract_atoms(g))
+        {
+            if (!s.in_ensures && s.atom->a != nullptr && s.atom->a->kind == Expr::Kind::Formal)
+            {
+                named.insert(s.atom->a->index);
+            }
+        }
+        // the parameters the trailing arguments of a quantified clause of the callee mention (record 0062 item 7): a pointer among them is a base the quantifier subscripts, and every one
+        // reads no memory (the quantifier is lowered at the site with the arguments in their place, and its trailing arguments are evaluated once, outside the binder: record 0061 item 3)
+        std::set<int> quantified;
+        for (const Clause& c : g.requires_)
+        {
+            collect_quantified_formals(c.expr, quantified);
+        }
+        for (int k : quantified)
+        {
+            if (k >= 0 && static_cast<size_t>(k) < e.args.size() && e.args[static_cast<size_t>(k)] != nullptr)
+            {
+                if (g.params[static_cast<size_t>(k)].type.is_ptr())
+                {
+                    named.insert(k);
+                }
+                if (reads_heap(*e.args[static_cast<size_t>(k)]) || mentions_old(e.args[static_cast<size_t>(k)]) ||
+                    reads_cell(e.args[static_cast<size_t>(k)]))
+                {
+                    err(e.args[static_cast<size_t>(k)]->loc,
+                        "argument " + std::to_string(k + 1) + " of the application of '" + g.c_name +
+                            "' reads memory and is a trailing argument of a quantified clause of the callee (record 0062 item 7: M4.5e2)");
+                }
+            }
+        }
+        for (size_t k {0U}; k < e.args.size(); ++k)
+        {
+            const Expr* a {e.args[k]};
+            if (a == nullptr)
+            {
+                err(e.loc, "an application with a missing argument");
+                continue;
+            }
+            if (in_check && named.count(static_cast<int>(k)) != 0U && a->kind == Expr::Kind::AddrOf &&
+                a->var != nullptr && a->var->type.is_array())
+            {
+                array_addr_ok_.insert(a); // the decay of a named array: the base the callee's rows subscript
+            }
+            expr(*a, ctx, false);
+            // a named array passed for a pointer to its element type is the decay (as e1c's quantifier argument is)
+            const bool decay {in_check && a->kind == Expr::Kind::AddrOf && a->var != nullptr &&
+                              a->var->type.is_array() && g.params[k].type.is_ptr() &&
+                              g.params[k].type.pointee != nullptr && a->var->type.element != nullptr &&
+                              *a->var->type.element == *g.params[k].type.pointee};
+            if (a->type != g.params[k].type && !decay)
+            {
+                err(a->loc, "argument " + std::to_string(k + 1U) + " of the application of '" + g.c_name + "' is " +
+                                a->type.str() + ", the parameter is " + g.params[k].type.str() + " (convert it)");
+            }
+            if (named.count(static_cast<int>(k)) != 0U)
+            {
+                const bool ok {in_pure
+                                   ? a->kind == Expr::Kind::Formal
+                                   : ((a->kind == Expr::Kind::Local && a->var != nullptr && !a->var->address_taken) ||
+                                      (a->kind == Expr::Kind::AddrOf && a->var != nullptr && a->var->type.is_array()))};
+                if (!ok)
+                {
+                    err(a->loc, "argument " + std::to_string(k + 1U) + " of the application of '" + g.c_name +
+                                    "' is a pointer the callee's `reads` names, and is not " +
+                                    (in_pure ? "a parameter of the function"
+                                             : "a pointer variable that is not address-taken or a named array") +
+                                    " (record 0062 item 4: M4.5e2)");
+                }
+            }
+        }
+    }
+
+    // The parameters of the enclosing function that the trailing arguments of each quantifier in `e` mention
+    static void collect_quantified_formals(const Expr* e, std::set<int>& out)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        if (e->kind == Expr::Kind::Forall)
+        {
+            const std::function<void(const Expr*)> walk {[&](const Expr* x)
+                                                         {
+                                                             if (x == nullptr)
+                                                             {
+                                                                 return;
+                                                             }
+                                                             if (x->kind == Expr::Kind::Formal)
+                                                             {
+                                                                 out.insert(x->index);
+                                                             }
+                                                             for (const Expr* y : {x->a, x->b, x->c})
+                                                             {
+                                                                 walk(y);
+                                                             }
+                                                             for (const Expr* y : x->args)
+                                                             {
+                                                                 walk(y);
+                                                             }
+                                                         }};
+            for (const Expr* x : e->args)
+            {
+                walk(x);
+            }
+            return;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            collect_quantified_formals(x, out);
+        }
+        for (const Expr* x : e->args)
+        {
+            collect_quantified_formals(x, out);
+        }
+    }
+
+    // The value `E` of a `pure` function holds no old value, atom, quantifier or write (record 0062 item 5; the encoder rejects each first).
+    void pure_body_rules(const Function& f, const Expr& e)
+    {
+        const char* what {nullptr};
+        switch (e.kind)
+        {
+            case Expr::Kind::Old:
+                what = "an old value";
+                break;
+            case Expr::Kind::Atom:
+                what = "a permission atom";
+                break;
+            case Expr::Kind::Forall:
+            case Expr::Kind::Bound:
+            case Expr::Kind::ForallArg:
+                what = "a quantifier";
+                break;
+            case Expr::Kind::AssignE:
+            case Expr::Kind::StoreE:
+            case Expr::Kind::Comma:
+            case Expr::Kind::Call:
+                what = "a write or a call";
+                break;
+            case Expr::Kind::Result:
+                what = "the result";
+                break;
+            default:
+                break;
+        }
+        if (what != nullptr)
+        {
+            err(e.loc, std::string("the value of the `pure` function '") + f.c_name + "' holds " + what +
+                           " (record 0062 item 5)");
+            return;
+        }
+        for (const Expr* x : {e.a, e.b, e.c})
+        {
+            if (x != nullptr)
+            {
+                pure_body_rules(f, *x);
+            }
+        }
+        for (const Expr* x : e.args)
+        {
+            if (x != nullptr)
+            {
+                pure_body_rules(f, *x);
+            }
+        }
+    }
+
+    // The contract of a `pure` function (record 0062 items 3 and 5): the atoms of its `requires` are `reads(*p)` and `reads_range(p, n)` on a parameter of its own, each a top-level
+    // conjunct (no guard), the count reading no memory; its `ensures` holds no atom and no old value; no parameter is marked or `restrict`.
+    void pure_contract_rules(const Function& f)
+    {
+        for (const AtomSite& s : contract_atoms(f))
+        {
+            const Expr& a {*s.atom};
+            if (s.in_ensures)
+            {
+                err(a.loc, "a permission atom in the `ensures` of the `pure` function '" + f.c_name +
+                               "' (record 0062 item 3: M4.5f1)");
+                continue;
+            }
+            if ((a.atom != AtomKind::Reads && a.atom != AtomKind::ReadsRange) || !s.guards.empty() || !s.path.empty() ||
+                !s.via.empty() || a.a == nullptr || a.a->kind != Expr::Kind::Formal ||
+                (a.b != nullptr && reads_heap(*a.b)))
+            {
+                err(a.loc,
+                    "an atom in the `requires` of the `pure` function '" + f.c_name +
+                        "' other than `reads(*p)` or `reads_range(p, n)` on a parameter as a top-level conjunct with a count that reads no memory (record 0062 item 3: M4.5f1)");
+            }
+        }
+        for (const Clause& c : f.ensures_)
+        {
+            if (mentions_old(c.expr))
+            {
+                err(c.loc, "an old value in the `ensures` of the `pure` function '" + f.c_name +
+                               "' (a function has one state; record 0062 item 3)");
+            }
+        }
+        for (size_t k {0U}; k < f.params.size(); ++k)
+        {
+            if (f.params[k].init != InitMarker::None || f.params[k].is_restrict || f.params[k].not_invalidating)
+            {
+                err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of the `pure` function '" + f.c_name +
+                                         "' is marked, `restrict` or owning (record 0062 item 3: M4.5f1)");
+            }
+        }
+    }
+
+    static void collect_applications(const Expr* e, std::vector<const Function*>& out)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        if (e->kind == Expr::Kind::Apply && e->callee != nullptr)
+        {
+            out.push_back(e->callee);
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            collect_applications(x, out);
+        }
+        for (const Expr* x : e->args)
+        {
+            collect_applications(x, out);
+        }
+    }
+
+    // The graph of applications over bodies and contracts (record 0062 items 5 and 10): no cycle but a function's application of itself in its own body.  A function that applies
+    // itself in its `requires` or `ensures`, and every cycle of two or more functions, is refused (a cycle through a contract would escape the termination check, and the facts of item 8
+    // would rest on themselves); the encoder rejects each first, so this is the backstop.
+    void application_graph()
+    {
+        std::map<const Function*, std::set<const Function*>> edges;
+        for (const Function& f : prog_.functions())
+        {
+            if (!f.pure)
+            {
+                continue;
+            }
+            std::vector<const Function*> from_body;
+            std::vector<const Function*> from_contract;
+            collect_applications(f.pure_body, from_body);
+            for (const Clause& c : f.requires_)
+            {
+                collect_applications(c.expr, from_contract);
+            }
+            for (const Clause& c : f.ensures_)
+            {
+                collect_applications(c.expr, from_contract);
+            }
+            for (const Function* g : from_contract)
+            {
+                if (g == &f)
+                {
+                    err(f.loc, "the `pure` function '" + f.c_name +
+                                   "' applies itself in its `requires` or `ensures` (record 0062 item 10: M4.5f2)");
+                }
+                edges[&f].insert(g);
+            }
+            for (const Function* g : from_body)
+            {
+                if (g != &f)
+                {
+                    edges[&f].insert(g);
+                }
+            }
+        }
+        std::map<const Function*, int> color; // 0 white, 1 on the stack, 2 done
+        std::function<bool(const Function*)> cyclic {[&](const Function* f)
+                                                     {
+                                                         color[f] = 1;
+                                                         for (const Function* g : edges[f])
+                                                         {
+                                                             if (g == f)
+                                                             {
+                                                                 continue; // reported above
+                                                             }
+                                                             if (color[g] == 1 || (color[g] == 0 && cyclic(g)))
+                                                             {
+                                                                 return true;
+                                                             }
+                                                         }
+                                                         color[f] = 2;
+                                                         return false;
+                                                     }};
+        for (const Function& f : prog_.functions())
+        {
+            if (f.pure && color[&f] == 0 && cyclic(&f))
+            {
+                err(f.loc, "the `pure` functions applying each other in a cycle through '" + f.c_name +
+                               "' (record 0062 item 10: mutual recursion is M4.5f2's)");
+                return;
+            }
+        }
+    }
+
     const Program& prog_;
     std::unordered_set<const Function*> functions_;
     const Function* fn_ {nullptr};
@@ -4482,6 +4842,8 @@ private:
     // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
     bool in_invariant_ {false};
     bool in_check_ {false}; // a `check` statement's expression (not C's `assert`): a quantifier may stand there
+    // Record 0062 item 4: the body, `requires` and `ensures` of a `pure` function are being checked (a measure never is): an application may stand there
+    bool apply_ok_ {false};
     // record 0061 (M4.5e1c part B): the quantifier whose body is being checked, the quantifiers at a positive position of a contract clause
     const Expr* cur_forall_ {nullptr};
     std::set<const Expr*> forall_ok_;

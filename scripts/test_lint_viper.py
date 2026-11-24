@@ -7980,8 +7980,20 @@ class Row:
         self.text, self.entries = text, entries
 
 
-def build_rows(lines):
-    """(vpr text, map text) of a fixture of strings, `Check`s (one entry) and `Row`s (several)."""
+def build_rows(lines, wf_stubs=True):
+    """(vpr text, map text) of a fixture of strings, `Check`s (one entry) and `Row`s (several).  Decision 0062 item 9 (S3): every `pf_<name>__<id>`
+    function has its `__wf` method; a fixture that is not about that rule gets an empty one appended after its last line (`wf_stubs=False` leaves the
+    fixture as written)."""
+    if wf_stubs:
+        texts = [i if isinstance(i, str) else i.text for i in lines]
+        have = {m.group(1) for t in texts for m in [re.match(r"method\s+(pf_[\w$']+)__wf\b", t)] if m}
+        stubs = []
+        for t in texts:
+            m = re.match(r"function\s+(pf_[\w$']+)\s*\(", t)
+            if m and m.group(1) not in have:
+                have.add(m.group(1))
+                stubs += [f"method {m.group(1)}__wf()", "  decreases", "{", "}"]
+        lines = [*lines, *stubs]
     text, entries = [], []
     for i, item in enumerate(lines, start=1):
         if isinstance(item, Check):
@@ -8288,10 +8300,11 @@ class ApplicationGhostTests(unittest.TestCase):
     ENSURES = f"((-2147483648 <= n) && (n <= 2147483647) && (0 <= n) && (n <= 1000)) ==> ((0 <= {APP}(n)) && ({APP}(n) <= 500500))"
 
     @classmethod
-    def program(cls, requires=None, domain=None, rows=("assert " + "hva_m__1__pf_tri__1_post(n) <= 500500",)):
+    def program(cls, requires=None, domain=None, rows=("assert " + "hva_m__1__pf_tri__1_post(n) <= 500500",), tag=(-2**63, 2**63 - 1)):
         requires = (cls.RANGE, cls.ENSURES) if requires is None else requires
         out = [*PureFunctionTests.FUNCTION, *PureFunctionTests.METHOD, *(cls.DOMAIN if domain is None else domain),
                "method m__1__wf(n: Int, res: Int)"]
+        out[0] += " // cerastes:result %d %d" % tag  # the callee's result tag, which fact (i) is checked against (decision 0062 item 12)
         out += [Check(f"  requires {r}", WF, "internal") for r in requires]
         out += ["  decreases", "{"] + [Check(f"  {r}", A, "check") for r in rows] + ["}"]
         return out
@@ -8318,7 +8331,7 @@ class ApplicationGhostTests(unittest.TestCase):
         a = self.APP
         for lo, hi in ((-2147483648, 2147483647), (0, 4294967295), (-128, 127), (-(2**127), 2**127 - 1)):
             with self.subTest(range=(lo, hi)):
-                self.assertEqual(self.problems(self.program(requires=(f"({lo} <= {a}(n)) && ({a}(n) <= {hi})",))), [])
+                self.assertEqual(self.problems(self.program(requires=(f"({lo} <= {a}(n)) && ({a}(n) <= {hi})",), tag=(lo, hi))), [])
 
     def test_the_twins_of_the_type_range(self):
         a = self.APP
@@ -8444,7 +8457,8 @@ class KeepFactTests(unittest.TestCase):
     contract pass (an `owns_range` alias under a false guard), as the unguarded keep fact of 0061 does (S45)."""
 
     PRE, POST = "hva_m__2__pf_sum__2_pre", "hva_m__2__pf_sum__2_post"
-    INCLUSION = "(offset_of(a) <= offset_of(a)) && ((offset_of(a) + v_n) <= (offset_of(a) + v_n))"
+    INCLUSION = "(block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && ((offset_of(a) + v_n) <= (offset_of(a) + v_n))"
+    SHAPE = "(a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))"
 
     @classmethod
     def program(cls, keep=None, guard=None):
@@ -8452,7 +8466,14 @@ class KeepFactTests(unittest.TestCase):
         keep = f"({cls.INCLUSION}) ==> ({cls.POST}(a, v_n) == {cls.PRE}(a, v_n))" if keep is None else keep
         return [
             "function pf_sum__2(a: Ref, n: Int): Int",
+            Check("  requires (-2147483648 <= n) && (n <= 2147483647)", WF, "internal"),
+            Check(f"  requires {cls.SHAPE}", WF, "internal"),
+            Check("  requires a != null", WF, "internal"),
+            Check(f"  requires {cls.SHAPE}", WF, "internal"),
             Check("  requires 0 <= n", WF, "internal"),
+            Check("  requires (offset_of(a) + n) <= len(block_of(a))", WF, "internal"),
+            Check("  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, wildcard)", WF, "internal"),
+            Check("  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))", WF, "internal"),
             "  decreases",
             "{",
             "  n",
@@ -8741,6 +8762,270 @@ class PureRequiresMinTests(unittest.TestCase):
                  "  decreases", "{", "}"]
         probs = self.problems(lines)
         self.assertTrue(any("applies a `pure` function: its value clauses are not comparable" in p for p in probs), probs)
+
+
+class QuantifiedGuardTests(unittest.TestCase):
+    """Decision 0062 item 8 and item 12 (audit round 1, B1): fact (ii)'s guard V of an application of a callee with a user quantifier (cut 2) in its
+    `requires` holds that quantifier over the method's `hvq` ghosts at the arguments, with the callee's other value clauses and pure lines, as a set of
+    conjuncts.  A V without it proves what the callee never promised (the program of the audit, `cx1`: the `m + 1` overflow row passes under V without Q
+    and fails under V with Q).  The program is the audit's `cx1b_vq_sound.vpr`; the twins change the fact line only."""
+
+    V = '(-2147483648 <= n) && (n <= 2147483647) && (-2147483648 <= m) && (m <= 2147483647) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (1 <= n) && (a != null) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a)))'
+    Q = '(forall q0: Int :: { hvq_f_f__2__a_post(q0) } (((-2147483648) <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) <= 2147483647) && ((0 <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) < n))) ==> (hvq_f_f__2__a_post(q0) > m))'
+    BODY = '((hva_f_f__2__pf_g__1_post(a, n, m) == 0) && (m < 2147483647))'
+    PROGRAM = "field v_int: Int\nfield d_int: Bool\nfield v_ptr_int: Ref\nfield d_ptr_int: Bool\nfield tok: Bool\nfield lv: Bool\n\n// cerastes:domain-ok 0028\ndomain Block {\n  function loc(b: Block, i: Int): Ref\n  function len(b: Block): Int\n  function block_of(r: Ref): Block\n  function offset_of(r: Ref): Int\n  function member(r: Ref, k: Int): Block\n  function parent_of(b: Block): Ref\n  function index_of(b: Block): Int\n  function lvloc(b: Block): Ref\n  // cerastes:axiom-ok 0033\n  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }\n  // cerastes:axiom-ok 0034\n  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }\n  // cerastes:axiom-ok 0035\n  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }\n  // cerastes:axiom-ok 0036\n  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }\n}\n\n\n// The callee: g(a, n, m) requires 1 <= n, reads_range(a, n), cerastes_forall(gt, a, n, m) (every element > m); ensures r == 0 && m < INT_MAX.\n// Silicon proves the ensures: a[0] > m and a[0] <= INT_MAX.\nfunction pf_g__1(a: Ref, n: Int, m: Int): Int\n  requires (-2147483648 <= n) && (n <= 2147483647)\n  requires (-2147483648 <= m) && (m <= 2147483647)\n  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))\n  requires 1 <= n\n  requires a != null\n  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))\n  requires 0 <= n\n  requires (offset_of(a) + n) <= len(block_of(a))\n  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, wildcard)\n  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))\n  requires forall q0: Int :: { loc(block_of(a), q0) } (((-2147483648) <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) <= 2147483647) && ((0 <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) < n))) ==> (loc(block_of(a), q0).v_int > m)\n  ensures result == 0\n  ensures m < 2147483647\n  decreases\n{\n  0\n}\n\n// The caller f(a, n, m): requires 1 <= n && reads_range(a, n) (no quantifier, m unconstrained);\n// ensures(r, reads_range(a, n) && m + 1 > m && (m == INT_MAX ? g(a, n, m) == 0 : 1)).\n// In C, f(arr, 1, INT_MAX) is a legal call and the ensures overflows at m + 1.\nmethod f_f__2(a: Ref, n: Int, m: Int, amt: Perm) returns (res: Int)\n  requires ((-2147483648) <= n) && (n <= 2147483647)\n  requires ((-2147483648) <= m) && (m <= 2147483647)\n  requires none < amt && amt < write\n  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))\n  requires 1 <= n\n  requires a != null\n  requires (offset_of(a) + n) <= len(block_of(a))\n  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, amt)\n  requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))\n  ensures ((-2147483648) <= res) && (res <= 2147483647)\n  ensures forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> acc(loc(block_of(a), k).v_int, amt)\n  ensures forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))\n  ensures m + 1 > m\n  ensures (m == 2147483647) ==> (((((-2147483648) <= n) && (n <= 2147483647)) && (((-2147483648) <= m) && (m <= 2147483647)) && (1 <= n) && (a != null) && ((offset_of(a) + n) <= len(block_of(a))) && (forall q0: Int :: { loc(block_of(a), q0) } (((-2147483648) <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) <= 2147483647) && ((0 <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) < n))) ==> (loc(block_of(a), q0).v_int > m)) ? pf_g__1(a, n, m) : 0) == 0)\n  decreases _\n{\n  res := 0\n}\n\n// cerastes:domain-ok 0061\ndomain Hvq_f_f__2 {\n  function hvq_f_f__2__a_post(s: Int): Int\n  function hva_f_f__2__pf_g__1_post(a: Ref, n: Int, m: Int): Int\n}\n\n// well-formedness of the contract of `f` (variant M), with fact (ii) guarded by V WITHOUT the callee's quantified clause\n// (the only guard scripts/lint_viper.py admits for fact (ii): it refuses a quantifier in a fact)\nmethod f_f__2__wf(a: Ref, n: Int, m: Int, amt: Perm, res: Int)\n  requires none < amt && amt < write\n  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))\n  requires ((-2147483648) <= n) && (n <= 2147483647)\n  requires ((-2147483648) <= m) && (m <= 2147483647)\n  requires ((-2147483648) <= res) && (res <= 2147483647)\n  requires forall s: Int :: { hvq_f_f__2__a_post(s) } (-2147483648 <= hvq_f_f__2__a_post(s)) && (hvq_f_f__2__a_post(s) <= 2147483647)\n  requires ((-2147483648) <= hva_f_f__2__pf_g__1_post(a, n, m)) && (hva_f_f__2__pf_g__1_post(a, n, m) <= 2147483647)\n@@FACT@@\n  decreases\n{\n  // the overflow row of `m + 1` in the ensures, under the requires\n  assert ((1 <= n) && (a != null) && ((offset_of(a) + n) <= len(block_of(a)))) ==> !(2147483647 < m + 1) //ROW:ens:overflow\n  // the rows of g(a, n, m) under the path m == INT_MAX: the framing, the value clause and the quantified clause Q over the post ghosts\n  assert ((1 <= n) && (a != null) && ((offset_of(a) + n) <= len(block_of(a))) && (m == 2147483647)) ==> ((block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && ((offset_of(a) + n) <= (offset_of(a) + n))) //ROW:app:frame\n  assert ((1 <= n) && (a != null) && ((offset_of(a) + n) <= len(block_of(a))) && (m == 2147483647)) ==> (1 <= n) //ROW:app:value\n  assert ((1 <= n) && (a != null) && ((offset_of(a) + n) <= len(block_of(a))) && (m == 2147483647)) ==> (forall q0: Int :: { hvq_f_f__2__a_post(q0) } (((-2147483648) <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) <= 2147483647) && ((0 <= (q0 - offset_of(a))) && ((q0 - offset_of(a)) < n))) ==> (hvq_f_f__2__a_post(q0) > m)) //ROW:app:q\n}\n"
+
+    def fact_problems(self, fact):
+        text = self.PROGRAM.replace("@@FACT@@", "  requires " + fact)
+        probs = lv.lint_vpr(text, None, "t.vpr", "t.vpr.map")
+        marker = "hva_f_f__2__pf_g__1_post(a, n, m) == 0"
+        line = [i for i, l in enumerate(text.split("\n"), start=1) if l.startswith("  requires") and l.endswith(fact)]
+        self.assertEqual(len(line), 1, line)
+        return [p for p in probs if p.startswith(f"t.vpr:{line[0]}:")]
+
+    def test_v_with_the_quantified_clause_is_clean(self):
+        self.assertEqual(self.fact_problems(f"({self.V} && {self.Q}) ==> {self.BODY}"), [])
+
+    def test_v_without_the_quantified_clause_is_refused(self):
+        probs = self.fact_problems(f"({self.V}) ==> {self.BODY}")
+        self.assertTrue(any("decision 0062" in p and "quantified clauses over the method's `hvq` ghosts" in p for p in probs), probs)
+
+    def test_the_twins_of_the_quantified_clause(self):
+        q = self.Q
+        cases = {
+            "a weaker element condition": q.replace("> m))", ">= m))"),
+            "a shorter range": q.replace("< n)))", "< n - 1)))"),
+            "the pre-state ghost for a post-state application": q.replace("hvq_f_f__2__a_post", "hvq_f_f__2__a_pre"),
+            "a ghost of no formal of the method": q.replace("hvq_f_f__2__a_post", "hvq_f_f__2__b_post"),
+            "a quantifier of another shape": q.replace("(q0 - offset_of(a)) < n", "(q0 - offset_of(a)) < m"),
+        }
+        for label, quant in cases.items():
+            self.assertNotEqual(quant, q, label)
+            with self.subTest(case=label):
+                probs = self.fact_problems(f"({self.V} && {quant}) ==> {self.BODY}")
+                self.assertTrue(any("decision 0062" in p for p in probs), (label, probs))
+
+    def test_the_quantified_clause_only_stands_in_the_guard_of_fact_ii(self):
+        cases = {
+            "in the body of the fact": f"({self.V}) ==> ({self.Q} && {self.BODY})",
+            "in an unguarded fact": f"{self.Q} && {self.BODY}",
+            "next to the keep fact": f"({self.V} && {self.Q}) ==> (hva_f_f__2__pf_g__1_post(a, n, m) == hva_f_f__2__pf_g__1_pre(a, n, m))",
+        }
+        for label, fact in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(self.fact_problems(fact), label)
+
+    def test_another_conjunct_in_v_is_refused(self):
+        self.assertTrue(self.fact_problems(f"({self.V} && {self.Q} && (n > 5)) ==> {self.BODY}"))
+        self.assertTrue(self.fact_problems(f"({self.V} && {self.Q} && hvq_f_f__2__a_post(0) > 0) ==> {self.BODY}"))
+
+
+class ApplicationFactAuditTests(unittest.TestCase):
+    """Decision 0062 item 12 (audit round 1: S1 the keep fact's guard read from the callee's own atoms, S2 fact (i)'s range against the callee's result
+    tag, S3 the definition-check method of every `pf_` function, N9 the prelude's closure)."""
+
+    @staticmethod
+    def problems(lines, stubs=True):
+        return lv.lint_vpr(*build_rows(lines, wf_stubs=stubs), "t.vpr", "t.vpr.map")
+
+    def refused(self, lines, fragment="decision 0062", stubs=True):
+        probs = self.problems(lines, stubs)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+        return probs
+
+    # --- S1: the keep fact is guarded by the inclusion of the callee's own intervals
+    def test_a_keep_fact_over_a_narrower_interval_is_clean(self):
+        k = KeepFactTests
+        inclusion = "(block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && ((offset_of(a) + (v_n - 1)) <= (offset_of(a) + v_n))"
+        keep = f"({inclusion}) ==> ({k.POST}(a, v_n - 1) == {k.PRE}(a, v_n - 1))"
+        self.assertEqual(self.problems(k.program(keep=keep)), [])
+
+    def test_a_keep_fact_over_a_wider_interval_than_the_atom_is_refused(self):
+        k = KeepFactTests
+        keep = f"((0 <= offset_of(a)) && (0 <= v_n)) ==> ({k.POST}(a, v_n + 5) == {k.PRE}(a, v_n + 5))"
+        self.refused(k.program(keep=keep))
+        keep = f"({k.INCLUSION}) ==> ({k.POST}(a, v_n + 5) == {k.PRE}(a, v_n + 5))"
+        self.refused(k.program(keep=keep))
+
+    def test_a_keep_fact_over_a_callee_with_no_atom_is_refused(self):
+        k = KeepFactTests
+        lines = k.program()
+        end = next(i for i, l in enumerate(lines) if isinstance(l, str) and l.startswith("// cerastes:trusted-contract"))
+        lines = [l for i, l in enumerate(lines) if not (i < end and isinstance(l, Check) and "forall k" in l.text)]
+        self.refused(lines, "has no range atom")
+
+    def test_a_keep_fact_without_the_same_block_conjunct_is_refused(self):
+        k = KeepFactTests
+        keep = f"((offset_of(a) <= offset_of(a)) && ((offset_of(a) + v_n) <= (offset_of(a) + v_n))) ==> ({k.POST}(a, v_n) == {k.PRE}(a, v_n))"
+        self.refused(k.program(keep=keep))
+
+    # --- S2: fact (i)'s range is the callee's result tag
+    TAG = "function pf_tri__1(n: Int): Int // cerastes:result %d %d"
+
+    def tagged(self, lo, hi, fact_lo, fact_hi):
+        a = ApplicationGhostTests.APP
+        lines = ApplicationGhostTests.program(requires=(f"({fact_lo} <= {a}(n)) && ({a}(n) <= {fact_hi})",))
+        lines[0] = self.TAG % (lo, hi)
+        return lines
+
+    def test_fact_i_equal_to_the_result_tag_is_clean(self):
+        for lo, hi in ((-2**63, 2**63 - 1), (-2**31, 2**31 - 1), (0, 2**32 - 1)):
+            with self.subTest(tag=(lo, hi)):
+                self.assertEqual(self.problems(self.tagged(lo, hi, lo, hi)), [])
+
+    def test_fact_i_narrower_or_wider_than_the_result_tag_is_refused(self):
+        self.refused(self.tagged(-2**63, 2**63 - 1, -128, 127), "cerastes:result")
+        self.refused(self.tagged(-2**31, 2**31 - 1, -2**63, 2**63 - 1), "cerastes:result")
+        self.refused(self.tagged(0, 2**32 - 1, -2**31, 2**31 - 1), "cerastes:result")
+
+    def test_a_result_tag_is_a_standard_c_integer_range(self):
+        self.refused(self.tagged(-100, 100, -100, 100), "no standard C integer range")
+        self.refused(self.tagged(0, 1000, 0, 1000), "no standard C integer range")
+
+    # --- S3: every pf_ function has its __wf method
+    def test_a_pf_function_without_its_wf_method_is_refused(self):
+        lines = ApplicationGhostTests.program()
+        self.refused(lines, "has no definition-check method", stubs=False)
+        self.assertEqual(self.problems(lines, stubs=True), [])
+
+    def test_a_wf_method_of_another_name_is_no_wf_method(self):
+        lines = [*PureFunctionTests.program(), "method pf_other__9__wf()", "  decreases", "{", "}"]
+        self.refused(lines, "has no definition-check method `pf_tri__1__wf`", stubs=False)
+
+    # --- N9: the prelude applies only prelude functions, without a cycle
+    def test_a_prelude_function_that_applies_a_pf_function_is_refused(self):
+        lines = [*PureFunctionTests.program(), "function c_div(a: Int, b: Int): Int", "{", "  pf_tri__1(a)", "}"]
+        self.refused(lines, "no prelude function")
+
+    def test_prelude_functions_in_a_cycle_are_refused(self):
+        lines = ["function c_div(a: Int, b: Int): Int", "{", "  c_rem(a, b)", "}", "function c_rem(a: Int, b: Int): Int", "{", "  c_div(a, b)", "}"]
+        self.refused(lines, "in a cycle")
+        self.refused(["function c_div(a: Int, b: Int): Int", "{", "  c_div(a, b)", "}"], "in a cycle")
+
+    def test_a_prelude_function_that_applies_a_prelude_function_is_no_cycle(self):
+        lines = ["function c_div(a: Int, b: Int): Int", "{", "  c_rem(a, b)", "}", "function c_rem(a: Int, b: Int): Int", "{", "  a", "}"]
+        probs = self.problems(lines)
+        self.assertFalse(any("in a cycle" in p or "no prelude function" in p for p in probs), probs)
+
+
+class PfEmittedShapeTests(unittest.TestCase):
+    """Decision 0062 items 8 and 12 on the shapes lowering emits (cut 2, `smallsum`: `sum_to` with `cerastes_forall(small_at, a, n)` in its `requires`,
+    which applies itself): (1) the guard of an application in a `pf_` body holds the applied callee's quantified `requires` clause at the arguments, its
+    element reads in the function's own contract form; (2) the `hvq` facts of the function's own `__wf` read their atoms from the function's `requires`;
+    (4) fact (ii)'s V holds the callee's quantified clause over the `hvq` ghosts.  The fixture is the emitted function with its `__wf` up to fact (ii);
+    the twins change one line."""
+
+    FIXTURE = '\n// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell\nfield v_int: Int\nfield d_int: Bool\nfield lv: Bool\n\n// cerastes:domain-ok 0028\ndomain Block {\n  function loc(b: Block, i: Int): Ref\n  function len(b: Block): Int\n  function block_of(r: Ref): Block\n  function offset_of(r: Ref): Int\n  function member(r: Ref, k: Int): Block\n  function parent_of(b: Block): Ref\n  function index_of(b: Block): Int\n  function lvloc(b: Block): Ref\n  // cerastes:axiom-ok 0033\n  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }\n  // cerastes:axiom-ok 0034\n  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }\n  // cerastes:axiom-ok 0035\n  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }\n  // cerastes:axiom-ok 0036\n  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }\n}\n\n// C/C++ function `smallsum` (a `pure` function, record 0062)\nfunction pf_smallsum__0(p_a__0: Ref, p_n__1: Int): Int // cerastes:result -2147483648 2147483647\n  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)\n  requires (p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0))))\n  requires p_n__1 >= 0\n  requires p_n__1 <= 1000\n  requires p_a__0 != null\n  requires (p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0))))\n  requires 0 <= p_n__1\n  requires (offset_of(p_a__0) + p_n__1) <= len(block_of(p_a__0))\n  requires forall k: Int :: { loc(block_of(p_a__0), k) } ((offset_of(p_a__0) <= k) && (k < (offset_of(p_a__0) + p_n__1))) ==> acc(loc(block_of(p_a__0), k).v_int, wildcard)\n  requires forall k: Int :: { loc(block_of(p_a__0), k) } ((offset_of(p_a__0) <= k) && (k < (offset_of(p_a__0) + p_n__1))) ==> (((-2147483648) <= loc(block_of(p_a__0), k).v_int) && (loc(block_of(p_a__0), k).v_int <= 2147483647))\n  requires forall q0: Int :: { loc(block_of(p_a__0), q0) } (((-2147483648) <= (q0 - offset_of(p_a__0))) && ((q0 - offset_of(p_a__0)) <= 2147483647)) ==> ((!(((q0 - offset_of(p_a__0)) >= 0) && ((q0 - offset_of(p_a__0)) < p_n__1))) || ((((((block_of(loc(block_of(p_a__0), q0)) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(p_a__0), q0)))) && (offset_of(loc(block_of(p_a__0), q0)) < (offset_of(p_a__0) + p_n__1))) ? loc(block_of(p_a__0), q0).v_int : 0) >= (-1000)) && (((((block_of(loc(block_of(p_a__0), q0)) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(p_a__0), q0)))) && (offset_of(loc(block_of(p_a__0), q0)) < (offset_of(p_a__0) + p_n__1))) ? loc(block_of(p_a__0), q0).v_int : 0) <= 1000)))\n  ensures (((-1000) * p_n__1) <= result) && (result <= (1000 * p_n__1))\n  decreases p_n__1\n{\n  (p_n__1 == 0) ? 0 : ((((((((((((((-2147483648) <= (p_n__1 - 1)) && ((p_n__1 - 1) <= 2147483647)) && ((p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0)))))) && ((p_n__1 - 1) >= 0)) && ((p_n__1 - 1) <= 1000)) && (p_a__0 != null)) && ((p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0)))))) && (0 <= (p_n__1 - 1))) && ((offset_of(p_a__0) + (p_n__1 - 1)) <= len(block_of(p_a__0)))) && (forall q0: Int :: { loc(block_of(p_a__0), q0) } (((-2147483648) <= (q0 - offset_of(p_a__0))) && ((q0 - offset_of(p_a__0)) <= 2147483647)) ==> ((!(((q0 - offset_of(p_a__0)) >= 0) && ((q0 - offset_of(p_a__0)) < (p_n__1 - 1)))) || ((((((block_of(loc(block_of(p_a__0), q0)) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(p_a__0), q0)))) && (offset_of(loc(block_of(p_a__0), q0)) < (offset_of(p_a__0) + p_n__1))) ? loc(block_of(p_a__0), q0).v_int : 0) >= (-1000)) && (((((block_of(loc(block_of(p_a__0), q0)) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(p_a__0), q0)))) && (offset_of(loc(block_of(p_a__0), q0)) < (offset_of(p_a__0) + p_n__1))) ? loc(block_of(p_a__0), q0).v_int : 0) <= 1000))))) && (((block_of(p_a__0) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(p_a__0))) && ((offset_of(p_a__0) + (p_n__1 - 1)) <= (offset_of(p_a__0) + p_n__1)))) ? \n  pf_smallsum__0(p_a__0, p_n__1 - 1) : 0) + ((((block_of(loc(block_of(p_a__0), offset_of(p_a__0) + (p_n__1 - 1))) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(p_a__0), offset_of(p_a__0) + (p_n__1 - 1))))) && (offset_of(loc(block_of(p_a__0), offset_of(p_a__0) + (p_n__1 - 1))) < (offset_of(p_a__0) + p_n__1))) ? loc(block_of(p_a__0), offset_of(p_a__0) + (p_n__1 - 1)).v_int : 0))\n}\n\n// cerastes:domain-ok 0061\ndomain Hvq_pf_smallsum__0 {\n  function hvq_pf_smallsum__0__p_a__0_pre(s: Int): Int\n  function hva_pf_smallsum__0__pf_smallsum__0_pre(x0: Ref, x1: Int): Int\n}\n\n// well-formedness of the contract of C/C++ function `smallsum`\nmethod pf_smallsum__0__wf(p_a__0: Ref, p_n__1: Int, res: Int, hv_e0_pre: Int)\n  requires (p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0))))\n  requires ((-2147483648) <= p_n__1) && (p_n__1 <= 2147483647)\n  requires ((-2147483648) <= res) && (res <= 2147483647)\n  requires ((-2147483648) <= hv_e0_pre) && (hv_e0_pre <= 2147483647)\n  requires forall s: Int :: { hvq_pf_smallsum__0__p_a__0_pre(s) } ((-2147483648) <= hvq_pf_smallsum__0__p_a__0_pre(s)) && (hvq_pf_smallsum__0__p_a__0_pre(s) <= 2147483647)\n  requires hvq_pf_smallsum__0__p_a__0_pre(offset_of(p_a__0) + (p_n__1 - 1)) == hv_e0_pre\n  requires ((-2147483648) <= hva_pf_smallsum__0__pf_smallsum__0_pre(p_a__0, p_n__1 - 1)) && (hva_pf_smallsum__0__pf_smallsum__0_pre(p_a__0, p_n__1 - 1) <= 2147483647)\n  requires (((((((((((-2147483648) <= (p_n__1 - 1)) && ((p_n__1 - 1) <= 2147483647)) && ((p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0)))))) && ((p_n__1 - 1) >= 0)) && ((p_n__1 - 1) <= 1000)) && (p_a__0 != null)) && ((p_a__0 == null) || (((p_a__0 == loc(block_of(p_a__0), offset_of(p_a__0))) && (0 <= offset_of(p_a__0))) && (offset_of(p_a__0) <= len(block_of(p_a__0)))))) && (0 <= (p_n__1 - 1))) && ((offset_of(p_a__0) + (p_n__1 - 1)) <= len(block_of(p_a__0)))) && (forall q0: Int :: { hvq_pf_smallsum__0__p_a__0_pre(q0) } (((-2147483648) <= (q0 - offset_of(p_a__0))) && ((q0 - offset_of(p_a__0)) <= 2147483647)) ==> ((!(((q0 - offset_of(p_a__0)) >= 0) && ((q0 - offset_of(p_a__0)) < (p_n__1 - 1)))) || ((hvq_pf_smallsum__0__p_a__0_pre(q0) >= (-1000)) && (hvq_pf_smallsum__0__p_a__0_pre(q0) <= 1000))))) ==> ((((-1000) * (p_n__1 - 1)) <= hva_pf_smallsum__0__pf_smallsum__0_pre(p_a__0, p_n__1 - 1)) && (hva_pf_smallsum__0__pf_smallsum__0_pre(p_a__0, p_n__1 - 1) <= (1000 * (p_n__1 - 1))))\n'
+
+    def lint(self, text):
+        lines = text.split("\n")
+        probs = lv.lint_vpr(text + "  decreases\n{\n}\n", None, "t.vpr", "t.vpr.map")
+        return lines, probs
+
+    def at(self, lines, probs, predicate):
+        hits = [i for i, l in enumerate(lines, start=1) if predicate(l)]
+        self.assertTrue(hits)
+        return [p for p in probs if any(p.startswith(f"t.vpr:{i}:") for i in hits)]
+
+    @staticmethod
+    def body_quantifier(l):
+        return "forall q0" in l and not l.strip().startswith("requires")
+
+    @staticmethod
+    def fact_ii(l):
+        return l.startswith("  requires") and "forall q0" in l and "hva_pf_smallsum__0__pf_smallsum__0_pre" in l
+
+    def mutate(self, predicate, old, new):
+        lines = self.FIXTURE.split("\n")
+        hits = [i for i, l in enumerate(lines) if predicate(l)]
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn(old, lines[hits[0]])
+        lines[hits[0]] = lines[hits[0]].replace(old, new)
+        return "\n".join(lines)
+
+    def test_the_emitted_function_and_its_wf_facts_are_clean(self):
+        lines, probs = self.lint(self.FIXTURE)
+        self.assertEqual([p for p in probs if "no position map" not in p], [])
+
+    # --- (1) the quantifier of a body
+    def test_the_twins_of_the_body_quantifier(self):
+        cases = {
+            "another bound": ("(p_n__1 - 1)", "(p_n__1 - 2)"),
+            "a weaker element condition": (">= (-1000)", ">= (-999)"),
+            "a stronger element condition": ("<= 1000)", "<= 999)"),
+            "reads in the form of the callee's own count": ("(offset_of(p_a__0) + p_n__1)", "(offset_of(p_a__0) + (p_n__1 - 1))"),
+        }
+        for label, (old, new) in cases.items():
+            with self.subTest(case=label):
+                lines, probs = self.lint(self.mutate(self.body_quantifier, old, new))
+                self.assertTrue(any("decision 0061 item 11" in p and "`pf_` body" in p for p in self.at(lines, probs, self.body_quantifier)), (label, probs))
+
+    def test_a_body_quantifier_with_no_application_of_a_function_that_has_one_is_refused(self):
+        text = self.FIXTURE.replace("pf_smallsum__0(p_a__0, p_n__1 - 1)", "(p_n__1 - 1)")
+        lines, probs = self.lint(text)
+        self.assertTrue(any("`pf_` body" in p for p in self.at(lines, probs, self.body_quantifier)), probs)
+
+    # --- (2) and (3): the hvq facts of the function's own __wf
+    def test_the_twin_of_the_atoms_of_a_function_wf(self):
+        lines = [l for l in self.FIXTURE.split("\n") if not (l.startswith("  requires") and ".v_int" in l and "hvq_" not in l and "hva_" not in l)]
+        lines, probs = self.lint("\n".join(lines))
+        self.assertTrue(any("decision 0061 item 11" in p and "place atom" in p for p in probs), probs)
+
+    # --- (4) fact (ii)'s V
+    def test_the_twins_of_the_emitted_v(self):
+        cases = {
+            "a weaker quantified element condition": (">= (-1000)", ">= (-999)"),
+            "another bound of the quantifier": ("< (p_n__1 - 1)", "< p_n__1"),
+        }
+        for label, (old, new) in cases.items():
+            with self.subTest(case=label):
+                lines, probs = self.lint(self.mutate(self.fact_ii, old, new))
+                self.assertTrue(any("decision 0062" in p for p in self.at(lines, probs, self.fact_ii)), (label, probs))
+
+
+class MixedRowAndTagTests(unittest.TestCase):
+    """Decision 0062 item 12 (audit follow-up, il-analyst-2's emitted shapes): an obligation row of an `f__wf` method may hold both kinds of ghost (the
+    overflow row of a body that adds an application and an element read), never an assumed fact other than fact (ii)'s V; fact (i) is checked against
+    the callee's result tag, which an integer, non-enumeration result always has."""
+
+    def program(self, extra):
+        k = QuantifiedGuardTests
+        text = k.PROGRAM.replace("@@FACT@@", f"  requires ({k.V} && {k.Q}) ==> {k.BODY}")
+        lines = text.rstrip("\n").split("\n")
+        assert lines[-1] == "}"
+        lines[-1:-1] = [extra]
+        return lines
+
+    def problems_at(self, extra):
+        lines = self.program(extra)
+        probs = lv.lint_vpr("\n".join(lines) + "\n", None, "t.vpr", "t.vpr.map")
+        line = len(lines) - 1
+        return [p for p in probs if p.startswith(f"t.vpr:{line}:")]
+
+    MIXED = "hva_f_f__2__pf_g__1_post(a, n, m) + hvq_f_f__2__a_post(0) <= 4294967294"
+
+    def test_a_row_over_both_kinds_of_ghost_is_clean(self):
+        self.assertEqual(self.problems_at(f"  assert {self.MIXED}"), [])
+        self.assertEqual(self.problems_at(f"  assert (n > 0) ==> ({self.MIXED})"), [])
+
+    def test_the_twins_of_the_mixed_row(self):
+        cases = {
+            "an assumed fact": f"  requires {self.MIXED}",
+            "an exhale": f"  exhale {self.MIXED}",
+            "an assume": f"  assume {self.MIXED}",
+            "a row that reads the heap": "  assert hva_f_f__2__pf_g__1_post(a, n, m) + hvq_f_f__2__a_post(0) <= loc(block_of(a), 0).v_int",
+        }
+        for label, line in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue(self.problems_at(line), label)
+
+    def test_fact_i_of_a_callee_without_a_result_tag_is_refused(self):
+        a = ApplicationGhostTests.APP
+        lines = ApplicationGhostTests.program(requires=(f"(-9223372036854775808 <= {a}(n)) && ({a}(n) <= 9223372036854775807)",))
+        self.assertTrue(lines[0].endswith("9223372036854775807"))
+        lines[0] = lines[0][:lines[0].index(" // cerastes:result")]
+        probs = lv.lint_vpr(*build_rows(lines), "t.vpr", "t.vpr.map")
+        self.assertTrue(any("carries no `// cerastes:result" in p for p in probs), probs)
 
 
 if __name__ == "__main__":

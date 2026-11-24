@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <initializer_list>
@@ -207,9 +208,10 @@ public:
     {
         return prog_;
     }
+    // The functions checked: the verified bodies and, from decision 0062 (question 281), each read `pure` function.
     int verified_functions() const
     {
-        return static_cast<int>(to_verify_.size());
+        return static_cast<int>(to_verify_.size()) + pure_read_count();
     }
 
 private:
@@ -323,6 +325,13 @@ private:
         // Record 0061 items 3 and 4: the quantifier whose `pure` function's body is being encoded (null elsewhere): the parameters of the function are the bound
         // variable and `ForallArg`s of it, and every report inside the body is made at the quantifier's site.
         ForallSite* forall {nullptr};
+        // Record 0062 items 3 and 4: the read `pure` function whose contract or body is being encoded (null elsewhere).  An application may stand in it; `pure_body`
+        // says it is the body (its parameters are `enk_param_ref`s of a copy of the body, so that it is read as a `requires` is: item 3's contract form).
+        a_routine_ptr pure_fn {nullptr};
+        bool pure_body {false};
+        // Record 0062 item 4: inside a position that must read no memory (the count or guard of an atom, an element's index, a trailing argument of
+        // `cerastes_forall`): an application there is `unsupported_annotation`, since a call counts as a read.
+        int no_read {0};
     };
 
     vir::Program prog_;
@@ -757,7 +766,9 @@ private:
                    "a subscript of something that is not a pointer to a bool, an integer, an enumeration or a pointer");
             return nullptr;
         }
+        ++cx_.no_read; // record 0062 item 4: an application in an index counts as a read of memory
         const Expr* ix {expr(index)};
+        --cx_.no_read;
         if (ix == nullptr)
         {
             return nullptr;
@@ -958,7 +969,9 @@ private:
             reject_args(Diag::char_subscripts, index->position, {name});
             return nullptr;
         }
+        ++cx_.no_read; // record 0062 item 4: an application in an index counts as a read of memory
         const Expr* ix {expr(index)};
+        --cx_.no_read;
         if (ix == nullptr)
         {
             return nullptr;
@@ -3838,7 +3851,9 @@ private:
                     " with a count that is not an integer (a bool, an enumeration, a floating-point or a pointer count is refused, decision 0060 item 3)");
             return nullptr;
         }
+        ++cx_.no_read; // record 0062 item 4: a count reads no memory, and an application counts as a read
         const Expr* cnt {expr(cn)};
+        --cx_.no_read;
         if (cnt == nullptr)
         {
             return nullptr;
@@ -4659,6 +4674,8 @@ private:
         }
         vir::Function* f {prog_.add_function(rname(r), ret.t, loc_of(decl), end)};
         fns_[r] = f;
+        f->pure = pure_reading_.count(r) !=
+                  0U; // record 0062: a read `pure` function is neither a verified method nor a trusted one
         restrict_at_[f] = at;
         std::vector<int> restricted;
         // A definition's own parameter variables carry the qualifiers too (C++ strips the top-level ones from the parameter type, P58).
@@ -4896,6 +4913,7 @@ private:
             const Annot k {classify(a)};
             cx_.contract = true;
             cx_.annot = k;
+            cx_.pure_fn = f->pure ? r : nullptr; // record 0062: an application may stand in a read function's contract
             cx_.binder_present = has_binder(a);
             cx_.binder_name.clear();
             for (const AnnotArg& g : arguments_of(a))
@@ -4947,6 +4965,10 @@ private:
             {
                 continue;
             }
+            if (f->pure && !pure_clause_ok(c, k, a->position))
+            {
+                continue; // item 3's rules on a read function's contract: reported
+            }
             vir::Clause cl {c, loc_of(a->position)};
             (k == Annot::requires_ ? f->requires_ : f->ensures_).push_back(cl);
         }
@@ -4986,6 +5008,13 @@ private:
                 ok = false;
                 continue;
             }
+            if (cx_.pure_fn != nullptr && vir::reads_heap(*x))
+            {
+                reject(Diag::unsupported_annotation, g.expr->position,
+                       "a measure that reads memory in a `pure` function (M4.5f1, decision 0062 item 3)");
+                ok = false;
+                continue;
+            }
             parts.push_back(vir::Clause {x, where});
         }
         if (n == 0)
@@ -5005,6 +5034,881 @@ private:
         }
     }
     std::set<a_routine_ptr> measure_rejected_; // functions whose `decreases` was rejected
+
+    // ---- pure functions as Viper functions (record 0062) -------------------------------------------------------------
+    // A `pure` function that an annotation of a `check` or of another read function applies, or that carries a `requires`, an `ensures` or a `decreases`, is
+    // READ (item 2): its signature by item 3's rules, its contract through `encode_contract` (with `cx_.pure_fn` set), its body, one `return E;`, as a copy whose
+    // parameters are `enk_param_ref`s, so that `E` is encoded exactly as a clause of a `requires` is (the entry state, reads through the parameters framed by the
+    // function's own atoms).  The result is a vir::Function with `pure` set and `pure_body` the encoded `E`; an application of it is an `Expr::Kind::Apply`.
+    struct PureRead
+    {
+        vir::Function* f {nullptr};
+        bool ok {false};
+        bool reading {false};
+    };
+    std::map<a_routine_ptr, PureRead> pure_;
+    std::vector<a_routine_ptr> pure_order_; // the order the functions were first met
+    std::set<a_routine_ptr>
+        pure_reading_; // being read: function_of marks the vir::Function `pure` and encode_contract sets `cx_.pure_fn`
+    std::map<a_routine_ptr, bool>
+        spec_clean_; // the checks Encoder::run makes on every spec routine, run once: whether they found nothing
+    // an application of a read function inside a read function's body or contract (item 10's graph)
+    struct PureEdge
+    {
+        a_routine_ptr callee {nullptr};
+        bool in_contract {false};
+        a_source_position at {};
+    };
+    std::map<a_routine_ptr, std::vector<PureEdge>> pure_edges_;
+    std::deque<an_expr_node> pure_nodes_; // the copies of the bodies read (stable addresses)
+
+    int pure_read_count() const
+    {
+        int n {0};
+        for (const auto& [r, st] : pure_)
+        {
+            n += st.ok && !st.reading ? 1 : 0;
+        }
+        return n;
+    }
+
+    // The checks every spec routine gets before anything else (record 0062 item 2): markers on a parameter, a structure by value, a global in the body.  Run
+    // once per routine, by the run loop or by the first read; true when they found nothing.
+    bool spec_routine_clean(a_routine_ptr r)
+    {
+        if (auto it {spec_clean_.find(r)}; it != spec_clean_.end())
+        {
+            return it->second;
+        }
+        const size_t before {reported_count()};
+        Ctx saved {std::move(cx_)};
+        reject_markers_in_spec_function(r);       // decision 0042 item 4
+        reject_struct_value_in_spec_signature(r); // decision 0044 items 3-4
+        if (verified_body(r) != nullptr)
+        {
+            reject_globals_in_spec_body(r);
+        }
+        cx_ = std::move(saved);
+        const bool clean {reported_count() == before};
+        spec_clean_[r] = clean;
+        return clean;
+    }
+
+    static bool carries_pure_contract(a_routine_ptr r)
+    {
+        for (an_attribute_ptr a : contracts_of(r))
+        {
+            const Annot k {classify(a)};
+            if (k == Annot::requires_ || k == Annot::ensures || k == Annot::decreases)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Item 3's rules on the function, each `pure_function` at `at` with the rule it breaks.  True when the function can be read.
+    bool pure_function_rules(a_routine_ptr r, const a_source_position& at)
+    {
+        const std::string name {rname(r)};
+        auto fail = [&](const std::string& rule)
+        {
+            reject_args(Diag::pure_function, at, {name, rule});
+            return false;
+        };
+        if (verified_body(r) == nullptr)
+        {
+            reject(
+                Diag::unsupported_annotation, at,
+                "a call of the `pure` function \"" + name +
+                    "\", which has no body in a verified file of this unit (a declaration only, or defined in a system header: its definition is read from the unit; M6's contract manifest, decision 0062 item 3)");
+            return false;
+        }
+        if (r->is_weak || r->is_weakref)
+        {
+            reject(Diag::unsupported_declaration, at, "a weak function (another unit may replace its definition)");
+            return false;
+        }
+        if (r->is_lambda_body || r->is_template_function || r->assoc_template != nullptr ||
+            r->is_prototype_instantiation)
+        {
+            return fail("it is a template, one of its instances or a lambda (M5)");
+        }
+        if (r->source_corresp.is_class_member)
+        {
+            return fail("it is a member function (M7)");
+        }
+        if (r->is_declared_constexpr || r->is_constexpr || r->is_consteval)
+        {
+            return fail(r->is_consteval ? "it is `consteval` (M7)" : "it is `constexpr` (M7)");
+        }
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
+        if (x == nullptr || x->has_ellipsis || !x->prototyped)
+        {
+            return fail("it is variadic or declared without a prototype");
+        }
+        a_type_ptr rt {return_type(r) != nullptr ? skip_typerefs(return_type(r)) : nullptr};
+        if (rt == nullptr || rt->kind != tk_integer)
+        {
+            // `bool`, the integer types and the enumerations are all `tk_integer` entries
+            return fail("it does not return `bool`, an integer or an enumeration (a pointer or a structure: M4.5f1)");
+        }
+        std::vector<a_variable_ptr> pvars;
+        if (a_scope_ptr bs {body_scope(r)})
+        {
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
+            {
+                pvars.push_back(v);
+            }
+        }
+        size_t pk {0U};
+        for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next, ++pk)
+        {
+            if (pk >= pvars.size())
+            {
+                return fail("its parameters cannot be read");
+            }
+            const a_type_qualifier_set quals {
+                p->qualifiers | (pvars[pk]->type != nullptr ? f_get_type_qualifiers(pvars[pk]->type, TRUE) : 0U)};
+            const VType pt {signature_vtype(p->type, true, quals)};
+            if (!pt.ok)
+            {
+                return fail("a parameter has a type a contract cannot hold");
+            }
+            if (pt.restrict_q)
+            {
+                reject(
+                    Diag::unsupported_annotation, at,
+                    "\"" + name +
+                        "\" has a `restrict` parameter (decision 0043 item 10: `restrict` stays rejected until M8 models it)");
+                return false;
+            }
+            const vir::Type* leaf {&pt.t};
+            while (leaf->is_ptr() && leaf->pointee != nullptr)
+            {
+                leaf = leaf->pointee;
+            }
+            if (!leaf->is_bool() && !leaf->is_int())
+            {
+                return fail(
+                    "a parameter is not a `bool`, an integer, an enumeration or a pointer to one of those or to a pointer (a structure: M4.5f1)");
+            }
+        }
+        if (pvars.size() != pk)
+        {
+            return fail("its parameters cannot be read");
+        }
+        return check_signature(r, at);
+    }
+
+    // The body of a read function, as the statements the front end keeps: blocks, `static_assert`s (passed to the cross-check of record 0024 item 2, with the
+    // function's own context) and exactly one `return E;` at the end.  False after a report.
+    bool read_pure_statements(a_statement_ptr s, a_routine_ptr r, const a_source_position& at, a_statement_ptr* ret,
+                              int depth)
+    {
+        const std::string name {rname(r)};
+        if (s == nullptr)
+        {
+            return true;
+        }
+        if (*ret != nullptr)
+        {
+            reject_args(Diag::pure_function, at,
+                        {name, "its body is not exactly one `return E;` (a statement after the `return`: M4.5f1)"});
+            return false;
+        }
+        switch (s->kind)
+        {
+            case stmk_block:
+                if (depth >= 8)
+                {
+                    reject_args(Diag::pure_function, at,
+                                {name, "its body is not exactly one `return E;` (blocks nested too deeply)"});
+                    return false;
+                }
+                for (a_statement_ptr c {s->variant.block.statements}; c != nullptr; c = c->next)
+                {
+                    if (!read_pure_statements(c, r, at, ret, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            case stmk_decl:
+                for (an_il_entity_list_entry_ptr en {s->variant.decl.entities}; en != nullptr; en = en->next)
+                {
+                    if (en->entity.kind == iek_static_assertion)
+                    {
+                        encode_block_static_assertion(reinterpret_cast<a_static_assertion_ptr>(en->entity.ptr));
+                        continue;
+                    }
+                    if (en->entity.kind == iek_type && reinterpret_cast<a_type_ptr>(en->entity.ptr)->kind == tk_typeref)
+                    {
+                        continue; // a typedef declares nothing a body reads
+                    }
+                    reject_args(
+                        Diag::pure_function, at,
+                        {name,
+                         "its body declares a local variable or a type (the body is exactly one `return E;`: M4.5f1)"});
+                    return false;
+                }
+                return true;
+            case stmk_return:
+                if (s->expr == nullptr || s->variant.return_dynamic_init != nullptr)
+                {
+                    reject_args(Diag::pure_function, at, {name, "its `return` has no value that can be read"});
+                    return false;
+                }
+                *ret = s;
+                return true;
+            default:
+                reject_args(
+                    Diag::pure_function, at,
+                    {name,
+                     "its body is not exactly one `return E;` (an `if`, a loop, an assignment or another statement: M4.5f1)"});
+                return false;
+        }
+    }
+
+    // A copy of `e` in which every parameter variable is the `enk_param_ref` of its position, the form a contract reads parameters in.
+    an_expr_node_ptr clone_pure_expr(an_expr_node_ptr e, const std::map<a_variable_ptr, int>& params)
+    {
+        if (e == nullptr)
+        {
+            return nullptr;
+        }
+        pure_nodes_.push_back(*e);
+        an_expr_node_ptr n {&pure_nodes_.back()};
+        n->next = nullptr;
+        if (e->kind == enk_variable)
+        {
+            if (auto it {params.find(e->variant.variable.ptr)}; it != params.end())
+            {
+                n->kind = enk_param_ref;
+                n->variant.param_ref.param_num = static_cast<unsigned>(it->second) + 1U;
+                n->variant.param_ref.levels_up = 0U;
+            }
+        }
+        else if (e->kind == enk_operation)
+        {
+            n->variant.operation.operands = nullptr;
+            an_expr_node_ptr last {nullptr};
+            for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
+            {
+                an_expr_node_ptr c {clone_pure_expr(o, params)};
+                if (last == nullptr)
+                {
+                    n->variant.operation.operands = c;
+                }
+                else
+                {
+                    last->next = c;
+                }
+                last = c;
+            }
+        }
+        return n;
+    }
+
+    // The first assignment, increment or decrement in `e` (a call is not one: it is an application or `call_in_annotation`), or null.
+    an_expr_node_ptr first_pure_write(an_expr_node_ptr e, int depth)
+    {
+        if (e == nullptr || e->kind != enk_operation || depth > 1000)
+        {
+            return nullptr;
+        }
+        if (is_effect_operation(e) && !is_call_kind(e->variant.operation.kind))
+        {
+            return e;
+        }
+        for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
+        {
+            if (an_expr_node_ptr w {first_pure_write(o, depth + 1)})
+            {
+                return w;
+            }
+        }
+        return nullptr;
+    }
+
+    // `E` of the body, encoded in the contract form of the function's entry state (record 0062 item 3).  False after a report.
+    bool encode_pure_body(a_routine_ptr r, vir::Function* f, const a_source_position& at)
+    {
+        a_statement_ptr ret {nullptr};
+        cx_ = Ctx();
+        cx_.routine = r;
+        cx_.fn = f;
+        cx_.stmt_pos = at;
+        if (!read_pure_statements(verified_body(r), r, at, &ret, 0))
+        {
+            return false;
+        }
+        if (ret == nullptr)
+        {
+            reject_args(Diag::pure_function, at, {rname(r), "its body is not exactly one `return E;`"});
+            return false;
+        }
+        std::map<a_variable_ptr, int> params;
+        int k {0};
+        if (a_scope_ptr bs {body_scope(r)})
+        {
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next, ++k)
+            {
+                params[v] = k;
+            }
+        }
+        an_expr_node_ptr e {clone_pure_expr(ret->expr, params)};
+        // an assignment, `++` or `--` in `E` has the tag it has in an annotation (the front end scans only the annotation's own expression, not a body it calls)
+        if (an_expr_node_ptr w {first_pure_write(e, 0)}; w != nullptr)
+        {
+            reject_args(Diag::annotation_side_effect, w->position,
+                        {"an assignment or an increment in the body of a `pure` function"});
+            return false;
+        }
+        cx_ = Ctx();
+        cx_.routine = r;
+        cx_.fn = f;
+        cx_.stmt_pos = ret->position.seq != 0U ? ret->position : at;
+        cx_.contract = true;
+        cx_.annotation = true;
+        cx_.annot = Annot::requires_;
+        cx_.pure_fn = r;
+        cx_.pure_body = true;
+        const Expr* x {expr(e)}; // a value, as the operand of a `return` is: no truth context
+        if (x == nullptr)
+        {
+            return false;
+        }
+        if (x->type != f->ret)
+        {
+            reject(Diag::unsupported_expression, ret->position.seq != 0U ? ret->position : at,
+                   "a returned value that is not of the declared result type of \"" + rname(r) + "\"");
+            return false;
+        }
+        if (loaded_read(x) != nullptr)
+        {
+            reject(Diag::unsupported_annotation, ret->position.seq != 0U ? ret->position : at, kLoadedReadMessage);
+            return false;
+        }
+        f->pure_body = x;
+        return true;
+    }
+
+    // The function `r` as a Viper function, read once (item 2); null after a rejection (reported at `at`, the call, or at the function's declaration when
+    // only its contract made it read).
+    vir::Function* read_pure(a_routine_ptr r, const a_source_position& at)
+    {
+        if (auto it {pure_.find(r)}; it != pure_.end())
+        {
+            if (it->second.reading)
+            {
+                auto fi {fns_.find(r)};
+                return fi != fns_.end() ? fi->second : nullptr;
+            }
+            return it->second.ok ? it->second.f : nullptr;
+        }
+        PureRead& st {pure_[r]};
+        st.reading = true;
+        pure_order_.push_back(r);
+        const size_t before {reported_count()};
+        Ctx saved {std::move(cx_)};
+        cx_ = Ctx();
+        cx_.routine = r;
+        cx_.stmt_pos = r->source_corresp.decl_position;
+        vir::Function* f {nullptr};
+        const a_source_position decl {r->source_corresp.decl_position};
+        if (spec_routine_clean(r) && pure_function_rules(r, at))
+        {
+            pure_reading_.insert(r);
+            f = function_of(r, true, decl);
+            pure_reading_.erase(r);
+            if (f != nullptr && reported_count() == before && encode_pure_body(r, f, decl) &&
+                reported_count() == before)
+            {
+                st.f = f;
+                st.ok = true;
+            }
+        }
+        st.reading = false;
+        cx_ = std::move(saved);
+        return st.ok ? st.f : nullptr;
+    }
+
+    // the parameters of a read function that an atom of its `requires` names (the pointers an application passes where the callee reads)
+    static std::set<int> atom_parameters(const vir::Function& f)
+    {
+        std::set<int> out;
+        std::function<void(const Expr*)> walk {
+            [&](const Expr* x)
+            {
+                if (x == nullptr)
+                {
+                    return;
+                }
+                if (x->kind == Expr::Kind::Atom && x->a != nullptr && x->a->kind == Expr::Kind::Formal)
+                {
+                    out.insert(x->a->index);
+                }
+                for (const Expr* y : {x->a, x->b, x->c})
+                {
+                    walk(y);
+                }
+                for (const Expr* y : x->args)
+                {
+                    walk(y);
+                }
+            }};
+        for (const vir::Clause& c : f.requires_)
+        {
+            walk(c.expr);
+        }
+        return out;
+    }
+
+    // the parameters of a read function that a `cerastes_forall` of its `requires` takes as a trailing argument (cut 2: an application's argument for such a
+    // parameter is read inside the quantifier, so it reads no memory and a pointer among them is a bare parameter, a pointer variable or a named local array)
+    static std::set<int> forall_parameters(const vir::Function& f)
+    {
+        std::set<int> out;
+        std::function<void(const Expr*, bool)> walk {[&](const Expr* x, bool in_args)
+                                                     {
+                                                         if (x == nullptr)
+                                                         {
+                                                             return;
+                                                         }
+                                                         if (in_args && x->kind == Expr::Kind::Formal)
+                                                         {
+                                                             out.insert(x->index);
+                                                         }
+                                                         if (x->kind == Expr::Kind::Forall)
+                                                         {
+                                                             for (const Expr* y : x->args)
+                                                             {
+                                                                 walk(y, true);
+                                                             }
+                                                             return;
+                                                         }
+                                                         for (const Expr* y : {x->a, x->b, x->c})
+                                                         {
+                                                             walk(y, in_args);
+                                                         }
+                                                         for (const Expr* y : x->args)
+                                                         {
+                                                             walk(y, in_args);
+                                                         }
+                                                     }};
+        for (const vir::Clause& c : f.requires_)
+        {
+            walk(c.expr, false);
+        }
+        return out;
+    }
+
+    // Whether a value clause of a read function's `requires` reads memory (item 3): a read or an atom does, an application does when its callee reads
+    // (`value_reads_memory` ignores a quantifier: the one clause that may read, cut 2).
+    static bool value_reads_memory(const Expr* x)
+    {
+        if (x == nullptr || x->kind == Expr::Kind::Forall)
+        {
+            return false;
+        }
+        if (x->kind == Expr::Kind::Deref || x->kind == Expr::Kind::Atom)
+        {
+            return true;
+        }
+        if (x->kind == Expr::Kind::Apply && x->callee != nullptr && contract_has_atom(*x->callee, false))
+        {
+            return true;
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (value_reads_memory(y))
+            {
+                return true;
+            }
+        }
+        for (const Expr* y : x->args)
+        {
+            if (value_reads_memory(y))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool mentions_kind(const Expr* x, Expr::Kind k)
+    {
+        if (x == nullptr)
+        {
+            return false;
+        }
+        if (x->kind == k)
+        {
+            return true;
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (mentions_kind(y, k))
+            {
+                return true;
+            }
+        }
+        for (const Expr* y : x->args)
+        {
+            if (mentions_kind(y, k))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A read through a pointer loaded from memory (`**pp`, `(*pp)[i]`): the first such Deref in `x`, or null.  A read function's atoms stand on its parameters'
+    // cells only, so the pointee of a loaded pointer can never be framed (audit round 2, R2-S5); a quantifier's own reads are written over its arguments.
+    static const Expr* loaded_read(const Expr* x)
+    {
+        if (x == nullptr || x->kind == Expr::Kind::Forall)
+        {
+            return nullptr;
+        }
+        if (x->kind == Expr::Kind::Deref && x->a != nullptr)
+        {
+            const Expr* base {x->a->kind == Expr::Kind::ElemAddr ? x->a->a : x->a};
+            if (base == nullptr || base->kind != Expr::Kind::Formal)
+            {
+                return x;
+            }
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (const Expr* r {loaded_read(y)})
+            {
+                return r;
+            }
+        }
+        for (const Expr* y : x->args)
+        {
+            if (const Expr* r {loaded_read(y)})
+            {
+                return r;
+            }
+        }
+        return nullptr;
+    }
+
+    static constexpr const char* kLoadedReadMessage =
+        "a read through a pointer loaded from memory in a `pure` function (its atoms name only its parameters' cells: M4.5f1, decision 0062 item 3)";
+
+    // Item 3's rules on one clause of a read function's contract, at the clause `at`: a `requires` holds value clauses that read no memory (a quantifier excepted)
+    // and, as top-level conjuncts with no guard, `reads` and `reads_range` of its own pointer parameters; an `ensures` holds no atom and no `old`.  False after a report.
+    bool pure_clause_ok(const Expr* c, Annot k, const a_source_position& at)
+    {
+        const std::string name {cx_.fn != nullptr ? cx_.fn->c_name : std::string("a function")};
+        if (loaded_read(c) != nullptr)
+        {
+            reject(Diag::unsupported_annotation, at, kLoadedReadMessage);
+            return false;
+        }
+        if (k == Annot::ensures)
+        {
+            if (holds_atom(*c))
+            {
+                reject(
+                    Diag::unsupported_annotation, at,
+                    "a permission atom in the `ensures` of the `pure` function \"" + name +
+                        "\" (it takes nothing and returns nothing: its `requires` atoms are what it reads; M4.5f1, decision 0062 item 3)");
+                return false;
+            }
+            if (mentions_kind(c, Expr::Kind::Old))
+            {
+                reject(Diag::unsupported_annotation, at,
+                       "`old` in the `ensures` of the `pure` function \"" + name +
+                           "\" (a function has one state, decision 0062 item 3)");
+                return false;
+            }
+            return true;
+        }
+        std::vector<const Expr*> conjuncts;
+        std::function<void(const Expr*)> spine {
+            [&](const Expr* x)
+            {
+                if (x != nullptr && x->kind == Expr::Kind::Binary && x->bop == vir::BinaryOp::LAnd)
+                {
+                    spine(x->a);
+                    spine(x->b);
+                    return;
+                }
+                conjuncts.push_back(x);
+            }};
+        spine(c);
+        for (const Expr* x : conjuncts)
+        {
+            if (x != nullptr && x->kind == Expr::Kind::Atom)
+            {
+                const bool reads {x->atom == vir::AtomKind::Reads || x->atom == vir::AtomKind::ReadsRange};
+                if (!reads || x->a == nullptr || x->a->kind != Expr::Kind::Formal)
+                {
+                    reject(
+                        Diag::unsupported_annotation, at,
+                        std::string(
+                            "`owns`, `owns_range`, `owns_block`, `live` or a permission atom on anything but a pointer parameter in the `requires` of the `pure` function \"") +
+                            name +
+                            "\" (a `pure` function reads: `reads(*p)` and `reads_range(p, n)`; M4.5f1, decision 0062 item 3)");
+                    return false;
+                }
+                continue;
+            }
+            if (x != nullptr && holds_atom(*x))
+            {
+                reject(
+                    Diag::unsupported_annotation, at,
+                    "a permission atom under a guard, `||`, `!` or `?:` in the `requires` of the `pure` function \"" +
+                        name + "\" (an atom is a top-level conjunct there; M4.5f1, decision 0062 item 3)");
+                return false;
+            }
+            if (value_reads_memory(x))
+            {
+                reject(
+                    Diag::unsupported_annotation, at,
+                    "a value clause that reads memory in the `requires` of the `pure` function \"" + name +
+                        "\" (it is lowered at every application over the arguments; the one clause that may read is a `cerastes_forall`; M4.5f1, decision 0062 item 3)");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // `g(e_1, ..., e_m)`, a call of a `pure` function in an annotation (record 0062 item 4).  Where an application may not stand it is the rejection that
+    // names where it is lifted; in an ordinary function's `requires` or `ensures` and in a loop invariant it is still `call_in_annotation` (parts C and D).
+    const Expr* application(an_expr_node_ptr e, a_routine_ptr callee, const std::vector<an_expr_node_ptr>& ops)
+    {
+        const std::string name {rname(callee)};
+        const a_source_position at {e->position};
+        auto refuse = [&](const std::string& where)
+        {
+            reject(Diag::unsupported_annotation, at, "a call of \"" + name + "\" " + where + " (decision 0062 item 4)");
+            return static_cast<const Expr*>(nullptr);
+        };
+        if (cx_.forall != nullptr)
+        {
+            reject(Diag::call_in_annotation, at, name);
+            return nullptr;
+        }
+        if (cx_.old_depth > 0)
+        {
+            return refuse("under `old` (an application counts as a read of memory: M4.5e2)");
+        }
+        if (cx_.annot == Annot::decreases || (cx_.loop_clause && !cx_.loop_invariant))
+        {
+            return refuse("in a `decreases` (a measure applies no function: M4.5f1)");
+        }
+        if (cx_.no_read > 0 || cx_.owning_count)
+        {
+            return refuse(
+                "in a position that must read no memory (the count of an atom, an element's index, a trailing argument of `cerastes_forall`: a call counts as a read there; M4.5e2)");
+        }
+        if (!cx_.check_clause && cx_.pure_fn == nullptr)
+        {
+            reject(Diag::call_in_annotation, at,
+                   name); // an ordinary function's contract, a loop invariant: parts C and D
+            return nullptr;
+        }
+        vir::Function* f {read_pure(callee, at)};
+        if (f == nullptr)
+        {
+            return nullptr;
+        }
+        if (ops.size() - 1U != f->params.size())
+        {
+            reject(Diag::unsupported_expression, at,
+                   "a call whose arguments do not match the declaration of \"" + name + "\"");
+            return nullptr;
+        }
+        std::set<int> atoms {atom_parameters(*f)};
+        const std::set<int> quantified {forall_parameters(*f)};
+        atoms.insert(quantified.begin(), quantified.end());
+        std::vector<const Expr*> args;
+        for (size_t i {1U}; i < ops.size(); ++i)
+        {
+            const size_t k {i - 1U};
+            const vir::Type& pty {f->params[k].type};
+            const bool named_by_atom {atoms.count(static_cast<int>(k)) != 0U};
+            an_expr_node_ptr use {pty.is_ptr() ? peel_one_generated_cast(ops[i]) : ops[i]};
+            const Expr* a {nullptr};
+            bool is_array {false};
+            if (pty.is_ptr() && !cx_.contract && array_variable(use) != nullptr)
+            {
+                // a named local array in a `check` (record 0061 item 3, as `cerastes_forall` reads it): its decay collapsed to the array
+                a_variable_ptr av {array_variable(use)};
+                auto it {cx_.vars.find(av)};
+                if (cx_.rejected_vars.count(av) != 0U || it == cx_.vars.end() || !it->second->type.is_array() ||
+                    cx_.declaring == av || cx_.pending.count(av) != 0U)
+                {
+                    if (it == cx_.vars.end() && cx_.rejected_vars.count(av) == 0U)
+                    {
+                        reject(Diag::unsupported_annotation, ops[i]->position,
+                               "an array argument of \"" + name +
+                                   "\" that is not a local array of this function (a global array: M4.5e1e)");
+                    }
+                    return nullptr;
+                }
+                a = b_.addr_of(it->second, loc_of(use->position));
+                is_array = true;
+                if (it->second->type.element == nullptr || pty.pointee == nullptr ||
+                    !(*it->second->type.element == *pty.pointee))
+                {
+                    reject(Diag::unsupported_expression, ops[i]->position,
+                           "an argument of \"" + name + "\" whose type is not the type of the parameter");
+                    return nullptr;
+                }
+            }
+            else
+            {
+                allow_enum_conversion(ops[i]);
+                a = expr(ops[i]);
+                if (a == nullptr)
+                {
+                    return nullptr;
+                }
+                if (a->type != pty)
+                {
+                    reject(Diag::unsupported_expression, ops[i]->position,
+                           "an argument of \"" + name + "\" whose type is not the type of the parameter");
+                    return nullptr;
+                }
+            }
+            if (quantified.count(static_cast<int>(k)) != 0U &&
+                (vir::reads_heap(*a) || mentions_kind(a, Expr::Kind::Old)))
+            {
+                reject(
+                    Diag::unsupported_annotation, ops[i]->position,
+                    "an argument of \"" + name +
+                        "\" that reads memory for a parameter its quantifier takes (the read is written inside the quantifier: M4.5e2, decision 0062 item 7)");
+                return nullptr;
+            }
+            if (named_by_atom && pty.is_ptr())
+            {
+                const bool bare {cx_.contract
+                                     ? a->kind == Expr::Kind::Formal
+                                     : (a->kind == Expr::Kind::Local && a->var != nullptr && !a->var->address_taken) ||
+                                           is_array};
+                if (!bare)
+                {
+                    reject(
+                        Diag::unsupported_annotation, ops[i]->position,
+                        cx_.contract
+                            ? "a pointer argument of \"" + name +
+                                  "\", which reads through it, that is not a bare pointer parameter of the contract (`&a[1]`, `p + 1`, a loaded pointer, the result: M4.5e2, decision 0062 item 4)"
+                            : "a pointer argument of \"" + name +
+                                  "\", which reads through it, that is not a pointer variable (not address-taken) or a named local array (`&a[1]`, `p + 1`, a loaded pointer, a global array: M4.5e2, decision 0062 item 4)");
+                    return nullptr;
+                }
+            }
+            spell_formals(a);
+            args.push_back(a);
+        }
+        if (cx_.pure_fn != nullptr)
+        {
+            pure_edges_[cx_.pure_fn].push_back(PureEdge {callee, !cx_.pure_body, at});
+        }
+        std::string text {name + "("};
+        for (size_t k {0U}; k < args.size(); ++k)
+        {
+            const Expr* a {args[k]};
+            std::string t {a->kind == Expr::Kind::AddrOf && a->var != nullptr ? a->var->name : count_text(a)};
+            if (t.empty())
+            {
+                t = a->kind == Expr::Kind::Local && a->var != nullptr ? a->var->name : std::string("...");
+            }
+            text += (k != 0U ? ", " : "") + t;
+        }
+        text += ")";
+        return b_.apply(f, std::move(args), std::move(text), loc_of(at));
+    }
+
+    // Item 10: the applications among the read functions.  A function that applies itself in its body needs a `decreases`; every other cycle, between two or
+    // more functions or through a `requires` or an `ensures`, is rejected (M4.5f2).
+    void check_pure_cycles()
+    {
+        auto reaches = [&](a_routine_ptr from, a_routine_ptr target)
+        {
+            std::set<a_routine_ptr> seen;
+            std::vector<a_routine_ptr> todo {from};
+            while (!todo.empty())
+            {
+                a_routine_ptr n {todo.back()};
+                todo.pop_back();
+                if (n == target)
+                {
+                    return true;
+                }
+                if (!seen.insert(n).second)
+                {
+                    continue;
+                }
+                if (auto it {pure_edges_.find(n)}; it != pure_edges_.end())
+                {
+                    for (const PureEdge& e : it->second)
+                    {
+                        todo.push_back(e.callee);
+                    }
+                }
+            }
+            return false;
+        };
+        for (a_routine_ptr r : pure_order_)
+        {
+            const auto st {pure_.find(r)};
+            auto edges {pure_edges_.find(r)};
+            if (st == pure_.end() || !st->second.ok || edges == pure_edges_.end())
+            {
+                continue;
+            }
+            bool self_body {false};
+            bool mutual {false};
+            for (const PureEdge& e : edges->second)
+            {
+                if (!reaches(e.callee, r))
+                {
+                    continue; // not on a cycle
+                }
+                if (e.in_contract)
+                {
+                    cx_ = Ctx();
+                    cx_.routine = r;
+                    reject(
+                        Diag::unsupported_annotation, e.at,
+                        "a call of \"" + rname(e.callee) + "\" in the contract of the `pure` function \"" + rname(r) +
+                            "\", which reaches \"" + rname(r) +
+                            "\" again (a `pure` function reaching itself through a `requires` or an `ensures` would escape the termination check: M4.5f2, decision 0062 item 10)");
+                }
+                else if (e.callee == r)
+                {
+                    self_body = true;
+                }
+                else
+                {
+                    mutual = true;
+                }
+            }
+            cx_ = Ctx();
+            cx_.routine = r;
+            if (mutual)
+            {
+                reject(Diag::unsupported_annotation, r->source_corresp.decl_position,
+                       "mutual recursion between `pure` functions (\"" + rname(r) +
+                           "\" is part of a cycle of calls: M4.5f2, decision 0062 item 10)");
+            }
+            else if (self_body && st->second.f->decreases_.empty() && measure_rejected_.count(r) == 0U)
+            {
+                reject(
+                    Diag::missing_decreases, r->source_corresp.decl_position,
+                    "function \"" + rname(r) +
+                        "\" is recursive (it calls itself) and has no termination measure: write CERASTES_DECREASES(...) after its parameter list");
+            }
+        }
+    }
 
     // ---- types computed from constants (decision 0024 item 6) -------------------------------------------------------------
     // The front end computes an array bound, a `_BitInt` width or a non-type template argument alone and wraps the result; a
@@ -7301,7 +8205,7 @@ private:
 
     // Decision 0042 item 4 ("never ignored"): a marker (`owning` too) on a parameter of a `pure` or `predicate` function, whose signature is never read (its body is not
     // encoded), is rejected rather than accepted without a word.
-    // A pure function or predicate that takes or returns a struct by value (decision 0044 items 3 and 4: M4.5f1 encodes the bodies of specification functions).
+    // A pure function or predicate that takes or returns a struct by value (decision 0044 items 3 and 4; record 0062 item 1: a read `pure` function takes and returns scalars, M4.5f1).
     void reject_struct_value_in_spec_signature(a_routine_ptr r)
     {
         bool by_value {false};
@@ -7323,7 +8227,7 @@ private:
         {
             reject(
                 Diag::unsupported_declaration, r->source_corresp.decl_position,
-                "a pure function or predicate that takes or returns a struct by value (M4.5f1 encodes the bodies of specification functions, decision 0044 item 4)");
+                "a pure function or predicate that takes or returns a struct by value (a read `pure` function takes and returns scalars: M4.5f1, decisions 0044 item 4 and 0062 item 1)");
         }
     }
 
@@ -8883,7 +9787,9 @@ private:
                     "\" with a count that is not an integer (a bool, an enumeration, a floating-point or a pointer count is refused, decision 0060 item 3)");
             return nullptr;
         }
+        ++cx_.no_read; // record 0062 item 4: a count reads no memory, and an application counts as a read
         const Expr* cnt {expr(cn)};
+        --cx_.no_read;
         if (cnt == nullptr)
         {
             return nullptr;
@@ -9734,7 +10640,7 @@ private:
             reject(
                 Diag::unsupported_annotation, at,
                 quoted +
-                    " has a contract (`requires`, `ensures` or `decreases`): a quantifier inlines its body, and contracts on a `pure` function come with M4.5e1d (decision 0061 item 3, question 252)");
+                    " has a contract (`requires`, `ensures` or `decreases`): a quantifier inlines its body and knows nothing of a contract (M4.5e2 lifts it; decision 0062 item 1, question 265)");
             return false;
         }
         // the parameters, by position (P80 (c): the body's variables are the scope's parameter variables)
@@ -10211,7 +11117,9 @@ private:
             }
             else
             {
+                ++cx_.no_read; // record 0062 item 4: a trailing argument of a quantifier reads no memory
                 x = expr(use);
+                --cx_.no_read;
                 if (x == nullptr)
                 {
                     return nullptr;
@@ -11196,6 +12104,15 @@ private:
         {
             // Record 0061 item 2: the quantifier, in every position (a `check` included); cut 3 refuses the namespace spelling in all of them.
             const SpecFn qf {spec_fn(callee)};
+            if (cx_.pure_body && qf != SpecFn::none && qf != SpecFn::old_c)
+            {
+                // record 0062 item 3: the body of a read `pure` function holds a value, never an atom or a quantifier (a named quantified property: M4.5f1)
+                reject(
+                    Diag::unsupported_annotation, e->position,
+                    "\"" + name +
+                        "\" in the body of a `pure` function (its body is a value computed from its parameters and the elements they point to: M4.5f1, decision 0062 item 3)");
+                return nullptr;
+            }
             if (qf == SpecFn::forall)
             {
                 return forall_site(e, ops);
@@ -11254,6 +12171,10 @@ private:
         }
         if (cx_.contract || cx_.annotation)
         {
+            if (marked(callee, Annot::pure) && !marked(callee, Annot::predicate))
+            {
+                return application(e, callee, ops); // record 0062 item 4
+            }
             reject(Diag::call_in_annotation, e->position, name);
             return nullptr;
         }
@@ -22603,12 +23524,12 @@ void Encoder::run(const IlEntities& ents)
             check_attributes(r->source_corresp.attributes, rx != nullptr && rx->does_not_return);
         }
         if (is_spec_routine(r))
-        {                                             // specification, never run: its body is not encoded (0011 item 4)
-            reject_markers_in_spec_function(r);       // decision 0042 item 4
-            reject_struct_value_in_spec_signature(r); // decision 0044 items 3-4
-            if (body != nullptr)
+        {
+            // specification, never run: its body is not encoded unless it is read (0011 item 4; record 0062 item 2): the checks of every spec routine first
+            // (a function they reject is not read further), then a `pure` function with a body that carries a `requires`, an `ensures` or a `decreases` is read
+            if (spec_routine_clean(r) && body != nullptr && marked(r, Annot::pure) && carries_pure_contract(r))
             {
-                reject_globals_in_spec_body(r);
+                read_pure(r, decl);
             }
             continue;
         }
@@ -22714,12 +23635,13 @@ void Encoder::run(const IlEntities& ents)
     add_static_local_atoms(); // decision 0041 item 12: before any contract is read to classify calls or loops
     recheck_restrict_after_static_atoms(); // decision 0044 item 11
     require_measures_in_cycles();
+    check_pure_cycles(); // record 0062 item 10
     check_block_static_assertions(ents);
 }
 
 // Decision 0025 item 5 (amends 0024 item 2): once nothing has been rejected, every static assertion of a verified file that a function
-// memory region holds must have reached encode_block_static_assertion, except in a `predicate` or `pure` routine's region (not encoded
-// until M4.5f).  Anything else, a region no routine owns included, is reported: the encoder never passes what it did not check.
+// memory region holds must have reached encode_block_static_assertion, except in a `predicate` routine's region and in a `pure` routine's that
+// nothing reads (record 0062 item 3: a read `pure` function's assertions are checked as in code).  Anything else, a region no routine owns included, is reported: the encoder never passes what it did not check.
 void Encoder::check_block_static_assertions(const IlEntities& ents)
 {
     if (reported_count() != 0U)
@@ -22747,7 +23669,8 @@ void Encoder::check_block_static_assertions(const IlEntities& ents)
         {
             for (a_routine_ptr r : it->second)
             {
-                spec = spec || is_spec_routine(r);
+                // record 0062 item 3: the region of a READ `pure` function is no longer exempt; an unread one and a `predicate` stay so
+                spec = spec || (is_spec_routine(r) && pure_.count(r) == 0U);
             }
         }
         if (spec)

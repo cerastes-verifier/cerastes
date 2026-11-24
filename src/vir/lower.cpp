@@ -66,7 +66,8 @@ std::string sanitize(const std::string& s)
 
 std::string method_name(const Function& f)
 {
-    return "f_" + sanitize(f.c_name) + "__" + std::to_string(f.id);
+    // record 0062 item 6: a read `pure` function is the Viper function `pf_<name>__<id>` (its definition check is the method `pf_<name>__<id>__wf`)
+    return (f.pure ? "pf_" : "f_") + sanitize(f.c_name) + "__" + std::to_string(f.id);
 }
 std::string formal_name(const Function& f, int k)
 {
@@ -882,13 +883,14 @@ public:
         }
         for (const Function& f : prog_.functions())
         {
-            // a `pure` function (record 0062) has no `__wf` method yet: part B gives it its Viper function and its definition check
-            if (!f.pure && (!f.requires_.empty() || !f.ensures_.empty() || !f.decreases_.empty()))
+            // every read `pure` function has its definition check, a contract or not (record 0062 item 9: its body is a clause)
+            if (f.pure || !f.requires_.empty() || !f.ensures_.empty() || !f.decreases_.empty())
             {
                 wf_method(f);
             }
         }
         check_cycles();
+        check_function_cycles();
         alloc_methods();
         program_start_method();
         check_poison();
@@ -983,6 +985,28 @@ private:
                 internal_error(SrcLoc {},
                                "a struct value reached a consumer lowering does not take (decision 0044 item 2) in `" +
                                    m.name + "`");
+            }
+        }
+        for (const low::LFunction& f : out_.functions)
+        {
+            bool bad {poison_in(f.body)};
+            for (const low::LClause& c : f.requires_)
+            {
+                bad = bad || poison_in(c.expr);
+            }
+            for (const low::LClause& c : f.ensures_)
+            {
+                bad = bad || poison_in(c.expr);
+            }
+            for (const E& d : f.decreases_)
+            {
+                bad = bad || poison_in(d);
+            }
+            if (bad)
+            {
+                internal_error(SrcLoc {},
+                               "a struct value reached a consumer lowering does not take (decision 0044 item 2) in `" +
+                                   f.name + "`");
             }
         }
     }
@@ -7734,7 +7758,21 @@ private:
                 continue;
             }
             const E slot {low::dom("loc", {block_of(r.base), binder})};
-            const E ante {low::and_(range_check(fq_ival(q, view), *site.bound_type), r.guard)};
+            // the conjuncts of a read's guard that read memory (the second `a[i]` of `-1000 <= a[i] && a[i] <= 1000`: its guard holds the first read) are left out: a stronger row, and the marked rows' reach
+            // reads no memory (the lint's shape, decision 0061 item 11)
+            E plain_guard;
+            {
+                std::vector<E> parts;
+                conjuncts(r.guard, parts);
+                for (const E& part : parts)
+                {
+                    if (!lreads_heap(part))
+                    {
+                        plain_guard = low::and_(plain_guard, part);
+                    }
+                }
+            }
+            const E ante {low::and_(range_check(fq_ival(q, view), *site.bound_type), plain_guard)};
             const auto row = [&](const E& reach, const E& cond)
             {
                 return low::forall_({low::LVar {cl.binder, low::LType::Int}}, {{slot}}, low::implies(reach, cond));
@@ -7790,6 +7828,22 @@ private:
     // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
     // by itself: the chain `(D_1 ? read : (D_2 ? read : ... : dummy))` over the framing disjuncts of the earlier atoms of the same field, or the
     // plain read when the framing is trivial (an unconditional atom on the same place) or implied by the guard the read is evaluated under.
+    // What a failed framing row of a read says: a measure, the body of a `pure` function (record 0062 item 9: its own wording, the function's `requires` being what must own the read), or a contract
+    std::string unowned_read_text(const std::string& read_text, const char* fallback) const
+    {
+        if (cmeasure_)
+        {
+            return "the termination measure of `" + cf_->c_name + "` reads " + quoted(read_text, fallback) +
+                   " without owning it";
+        }
+        if (cbody_ && cf_->pure)
+        {
+            return "in `" + cf_->c_name + "`: reads " + quoted(read_text, fallback) +
+                   ", which its `requires` does not own";
+        }
+        return "the contract of `" + cf_->c_name + "` reads " + quoted(read_text, fallback) + " without owning it";
+    }
+
     LV contract_read(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
     {
         using low::BinOp;
@@ -8040,11 +8094,7 @@ private:
                 }
                 const std::string read_text {e.c_text};
                 obl(full, guard, gdep, any, {},
-                    meta("permission", e.loc,
-                         cmeasure_ ? "the termination measure of `" + cf_->c_name + "` reads " +
-                                         quoted(read_text, "an element of a pointer") + " without owning it"
-                                   : "the contract of `" + cf_->c_name + "` reads " +
-                                         quoted(read_text, "an element of a pointer") + " without owning it"));
+                    meta("permission", e.loc, unowned_read_text(read_text, "an element of a pointer")));
                 full.obls.back().fq_trigger = low::fn(ghost, {low::var(cl.binder)});
             }
             return {low::fn(ghost, {slot}), {}};
@@ -8072,12 +8122,7 @@ private:
                     read_text = ea->a->c_text + "[" + ea->b->c_text + "]";
                 }
                 const char* what_read {elem ? "an element of a pointer" : "a pointer's object"};
-                obl(full, guard, gdep, any, {},
-                    meta("permission", e.loc,
-                         cmeasure_ ? "the termination measure of `" + cf_->c_name + "` reads " +
-                                         quoted(read_text, what_read) + " without owning it"
-                                   : "the contract of `" + cf_->c_name + "` reads " + quoted(read_text, what_read) +
-                                         " without owning it"));
+                obl(full, guard, gdep, any, {}, meta("permission", e.loc, unowned_read_text(read_text, what_read)));
             }
             return {low::var(ghost_name(key)), {}};
         }
@@ -9296,9 +9341,7 @@ private:
                 }
                 return fq_->args[static_cast<size_t>(e.arg_index)];
             case Expr::Kind::Apply:
-                // record 0062, part A: check_program refuses an application, so none reaches lowering (part B lowers it)
-                internal_error(e.loc, "an application of a `pure` function reached lowering");
-                return {e.type.is_bool() ? low::bool_lit(true) : low::int_lit("0"), {}};
+                return apply_node(e, env, guard, gdep, full);
             case Expr::Kind::Atom:
                 // a written atom's rows are the loop's own (decision 0040 item 5); its own loads are reads of the
                 // invariant, framed like any (decision 0045 item 12)
@@ -20567,8 +20610,8 @@ private:
     {
         if (f.pure)
         {
-            // Record 0062 item 5: a read `pure` function is neither a verified method nor a trusted one.  It makes no method here; part B makes its Viper
-            // function (`LProgram::functions`).
+            // Record 0062 item 5: a read `pure` function is neither a verified method nor a trusted one: its Viper function (`LProgram::functions`) and its `__wf` method
+            pure_function(f);
             return;
         }
         fn_ = Fn {};
@@ -20907,6 +20950,1139 @@ private:
         out_.methods.push_back(std::move(m));
     }
 
+    // ---- pure functions (record 0062; M4.5e1d part B) ----
+
+    // One line of a `pure` function's `requires`, in terms of its own formals (`pf_env`), in emission order.  The memory-free ones (every kind but AtomQuant) are what an application assumes of
+    // its arguments: the guard `G` of item 7 and fact (ii)'s `V` of item 8.  One list gives the function's own Viper lines AND every application's rows, so the guard can never be stronger than
+    // the rows.
+    struct PfLine
+    {
+        enum class Kind
+        {
+            Range,    // an integer parameter's type range
+            Shape,    // a pointer parameter's well-formedness
+            AtomLine, // a conjunct of an atom's pure line (`p != null`, the shape, `0 <= n`, the bound)
+            AtomQuant, // the permission and the element range of an atom (they depend on the heap: not part of `G` or `V`)
+            Value,     // a value clause of the `requires`
+            Quant // a `cerastes_forall` clause (cut 2): lowered afresh at each application, with the arguments in place of the parameters
+        };
+        Kind kind {Kind::Value};
+        E cond;
+        const Expr* atom {nullptr}; // AtomLine, AtomQuant: the callee's Atom node
+        SrcLoc loc;                 // Value: the clause's position; an atom's lines: the atom's
+        std::string text;           // Value: the clause as written
+        const Expr* node {nullptr}; // Quant: the Forall node of the callee's clause
+    };
+    std::map<const Function*, std::vector<PfLine>> pf_lines_cache_;
+    // the self-application nodes of the body being lowered: the position of each (the emitter's `body_calls`)
+    std::map<const low::LExpr*, SrcLoc> self_apps_;
+    bool cbody_ {false}; // the body of a `pure` function is being lowered (the wording of a row)
+    // an application in `f__wf` (item 8): its ghost function, the callee, the state and the lowered arguments
+    struct WfApp
+    {
+        const Function* callee {nullptr};
+        bool post {false};
+        std::vector<E> args;
+        std::string ghost;
+        std::vector<E>
+            quants; // the callee's quantified clauses at the arguments, over the method's `hvq` ghosts (record 0062 item 8: part of fact (ii)'s `V`)
+    };
+    std::vector<WfApp> wf_apps_;
+    // One row of an application's guard: what it says, and what a failure of it means
+    struct ApplyConj
+    {
+        enum class Kind
+        {
+            Frame,
+            Range,
+            Shape,
+            AtomLine,
+            Value
+        };
+        Kind kind {Kind::Value};
+        E cond;
+        const AtomSite* site {nullptr}; // Frame, AtomLine: the callee's atom site
+        SrcLoc loc;                     // the callee's clause or atom: the note
+        std::string text;               // Value: the clause as written
+    };
+
+    static E subst_vars(const E& e, const std::map<std::string, E>& m)
+    {
+        if (!e)
+        {
+            return e;
+        }
+        if (e->kind == low::LExpr::Kind::Var)
+        {
+            const auto it {m.find(e->text)};
+            return it == m.end() ? e : it->second;
+        }
+        const E a {subst_vars(e->a, m)};
+        const E b {subst_vars(e->b, m)};
+        const E c {subst_vars(e->c, m)};
+        std::vector<E> args;
+        bool same {a == e->a && b == e->b && c == e->c};
+        for (const E& x : e->args)
+        {
+            args.push_back(subst_vars(x, m));
+            same = same && args.back() == x;
+        }
+        if (same)
+        {
+            return e;
+        }
+        auto n {std::make_shared<low::LExpr>(*e)};
+        n->a = a;
+        n->b = b;
+        n->c = c;
+        n->args = std::move(args);
+        return n;
+    }
+
+    // The environment of a `pure` function over its own Viper formals; its result is the Viper function's `result`.
+    Env pf_env(const Function& g) const
+    {
+        Env env;
+        env.formal_leaves.resize(g.params.size());
+        for (size_t k {0U}; k < g.params.size(); ++k)
+        {
+            env.formals.push_back(low::var(formal_name(g, static_cast<int>(k))));
+        }
+        env.result = low::var("result");
+        return env;
+    }
+
+    // The permission and the element range of a `reads` or `reads_range` atom of a `pure` function's `requires` (item 6, form Min): `acc(.v_T, wildcard)` over the interval, then the range of the
+    // elements' type.  The flag `d_T` and the liveness cell are not held: the callers' rows check them (item 7).
+    std::vector<E> pf_atom_quants(const AtomSite& s, const Env& env)
+    {
+        const Type& t {site_pointee(s)};
+        const std::string sfx {use_cell_type(t)};
+        const E root {site_root(s, env)};
+        const E wild {low::var("wildcard")};
+        std::vector<E> out;
+        if (site_is_range(s))
+        {
+            Full scratch;
+            const E n {lower(*s.atom->b, env, nullptr, Deps {}, scratch).e};
+            out.push_back(range_quant(root, n,
+                                      [&](const E& slot)
+                                      {
+                                          return low::acc(slot, "v_" + sfx, wild);
+                                      }));
+            if (element_range(cell_value(root, t), t))
+            {
+                out.push_back(range_quant(root, n,
+                                          [&](const E& slot)
+                                          {
+                                              return element_range(cell_value(slot, t), t);
+                                          }));
+            }
+        }
+        else
+        {
+            out.push_back(low::acc(root, "v_" + sfx, wild));
+            if (const E r = element_range(cell_value(root, t), t))
+            {
+                out.push_back(r);
+            }
+        }
+        return out;
+    }
+
+    // The `requires` lines of the `pure` function `g` (item 6): the parameters' type ranges, each pointer's shape, then the clauses in order, a value clause as a method's contract has it, an
+    // atom as its pure line (one line per conjunct) and its quantified permission and element range.
+    const std::vector<PfLine>& pf_lines(const Function& g)
+    {
+        if (const auto cached {pf_lines_cache_.find(&g)}; cached != pf_lines_cache_.end())
+        {
+            return cached->second;
+        }
+        std::vector<PfLine> out;
+        const Env env {pf_env(g)};
+        for (size_t k {0U}; k < g.params.size(); ++k)
+        {
+            const Type& t {g.params[k].type};
+            if (t.is_int())
+            {
+                out.push_back(PfLine {PfLine::Kind::Range, range_check(env.formals[k], *t.int_type), nullptr,
+                                      g.params[k].loc, ""});
+            }
+        }
+        for (size_t k {0U}; k < g.params.size(); ++k)
+        {
+            const Type& t {g.params[k].type};
+            if (t.is_ptr())
+            {
+                out.push_back(PfLine {PfLine::Kind::Shape, wf_expr(env.formals[k], &t), nullptr, g.params[k].loc, ""});
+            }
+        }
+        const FnAtoms& fa {atoms_of(g)};
+        CtxSave save(*this);
+        for (size_t ci {0U}; ci < g.requires_.size(); ++ci)
+        {
+            const Clause& c {g.requires_[ci]};
+            std::vector<const Expr*> parts;
+            split_conjuncts_vir(c.expr, parts);
+            size_t atoms_seen {0U};
+            const size_t first {first_site(fa, false, static_cast<int>(ci))};
+            for (const Expr* part : parts)
+            {
+                if (part->kind == Expr::Kind::Atom)
+                {
+                    set_ctx(g, CMode::Wf, false, static_cast<int>(ci));
+                    cseen_ = first + atoms_seen;
+                    Full scratch;
+                    const LV v {atom(*part, env, nullptr, Deps {}, &scratch)};
+                    ++atoms_seen;
+                    std::vector<E> pieces;
+                    conjuncts(v.e, pieces);
+                    for (const E& x : pieces)
+                    {
+                        out.push_back(PfLine {PfLine::Kind::AtomLine, x, part, part->loc, ""});
+                    }
+                    for (const E& x : pf_atom_quants(fa.sites[fa.index.at(part)], env))
+                    {
+                        out.push_back(PfLine {PfLine::Kind::AtomQuant, x, part, part->loc, ""});
+                    }
+                    continue;
+                }
+                // a quantified clause (cut 2) is a top-level conjunct and nothing else; a value clause that reads memory other than through an application (itself guarded, as in the
+                // function's own line) never reaches here
+                if (has_forall(part) && part->kind != Expr::Kind::Forall)
+                {
+                    internal_error(
+                        part->loc,
+                        "a quantifier that is not a top-level conjunct of the `requires` of a `pure` function reached lowering (record 0062 item 3)");
+                    continue;
+                }
+                set_ctx(g, CMode::Method, false, static_cast<int>(ci));
+                cseen_ = first + atoms_seen;
+                Full scratch;
+                const LV v {lower(*part, env, nullptr, Deps {}, scratch)};
+                pure_full(scratch, *part, "a precondition");
+                if (part->kind == Expr::Kind::Forall)
+                {
+                    PfLine ql {PfLine::Kind::Quant, v.e, nullptr, c.loc.known() ? c.loc : g.loc,
+                               !part->c_text.empty() ? part->c_text : part->forall_name};
+                    ql.node = part;
+                    out.push_back(std::move(ql));
+                    continue;
+                }
+                out.push_back(PfLine {PfLine::Kind::Value, v.e, nullptr, c.loc.known() ? c.loc : g.loc,
+                                      !part->c_text.empty() ? part->c_text : c.expr->c_text});
+            }
+        }
+        return pf_lines_cache_.emplace(&g, std::move(out)).first->second;
+    }
+
+    static bool has_apply(const Expr* e)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e->kind == Expr::Kind::Apply)
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (has_apply(x))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (has_apply(x))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The interval of the enclosing contract's sites that frame a read of the callee's atom `gs` at `root` for `count` elements (item 7 (i)): the disjunction over the enclosing contract's
+    // unmarked sites of that cell field of "the site's guard, the same block, and the callee's interval inside the site's".  One site must hold the whole interval (a listed limit).
+    E apply_frame(const AtomSite& gs, const E& root, const E& count, const Env& env)
+    {
+        using low::BinOp;
+        const bool post {cens_ && !cold_};
+        const std::string sfx {use_cell_type(site_pointee(gs))};
+        const FnAtoms& fa {atoms_of(*cf_)};
+        E any;
+        for (size_t i {0U}; i < fa.sites.size(); ++i)
+        {
+            const AtomSite& s {fa.sites[i]};
+            if (!site_takes_cell(s) && !site_is_range(s))
+            {
+                continue;
+            }
+            if (post ? (!s.in_ensures || i >= cseen_) : (s.in_ensures || (!cens_ && i >= cseen_)))
+            {
+                continue;
+            }
+            if (!s.path.empty() || !s.via.empty() || site_fields(s).count(sfx) == 0U ||
+                site_marker(*cf_, s) != InitMarker::None)
+            {
+                continue;
+            }
+            const E ref {site_ref(s, env)};
+            E n_site {low::int_lit("1")};
+            if (site_is_range(s))
+            {
+                Full scratch;
+                n_site = lower(*s.atom->b, env, nullptr, Deps {}, scratch).e;
+            }
+            const E off_site {low::dom("offset_of", {ref})};
+            const E off_callee {low::dom("offset_of", {root})};
+            E d {site_guard(s, env)};
+            d = low::and_(d, low::bin(BinOp::Eq, block_of(root), block_of(ref)));
+            d = low::and_(d, low::bin(BinOp::Le, off_site, off_callee));
+            d = low::and_(d, low::bin(BinOp::Le, low::bin(BinOp::Add, off_callee, count),
+                                      low::bin(BinOp::Add, off_site, n_site)));
+            any = any ? low::bin(BinOp::Or, any, d) : d;
+        }
+        return any ? any : low::bool_lit(false);
+    }
+
+    // The conjuncts an application of `g` at `args` needs (item 7), in the order of its rows: the framing of each of `g`'s atoms by the enclosing contract (`frames`: not in a `check`, which
+    // has its own rows), then `g`'s own memory-free `requires` lines at the arguments.  The guard `G` is the lines and then the framing; fact (ii)'s `V` is the lines.
+    std::vector<ApplyConj> apply_conjuncts(const Function& g, const std::vector<E>& args, const Env& env, bool frames)
+    {
+        std::vector<ApplyConj> out;
+        std::map<std::string, E> sub;
+        Env aenv;
+        aenv.formals = args;
+        aenv.formal_leaves.resize(args.size());
+        for (size_t k {0U}; k < args.size(); ++k)
+        {
+            sub[formal_name(g, static_cast<int>(k))] = args[k];
+        }
+        if (frames)
+        {
+            for (const AtomSite& gs : atoms_of(g).sites)
+            {
+                if (gs.in_ensures)
+                {
+                    continue;
+                }
+                const E root {args[static_cast<size_t>(site_key(gs))]};
+                E count {low::int_lit("1")};
+                if (site_is_range(gs))
+                {
+                    Full scratch;
+                    count = lower(*gs.atom->b, aenv, nullptr, Deps {}, scratch).e;
+                }
+                ApplyConj c;
+                c.kind = ApplyConj::Kind::Frame;
+                c.cond = apply_frame(gs, root, count, env);
+                c.site = &gs;
+                c.loc = gs.atom->loc;
+                out.push_back(std::move(c));
+            }
+        }
+        const FnAtoms& ga {atoms_of(g)};
+        for (const PfLine& l : pf_lines(g))
+        {
+            if (l.kind == PfLine::Kind::AtomQuant || l.kind == PfLine::Kind::Quant)
+            {
+                continue;
+            }
+            ApplyConj c;
+            c.cond = subst_vars(l.cond, sub);
+            c.loc = l.loc;
+            c.text = l.text;
+            switch (l.kind)
+            {
+                case PfLine::Kind::Range:
+                    c.kind = ApplyConj::Kind::Range;
+                    break;
+                case PfLine::Kind::Shape:
+                    c.kind = ApplyConj::Kind::Shape;
+                    break;
+                case PfLine::Kind::AtomLine:
+                    c.kind = ApplyConj::Kind::AtomLine;
+                    c.site = &ga.sites[ga.index.at(l.atom)];
+                    break;
+                default:
+                    c.kind = ApplyConj::Kind::Value;
+                    break;
+            }
+            out.push_back(std::move(c));
+        }
+        return out;
+    }
+
+    // The guard `G` of an application: the lines at the arguments, then the framing (the order of the fixture `s46_b_guard.vpr`).
+    static E apply_guard(const std::vector<ApplyConj>& conj, const std::vector<E>& quants = {})
+    {
+        E g;
+        for (const ApplyConj& c : conj)
+        {
+            if (c.kind != ApplyConj::Kind::Frame)
+            {
+                g = low::and_(g, c.cond);
+            }
+        }
+        for (const E& q : quants)
+        {
+            g = low::and_(g, q);
+        }
+        for (const ApplyConj& c : conj)
+        {
+            if (c.kind == ApplyConj::Kind::Frame)
+            {
+                g = low::and_(g, c.cond);
+            }
+        }
+        return g;
+    }
+
+    // Who calls, for a row: the contract or the body of a `pure` function, a contract, or a `check`.
+    std::string apply_who() const
+    {
+        if (cmode_ == CMode::None)
+        {
+            return "this `check`";
+        }
+        if (cf_ == nullptr)
+        {
+            return "this annotation";
+        }
+        return std::string(cf_->pure && cbody_ ? "the body of `" : "the contract of `") + cf_->c_name + "`";
+    }
+
+    // What a failed conjunct of an application's guard means (item 7): the framing is a `permission` row, a value clause or an atom's pure line a `precondition` row with a note at the callee's
+    // clause, the parameters' ranges and shapes `internal` (they follow from the argument's own obligations).
+    low::Meta apply_row_meta(const ApplyConj& c, const Expr& app, const Function& g)
+    {
+        const std::string who {apply_who()};
+        switch (c.kind)
+        {
+            case ApplyConj::Kind::Frame:
+            {
+                low::Meta m {
+                    meta("permission", app.loc,
+                         who + " calls `" + g.c_name + "`, which reads " +
+                             quoted(c.site != nullptr ? site_call_text(*c.site, app) : std::string(), "memory") +
+                             ", without owning it")};
+                m.has_note = true;
+                m.note_loc = c.loc;
+                m.note_text = "this is the `reads` of `" + g.c_name + "`";
+                return m;
+            }
+            case ApplyConj::Kind::Range:
+            case ApplyConj::Kind::Shape:
+                return meta("internal", app.loc,
+                            "internal check: an argument of the application of `" + g.c_name +
+                                "` is a value of its parameter's type");
+            case ApplyConj::Kind::AtomLine:
+            {
+                low::Meta m {meta(
+                    "precondition", app.loc,
+                    who + " calls `" + g.c_name + "`, whose `requires` may not hold: " +
+                        quoted(c.site != nullptr ? site_call_text(*c.site, app) : std::string(),
+                               "the memory it reads") +
+                        " needs a pointer that is not null and a count that is not negative and within the object")};
+                m.has_note = true;
+                m.note_loc = c.loc;
+                m.note_text = "this is the `reads` of `" + g.c_name + "`";
+                return m;
+            }
+            case ApplyConj::Kind::Value:
+                break;
+        }
+        low::Meta m {meta("precondition", app.loc,
+                          who + " calls `" + g.c_name + "`, whose `requires` may not hold" +
+                              (c.text.empty() ? std::string() : ": `" + c.text + "`"))};
+        m.has_note = true;
+        m.note_loc = c.loc;
+        m.note_text = "this is the `requires` of `" + g.c_name + "`";
+        return m;
+    }
+
+    std::string hva_name(const Function& g) const
+    {
+        return "hva_" + method_name(*fn_.f) + "__" + method_name(g) + (cens_ && !cold_ ? "_post" : "_pre");
+    }
+
+    // `e` with each parameter of the callee replaced by the application's argument (a copy of every node on the way to one; the rest is shared)
+    const Expr* subst_formals(const Expr* e, const std::vector<const Expr*>& with)
+    {
+        if (e == nullptr)
+        {
+            return e;
+        }
+        if (e->kind == Expr::Kind::Formal)
+        {
+            return with[static_cast<size_t>(e->index)];
+        }
+        const Expr* a {subst_formals(e->a, with)};
+        const Expr* b {subst_formals(e->b, with)};
+        const Expr* c {subst_formals(e->c, with)};
+        std::vector<const Expr*> args;
+        bool same {a == e->a && b == e->b && c == e->c};
+        for (const Expr* x : e->args)
+        {
+            args.push_back(subst_formals(x, with));
+            same = same && args.back() == x;
+        }
+        if (same)
+        {
+            return e;
+        }
+        fq_arena_.push_back(*e);
+        Expr* n {&fq_arena_.back()};
+        n->a = a;
+        n->b = b;
+        n->c = c;
+        n->args = std::move(args);
+        return n;
+    }
+    // The quantifier a callee's clause `forall` is at the application `app`, as if written there: its trailing arguments are the callee's expressions with the arguments of the application
+    // in place of the parameters (item 7), the body is the same (it names its arguments by position, and the bound variable)
+    const Expr* apply_site_forall(const Expr& app, const Expr& forall)
+    {
+        std::vector<const Expr*> args;
+        for (const Expr* x : forall.args)
+        {
+            args.push_back(subst_formals(x, app.args));
+        }
+        fq_arena_.push_back(forall);
+        Expr* n {&fq_arena_.back()};
+        n->args = std::move(args);
+        n->loc = app.loc;
+        return n;
+    }
+
+    // An application in a contract, a measure or the body of a `pure` function (record 0062 items 4, 7 and 8), and in a `check`.
+    LV apply_node(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
+    {
+        const Function& g {*e.callee};
+        std::vector<E> args;
+        Deps adep;
+        for (const Expr* a : e.args)
+        {
+            const LV v {lower(*a, env, guard, gdep, full)};
+            args.push_back(v.e);
+            adep = join(adep, v.dep);
+        }
+        if (cmode_ == CMode::None)
+        {
+            return apply_check(e, g, args, adep, env, guard, gdep, full);
+        }
+        if (cmode_ != CMode::Method && cmode_ != CMode::Wf)
+        {
+            internal_error(
+                e.loc,
+                "an application of a `pure` function in a call, a return or a loop invariant reached lowering (record 0062 parts C and D)");
+            return {inv_dummy(e.type), {}};
+        }
+        const std::vector<ApplyConj> conj {apply_conjuncts(g, args, env, true)};
+        // The callee's quantified clauses at the arguments (item 7): each is the quantifier as if written at the site, lowered by 0061 in this mode
+        E vlines;
+        for (const ApplyConj& c : conj)
+        {
+            if (c.kind != ApplyConj::Kind::Frame)
+            {
+                vlines = low::and_(vlines, c.cond);
+            }
+        }
+        std::vector<E> quants;
+        std::vector<std::string> quant_texts;
+        std::vector<SrcLoc> quant_locs;
+        for (const PfLine& l : pf_lines(g))
+        {
+            if (l.kind != PfLine::Kind::Quant)
+            {
+                continue;
+            }
+            const Expr* site {apply_site_forall(e, *l.node)};
+            Full scratch;
+            // Method: the value, whose reads are chains over the contract's own sites.  `f__wf`: over the `hvq` ghosts; its obligations (the reads' framing, the body's own) are rows of the caller,
+            // guarded by the callee's other lines (the quantifier is evaluated only where they hold)
+            Full& target {cmode_ == CMode::Wf ? full : scratch};
+            const LV q {lower(*site, env, cmode_ == CMode::Wf ? low::and_(guard, vlines) : nullptr, gdep, target)};
+            if (cmode_ == CMode::Method)
+            {
+                pure_full(scratch, *site, "a quantified clause");
+            }
+            quants.push_back(q.e);
+            quant_texts.push_back(l.text);
+            quant_locs.push_back(l.loc);
+        }
+        if (cmode_ == CMode::Method)
+        {
+            const E gd {apply_guard(conj, quants)};
+            const E call {low::fn(method_name(g), args)};
+            if (&g == fn_.f && cbody_)
+            {
+                self_apps_[call.get()] = e.loc;
+            }
+            return {gd ? low::ite(gd, call, inv_dummy(e.type)) : call, adep};
+        }
+        // `f__wf`: the application is a ghost function of the method's domain, and every conjunct of the guard is a row (item 8)
+        const bool post {cens_ && !cold_};
+        const std::string ghost {hva_name(g)};
+        bool known {false};
+        for (const WfApp& w : wf_apps_)
+        {
+            bool same {w.ghost == ghost && w.args.size() == args.size()};
+            for (size_t i {0U}; same && i < args.size(); ++i)
+            {
+                same = same_expr(w.args[i], args[i]);
+            }
+            known = known || same;
+        }
+        if (!known)
+        {
+            wf_apps_.push_back(WfApp {&g, post, args, ghost, quants});
+        }
+        for (const ApplyConj& c : conj)
+        {
+            obl(full, guard, gdep, c.cond, adep, apply_row_meta(c, e, g));
+        }
+        for (size_t i {0U}; i < quants.size(); ++i)
+        {
+            ApplyConj qc;
+            qc.kind = ApplyConj::Kind::Value;
+            qc.cond = quants[i];
+            qc.loc = quant_locs[i];
+            qc.text = quant_texts[i];
+            obl(full, guard, gdep, qc.cond, adep, apply_row_meta(qc, e, g));
+        }
+        return {low::fn(ghost, args), adep};
+    }
+
+    // An application in a `check` (item 7): the rows first (the callee's parameter ranges and pointer shapes at the arguments, per atom its pure lines, the rows of record 0061 item 10 over its
+    // interval and the element range, then each value clause), then the fact with the bare application, whose own Viper check holds because every row was asserted (a failed row is assumed).
+    LV apply_check(const Expr& e, const Function& g, const std::vector<E>& args, const Deps& adep, const Env& env,
+                   const E& guard, const Deps& gdep, Full& full)
+    {
+        using low::BinOp;
+        const std::vector<ApplyConj> conj {apply_conjuncts(g, args, Env {}, false)};
+        for (const ApplyConj& c : conj)
+        {
+            if (c.kind == ApplyConj::Kind::Range || c.kind == ApplyConj::Kind::Shape)
+            {
+                obl(full, guard, gdep, c.cond, adep, apply_row_meta(c, e, g));
+            }
+        }
+        Env aenv;
+        aenv.formals = args;
+        aenv.formal_leaves.resize(args.size());
+        size_t atom_no {0U};
+        for (const AtomSite& gs : atoms_of(g).sites)
+        {
+            if (gs.in_ensures)
+            {
+                continue;
+            }
+            for (const ApplyConj& c : conj)
+            {
+                if (c.kind == ApplyConj::Kind::AtomLine && c.site == &gs)
+                {
+                    obl(full, guard, gdep, c.cond, adep, apply_row_meta(c, e, g));
+                }
+            }
+            const size_t key {static_cast<size_t>(site_key(gs))};
+            const Expr& argx {*e.args[key]};
+            const bool named {argx.kind == Expr::Kind::AddrOf && argx.var != nullptr && argx.var->type.is_array()};
+            const E base {args[key]};
+            if (base == nullptr || base->kind != low::LExpr::Kind::Var)
+            {
+                internal_error(
+                    e.loc, "the pointer an application's `reads` names is not a variable (a call binds it to a local)");
+                continue;
+            }
+            const Type& t {site_pointee(gs)};
+            E count {low::int_lit("1")};
+            IntType idx_type;
+            idx_type.bits = 32;
+            idx_type.is_signed = true;
+            const IntType* bound_type {&idx_type};
+            if (site_is_range(gs))
+            {
+                Full scratch;
+                count = lower(*gs.atom->b, aenv, nullptr, Deps {}, scratch).e;
+                if (gs.atom->b->type.is_int() && gs.atom->b->type.int_type != nullptr)
+                {
+                    bound_type = gs.atom->b->type.int_type;
+                }
+            }
+            const std::string binder {"q" + std::to_string(atom_no++)};
+            const E q {low::var(binder)};
+            const E off {low::bin(BinOp::Sub, q, low::dom("offset_of", {base}))};
+            const E ante {
+                low::and_(range_check(off, *bound_type),
+                          low::and_(low::bin(BinOp::Le, low::int_lit("0"), off), low::bin(BinOp::Lt, off, count)))};
+            const E slot {low::dom("loc", {block_of(base), q})};
+            const auto row = [&](const E& reach, const E& cond)
+            {
+                return low::forall_({low::LVar {binder, low::LType::Int}}, {{slot}}, low::implies(reach, cond));
+            };
+            const std::string text {gs.atom->a != nullptr ? gs.atom->a->c_text : std::string()};
+            const std::string base_text {named ? argx.var->name : argx.c_text};
+            const std::string place {quoted(base_text, "the memory")};
+            const auto where = [&](low::Meta m)
+            {
+                m.message = "in `" + e.c_text + "`: " + m.message;
+                return m;
+            };
+            if (!named)
+            {
+                obl(full, guard, gdep, row(ante, low::bin(BinOp::Ne, base, low::null_())), adep,
+                    where(meta("null-dereference", e.loc, "reads through " + place + ", which may be null")));
+                const std::string kq {new_temp(low::LType::Perm)};
+                obl(full, nullptr, gdep, low::bool_lit(true), adep,
+                    meta("internal", e.loc, "internal check: the liveness of an application's pointer"));
+                std::vector<low::LStmt>& st {full.obls.back().stmts};
+                assign(st, kq, live_perm(base));
+                emit_assert(
+                    st, low::implies(guard, row(ante, low::bin(BinOp::Gt, low::var(kq), low::no_perm()))),
+                    where(meta("lifetime", e.loc, "uses " + place + " after the object it points to may have ended")));
+            }
+            else
+            {
+                const E in {low::not_(low::bin(BinOp::Or, low::bin(BinOp::Lt, q, low::int_lit("0")),
+                                               low::bin(BinOp::Le, low::dom("len", {block_of(base)}), q)))};
+                obl(full, guard, gdep, row(ante, in), adep,
+                    where(meta("out-of-bounds", e.loc,
+                               "reads an element of " + place + ", whose index may be outside the array")));
+            }
+            const E reach {low::and_(ante, guard)};
+            obl(full, nullptr, gdep, low::bool_lit(true), adep,
+                meta("internal", e.loc, "internal check: the marked rows of an application's reads"));
+            std::vector<low::LStmt>& marked {full.obls.back().stmts};
+            for (const char* f : {"v_", "d_"})
+            {
+                emit_marked_row(marked, row(reach, low::acc(slot, f + use_cell_type(t), low::var("wildcard"))),
+                                where(meta("permission", e.loc,
+                                           "reads " + place + " without owning it: " +
+                                               (named ? std::string("a callee may have kept its object")
+                                                      : std::string("the object it points to may have ended")))));
+            }
+            obl(full, guard, gdep, row(ante, cell_flag(slot, t)), adep,
+                where(meta("uninitialized", e.loc, "reads an element of " + place + " before it is given a value")));
+            if (const E er = element_range(cell_value(slot, t), t))
+            {
+                obl(full, guard, gdep, row(ante, er), adep,
+                    meta("internal", e.loc,
+                         "internal check: the elements an application reads are values of their type"));
+            }
+        }
+        for (const ApplyConj& c : conj)
+        {
+            if (c.kind == ApplyConj::Kind::Value)
+            {
+                obl(full, guard, gdep, c.cond, adep, apply_row_meta(c, e, g));
+            }
+        }
+        // a quantified clause of the callee: the quantifier as if written in this `check` (the rows of record 0061 item 10 for its reads come with the lowering), asserted as one row
+        for (const PfLine& l : pf_lines(g))
+        {
+            if (l.kind != PfLine::Kind::Quant)
+            {
+                continue;
+            }
+            const Expr* site {apply_site_forall(e, *l.node)};
+            const LV q {lower(*site, env, guard, gdep, full)};
+            ApplyConj qc;
+            qc.kind = ApplyConj::Kind::Value;
+            qc.cond = q.e;
+            qc.loc = l.loc;
+            qc.text = l.text;
+            obl(full, guard, gdep, qc.cond, adep, apply_row_meta(qc, e, g));
+        }
+        return {low::fn(method_name(g), args), adep};
+    }
+
+    // The self-applications of `name` in the order the emitter prints `e`
+    static void self_calls_in_print_order(const E& e, const std::string& name, std::vector<const low::LExpr*>& out)
+    {
+        if (!e)
+        {
+            return;
+        }
+        switch (e->kind)
+        {
+            case low::LExpr::Kind::Fn:
+            case low::LExpr::Kind::Dom:
+                if (e->kind == low::LExpr::Kind::Fn && e->text == name)
+                {
+                    out.push_back(e.get());
+                }
+                for (const E& x : e->args)
+                {
+                    self_calls_in_print_order(x, name, out);
+                }
+                return;
+            case low::LExpr::Kind::Forall:
+                for (const E& x : e->args)
+                {
+                    self_calls_in_print_order(x, name, out);
+                }
+                self_calls_in_print_order(e->a, name, out);
+                return;
+            default:
+                break;
+        }
+        for (const E& x : {e->a, e->b, e->c})
+        {
+            self_calls_in_print_order(x, name, out);
+        }
+    }
+
+    // The Viper function of a read `pure` function (item 6): its `requires` lines, its `ensures` (a user row `postcondition` at the function's `return`), its measure (never `_`) and its body in the
+    // contract form of its own `requires` sites.  Its definition check is the `__wf` method (`wf_method`).
+    void pure_function(const Function& f)
+    {
+        fn_ = Fn {};
+        fn_.f = &f;
+        fn_.method = method_name(f);
+        self_apps_.clear();
+        low::LFunction lf;
+        lf.name = fn_.method;
+        lf.comment = "C/C++ function `" + f.c_name + "` (a `pure` function, record 0062)";
+        if (f.ret.is_int() && f.ret.int_type != nullptr && !f.ret.int_type->is_enum)
+        {
+            const dec::Range r {dec::range_of(*f.ret.int_type)};
+            lf.result_tag = r.lo + " " + r.hi;
+        }
+        for (size_t k {0U}; k < f.params.size(); ++k)
+        {
+            lf.formals.push_back(low::LVar {formal_name(f, static_cast<int>(k)), ltype(f.params[k].type)});
+        }
+        lf.result = ltype(f.ret);
+        const Env env {pf_env(f)};
+        const SrcLoc ret_loc {f.pure_body != nullptr && f.pure_body->loc.known() ? f.pure_body->loc : f.loc};
+        for (const PfLine& l : pf_lines(f))
+        {
+            lf.requires_.push_back(clause_checks(l.cond, f.loc, false, f.c_name));
+        }
+        for (size_t ci {0U}; ci < f.ensures_.size(); ++ci)
+        {
+            const Clause& c {f.ensures_[ci]};
+            Full scratch;
+            LV v;
+            {
+                CtxSave save(*this);
+                set_ctx(f, CMode::Method, false, static_cast<int>(f.requires_.size()));
+                v = lower(*c.expr, env, nullptr, {}, scratch);
+            }
+            pure_full(scratch, *c.expr, "a postcondition");
+            std::vector<E> parts;
+            if (has_forall(c.expr))
+            {
+                split_conjuncts(v.e, parts);
+            }
+            else
+            {
+                parts.push_back(v.e);
+            }
+            for (const E& x : parts)
+            {
+                low::LClause lc;
+                lc.expr = x;
+                low::Meta pm {meta("postcondition", ret_loc,
+                                   "`" + f.c_name + "` may return a value that its postcondition does not allow")};
+                pm.has_note = true;
+                pm.note_loc = c.loc.known() ? c.loc : f.loc;
+                pm.note_text = "this is the postcondition";
+                lc.checks.push_back(low::Check {"postcondition.violated", std::move(pm)});
+                lc.checks.push_back(clause_checks(x, f.loc, false, f.c_name).checks.front());
+                lf.ensures_.push_back(std::move(lc));
+            }
+        }
+        for (const Clause& c : f.decreases_)
+        {
+            Full scratch;
+            LV v;
+            {
+                CtxSave save(*this);
+                set_ctx(f, CMode::Method, false, static_cast<int>(f.requires_.size()));
+                v = lower(*c.expr, env, nullptr, {}, scratch);
+            }
+            pure_full(scratch, *c.expr, "a termination measure");
+            lf.decreases_.push_back(v.e);
+        }
+        if (!f.decreases_.empty())
+        {
+            low::Meta dm;
+            dm.category = "termination";
+            dm.loc = ret_loc;
+            dm.message = "the measure of `" + f.c_name +
+                         "` may not decrease at a recursive call, or may not be bounded below by zero";
+            lf.decreases_check = low::Check {"termination.failed", std::move(dm)};
+        }
+        {
+            Full scratch;
+            LV v;
+            {
+                CtxSave save(*this);
+                set_ctx(f, CMode::Method, false, static_cast<int>(f.requires_.size()));
+                cbody_ = true;
+                v = lower(*f.pure_body, env, nullptr, {}, scratch);
+                cbody_ = false;
+            }
+            pure_full(scratch, *f.pure_body, "the value of a `pure` function");
+            lf.body = v.e;
+        }
+        std::vector<const low::LExpr*> calls;
+        self_calls_in_print_order(lf.body, lf.name, calls);
+        if (!calls.empty() && f.decreases_.empty())
+        {
+            internal_error(
+                f.loc,
+                "the `pure` function `" + f.c_name +
+                    "` applies itself and has no measure (a recursive function needs a `decreases`: record 0062 item 10)");
+        }
+        for (const low::LExpr* call : calls)
+        {
+            const auto it {self_apps_.find(call)};
+            if (it == self_apps_.end())
+            {
+                internal_error(f.loc,
+                               "a self-application in the body of `" + f.c_name + "` that lowering did not record");
+                continue;
+            }
+            low::Meta m {meta("termination", it->second,
+                              "the measure of `" + f.c_name +
+                                  "` may not decrease at this call, or may not be bounded below by zero")};
+            if (!f.decreases_.empty())
+            {
+                m.has_note = true;
+                m.note_loc = f.decreases_.front().loc.known() ? f.decreases_.front().loc : f.loc;
+                m.note_text = "this is the measure";
+            }
+            lf.body_calls.push_back(low::Check {"termination.failed", std::move(m)});
+        }
+        out_.functions.push_back(std::move(lf));
+    }
+
+    // The applications of `__wf` methods are ghost functions; their facts (item 8) are assumed as `requires` of the method: (i) the result's type range of an integer result that is no enumeration,
+    // (ii) each `ensures` clause of the callee that reads no memory and holds no quantifier or application, under `V`, the callee's value `requires` and pure lines at the arguments.
+    static bool lexpr_mentions(const E& e, const std::string& name)
+    {
+        if (!e)
+        {
+            return false;
+        }
+        if (e->kind == low::LExpr::Kind::Fn && e->text == name)
+        {
+            return true;
+        }
+        for (const E& x : {e->a, e->b, e->c})
+        {
+            if (lexpr_mentions(x, name))
+            {
+                return true;
+            }
+        }
+        for (const E& x : e->args)
+        {
+            if (lexpr_mentions(x, name))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool lstmts_mention(const std::vector<low::LStmt>& body, const std::string& name)
+    {
+        for (const low::LStmt& s : body)
+        {
+            if (lexpr_mentions(s.expr, name) || lstmts_mention(s.then_body, name) ||
+                lstmts_mention(s.else_body, name) || lstmts_mention(s.stmts, name))
+            {
+                return true;
+            }
+            for (const E& x : s.args)
+            {
+                if (lexpr_mentions(x, name))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void wf_application_facts(low::LMethod& m, std::vector<E>& facts)
+    {
+        if (wf_apps_.empty())
+        {
+            return;
+        }
+        for (const WfApp& w : wf_apps_)
+        {
+            low::LGhostFn gf;
+            gf.name = w.ghost;
+            gf.result = ltype(w.callee->ret);
+            gf.params.clear();
+            for (size_t k {0U}; k < w.callee->params.size(); ++k)
+            {
+                gf.params.push_back(low::LVar {"x" + std::to_string(k), ltype(w.callee->params[k].type)});
+            }
+            bool have {false};
+            for (const low::LGhostFn& x : m.ghost_fns)
+            {
+                have = have || x.name == gf.name;
+            }
+            if (!have)
+            {
+                m.ghost_fns.push_back(std::move(gf));
+            }
+        }
+        for (const WfApp& w : wf_apps_)
+        {
+            const Function& g {*w.callee};
+            const E app {low::fn(w.ghost, w.args)};
+            if (g.ret.is_int() && g.ret.int_type != nullptr && !g.ret.int_type->is_enum)
+            {
+                facts.push_back(range_check(app, *g.ret.int_type));
+            }
+            bool applies {false};
+            for (const Clause& c : g.requires_)
+            {
+                applies = applies || has_apply(c.expr);
+            }
+            if (applies)
+            {
+                continue; // item 8's narrowing: a callee whose `requires` holds an application gets no fact (ii)
+            }
+            std::map<std::string, E> sub;
+            Env aenv;
+            aenv.formals = w.args;
+            aenv.formal_leaves.resize(w.args.size());
+            aenv.result = app;
+            for (size_t k {0U}; k < w.args.size(); ++k)
+            {
+                sub[formal_name(g, static_cast<int>(k))] = w.args[k];
+            }
+            E v;
+            for (const PfLine& l : pf_lines(g))
+            {
+                if (l.kind != PfLine::Kind::AtomQuant && l.kind != PfLine::Kind::Quant)
+                {
+                    v = low::and_(v, subst_vars(l.cond, sub));
+                }
+            }
+            for (const E& q : w.quants)
+            {
+                v = low::and_(v, q); // the callee's quantified clauses over the ghosts at the arguments (audit B1)
+            }
+            for (const Clause& c : g.ensures_)
+            {
+                if (reads_heap(*c.expr) || has_forall(c.expr))
+                {
+                    continue;
+                }
+                Full scratch;
+                E body;
+                {
+                    CtxSave save(*this);
+                    set_ctx(g, CMode::Wf, false, static_cast<int>(g.requires_.size()));
+                    body = lower(*c.expr, aenv, nullptr, {}, scratch).e;
+                }
+                facts.push_back(v ? low::implies(v, body) : body);
+            }
+        }
+        // a ghost function that nothing mentions (a body whose application no row or fact reads) is not declared: the lint refuses a domain no `__wf` method uses
+        std::vector<low::LGhostFn> used;
+        for (const low::LGhostFn& gf : m.ghost_fns)
+        {
+            bool in_use {lstmts_mention(m.body, gf.name)};
+            for (const E& f : facts)
+            {
+                in_use = in_use || lexpr_mentions(f, gf.name);
+            }
+            if (in_use || gf.name.rfind("hvq_", 0U) == 0U)
+            {
+                used.push_back(gf);
+            }
+        }
+        m.ghost_fns = std::move(used);
+        if (!m.ghost_fns.empty())
+        {
+            m.ghost_domain = "Hvq_" + fn_.method;
+        }
+    }
+
+    // The graph of the emitted functions (record 0062 item 5, the backstop of `check_cycles`): no cycle but a function's application of itself in its own body.
+    void check_function_cycles()
+    {
+        std::map<std::string, std::set<std::string>> edges;
+        std::set<std::string> names;
+        for (const low::LFunction& f : out_.functions)
+        {
+            names.insert(f.name);
+        }
+        const std::function<void(const E&, const std::string&, bool)> walk {
+            [&](const E& e, const std::string& from, bool body)
+            {
+                if (!e)
+                {
+                    return;
+                }
+                if (e->kind == low::LExpr::Kind::Fn && names.count(e->text) != 0U && !(body && e->text == from))
+                {
+                    edges[from].insert(e->text);
+                }
+                for (const E& x : {e->a, e->b, e->c})
+                {
+                    walk(x, from, body);
+                }
+                for (const E& x : e->args)
+                {
+                    walk(x, from, body);
+                }
+            }};
+        for (const low::LFunction& f : out_.functions)
+        {
+            for (const low::LClause& c : f.requires_)
+            {
+                walk(c.expr, f.name, false);
+            }
+            for (const low::LClause& c : f.ensures_)
+            {
+                walk(c.expr, f.name, false);
+            }
+            for (const E& d : f.decreases_)
+            {
+                walk(d, f.name, false);
+            }
+            walk(f.body, f.name, true);
+        }
+        std::map<std::string, int> color;
+        const std::function<bool(const std::string&)> cyclic {[&](const std::string& n)
+                                                              {
+                                                                  color[n] = 1;
+                                                                  for (const std::string& t : edges[n])
+                                                                  {
+                                                                      if (color[t] == 1 || (color[t] == 0 && cyclic(t)))
+                                                                      {
+                                                                          return true;
+                                                                      }
+                                                                  }
+                                                                  color[n] = 2;
+                                                                  return false;
+                                                              }};
+        for (const std::string& n : names)
+        {
+            if (color[n] == 0 && cyclic(n))
+            {
+                internal_error(
+                    SrcLoc {},
+                    "the emitted Viper functions apply each other in a cycle, or a function applies itself outside its own body (`" +
+                        n + "`; record 0062 item 5)");
+                return;
+            }
+        }
+    }
+
     // A key names the result's place: the result itself or a place whose innermost root is the result (`*r.q`, decision 0045).
     bool is_result_key(int k) const
     {
@@ -20945,6 +22121,7 @@ private:
         const FnAtoms& fa {atoms_of(f)};
         wf_ghosts_.clear();
         wf_hvq_.clear();
+        wf_apps_.clear();
         low::LMethod m;
         m.name = fn_.method + "__wf";
         m.comment = "well-formedness of the contract of C/C++ function `" + f.c_name + "`";
@@ -20960,7 +22137,8 @@ private:
             LV v;
             {
                 CtxSave save(*this);
-                set_ctx(f, CMode::Wf, ens, idx);
+                // a `pure` function has one state: its `ensures` is read in the entry state with every `requires` site in view (record 0062 item 9)
+                set_ctx(f, CMode::Wf, ens && !f.pure, f.pure && ens ? static_cast<int>(f.requires_.size()) : idx);
                 v = lower(*c.expr, env, nullptr, {}, full);
             }
             pure_full(full, *c.expr, "a contract clause");
@@ -21023,7 +22201,7 @@ private:
                                  " on a path where its `requires` did not take it"));
                 }
             }
-            if (ens && f.body == nullptr)
+            if (ens && f.body == nullptr && !f.pure)
             {
                 // Decision 0054 item 2 (audit B1; 0045 item 5 for block sites): a contract without a body is a promise nothing checks.  A block site whose place is
                 // reached through a load, or rests on a global, must say it names the block its `requires` partner took, and two `ensures` block sites one of which
@@ -21180,6 +22358,24 @@ private:
             go(f.requires_[k], false, static_cast<int>(k));
         }
         E requires_only {prior};
+        if (f.pure)
+        {
+            // The body is one more clause of the entry state (record 0062 item 9): each of its operations' obligations, each read's framing by the function's own atoms, each application's rows,
+            // the conversion at the `return`, reported in the function at the operation.
+            Full full;
+            {
+                CtxSave save(*this);
+                set_ctx(f, CMode::Wf, false, static_cast<int>(f.requires_.size()));
+                cbody_ = true;
+                lower(*f.pure_body, env, nullptr, {}, full);
+                cbody_ = false;
+            }
+            pure_full(full, *f.pure_body, "the value of a `pure` function");
+            for (Obl& o : full.obls)
+            {
+                emit_assert(m.body, low::implies(low::and_(requires_only, o.guard), o.cond), o.meta);
+            }
+        }
         for (size_t k {0U}; k < f.ensures_.size(); ++k)
         {
             go(f.ensures_[k], true, static_cast<int>(k));
@@ -21506,6 +22702,8 @@ private:
                 }
             }
         }
+        std::vector<low::E> hva_facts;
+        wf_application_facts(m, hva_facts);
         for (size_t k {0U}; k < f.params.size(); ++k)
         {
             for (const LeafVar& lv : param_vars(f, static_cast<int>(k)))
@@ -21513,7 +22711,8 @@ private:
                 m.formals.push_back(low::LVar {lv.name, ltype(lv.type)});
             }
         }
-        for (int k {0}; k < fa.nreq; ++k)
+        for (int k {0}; !f.pure && k < fa.nreq;
+             ++k) // a `pure` function holds no ghost amount: its atoms are `wildcard` (record 0062 item 6)
         {
             m.formals.push_back(low::LVar {amount_name(k), low::LType::Perm});
         }
@@ -21532,7 +22731,7 @@ private:
                 m.requires_.push_back(clause_checks(facts, f.loc, false, what));
             }
         }
-        for (int k {0}; k < fa.nreq; ++k)
+        for (int k {0}; !f.pure && k < fa.nreq; ++k)
         {
             m.requires_.push_back(clause_checks(amount_bounds(amount_name(k)), f.loc, false, what));
         }
@@ -21579,6 +22778,10 @@ private:
             m.requires_.push_back(clause_checks(fact, f.loc, false, what));
         }
         for (const E& fact : hvq_facts)
+        {
+            m.requires_.push_back(clause_checks(fact, f.loc, false, what));
+        }
+        for (const E& fact : hva_facts)
         {
             m.requires_.push_back(clause_checks(fact, f.loc, false, what));
         }

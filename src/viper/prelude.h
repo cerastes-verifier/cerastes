@@ -32,7 +32,9 @@ namespace cerastes::viper {
 //   c_[u]xor_mask_N_k, c_[u]xor_cmask_N_k   (decision 0027 item 3) x ^ (2^k - 1) and x ^ ~(2^k - 1) for x of the signed/unsigned computed type
 //                   of N bits: one parameter, the body is the exact form over `a` (a floor quotient and a remainder by the power-of-two literal
 //                   2^k), and one `ensures`, the range of the type guarded by the range of the argument (total, no `requires`).
-std::string prelude_text(const std::set<std::string>& used);
+//   `empty_decreases` (record 0062 item 6): a program that holds a `pf_` function prints an empty `decreases` line on every prelude function (Silicon's termination plugin asks for one where a
+//   function with a measure applies it); no other program's text changes.
+std::string prelude_text(const std::set<std::string>& used, bool empty_decreases = false);
 
 // The memory model's prelude (decision 0032 item 5, decision 0028 item 2), for a program that has a cell or a pointer: a pair of fields
 // `v_<t>`, `d_<t>` for each cell type `<t>` (the key; the value is the Viper type of `v_<t>`: "Int", "Bool" or "Ref"), `field lv: Bool`

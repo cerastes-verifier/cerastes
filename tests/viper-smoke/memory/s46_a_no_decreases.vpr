@@ -1,5 +1,5 @@
 // expect: verified
-// S46 (a) recorded: no decreases line on the recursive function (evidence for the lint rule)
+// S46 (a) recorded (audit round 1, S6): no decreases line on a recursive function whose body does NOT decrease (the self-application is at the same n, no ensures): Silicon checks nothing and the function verifies: the evidence that the lint's rule (every pf_ function has one decreases line) is load-bearing
 // S46 hand-written fixture of the target shapes of record 0062 (draft; plan .claude/plans/m4-5e1d-pure-functions.md section 5), written from the emitted shapes of e1b and e1c (build/m4.5e1d/baseline/vpr) and the S45 fixtures. No inhale or assume.
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
 field v_int: Int
@@ -41,5 +41,5 @@ function pf_sum_to(a: Ref, n: Int): Int
   requires forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647))
 {
   (n == 0) ? 0 :
-    ((((-2147483648 <= (n - 1)) && ((n - 1) <= 2147483647) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && 0 <= (n - 1) && (a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= (n - 1)) && ((offset_of(a) + (n - 1)) <= len(block_of(a))) && ((block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && (offset_of(a) + (n - 1) <= offset_of(a) + n))) ? pf_sum_to(a, n - 1) : 0) + ((((offset_of(a) <= (offset_of(a) + n - 1)) && ((offset_of(a) + n - 1) < offset_of(a) + n))) ? loc(block_of(a), (offset_of(a) + n - 1)).v_int : 0))
+    ((((-2147483648 <= n) && (n <= 2147483647) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && 0 <= n && (a != null) && ((a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))) && (0 <= n) && ((offset_of(a) + n) <= len(block_of(a))) && ((block_of(a) == block_of(a)) && (offset_of(a) <= offset_of(a)) && (offset_of(a) + n <= offset_of(a) + n))) ? pf_sum_to(a, n) : 0) + ((((offset_of(a) <= (offset_of(a) + n - 1)) && ((offset_of(a) + n - 1) < offset_of(a) + n))) ? loc(block_of(a), (offset_of(a) + n - 1)).v_int : 0))
 }

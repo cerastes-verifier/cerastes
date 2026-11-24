@@ -304,6 +304,9 @@ struct LFunction
     std::string comment; // a `//` line above the function (the C/C++ function it stands for)
     // `//` lines above the function line, each a lint tag
     std::vector<std::string> tags;
+    // An integer result's type range, `<lo> <hi>`: written as `// cerastes:result <lo> <hi>` on the signature line, which the lint compares with fact (i)'s range (record 0062 item 12, S2); empty
+    // for a `bool` or an enumeration result
+    std::string result_tag;
     std::vector<LVar> formals;
     LType result {LType::Int};
     std::vector<LClause> requires_;
