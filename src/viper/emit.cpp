@@ -50,6 +50,8 @@ const char* bin_text(BinOp op)
 }
 
 // Fully parenthesized; a negative literal is parenthesized too.
+const char* type_name(low::LType t);
+
 std::string expr(const E& e, bool top = false)
 {
     if (!e)
@@ -117,10 +119,24 @@ std::string expr(const E& e, bool top = false)
         case LExpr::Kind::Forall:
         {
             // decision 0059 items 3, 7 and 8: the body extends as far as it can, so a quantifier that is not the whole condition is parenthesized
-            std::string s {"forall " + e->text + ": Int :: "};
-            for (const E& t : e->args)
+            std::string s {"forall "};
+            for (size_t i {0U}; i < e->binders.size(); ++i)
             {
-                s += "{ " + expr(t, true) + " } ";
+                s += (i != 0U ? ", " : "") + e->binders[i].name + ": " + type_name(e->binders[i].type);
+            }
+            s += " :: ";
+            size_t next {0U};
+            for (size_t set {0U}; next < e->args.size(); ++set)
+            {
+                // a set of several terms is `{ t1, t2 }`; without `trigger_sizes` every term is a set of its own
+                const size_t size {e->trigger_sizes.empty() ? 1U : e->trigger_sizes[set]};
+                s += "{ ";
+                for (size_t k {0U}; k < size; ++k)
+                {
+                    s += (k != 0U ? ", " : "") + expr(e->args[next + k], true);
+                }
+                s += " } ";
+                next += size;
             }
             s += expr(e->a, true);
             return top ? s : "(" + s + ")";
@@ -316,6 +332,18 @@ void stmts(Printer& p, const std::vector<low::LStmt>& body, int indent)
 
 void method(Printer& p, const low::LMethod& m)
 {
+    if (!m.ghost_fns.empty())
+    {
+        // record 0061 item 7 (variant M): the ghost functions of a `__wf` method that reads under a quantifier, in a domain of their own with no axiom
+        p.line(0, "");
+        p.line(0, "// cerastes:domain-ok 0061");
+        p.line(0, "domain " + m.ghost_domain + " {");
+        for (const low::LGhostFn& g : m.ghost_fns)
+        {
+            p.line(1, "function " + g.name + "(s: Int): " + type_name(g.result));
+        }
+        p.line(0, "}");
+    }
     p.line(0, "");
     if (!m.comment.empty())
     {

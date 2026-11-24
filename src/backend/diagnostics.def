@@ -271,3 +271,8 @@ CERASTES_DIAG(array_parameter_mismatch, error,
 CERASTES_DIAG(char_subscripts, error,
               "the index of \"%s\" has type \"char\" (-Wchar-subscripts): where plain char is signed a negative value indexes before the array; "
               "use \"unsigned char\" or \"signed char\", or cast the index (decision 0059)")
+// Quantifiers (decision 0061 items 3 and 4): `cerastes_forall(f, ...)` reads `f`'s body at the site.
+CERASTES_DIAG(forall_function, error,
+              "%s cannot be the function of a quantifier: %s (decision 0061)")
+CERASTES_DIAG(forall_argument_mismatch, error,
+              "the arguments of \"cerastes_forall\" for \"%s\" do not match its parameters: %s (decision 0061)")

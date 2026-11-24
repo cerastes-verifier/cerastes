@@ -198,9 +198,17 @@ bool same_expr(const E& a, const E& b)
     {
         return false;
     }
-    if (a->args.size() != b->args.size())
+    if (a->args.size() != b->args.size() || a->trigger_sizes != b->trigger_sizes ||
+        a->binders.size() != b->binders.size())
     {
         return false;
+    }
+    for (size_t i {0U}; i < a->binders.size(); ++i)
+    {
+        if (a->binders[i].name != b->binders[i].name || a->binders[i].type != b->binders[i].type)
+        {
+            return false;
+        }
     }
     for (size_t i {0U}; i < a->args.size(); ++i)
     {
@@ -649,6 +657,10 @@ struct OblCore
     int flag_of {-1};
     // Non-empty: a statement item (a case split, decision 0037 item 8), emitted in the item's place instead of an assert; `cond` and `meta` are unused.
     std::vector<low::LStmt> stmts;
+    // Record 0061 item 7: an obligation made while an element read under a quantifier's binder was lowered: that read's class (else -1) and, in `f__wf`, the
+    // ghost application that is its trigger.
+    int fq_class {-1};
+    E fq_trigger;
 };
 template <class S>
 struct BasicObl : OblCore
@@ -1871,6 +1883,7 @@ private:
             }
         }
         o.seq = full.next_seq++;
+        o.fq_class = fq_ != nullptr ? fq_->cur_class : -1;
         full.obls.push_back(std::move(o));
     }
 
@@ -6941,6 +6954,518 @@ private:
         return is_global_site_key(k);
     } // a derived key is never a global (decision 0045 item 2)
 
+    // ---- quantifiers (record 0061 items 3, 6 and 7; M4.5e1c part B: contracts) ----
+
+    // A read class is a pair (pointer argument, constant `c`) of the reads `base[i + c]` of the quantifier's body.  Binder `q<j>` is the absolute slot of class j.
+    struct FqClass
+    {
+        int arg {0};
+        long long c {0};
+        std::string binder;
+        // `f__wf`: the ghost functions of the class's reads, one per state read (the first read's first): each is a trigger of its binder, one trigger set per state
+        std::vector<std::string> ghosts;
+    };
+    // The quantifier being lowered (no nesting: check_program refuses it).  `view` -1: the joint view (the value: every class at its own binder, `i` from
+    // class 0); `view` j: the one binder of class j (an obligation row: `i` from class j, the other classes' slots computed).  `cur_class`: the class of the
+    // read being lowered, which every obligation made meanwhile carries.
+    struct Fq
+    {
+        const Expr* node {nullptr};
+        std::vector<LV> args;
+        std::vector<FqClass> classes;
+        int view {-1};
+        int cur_class {-1};
+    };
+    Fq* fq_ {nullptr};
+    // the copies of the places of a body whose arguments are replaced by the site's (`fq_resolve`)
+    std::deque<Expr> fq_arena_;
+    std::map<std::pair<const Expr*, const Expr*>, const Expr*> fq_subst_;
+    // the ghost functions of the `__wf` method being built: (the base formal, post-state) -> the element type
+    std::map<std::pair<int, bool>, Type> wf_hvq_;
+
+    static bool low_has_forall(const E& e)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e->kind == low::LExpr::Kind::Forall)
+        {
+            return true;
+        }
+        for (const E& x : {e->a, e->b, e->c})
+        {
+            if (low_has_forall(x))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool has_forall(const Expr* e)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e->kind == Expr::Kind::Forall)
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (has_forall(x))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (has_forall(x))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The formals a quantifier of `e` subscripts by its bound variable (item 7: a call binds each to a local).
+    static void fq_base_formals(const Expr* e, std::set<int>& out)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        if (e->kind == Expr::Kind::Forall)
+        {
+            std::function<void(const Expr*)> walk {
+                [&](const Expr* x)
+                {
+                    if (x == nullptr)
+                    {
+                        return;
+                    }
+                    if (x->kind == Expr::Kind::ElemAddr && x->a != nullptr && x->a->kind == Expr::Kind::ForallArg &&
+                        fq_mentions(x->b, Expr::Kind::Bound, e->bound_id) && x->a->arg_index >= 0 &&
+                        static_cast<size_t>(x->a->arg_index) < e->args.size() &&
+                        e->args[static_cast<size_t>(x->a->arg_index)] != nullptr &&
+                        e->args[static_cast<size_t>(x->a->arg_index)]->kind == Expr::Kind::Formal)
+                    {
+                        out.insert(e->args[static_cast<size_t>(x->a->arg_index)]->index);
+                    }
+                    for (const Expr* y : {x->a, x->b, x->c})
+                    {
+                        walk(y);
+                    }
+                    for (const Expr* y : x->args)
+                    {
+                        walk(y);
+                    }
+                }};
+            walk(e->a);
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            fq_base_formals(x, out);
+        }
+        for (const Expr* x : e->args)
+        {
+            fq_base_formals(x, out);
+        }
+    }
+    static bool fq_mentions(const Expr* e, Expr::Kind k, int id)
+    {
+        if (e == nullptr)
+        {
+            return false;
+        }
+        if (e->kind == k && e->bound_id == id)
+        {
+            return true;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (fq_mentions(x, k, id))
+            {
+                return true;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (fq_mentions(x, k, id))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // `i`, `i + c` or `i - c`: the constant (check_program refuses every other index that names the bound variable)
+    static bool fq_index_form(const Expr* idx, int id, long long* c)
+    {
+        const auto is_bound = [&](const Expr* x)
+        {
+            return x != nullptr && x->kind == Expr::Kind::Bound && x->bound_id == id;
+        };
+        if (is_bound(idx))
+        {
+            *c = 0;
+            return true;
+        }
+        if (idx != nullptr && idx->kind == Expr::Kind::Binary &&
+            (idx->bop == BinaryOp::Add || idx->bop == BinaryOp::Sub) && is_bound(idx->a) && idx->b != nullptr &&
+            idx->b->kind == Expr::Kind::Const && vir::dec::valid(idx->b->value) && idx->b->value.size() < 17U)
+        {
+            const long long v {std::stoll(idx->b->value)};
+            *c = idx->bop == BinaryOp::Add ? v : -v;
+            return true;
+        }
+        return false;
+    }
+    void fq_collect(const Expr* e, Fq& q)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        const int id {q.node->bound_id};
+        if (e->kind == Expr::Kind::Deref && e->a != nullptr && e->a->kind == Expr::Kind::ElemAddr &&
+            e->a->a != nullptr && e->a->a->kind == Expr::Kind::ForallArg && e->a->a->bound_id == id &&
+            fq_mentions(e->a->b, Expr::Kind::Bound, id))
+        {
+            long long c {0};
+            if (!fq_index_form(e->a->b, id, &c))
+            {
+                internal_error(
+                    e->loc,
+                    "an index that names a quantifier's bound variable in an unsupported form reached lowering");
+                return;
+            }
+            bool known {false};
+            for (const FqClass& k : q.classes)
+            {
+                known = known || (k.arg == e->a->a->arg_index && k.c == c);
+            }
+            if (!known)
+            {
+                q.classes.push_back(FqClass {e->a->a->arg_index, c, "q" + std::to_string(q.classes.size()), {}});
+            }
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            fq_collect(x, q);
+        }
+        for (const Expr* x : e->args)
+        {
+            fq_collect(x, q);
+        }
+    }
+    // The class of the element address `addr` of the active quantifier's body when its index names the bound variable, else -1.
+    int fq_binder_class(const Expr& addr) const
+    {
+        if (fq_ == nullptr || addr.kind != Expr::Kind::ElemAddr || addr.a == nullptr ||
+            addr.a->kind != Expr::Kind::ForallArg || addr.a->bound_id != fq_->node->bound_id ||
+            !fq_mentions(addr.b, Expr::Kind::Bound, fq_->node->bound_id))
+        {
+            return -1;
+        }
+        long long c {0};
+        if (!fq_index_form(addr.b, fq_->node->bound_id, &c))
+        {
+            return -1;
+        }
+        for (size_t j {0U}; j < fq_->classes.size(); ++j)
+        {
+            if (fq_->classes[j].arg == addr.a->arg_index && fq_->classes[j].c == c)
+            {
+                return static_cast<int>(j);
+            }
+        }
+        return -1;
+    }
+    // A place of the body with every argument of the quantifier replaced by the site's own expression (item 4: an argument reads no memory, so a place over it is a
+    // place over the formals): the element address of a read the binder does not index, or `*p` of a pointer argument.
+    const Expr* fq_resolve(const Expr* e)
+    {
+        if (e == nullptr || fq_ == nullptr)
+        {
+            return e;
+        }
+        if (e->kind == Expr::Kind::ForallArg)
+        {
+            return e->bound_id == fq_->node->bound_id && e->arg_index >= 0 &&
+                           static_cast<size_t>(e->arg_index) < fq_->node->args.size()
+                       ? fq_->node->args[static_cast<size_t>(e->arg_index)]
+                       : e;
+        }
+        if (!fq_mentions(e, Expr::Kind::ForallArg, fq_->node->bound_id))
+        {
+            return e;
+        }
+        const auto key {std::make_pair(e, fq_->node)};
+        if (const auto it {fq_subst_.find(key)}; it != fq_subst_.end())
+        {
+            return it->second;
+        }
+        fq_arena_.push_back(*e);
+        Expr* copy {&fq_arena_.back()};
+        copy->a = fq_resolve(e->a);
+        copy->b = fq_resolve(e->b);
+        copy->c = fq_resolve(e->c);
+        for (const Expr*& x : copy->args)
+        {
+            x = fq_resolve(x);
+        }
+        fq_subst_[key] = copy;
+        return copy;
+    }
+    // the bound variable's value when binder `cls` is the quantified one: `q - offset_of(base) - c`
+    E fq_ival(const Fq& q, size_t cls) const
+    {
+        const FqClass& k {q.classes[cls]};
+        E d {low::bin(low::BinOp::Sub, low::var(k.binder),
+                      low::dom("offset_of", {q.args[static_cast<size_t>(k.arg)].e}))};
+        if (k.c > 0)
+        {
+            d = low::bin(low::BinOp::Sub, d, low::int_lit(std::to_string(k.c)));
+        }
+        else if (k.c < 0)
+        {
+            d = low::bin(low::BinOp::Add, d, low::int_lit(std::to_string(-k.c)));
+        }
+        return d;
+    }
+    // the absolute slot of class `cls` computed from the bound variable of class `from`: `offset_of(base) + i + c`
+    E fq_slot_from(const Fq& q, size_t cls, size_t from) const
+    {
+        const FqClass& k {q.classes[cls]};
+        E s {
+            low::bin(low::BinOp::Add, low::dom("offset_of", {q.args[static_cast<size_t>(k.arg)].e}), fq_ival(q, from))};
+        if (k.c != 0)
+        {
+            s = low::bin(low::BinOp::Add, s, low::int_lit(std::to_string(k.c)));
+        }
+        return s;
+    }
+    // the absolute slot of class `cls` in the view: the binder itself in the joint view and in its own, else computed from the view's `i`
+    E fq_slot(const Fq& q, size_t cls) const
+    {
+        if (q.view < 0 || static_cast<size_t>(q.view) == cls)
+        {
+            return low::var(q.classes[cls].binder);
+        }
+        return fq_slot_from(q, cls, static_cast<size_t>(q.view));
+    }
+    // The ghost functions of two `__wf` methods are program-wide names in Viper (a duplicate across domains is an error), so they are method-qualified, `hvq_<method>__<formal>_<state>`
+    // (owner's decision, 2026-11-23; the lint strips the `<method>__` prefix).  False would give the record's first spelling `hvq_<formal>_<state>`, which collides.
+    static constexpr bool kHvqUniqueNames {true};
+    // the ghost function of the base formal `formal` in a state (record 0061 item 7: named after the Viper formal)
+    std::string hvq_name(const Function& f, int formal, bool post) const
+    {
+        return std::string("hvq_") + (kHvqUniqueNames ? method_name(f) + "__" : std::string()) +
+               formal_name(f, formal) + (post ? "_post" : "_pre");
+    }
+    // a failed obligation inside `f`'s body is reported at the quantifier's site, with a note at the operation (question 247)
+    static low::Meta fq_site_meta(low::Meta m, const Expr& site)
+    {
+        m.message = "in `" + site.forall_name + "`: " + m.message;
+        if (!m.has_note)
+        {
+            m.has_note = true;
+            m.note_loc = m.loc;
+            m.note_text = "this is the operation in `" + site.forall_name + "`";
+        }
+        m.loc = site.loc;
+        return m;
+    }
+
+    // `forall(f, args...)` in a contract (record 0061 items 3, 6 and 7): the value is `forall q0, q1.. :: { loc(block_of(base_j), q_j).. } range(i) && q_j == offset_of(base_j) +
+    // i + c_j ==> body`; in `f__wf` the obligations of the body come out beside it, one quantified row each over their own class's binder.
+    LV forall_expr(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
+    {
+        if (fq_ != nullptr || cmode_ == CMode::None || cmode_ == CMode::Inv)
+        {
+            internal_error(e.loc, "a quantifier outside a contract, or inside another, reached lowering");
+            return {low::bool_lit(true), {}};
+        }
+        Fq q;
+        q.node = &e;
+        // each trailing argument is evaluated once, at the site, outside the binder (audit round 1, B1): its own obligations are rows of the site
+        Deps adep;
+        for (const Expr* a : e.args)
+        {
+            q.args.push_back(lower(*a, env, guard, gdep, full));
+            adep = join(adep, q.args.back().dep);
+        }
+        fq_collect(e.a, q);
+        if (q.classes.empty())
+        {
+            internal_error(e.loc,
+                           "a quantifier without an element read indexed by its bound variable reached lowering");
+            return {low::bool_lit(true), {}};
+        }
+        struct Scope
+        {
+            Lowerer& l;
+            Fq* saved;
+            Scope(Lowerer& ll, Fq* q_) : l(ll), saved(ll.fq_)
+            {
+                l.fq_ = q_;
+            }
+            ~Scope()
+            {
+                l.fq_ = saved;
+            }
+        } scope(*this, &q);
+        const bool wf {cmode_ == CMode::Wf};
+        // the joint view: the value
+        Full body_full;
+        const LV v {lower(*e.a, env, nullptr, Deps {}, body_full)};
+        // the trigger term of class `j` (in `f__wf` its `g`-th ghost application)
+        const auto trigger_of = [&](size_t j, size_t g) -> E
+        {
+            const FqClass& k {q.classes[j]};
+            if (wf)
+            {
+                return low::fn(k.ghosts[g], {low::var(k.binder)});
+            }
+            const E base {q.args[static_cast<size_t>(k.arg)].e};
+            if (base == nullptr || base->kind != low::LExpr::Kind::Var)
+            {
+                internal_error(
+                    e.loc, "the pointer a quantified read subscripts is not a variable (a call binds it to a local)");
+                return low::bool_lit(true);
+            }
+            return low::dom("loc", {block_of(base), low::var(k.binder)});
+        };
+        // the trigger sets of the clause (record 0061 item 6, S45 addendum): one set holding one term per class; in `f__wf` a class read in both states has one set per state
+        // (each a single application over the binder: no computed term, no matching loop), the sets being the products of the classes' states
+        const auto states_of = [&](size_t j) -> size_t
+        {
+            return wf ? q.classes[j].ghosts.size() : 1U;
+        };
+        std::vector<low::LVar> binders;
+        std::vector<std::vector<E>> sets {{}};
+        for (size_t j {0U}; j < q.classes.size(); ++j)
+        {
+            binders.push_back(low::LVar {q.classes[j].binder, low::LType::Int});
+            std::vector<std::vector<E>> next;
+            for (const std::vector<E>& so_far : sets)
+            {
+                for (size_t g {0U}; g < states_of(j); ++g)
+                {
+                    next.push_back(so_far);
+                    next.back().push_back(trigger_of(j, g));
+                }
+            }
+            sets = std::move(next);
+        }
+        E antecedent {range_check(fq_ival(q, 0U), *e.bound_type)};
+        for (size_t j {1U}; j < q.classes.size(); ++j)
+        {
+            antecedent =
+                low::and_(antecedent, low::bin(low::BinOp::Eq, low::var(q.classes[j].binder), fq_slot_from(q, j, 0U)));
+        }
+        const E value {low::forall_(binders, sets, low::implies(antecedent, v.e))};
+        if (wf)
+        {
+            // one quantified row per obligation of the body, over its own class's binder (`prior` stays outside: the row is `prior && guard ==> forall ...`)
+            // The ghost applications in `x`: whether one is at the view's own binder and whether one is at anything else (a computed slot: another class), so that a row holds the
+            // applications of its own class alone (check_program's multi-class rule makes that so; this is its backstop)
+            const auto apps = [&](const E& x, size_t view, bool* own, bool* other)
+            {
+                std::function<void(const E&)> walk {
+                    [&](const E& y)
+                    {
+                        if (y == nullptr)
+                        {
+                            return;
+                        }
+                        if (y->kind == low::LExpr::Kind::Fn && y->text.rfind("hvq_", 0U) == 0U && y->args.size() == 1U)
+                        {
+                            const bool at_binder {y->args[0U]->kind == low::LExpr::Kind::Var &&
+                                                  y->args[0U]->text == q.classes[view].binder};
+                            *own = *own || at_binder;
+                            *other = *other || !at_binder;
+                        }
+                        for (const E& z : {y->a, y->b, y->c})
+                        {
+                            walk(z);
+                        }
+                        for (const E& z : y->args)
+                        {
+                            walk(z);
+                        }
+                    }};
+                walk(x);
+            };
+            const auto rows = [&](const Full& src, size_t view, bool single_class)
+            {
+                for (const Obl& o : src.obls)
+                {
+                    if (!o.stmts.empty())
+                    {
+                        internal_error(e.loc,
+                                       "a statement-carrying obligation in the body of a quantifier reached lowering");
+                        continue;
+                    }
+                    bool own {false};
+                    bool other {false};
+                    apps(o.guard, view, &own, &other);
+                    apps(o.cond, view, &own, &other);
+                    // the rows of class `view`; those that read no class at all (the guard's arithmetic, a scalar read's framing) belong to view 0; an untagged row that reads one
+                    // class belongs to that class's view; a row that reads two is refused by check_program, and an internal error here (never dropped)
+                    const bool tagged_mine {o.fq_class == static_cast<int>(view)};
+                    if (!single_class && ((tagged_mine && other) || (o.fq_class < 0 && own && other)))
+                    {
+                        internal_error(
+                            e.loc,
+                            "an obligation of a quantifier's body that mentions the reads of two classes reached lowering");
+                        continue;
+                    }
+                    const bool mine {tagged_mine ||
+                                     (o.fq_class < 0 && ((own && !other) || (view == 0U && !own && !other)))};
+                    if (!mine)
+                    {
+                        continue;
+                    }
+                    q.view = static_cast<int>(view);
+                    const E row_ante {low::and_(range_check(fq_ival(q, view), *e.bound_type), o.guard)};
+                    // the row's trigger: the read's own application, else the class's first; a class read in both states has one set per state
+                    std::vector<std::vector<E>> row_sets;
+                    if (q.classes[view].ghosts.size() > 1U)
+                    {
+                        for (size_t g {0U}; g < q.classes[view].ghosts.size(); ++g)
+                        {
+                            row_sets.push_back({trigger_of(view, g)});
+                        }
+                    }
+                    else
+                    {
+                        row_sets.push_back({o.fq_trigger != nullptr ? o.fq_trigger : trigger_of(view, 0U)});
+                    }
+                    const E row {low::forall_({low::LVar {q.classes[view].binder, low::LType::Int}}, row_sets,
+                                              low::implies(row_ante, o.cond))};
+                    obl(full, guard, gdep, row, adep, fq_site_meta(o.meta, e));
+                }
+            };
+            if (q.classes.size() == 1U)
+            {
+                rows(body_full, 0U, true);
+            }
+            else
+            {
+                for (size_t view {0U}; view < q.classes.size(); ++view)
+                {
+                    Full vf;
+                    q.view = static_cast<int>(view);
+                    lower(*e.a, env, nullptr, Deps {}, vf);
+                    rows(vf, view, false);
+                }
+            }
+            q.view = -1;
+        }
+        return {value, adep};
+    }
+
     // A read of `*p` in a contract (decision 0037 item 7).  Wf: a ghost value formal, and the framing obligation; otherwise the heap read, guarded
     // by itself: the chain `(D_1 ? read : (D_2 ? read : ... : dummy))` over the framing disjuncts of the earlier atoms of the same field, or the
     // plain read when the framing is trivial (an unconditional atom on the same place) or implied by the guard the read is evaluated under.
@@ -6972,17 +7497,41 @@ private:
             }
         } depth_guard(old_depth_, old_state);
         std::vector<int> path; // decision 0043 item 9: a place is a root and a member path
-        const bool elem {e.a != nullptr && e.a->kind == Expr::Kind::ElemAddr};
-        const Expr* root {e.a == nullptr || elem ? nullptr : member_root(e.a, &path)};
+        // Record 0061 item 6: under a quantifier's binder the read `p[i + c]` of a pointer argument is the cell at the absolute slot of its class's binder; any other
+        // place of the body is a place over the site's own arguments (item 4).
+        const int fq_cls {fq_ != nullptr && e.a != nullptr ? fq_binder_class(*e.a) : -1};
+        struct ClassReset
+        {
+            Fq* q;
+            ~ClassReset()
+            {
+                if (q != nullptr)
+                {
+                    q->cur_class = -1;
+                }
+            }
+        } class_reset {fq_cls >= 0 ? fq_ : nullptr};
+        const Expr* ea {fq_ != nullptr && fq_cls < 0 ? fq_resolve(e.a) : e.a};
+        const bool elem {ea != nullptr && ea->kind == Expr::Kind::ElemAddr};
+        const Expr* root {ea == nullptr || elem || fq_cls >= 0 ? nullptr : member_root(ea, &path)};
         int k {kNoPlaceKey};
         E p;
-        if (elem)
+        if (fq_cls >= 0)
+        {
+            // the index's own obligation (`i + c` may overflow) is a row of this class; the value is the slot
+            fq_->cur_class = fq_cls;
+            lower(*e.a->b, env, guard, gdep, full);
+            const FqClass& cl {fq_->classes[static_cast<size_t>(fq_cls)]};
+            const E bv {fq_->args[static_cast<size_t>(cl.arg)].e};
+            p = low::dom("loc", {block_of(bv), fq_slot(*fq_, static_cast<size_t>(fq_cls))});
+        }
+        else if (elem)
         {
             // Record 0060 item 5: `p[i]` of a pointer parameter, the cell `loc(block_of(p), offset_of(p) + i)`.  No Silicon permission or bound row belongs to a contract read
             // (the framing is `f__wf`'s obligation and the chain's guard); its key is its own, so no atom's place is "the very place read".
-            k = elem_key(*cf_, *e.a);
-            const LV b {lower(*e.a->a, env, guard, gdep, full)};
-            const LV i {lower(*e.a->b, env, guard, gdep, full)};
+            k = elem_key(*cf_, *ea);
+            const LV b {lower(*ea->a, env, guard, gdep, full)};
+            const LV i {lower(*ea->b, env, guard, gdep, full)};
             p = low::dom("loc", {block_of(b.e), low::bin(low::BinOp::Add, low::dom("offset_of", {b.e}), i.e)});
         }
         else if (root != nullptr && (root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::Result ||
@@ -7143,6 +7692,42 @@ private:
                 trivial = true;
             }
         }
+        if (cmode_ == CMode::Wf && fq_cls >= 0)
+        {
+            // Record 0061 item 7 (variant M): the read is the ghost function of its base parameter and state at the slot; the framing row (item 7) is one obligation
+            // of the class, quantified by the quantifier's own rows
+            const int formal {
+                fq_->node->args[static_cast<size_t>(fq_->classes[static_cast<size_t>(fq_cls)].arg)]->index};
+            const std::string ghost {hvq_name(*cf_, formal, post)};
+            wf_hvq_[{formal, post}] = t;
+            FqClass& cl {fq_->classes[static_cast<size_t>(fq_cls)]};
+            if (std::find(cl.ghosts.begin(), cl.ghosts.end(), ghost) == cl.ghosts.end())
+            {
+                cl.ghosts.push_back(ghost);
+            }
+            const E slot {fq_slot(*fq_, static_cast<size_t>(fq_cls))};
+            if (!trivial)
+            {
+                E any;
+                for (const E& d : ds)
+                {
+                    any = any ? low::bin(BinOp::Or, any, d) : d;
+                }
+                if (!any)
+                {
+                    any = low::bool_lit(false);
+                }
+                const std::string read_text {e.c_text};
+                obl(full, guard, gdep, any, {},
+                    meta("permission", e.loc,
+                         cmeasure_ ? "the termination measure of `" + cf_->c_name + "` reads " +
+                                         quoted(read_text, "an element of a pointer") + " without owning it"
+                                   : "the contract of `" + cf_->c_name + "` reads " +
+                                         quoted(read_text, "an element of a pointer") + " without owning it"));
+                full.obls.back().fq_trigger = low::fn(ghost, {low::var(cl.binder)});
+            }
+            return {low::fn(ghost, {slot}), {}};
+        }
         if (cmode_ == CMode::Wf)
         {
             const GKey key {k, path, post};
@@ -7160,10 +7745,10 @@ private:
                 }
                 // record 0060 item 5: an element reads as `p[i]`, from the Deref's own spelling or, failing that, its base's and its index's; with neither, no spelling is invented
                 std::string read_text {e.c_text};
-                if (read_text.empty() && elem && e.a->a != nullptr && e.a->b != nullptr && !e.a->a->c_text.empty() &&
-                    !e.a->b->c_text.empty())
+                if (read_text.empty() && elem && ea->a != nullptr && ea->b != nullptr && !ea->a->c_text.empty() &&
+                    !ea->b->c_text.empty())
                 {
-                    read_text = e.a->a->c_text + "[" + e.a->b->c_text + "]";
+                    read_text = ea->a->c_text + "[" + ea->b->c_text + "]";
                 }
                 const char* what_read {elem ? "an element of a pointer" : "a pointer's object"};
                 obl(full, guard, gdep, any, {},
@@ -8372,6 +8957,23 @@ private:
                 return aggregate(e, env, guard, gdep, full);
             case Expr::Kind::ElemAddr:
                 return elem_addr(e, env, guard, gdep, full);
+            case Expr::Kind::Forall:
+                return forall_expr(e, env, guard, gdep, full);
+            case Expr::Kind::Bound:
+                if (fq_ == nullptr || fq_->node->bound_id != e.bound_id)
+                {
+                    internal_error(e.loc, "a bound variable outside its quantifier reached lowering");
+                    return {low::int_lit("0"), {}};
+                }
+                return {fq_ival(*fq_, fq_->view < 0 ? 0U : static_cast<size_t>(fq_->view)), {}};
+            case Expr::Kind::ForallArg:
+                if (fq_ == nullptr || fq_->node->bound_id != e.bound_id || e.arg_index < 0 ||
+                    static_cast<size_t>(e.arg_index) >= fq_->args.size())
+                {
+                    internal_error(e.loc, "an argument of a quantifier outside its quantifier reached lowering");
+                    return {e.type.is_bool() ? low::bool_lit(true) : low::int_lit("0"), {}};
+                }
+                return fq_->args[static_cast<size_t>(e.arg_index)];
             case Expr::Kind::Atom:
                 // a written atom's rows are the loop's own (decision 0040 item 5); its own loads are reads of the
                 // invariant, framed like any (decision 0045 item 12)
@@ -8706,6 +9308,15 @@ private:
                 if (cmode_ == CMode::Method && has_atom(*e.b))
                 {
                     return {low::bin(BinOp::Implies, low::not_(a.e), b.e), dep};
+                }
+                // Record 0061 item 7: a quantifier stands as `g ==> forall ...` (a clause of its own under a plain guard), whichever side of the `||` it is on
+                if (cmode_ != CMode::None && has_forall(e.b))
+                {
+                    return {low::bin(BinOp::Implies, low::not_(a.e), b.e), dep};
+                }
+                if (cmode_ != CMode::None && has_forall(e.a))
+                {
+                    return {low::bin(BinOp::Implies, low::not_(b.e), a.e), dep};
                 }
                 return {low::bin(BinOp::Or, a.e, b.e), dep};
             case BinaryOp::Lt:
@@ -9634,6 +10245,49 @@ private:
                 struct_ptr_uses(*e.args[k], args[k], nullptr, {}, full, false);
             }
         }
+        // Record 0061 item 7: the pointers a callee's quantifier subscripts are bound to locals (the quantifier's trigger terms are over a variable): the local of
+        // the callee's range atom where there is one, the argument itself when it is a variable, else a local of its own, assigned before the rows that name it.
+        {
+            std::set<int> bases;
+            for (const Clause& c : callee.requires_)
+            {
+                fq_base_formals(c.expr, bases);
+            }
+            Deps adep;
+            for (const LV& a : args)
+            {
+                adep = join(adep, a.dep);
+            }
+            for (const int j : bases)
+            {
+                if (j < 0 || static_cast<size_t>(j) >= args.size() || !args[static_cast<size_t>(j)].leaves.empty() ||
+                    static_cast<size_t>(j) >= cenv.formals.size() || cenv.formals[static_cast<size_t>(j)] == nullptr)
+                {
+                    continue;
+                }
+                if (bound_args.size() > static_cast<size_t>(j) && bound_args[static_cast<size_t>(j)] != nullptr)
+                {
+                    cenv.formals[static_cast<size_t>(j)] = bound_args[static_cast<size_t>(j)];
+                    continue;
+                }
+                if (cenv.formals[static_cast<size_t>(j)]->kind == low::LExpr::Kind::Var)
+                {
+                    continue;
+                }
+                const std::string name {new_temp(low::LType::Ref)};
+                obl(full, nullptr, adep, low::bool_lit(true), {},
+                    meta("internal", e.loc,
+                         "internal check: a pointer a callee's quantifier subscripts bound to a local"),
+                    &pre.ex);
+                assign(full.obls.back().stmts, name, cenv.formals[static_cast<size_t>(j)]);
+                cenv.formals[static_cast<size_t>(j)] = low::var(name);
+                if (bound_args.size() < args.size())
+                {
+                    bound_args.resize(args.size());
+                }
+                bound_args[static_cast<size_t>(j)] = low::var(name);
+            }
+        }
         for (size_t ci {0U}; ci < callee.requires_.size(); ++ci)
         {
             const Clause& c {callee.requires_[ci]};
@@ -9653,13 +10307,26 @@ private:
             m.has_note = true;
             m.note_loc = c.loc.known() ? c.loc : callee.loc;
             m.note_text = "this is the requirement of `" + callee.c_name + "`";
-            // EXACT (decision 0026 item 1): C completes everything in PRE(c) before it makes the call, so the clause is asserted after all of it.
-            // BASE (step 2): only the argument values the clause reads, and the floor (0021 item 10).
-            obl(full, nullptr, {}, v.e, v.dep, std::move(m), &pre.ex);
-            if (opt_.drop_exact_set && !exact_dropped_ && !full.obls.back().dep.base.empty())
-            { // self-test hook (decision 0026)
-                full.obls.back().dep.ex.clear();
-                exact_dropped_ = true;
+            // A clause with a quantifier is one row per conjunct (record 0061 item 7: the quantifier is a row of its own, under at most a guard)
+            std::vector<E> rows;
+            if (has_forall(c.expr))
+            {
+                split_conjuncts(v.e, rows);
+            }
+            else
+            {
+                rows.push_back(v.e);
+            }
+            for (const E& row_e : rows)
+            {
+                // EXACT (decision 0026 item 1): C completes everything in PRE(c) before it makes the call, so the clause is asserted after all of it.
+                // BASE (step 2): only the argument values the clause reads, and the floor (0021 item 10).
+                obl(full, nullptr, {}, row_e, v.dep, m, &pre.ex);
+                if (opt_.drop_exact_set && !exact_dropped_ && !full.obls.back().dep.base.empty())
+                { // self-test hook (decision 0026)
+                    full.obls.back().dep.ex.clear();
+                    exact_dropped_ = true;
+                }
             }
         }
         call_pre_both_ = saved_both;
@@ -13253,12 +13920,13 @@ private:
             {
                 continue; // nothing but atoms: asserted above
             }
-            if (ret_kept_row_)
+            const bool kept_row {ret_kept_row_};
+            if (kept_row && !has_forall(c.expr))
             {
                 // one assertion for the whole clause (Silicon reports each conjunct of an asserted `&&` as its own error)
                 v.e = low::not_(low::not_(v.e));
-                ret_kept_row_ = false;
             }
+            ret_kept_row_ = false;
             std::string what {"the postcondition of `" + f.c_name + "` may not hold"};
             if (!c.added.empty())
             {
@@ -13286,6 +13954,30 @@ private:
             m.has_note = true;
             m.note_loc = c.loc;
             m.note_text = "this is the postcondition";
+            if (has_forall(c.expr))
+            {
+                // record 0061 item 7: a quantifier is a row of its own, so a clause that holds one is one row per conjunct
+                std::vector<E> rows;
+                split_conjuncts(v.e, rows);
+                // the clause's `!!` one-row form (a tied marked site's kept row) stays for the conjuncts that are no quantifier: one assertion for all of them
+                E plain;
+                for (const E& row_e : rows)
+                {
+                    if (kept_row && !low_has_forall(row_e))
+                    {
+                        plain = low::and_(plain, row_e);
+                    }
+                    else
+                    {
+                        emit_assert(out, row_e, m);
+                    }
+                }
+                if (plain != nullptr)
+                {
+                    emit_assert(out, low::not_(low::not_(plain)), m);
+                }
+                continue;
+            }
             emit_assert(out, v.e, std::move(m));
         }
     }
@@ -13329,6 +14021,12 @@ private:
                     return true;
                 }
                 break; // a cell written inside an expression (0039 item 2)
+            // record 0061 item 5: a quantifier touches memory when its body does (an element read is a Deref, found below); the bound variable
+            // is a value
+            case Expr::Kind::Forall:
+            case Expr::Kind::Bound:
+            case Expr::Kind::ForallArg:
+                break;
             default:
                 break;
         }
@@ -19186,6 +19884,9 @@ private:
             case Expr::Kind::AssignE:
             case Expr::Kind::Comma:
             case Expr::Kind::ElemAddr:
+            case Expr::Kind::Forall:
+            case Expr::Kind::Bound:
+            case Expr::Kind::ForallArg:
                 internal_error(e.loc, std::string("a call, variable, parameter, result, `old` or side effect in ") +
                                           what + " reached the prologue");
                 return false;
@@ -19470,7 +20171,7 @@ private:
     void push_clauses(std::vector<low::LClause>& out, const E& e, const Expr* source, const SrcLoc& loc, bool ensures,
                       const std::string& what)
     {
-        if (!has_range_atom(source))
+        if (!has_range_atom(source) && !has_forall(source))
         {
             out.push_back(clause_checks(e, loc, ensures, what));
             return;
@@ -19903,6 +20604,7 @@ private:
         fn_.method = method_name(f);
         const FnAtoms& fa {atoms_of(f)};
         wf_ghosts_.clear();
+        wf_hvq_.clear();
         low::LMethod m;
         m.name = fn_.method + "__wf";
         m.comment = "well-formedness of the contract of C/C++ function `" + f.c_name + "`";
@@ -20118,7 +20820,20 @@ private:
                     ni_row(site, *partner, site.atom->a != nullptr ? site.atom->a->c_text : std::string());
                 }
             }
-            prior = low::and_(prior, v.e);
+            if (has_forall(c.expr))
+            {
+                // record 0061 item 11: the prior's quantifiers are conjuncts of their own (a plain guard allowed)
+                std::vector<E> parts;
+                split_conjuncts(v.e, parts);
+                for (const E& part : parts)
+                {
+                    prior = low::and_(prior, part);
+                }
+            }
+            else
+            {
+                prior = low::and_(prior, v.e);
+            }
         };
         for (size_t k {0U}; k < f.requires_.size(); ++k)
         {
@@ -20300,6 +21015,157 @@ private:
                                                              low::var(ghost_name(kr, path, false)))));
             }
         }
+        // Record 0061 item 7 (variant M): the ghost functions of the reads under a quantifier, their domain, and the facts assumed over them (a)-(d), each with one trigger set
+        // per application it relates.  Nothing here when the contract has no quantified read: its `__wf` is as it was.
+        std::vector<low::E> hvq_facts;
+        if (!wf_hvq_.empty())
+        {
+            CtxSave hvq_ctx(*this);
+            cmode_ = CMode::Wf;
+            const auto app = [&](int formal, bool post, const E& s)
+            {
+                return low::fn(hvq_name(f, formal, post), {s});
+            };
+            const E s {low::var("s")};
+            const auto formal_var = [&](int formal)
+            {
+                return low::var(formal_name(f, formal));
+            };
+            m.ghost_domain = "Hvq_" + fn_.method;
+            // Facts (a), (b) and (c) are assumed only for a formal that has a place atom of the element's cell field in the contract (fail closed: a read through a formal
+            // with no atom of its own, an alias `q == p`, loses its range fact and its ties, and keeps its framing row; the lint takes the field from the atoms)
+            const auto has_atom_field = [&](int formal, const Type& t)
+            {
+                for (const AtomSite& site : fa.sites)
+                {
+                    if (site_key(site) == formal && site_fields(site).count(cell_suffix(t)) != 0U)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            for (const auto& [key, t] : wf_hvq_)
+            {
+                m.ghost_fns.push_back(low::LGhostFn {hvq_name(f, key.first, key.second), ltype(t)});
+                if (!has_atom_field(key.first, t))
+                {
+                    continue;
+                }
+                // (a) the type's range of an application, per state: a location in one state holds a value of its type
+                E range;
+                if (t.is_ptr())
+                {
+                    range = wf_expr(app(key.first, key.second, s), &t);
+                }
+                else if (!t.is_bool())
+                {
+                    range = range_check(app(key.first, key.second, s), *t.int_type);
+                }
+                if (range)
+                {
+                    hvq_facts.push_back(
+                        low::forall_({low::LVar {"s", low::LType::Int}}, {{app(key.first, key.second, s)}}, range));
+                }
+            }
+            // (b) the scalar tie: a scalar ghost of a read of the same parameter, state and cell field is the application at its slot
+            for (const auto& [gk, gt] : wf_ghosts_)
+            {
+                const int kr {std::get<0>(gk)};
+                const bool post {std::get<2>(gk)};
+                int formal {-1};
+                E slot;
+                if (is_elem_key(kr))
+                {
+                    const Expr& addr {*elem_of(kr).addr};
+                    formal = addr.a->index;
+                    Full scratch;
+                    slot = low::bin(low::BinOp::Add, low::dom("offset_of", {formal_var(formal)}),
+                                    lower(*addr.b, env, nullptr, Deps {}, scratch).e);
+                }
+                else if (kr >= 0 && static_cast<size_t>(kr) < f.params.size() && std::get<1>(gk).empty())
+                {
+                    formal = kr;
+                    slot = low::bin(low::BinOp::Add, low::dom("offset_of", {formal_var(formal)}), low::int_lit("0"));
+                }
+                const auto it {wf_hvq_.find({formal, post})};
+                if (formal < 0 || it == wf_hvq_.end() || cell_suffix(it->second) != cell_suffix(gt) ||
+                    !has_atom_field(formal, it->second))
+                {
+                    continue;
+                }
+                hvq_facts.push_back(low::bin(low::BinOp::Eq, app(formal, post, slot), low::var(ghost_name(gk))));
+            }
+            // (c) two parameters on one block, per state, between pointees of one cell field: their functions are indexed by the absolute slot
+            for (auto a {wf_hvq_.begin()}; a != wf_hvq_.end(); ++a)
+            {
+                for (auto b {std::next(a)}; b != wf_hvq_.end(); ++b)
+                {
+                    if (a->first.second != b->first.second || a->first.first == b->first.first ||
+                        cell_suffix(a->second) != cell_suffix(b->second) ||
+                        !has_atom_field(a->first.first, a->second) || !has_atom_field(b->first.first, b->second))
+                    {
+                        continue;
+                    }
+                    const bool post {a->first.second};
+                    hvq_facts.push_back(
+                        low::implies(low::bin(low::BinOp::Eq, block_of(formal_var(a->first.first)),
+                                              block_of(formal_var(b->first.first))),
+                                     low::forall_({low::LVar {"s", low::LType::Int}},
+                                                  {{app(a->first.first, post, s)}, {app(b->first.first, post, s)}},
+                                                  low::bin(low::BinOp::Eq, app(a->first.first, post, s),
+                                                           app(b->first.first, post, s)))));
+                }
+            }
+            // (d) a `reads` place keeps its value, only where it is taken and returned: under both atoms' guards
+            for (const auto& [key, t] : wf_hvq_)
+            {
+                if (!key.second || wf_hvq_.count({key.first, false}) == 0U)
+                {
+                    continue;
+                }
+                for (int i {0}; i < fa.nreq; ++i)
+                {
+                    const AtomSite& rs {fa.sites[static_cast<size_t>(i)]};
+                    const bool range {rs.atom->atom == AtomKind::ReadsRange};
+                    if ((!range && rs.atom->atom != AtomKind::Reads) || site_key(rs) != key.first || !rs.path.empty() ||
+                        !rs.via.empty() || !site_fields(rs).count(cell_suffix(t)) ||
+                        site_marker(f, rs) != InitMarker::None)
+                    {
+                        continue;
+                    }
+                    for (const AtomSite& es : fa.sites)
+                    {
+                        if (!es.in_ensures || es.atom->amount != i)
+                        {
+                            continue;
+                        }
+                        const E guards {low::and_(site_guard(rs, env), site_guard(es, env))};
+                        const E p {formal_var(key.first)};
+                        if (range)
+                        {
+                            Full scratch;
+                            const E n {lower(*rs.atom->b, env, nullptr, Deps {}, scratch).e};
+                            const E lo {low::dom("offset_of", {p})};
+                            hvq_facts.push_back(low::implies(
+                                guards, low::forall_({low::LVar {"s", low::LType::Int}},
+                                                     {{app(key.first, true, s)}, {app(key.first, false, s)}},
+                                                     low::implies(low::and_(low::bin(low::BinOp::Le, lo, s),
+                                                                            low::bin(low::BinOp::Lt, s,
+                                                                                     low::bin(low::BinOp::Add, lo, n))),
+                                                                  low::bin(low::BinOp::Eq, app(key.first, true, s),
+                                                                           app(key.first, false, s))))));
+                        }
+                        else
+                        {
+                            const E at {low::dom("offset_of", {p})};
+                            hvq_facts.push_back(low::implies(
+                                guards, low::bin(low::BinOp::Eq, app(key.first, true, at), app(key.first, false, at))));
+                        }
+                    }
+                }
+            }
+        }
         for (size_t k {0U}; k < f.params.size(); ++k)
         {
             for (const LeafVar& lv : param_vars(f, static_cast<int>(k)))
@@ -20369,6 +21235,10 @@ private:
             }
         }
         for (const E& fact : facts_)
+        {
+            m.requires_.push_back(clause_checks(fact, f.loc, false, what));
+        }
+        for (const E& fact : hvq_facts)
         {
             m.requires_.push_back(clause_checks(fact, f.loc, false, what));
         }

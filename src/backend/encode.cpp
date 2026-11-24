@@ -214,6 +214,7 @@ public:
 
 private:
     // ---- per-function state --------------------------------------------------------------------------------
+    struct ForallSite;
     struct Ctx
     {
         a_routine_ptr routine {nullptr};
@@ -319,6 +320,9 @@ private:
         // `owner_result_ok` (the value an owner receives, a `return` of a function that gives its result's block, the argument of a parameter that takes a
         // block), which the encoding of that context fills before it encodes the value.
         std::set<const an_expr_node*> owner_result_ok;
+        // Record 0061 items 3 and 4: the quantifier whose `pure` function's body is being encoded (null elsewhere): the parameters of the function are the bound
+        // variable and `ForallArg`s of it, and every report inside the body is made at the quantifier's site.
+        ForallSite* forall {nullptr};
     };
 
     vir::Program prog_;
@@ -659,6 +663,8 @@ private:
             case Expr::Kind::Local:
                 return x->var != nullptr ? x->var->name : "";
             case Expr::Kind::Formal: // a contract's index (decision 0060 item 5)
+            case Expr::Kind::Bound:  // the bound variable of a quantifier (record 0061)
+            case Expr::Kind::ForallArg:
                 return x->c_text;
             case Expr::Kind::Convert:
                 return x->explicit_cast ? "" : index_text(x->a, depth + 1);
@@ -715,7 +721,11 @@ private:
         }
         const char* const beyond {
             "an element of something other than a pointer parameter in a contract (a loaded pointer, a global or the result: M4.5e2, decision 0060 item 1)"};
-        if (base->kind != enk_param_ref)
+        // record 0061 item 4: in the function of a quantifier the pointer is one of its parameters, a variable the substitution maps to a `ForallArg`
+        const bool quantified_base {cx_.forall != nullptr && base->kind == enk_variable &&
+                                    base->variant.variable.ptr != nullptr &&
+                                    cx_.forall->slot.count(base->variant.variable.ptr) != 0U};
+        if (base->kind != enk_param_ref && !quantified_base)
         {
             reject(Diag::unsupported_expression, e->position, beyond);
             return nullptr;
@@ -725,9 +735,14 @@ private:
         {
             return nullptr;
         }
-        if (b->kind != Expr::Kind::Formal || !b->type.is_ptr() || b->type.pointee == nullptr)
+        if ((b->kind != Expr::Kind::Formal && b->kind != Expr::Kind::ForallArg) || !b->type.is_ptr() ||
+            b->type.pointee == nullptr)
         {
             reject(Diag::unsupported_expression, e->position, beyond);
+            return nullptr;
+        }
+        if (b->kind == Expr::Kind::ForallArg && !forall_base_ok(*b, e->position))
+        {
             return nullptr;
         }
         if (b->type.pointee->is_struct())
@@ -761,11 +776,27 @@ private:
         }
         if (vir::reads_heap(*ix))
         {
-            reject(Diag::unsupported_expression, index->position,
+            reject(cx_.forall != nullptr ? Diag::unsupported_annotation : Diag::unsupported_expression, index->position,
                    "an index that reads memory in a contract (M4.5e2, decision 0060 item 1)");
             return nullptr;
         }
         spell_formals(ix);
+        if (cx_.forall != nullptr)
+        {
+            // record 0061 item 6: an index that names the bound variable is `i`, `i + c` or `i - c`; each such read is a read class of the quantifier
+            const int form {bound_index_form(ix, cx_.forall->id)};
+            if (form == 2)
+            {
+                reject(
+                    Diag::unsupported_annotation, index->position,
+                    "an index that names the bound variable in another form than `i`, `i + c` or `i - c`, a conversion around it included (`a[2 * i]`, `a[n - i]`, `a[b[i]]`: M4.5e2, decision 0061 item 6)");
+                return nullptr;
+            }
+            if (form == 1)
+            {
+                ++cx_.forall->read_classes;
+            }
+        }
         const std::string name {!b->c_text.empty() ? b->c_text : std::string("the pointer")};
         const std::string t {index_text(ix)};
         if (reject_marked_read(b, e->position, cx_.old_depth > 0,
@@ -1387,13 +1418,20 @@ private:
         reject_at(d, position_for(cx_.stmt_pos), what);
     }
 
+    // Inside the body of a quantifier's function every report is made at the quantifier's site (record 0061 item 4: the body is `f`'s, the line the user
+    // reads is the `forall`).
+    const a_source_position& report_position(const a_source_position& p) const
+    {
+        return cx_.forall != nullptr ? cx_.forall->site : p;
+    }
+
     void reject(Diag d, const a_source_position& p, const std::string& what)
     {
         if (cx_.suppress)
         {
             return;
         }
-        DiagPos dp {position_for(p)};
+        DiagPos dp {position_for(report_position(p))};
         if (!rejected_.insert({static_cast<int>(d), dp.file, dp.line}).second)
         {
             return;
@@ -1408,7 +1446,7 @@ private:
         {
             return;
         }
-        DiagPos dp {position_for(p)};
+        DiagPos dp {position_for(report_position(p))};
         if (!rejected_.insert({static_cast<int>(d), dp.file, dp.line}).second)
         {
             return;
@@ -3244,6 +3282,12 @@ private:
     bool reject_marked_read(const Expr* pf, const a_source_position& at, bool is_old,
                             const std::string& member_place = "")
     {
+        // record 0061 item 4: a read through a quantifier's pointer argument follows the rule of the argument it is (a bare pointer parameter of the contract)
+        if (pf != nullptr && pf->kind == Expr::Kind::ForallArg && cx_.forall != nullptr && pf->arg_index >= 0 &&
+            static_cast<size_t>(pf->arg_index) < cx_.forall->args.size())
+        {
+            pf = cx_.forall->args[static_cast<size_t>(pf->arg_index)];
+        }
         if (pf == nullptr || pf->kind != Expr::Kind::Formal || cx_.fn == nullptr || pf->index < 0 ||
             static_cast<size_t>(pf->index) >= cx_.fn->params.size())
         {
@@ -4849,6 +4893,7 @@ private:
                 continue;
             }
             truth_context(arg); // decision 0023 item 5: `requires(x | 4)`, a clause of `ensures`
+            mark_forall_positions(arg, 0);
             const Expr* c {clause_bool(expr(arg), arg->position)};
             if (c == nullptr)
             {
@@ -5806,6 +5851,14 @@ private:
             {
                 cx_.case_var = vn ? vn : "?";
             }
+            // Record 0061 item 4: a parameter of the quantifier's function is the bound variable (the first) or a `ForallArg` (the others).
+            if (cx_.forall != nullptr)
+            {
+                if (const Expr* fp {forall_parameter(v, e->position)}; fp != nullptr)
+                {
+                    return fp;
+                }
+            }
             // A named constant (decision 0017 item 3) is its value: a literal of its type at the use, also in a contract.
             auto nc {named_.find(v)};
             if (nc != named_.end())
@@ -5824,6 +5877,13 @@ private:
             }
             if (vir::Global* g = global_of(v))
             {
+                if (cx_.forall != nullptr)
+                {
+                    reject(
+                        Diag::unsupported_expression, e->position,
+                        "a global in the function of a quantifier (0041 item 12: a global is read by name in code only; decision 0061 item 4)");
+                    return nullptr;
+                }
                 return global_read(g, e);
             }
         }
@@ -7922,6 +7982,22 @@ private:
         {
             return x;
         }
+        if (root->kind == Expr::Kind::ForallArg)
+        {
+            // record 0061 item 4: `*p` of a quantifier's pointer argument (a read of its first element, a read class of its own); a place reached through
+            // another load of it is M4.5e2's
+            if (x == root && forall_base_ok(*root, at))
+            {
+                return x;
+            }
+            if (x != root)
+            {
+                reject(
+                    Diag::unsupported_annotation, at,
+                    "a place reached through a load of a quantifier's pointer argument (`**pp`, `pp[i][j]`: M4.5e2, decision 0061 item 1)");
+            }
+            return nullptr;
+        }
         if (root->kind == Expr::Kind::Old)
         {
             reject(
@@ -8304,7 +8380,8 @@ private:
         owns_vlibc_block,
         zeroed,
         owns_range, // decision 0060 item 2
-        reads_range
+        reads_range,
+        forall // `cerastes_forall` (record 0061 item 2); `cerastes::forall` is `unsupported`
     };
     // The routine is one of the functions <cerastes.h> declares (decision 0047, audit N6: `owns_block` and `zeroed` are entities, not names).
     static bool declared_in_cerastes_header(a_routine_ptr r)
@@ -8320,7 +8397,7 @@ private:
         const std::string n {rname(r)};
         if ((n == "cerastes::owns_block" || n == "cerastes_owns_block" || n == "cerastes_owns_vlibc_block" ||
              n == "cerastes_zeroed" || n == "cerastes::owns_range" || n == "cerastes::reads_range" ||
-             n == "cerastes_owns_range" || n == "cerastes_reads_range") &&
+             n == "cerastes_owns_range" || n == "cerastes_reads_range" || n == "cerastes_forall") &&
             !declared_in_cerastes_header(r))
         {
             return SpecFn::none;
@@ -8361,9 +8438,13 @@ private:
         {
             return SpecFn::reads_range;
         }
+        if (n == "cerastes_forall")
+        {
+            return SpecFn::forall; // record 0061 item 2
+        }
         if (n == "cerastes::forall")
         {
-            return SpecFn::unsupported;
+            return SpecFn::unsupported; // the namespace spelling: cut 3 (record 0061 item 2)
         }
         return SpecFn::none;
     }
@@ -9176,6 +9257,796 @@ private:
             return nullptr; // decision 0042 item 6
         }
         return finish(ind, b_.deref(pf, loc_of(ind->position)));
+    }
+
+    // ---- quantifiers (record 0061 items 2 to 4, 6 and 8) ---------------------------------------------------------------------------------------
+    // The state of one `cerastes_forall(f, ...)` while the body of `f` is encoded (Ctx::forall).
+    struct ForallSite
+    {
+        int id {0};             // the bound variable's id (Program-wide; its Bound and ForallArg nodes carry it)
+        a_source_position site; // the call: where every report inside the body is made
+        std::string fname;      // `f`
+        const vir::IntType* bound_type {nullptr};
+        std::map<a_variable_ptr, int> slot; // `f`'s parameter variable: 0 the bound variable, k + 1 the ForallArg k
+        std::vector<std::string> names;     // by slot: the parameter's written name
+        std::vector<vir::Type> types;       // by slot
+        std::vector<const Expr*> args;      // the encoded trailing arguments, by k
+        int read_classes {0}; // the element reads whose index names the bound variable in an accepted form
+    };
+    int next_bound_id_ {0};
+    // The `cerastes_forall` calls of the clause being encoded that stand in a positive position (a conjunct, an operand of `||`, an arm of `?:`)
+    std::set<an_expr_node_ptr> forall_ok_;
+
+    std::set<an_expr_node_ptr> forall_left_of_or_;
+    void collect_forall_calls(an_expr_node_ptr n, std::set<an_expr_node_ptr>& out, int depth)
+    {
+        if (n == nullptr || n->kind != enk_operation || depth > 64)
+        {
+            return;
+        }
+        if (is_call_kind(n->variant.operation.kind))
+        {
+            a_routine_ptr callee {direct_callee(n)};
+            if (callee != nullptr && spec_fn(callee) == SpecFn::forall)
+            {
+                out.insert(n);
+            }
+        }
+        for (an_expr_node_ptr o {n->variant.operation.operands}; o != nullptr; o = o->next)
+        {
+            collect_forall_calls(o, out, depth + 1);
+        }
+    }
+
+    // Records the quantifiers of a clause that stand in a positive position: the clause itself and, through `&&`, `||` and the arms of `?:`, what stands
+    // there (record 0061 item 3, question 249: a nested quantifier, `!forall`, a comparison or arithmetic operand and a condition stay rejected).
+    void mark_forall_positions(an_expr_node_ptr n, int depth)
+    {
+        n = peel_generated_conversions(n);
+        if (n == nullptr || n->kind != enk_operation || depth > 32)
+        {
+            return;
+        }
+        const an_expr_operator_kind k {n->variant.operation.kind};
+        if (is_call_kind(k))
+        {
+            a_routine_ptr callee {direct_callee(n)};
+            if (callee != nullptr && spec_fn(callee) == SpecFn::forall)
+            {
+                forall_ok_.insert(n);
+            }
+            return;
+        }
+        const std::vector<an_expr_node_ptr> ops {operands_of(n)};
+        if (k == eok_lor && ops.size() == 2U)
+        {
+            // a quantifier on the left of `||` (anywhere in the left operand) is refused: the right operand's obligations would stand under `!(forall ...)`, a
+            // quantifier in a guard (check.cpp mark_forall_positions; M4.8): write the plain condition first, `g || forall(...)`
+            collect_forall_calls(ops[0U], forall_left_of_or_, 0);
+            mark_forall_positions(ops[1U], depth + 1);
+        }
+        else if (k == eok_land)
+        {
+            for (an_expr_node_ptr x : ops)
+            {
+                mark_forall_positions(x, depth + 1);
+            }
+        }
+        else if (k == eok_question && ops.size() == 3U)
+        {
+            mark_forall_positions(ops[1U], depth + 1);
+            mark_forall_positions(ops[2U], depth + 1);
+        }
+    }
+
+    // The bound variable or ForallArg a parameter variable of `f` stands for in its body; null for any other variable.
+    const Expr* forall_parameter(a_variable_ptr v, const a_source_position& at)
+    {
+        const ForallSite& q {*cx_.forall};
+        auto it {q.slot.find(v)};
+        if (it == q.slot.end())
+        {
+            return nullptr;
+        }
+        const SrcLoc l {loc_of(at)};
+        const size_t s {static_cast<size_t>(it->second)};
+        if (s == 0U)
+        {
+            return b_.bound(q.id, q.bound_type, q.names[0U], l);
+        }
+        return b_.forall_arg(q.id, it->second - 1, q.types[s], q.names[s], l);
+    }
+
+    // A pointer argument the body of `f` reads through must be a bare pointer parameter of the contract (item 3): `&a[1]`, `p + 1`, a loaded pointer and
+    // the result are M4.5e2's.  Reports and returns false otherwise.
+    bool forall_base_ok(const Expr& fa, const a_source_position& at)
+    {
+        const ForallSite& q {*cx_.forall};
+        if (fa.arg_index < 0 || static_cast<size_t>(fa.arg_index) >= q.args.size() ||
+            q.args[static_cast<size_t>(fa.arg_index)]->kind != Expr::Kind::Formal)
+        {
+            reject(
+                Diag::unsupported_annotation, at,
+                "an element of a pointer argument of a quantifier that is not a bare pointer parameter of the contract (`&a[1]`, `p + 1`, a loaded pointer, the result: M4.5e2, decision 0061 item 1)");
+            return false;
+        }
+        return true;
+    }
+
+    static bool mentions_bound(const Expr* x, int id)
+    {
+        if (x == nullptr)
+        {
+            return false;
+        }
+        if (x->kind == Expr::Kind::Bound && x->bound_id == id)
+        {
+            return true;
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (mentions_bound(y, id))
+            {
+                return true;
+            }
+        }
+        for (const Expr* y : x->args)
+        {
+            if (mentions_bound(y, id))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool mentions_old(const Expr* x)
+    {
+        if (x == nullptr)
+        {
+            return false;
+        }
+        if (x->kind == Expr::Kind::Old)
+        {
+            return true;
+        }
+        for (const Expr* y : {x->a, x->b, x->c})
+        {
+            if (mentions_old(y))
+            {
+                return true;
+            }
+        }
+        for (const Expr* y : x->args)
+        {
+            if (mentions_old(y))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // `i`, `i + c` or `i - c` exactly (no conversion around any part, `c` a constant on the right) of the bound variable `id`: the constant `c` of the form,
+    // or false.  The same rule as check.cpp's forall_index_form (record 0061 item 6), so that the user meets this rejection and never the backstop.
+    static bool forall_index_form(const Expr* idx, int id, long long* c)
+    {
+        auto is_bound = [&](const Expr* x)
+        {
+            return x != nullptr && x->kind == Expr::Kind::Bound && x->bound_id == id;
+        };
+        if (is_bound(idx))
+        {
+            *c = 0;
+            return true;
+        }
+        if (idx != nullptr && idx->kind == Expr::Kind::Binary &&
+            (idx->bop == vir::BinaryOp::Add || idx->bop == vir::BinaryOp::Sub) && is_bound(idx->a) &&
+            idx->b != nullptr && idx->b->kind == Expr::Kind::Const && idx->b->type.is_int() &&
+            vir::dec::valid(idx->b->value) && idx->b->value.size() < 17U)
+        {
+            const long long v {std::stoll(idx->b->value)};
+            *c = idx->bop == vir::BinaryOp::Add ? v : -v;
+            return true;
+        }
+        return false;
+    }
+    // The shape of an element read's index with respect to the bound variable `id`: 0 it does not name it, 1 it is `i`, `i + c` or `i - c` (a read class), 2 any
+    // other form, a conversion around the bound variable included (M4.5e2).
+    static int bound_index_form(const Expr* ix, int id)
+    {
+        if (!mentions_bound(ix, id))
+        {
+            return 0;
+        }
+        long long c {0};
+        return forall_index_form(ix, id, &c) ? 1 : 2;
+    }
+    // The read classes a subtree mentions, as check.cpp counts them: (pointer argument, constant) of every `Deref(ElemAddr(ForallArg, i + c))`.
+    static void forall_classes_in(const Expr* e, int id, std::set<std::pair<int, long long>>& out)
+    {
+        if (e == nullptr)
+        {
+            return;
+        }
+        if (e->kind == Expr::Kind::Deref && e->a != nullptr && e->a->kind == Expr::Kind::ElemAddr &&
+            e->a->a != nullptr && e->a->a->kind == Expr::Kind::ForallArg && mentions_bound(e->a->b, id))
+        {
+            long long c {0};
+            if (forall_index_form(e->a->b, id, &c))
+            {
+                out.insert({e->a->a->arg_index, c});
+            }
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            forall_classes_in(x, id, out);
+        }
+        for (const Expr* x : e->args)
+        {
+            forall_classes_in(x, id, out);
+        }
+    }
+    // A quantifier with several read classes: the rows of `f__wf` are one per class over that class's own binder, so a guard may not read memory and no
+    // computation may combine the reads of two classes (check.cpp's forall_multi_class, mirrored; record 0061 item 7, M4.5e2).  The first offence, or null.
+    static const char* forall_multi_class_why(const Expr* e, int id)
+    {
+        if (e == nullptr)
+        {
+            return nullptr;
+        }
+        const char* why {nullptr};
+        std::set<std::pair<int, long long>> in;
+        switch (e->kind)
+        {
+            case Expr::Kind::Binary:
+                if (e->bop == vir::BinaryOp::LAnd || e->bop == vir::BinaryOp::LOr)
+                {
+                    if (e->a != nullptr && vir::reads_heap(*e->a))
+                    {
+                        why = "a guard that reads memory";
+                    }
+                }
+                else if (e->bop != vir::BinaryOp::Lt && e->bop != vir::BinaryOp::Le && e->bop != vir::BinaryOp::Gt &&
+                         e->bop != vir::BinaryOp::Ge && e->bop != vir::BinaryOp::Eq && e->bop != vir::BinaryOp::Ne)
+                {
+                    forall_classes_in(e, id, in);
+                    if (in.size() > 1U)
+                    {
+                        why = "arithmetic over the reads of two classes";
+                    }
+                }
+                break;
+            case Expr::Kind::Cond:
+                if (e->a != nullptr && vir::reads_heap(*e->a))
+                {
+                    why = "a `?:` condition that reads memory";
+                }
+                break;
+            case Expr::Kind::Unary:
+            case Expr::Kind::Convert:
+                forall_classes_in(e, id, in);
+                if (in.size() > 1U)
+                {
+                    why = "a computation over the reads of two classes";
+                }
+                break;
+            default:
+                break;
+        }
+        if (why != nullptr)
+        {
+            return why;
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            if (const char* w {forall_multi_class_why(x, id)})
+            {
+                return w;
+            }
+        }
+        for (const Expr* x : e->args)
+        {
+            if (const char* w {forall_multi_class_why(x, id)})
+            {
+                return w;
+            }
+        }
+        return nullptr;
+    }
+
+    // The function a quantifier names, as read (item 3): its body's expression and its parameters.
+    struct ForallFn
+    {
+        std::string name;
+        an_expr_node_ptr body {nullptr}; // the `E` of its one `return E;`
+        struct Param
+        {
+            a_variable_ptr var {nullptr};
+            vir::Type type {vir::Type::void_type()};
+            a_type_ptr il {nullptr};
+            std::string name;
+            std::string type_name; // as the program spells it, for messages
+        };
+        std::vector<Param> params;
+    };
+
+    // Whether an argument of IL type `arg` is accepted for a parameter of IL type `param` (item 3): the same type up to top-level qualifiers, and a pointer to
+    // `T` for a pointer to `const T` (qualifiers added at the first level only).
+    static bool forall_argument_type_ok(a_type_ptr param, a_type_ptr arg)
+    {
+        if (param == nullptr || arg == nullptr)
+        {
+            return false;
+        }
+        a_type_ptr pt {skip_typerefs(param)};
+        a_type_ptr at {skip_typerefs(arg)};
+        if (pt->kind == tk_pointer && at->kind == tk_pointer && !pt->variant.pointer.is_reference &&
+            !at->variant.pointer.is_reference)
+        {
+            bool below {false};
+            return qualifiers_only_added(pt->variant.pointer.type, at->variant.pointer.type, 0, &below) && !below;
+        }
+        return f_identical_types(param, arg, ITF_IGNORE_TOP_LEVEL_QUALIFIERS) != 0;
+    }
+
+    // Reads the function `r` a quantifier names against item 3's rules; reports at `at` (the quantifier) and returns false when it is not such a function.
+    bool read_forall_function(a_routine_ptr r, const a_source_position& at, ForallFn& out)
+    {
+        out.name = rname(r);
+        const std::string quoted {"\"" + out.name + "\""};
+        auto fail = [&](const std::string& rule)
+        {
+            reject_args(Diag::forall_function, at, {quoted, rule});
+            return false;
+        };
+        if (marked(r, Annot::predicate))
+        {
+            reject(
+                Diag::unsupported_annotation, at,
+                quoted +
+                    " is a `predicate`: a quantifier reads a `pure` function (predicates: M4.5f1, decision 0061 item 3)");
+            return false;
+        }
+        if (!marked(r, Annot::pure))
+        {
+            return fail("it is not a `pure` function (mark it CERASTES_PURE)");
+        }
+        if (r->is_lambda_body || r->is_template_function || r->assoc_template != nullptr ||
+            r->is_prototype_instantiation)
+        {
+            return fail("it is a template, one of its instances or a lambda");
+        }
+        if (r->source_corresp.is_class_member)
+        {
+            return fail("it is a member function");
+        }
+        a_routine_type_supplement_ptr x {routine_supplement(r)};
+        if (x == nullptr || x->has_ellipsis || !x->prototyped)
+        {
+            return fail("it is variadic or declared without a prototype");
+        }
+        a_statement_ptr body {verified_body(r)};
+        if (body == nullptr)
+        {
+            return fail(
+                "it has no body in a verified file of this unit (a declaration only, or defined in a system header)");
+        }
+        a_type_ptr rt {return_type(r) != nullptr ? skip_typerefs(return_type(r)) : nullptr};
+        if (rt == nullptr || rt->kind != tk_integer || !rt->variant.integer.bool_type)
+        {
+            return fail("it does not return `bool`");
+        }
+        bool has_decreases {false};
+        for (an_attribute_ptr a : contracts_of(r))
+        {
+            has_decreases = has_decreases || classify(a) == Annot::decreases;
+        }
+        if (routine_has_contract(r) || has_decreases)
+        {
+            reject(
+                Diag::unsupported_annotation, at,
+                quoted +
+                    " has a contract (`requires`, `ensures` or `decreases`): a quantifier inlines its body, and contracts on a `pure` function come with M4.5e1d (decision 0061 item 3, question 252)");
+            return false;
+        }
+        // the parameters, by position (P80 (c): the body's variables are the scope's parameter variables)
+        std::vector<a_variable_ptr> pvars;
+        if (a_scope_ptr bs {body_scope(r)})
+        {
+            for (a_variable_ptr v {bs->variant.routine.parameters}; v != nullptr; v = v->next)
+            {
+                pvars.push_back(v);
+            }
+        }
+        size_t pk {0U};
+        for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next, ++pk)
+        {
+            if (pk >= pvars.size())
+            {
+                return fail("its parameters cannot be read");
+            }
+            const a_type_qualifier_set quals {
+                p->qualifiers | (pvars[pk]->type != nullptr ? f_get_type_qualifiers(pvars[pk]->type, TRUE) : 0U)};
+            const VType pt {signature_vtype(p->type, true, quals)};
+            if (!pt.ok)
+            {
+                return fail("a parameter has a type a contract cannot hold");
+            }
+            if (pt.restrict_q)
+            {
+                reject(
+                    Diag::unsupported_annotation, at,
+                    quoted +
+                        " has a `restrict` parameter (decision 0043 item 10: `restrict` stays rejected until M8 models it)");
+                return false;
+            }
+            ForallFn::Param pm;
+            pm.var = pvars[pk];
+            pm.type = pt.t;
+            pm.il = p->type;
+            pm.name = pvars[pk]->source_corresp.name != nullptr ? pvars[pk]->source_corresp.name
+                                                                : "arg" + std::to_string(pk + 1U);
+            pm.type_name = render_type(p->type);
+            if (pk == 0U)
+            {
+                if (!pt.t.is_int() || is_enum_type(pt.t))
+                {
+                    return fail(
+                        "its first parameter, the quantified variable, is not an integer type (a `bool` and an enumeration are not accepted)");
+                }
+            }
+            else
+            {
+                const vir::Type* leaf {&pt.t};
+                while (leaf->is_ptr() && leaf->pointee != nullptr)
+                {
+                    leaf = leaf->pointee;
+                }
+                if (!leaf->is_bool() && !leaf->is_int())
+                {
+                    return fail(
+                        "a parameter is not a `bool`, an integer, an enumeration or a pointer to one of those or to a pointer (structures: M4.5e1e)");
+                }
+            }
+            out.params.push_back(std::move(pm));
+        }
+        if (out.params.empty() || pvars.size() != out.params.size())
+        {
+            return fail("it has no parameter to quantify over");
+        }
+        // the parameter rules every function has (a variable length array, `[static N]`, a declaration that disagrees with another): after the types, so that
+        // a type a contract cannot hold is this function's own diagnostic
+        if (!check_signature(r, at))
+        {
+            return false;
+        }
+        // the body: exactly one `return E;`, an extra block around it read through (P80 (c))
+        a_statement_ptr s {body};
+        for (int depth {0}; s != nullptr && s->kind == stmk_block && depth < 8; ++depth)
+        {
+            a_statement_ptr first {s->variant.block.statements};
+            if (first == nullptr || first->next != nullptr)
+            {
+                s = nullptr;
+                break;
+            }
+            s = first;
+        }
+        if (s == nullptr || s->kind != stmk_return || s->expr == nullptr || s->variant.return_dynamic_init != nullptr)
+        {
+            return fail("its body is not exactly one `return E;`");
+        }
+        out.body = s->expr;
+        return true;
+    }
+
+    // What the body of a quantifier's function may hold once encoded (record 0061 item 4): values, the bound variable and the arguments, element reads
+    // through its pointer arguments, and `cerastes_old` of such a read.  Everything else is refused at the site.
+    bool forall_body_ok(const Expr& x, const a_source_position& at)
+    {
+        switch (x.kind)
+        {
+            case Expr::Kind::Const:
+            case Expr::Kind::Bound:
+            case Expr::Kind::ForallArg:
+            case Expr::Kind::Unary:
+            case Expr::Kind::Binary:
+            case Expr::Kind::Cond:
+            case Expr::Kind::Convert:
+            case Expr::Kind::ToBool:
+            case Expr::Kind::BoolToInt:
+            case Expr::Kind::ReportAt:
+            case Expr::Kind::Deref:
+            case Expr::Kind::ElemAddr:
+            case Expr::Kind::Old:
+            case Expr::Kind::Null:
+                break;
+            default:
+                reject(
+                    Diag::unsupported_expression, at,
+                    "this expression in the function of a quantifier (its body holds the bound variable, the other parameters and the elements of its pointer parameters: decision 0061 item 4)");
+                return false;
+        }
+        for (const Expr* y : {x.a, x.b, x.c})
+        {
+            if (y != nullptr && !forall_body_ok(*y, at))
+            {
+                return false;
+            }
+        }
+        for (const Expr* y : x.args)
+        {
+            if (y != nullptr && !forall_body_ok(*y, at))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // The first node of a quantifier's function body with a side effect: a write, an increment or a call, but not the `cerastes_old_` call that
+    // `cerastes_old(e)` expands to (old_c reads it without encoding it as a call).
+    an_expr_node_ptr first_forall_effect(an_expr_node_ptr e, int depth)
+    {
+        if (e == nullptr || e->kind != enk_operation || depth > 1000)
+        {
+            return nullptr;
+        }
+        if (is_effect_operation(e))
+        {
+            a_routine_ptr callee {direct_callee(e)};
+            if (callee == nullptr || spec_fn(callee) != SpecFn::old_c)
+            {
+                return e;
+            }
+        }
+        for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
+        {
+            if (an_expr_node_ptr f {first_forall_effect(o, depth + 1)})
+            {
+                return f;
+            }
+        }
+        return nullptr;
+    }
+
+    // `cerastes::forall(...)`, the namespace spelling, in every position of verify mode (record 0061 item 2, cut 3: P80 (b) found that an rvalue argument is
+    // an `enk_temp_init` that the annotation reader refuses, so no one rule reads every argument).
+    const Expr* forall_namespace(an_expr_node_ptr e, const std::string& name, const std::vector<an_expr_node_ptr>& ops)
+    {
+        const bool lambda {ops.size() > 1U && peel_place(ops[1U]) != nullptr &&
+                           peel_place(ops[1U])->kind == enk_lambda};
+        reject(
+            Diag::unsupported_annotation, e->position,
+            lambda
+                ? "\"" + name +
+                      "\" with a lambda (the lambda form of a quantifier: M7); write `cerastes_forall(f, ...)` with a `pure` function (decision 0061 item 2)"
+                : "\"" + name +
+                      "\" is not read when verifying (M7); write `cerastes_forall(f, ...)` with a `pure` function (decision 0061 item 2, cut 3)");
+        return nullptr;
+    }
+
+    // `cerastes_forall(f, e_1, ..., e_m)` (record 0061 items 3 and 4): a `Forall` over the first parameter of `f`, whose body is `f`'s `E` encoded here with
+    // the parameters as `Bound` and `ForallArg` nodes, and whose `args` are the encoded arguments, each read once at the site.
+    const Expr* forall_site(an_expr_node_ptr e, const std::vector<an_expr_node_ptr>& ops)
+    {
+        const a_source_position at {e->position};
+        auto refuse = [&](const std::string& why) -> const Expr*
+        {
+            reject(Diag::unsupported_annotation, at, "a quantifier " + why + " (decision 0061 item 3)");
+            return nullptr;
+        };
+        if (cx_.forall != nullptr)
+        {
+            return refuse("inside the function of a quantifier (a nested quantifier: M4.8, question 249)");
+        }
+        if (!cx_.contract)
+        {
+            if (cx_.loop_clause && !cx_.loop_invariant)
+            {
+                return refuse("in a loop's `decreases` (M4.8)");
+            }
+            if (cx_.loop_clause)
+            {
+                return refuse("in a loop invariant (M4.5e1c, staging: part C lifts it)");
+            }
+            if (cx_.check_clause)
+            {
+                return refuse("in a `check` (M4.5e1c, staging: part C lifts it)");
+            }
+            return refuse("in this annotation");
+        }
+        if (cx_.owning_count)
+        {
+            return refuse("in the count of `owning(n)` (a count reads no memory, decision 0060 item 13)");
+        }
+        if (cx_.annot == Annot::decreases)
+        {
+            return refuse("in a function's `decreases` (M4.8)");
+        }
+        if (cx_.old_depth > 0)
+        {
+            return refuse("under `old` (M4.8)");
+        }
+        if (forall_left_of_or_.count(e) != 0U)
+        {
+            return refuse(
+                "on the left of `||` (write the plain condition first, `g || forall(...)`: M4.8, question 249: positive positions only)");
+        }
+        if (forall_ok_.count(e) == 0U)
+        {
+            return refuse(
+                "in a position other than a conjunct, an operand of `||` or an arm of `?:` (under `!`, as an operand of `==` or of arithmetic, in a condition or in the guard of an atom: "
+                "M4.8, question 249)");
+        }
+        // `f` or `&f`, and nothing else (audit round 1, S5)
+        a_routine_ptr fr {nullptr};
+        if (ops.size() > 1U)
+        {
+            an_expr_node_ptr fnode {ops[1U]};
+            if (fnode->kind == enk_routine)
+            {
+                fr = fnode->variant.routine.ptr;
+            }
+            else if (fnode->kind == enk_operation && fnode->variant.operation.kind == eok_address_of &&
+                     fnode->variant.operation.operands != nullptr &&
+                     fnode->variant.operation.operands->next == nullptr &&
+                     fnode->variant.operation.operands->kind == enk_routine)
+            {
+                fr = fnode->variant.operation.operands->variant.routine.ptr;
+            }
+        }
+        if (fr == nullptr)
+        {
+            reject_args(
+                Diag::forall_function, at,
+                {"the first argument",
+                 "write `f` or `&f` for a `pure` function `f` (a lambda, a cast, a function pointer, `*f`, a comma and a conditional are not read)"});
+            return nullptr;
+        }
+        ForallFn fn;
+        if (!read_forall_function(fr, at, fn))
+        {
+            return nullptr;
+        }
+        const size_t nargs {ops.size() - 2U};
+        const size_t nparams {fn.params.size() - 1U};
+        if (nargs != nparams)
+        {
+            reject_args(Diag::forall_argument_mismatch, at,
+                        {fn.name, "the call has " + std::to_string(nargs) + " argument" + (nargs == 1U ? "" : "s") +
+                                      " after `" + fn.name + "`, but it has " + std::to_string(nparams) + " parameter" +
+                                      (nparams == 1U ? "" : "s") + " after the quantified variable"});
+            return nullptr;
+        }
+        // the arguments: evaluated once, here, outside the binder (item 3)
+        std::vector<const Expr*> args;
+        for (size_t k {0U}; k < nargs; ++k)
+        {
+            an_expr_node_ptr written {ops[k + 2U]};
+            const ForallFn::Param& pm {fn.params[k + 1U]};
+            // the written type: under one generated conversion (C's promotion of a `char`, `short` or `bool` argument) that is peeled, never a conversion the
+            // program wrote (item 3, P80 (e): a `char` for an `int` parameter is a mismatch)
+            an_expr_node_ptr use {peel_one_generated_cast(written)};
+            const bool matches {forall_argument_type_ok(pm.il, use->type)};
+            auto mismatch = [&](const std::string& have)
+            {
+                reject_args(Diag::forall_argument_mismatch, at,
+                            {fn.name, "argument " + std::to_string(k + 1U) + " has type \"" + have +
+                                          "\", but the parameter \"" + pm.name + "\" has type \"" + pm.type_name +
+                                          "\""});
+            };
+            if (!matches)
+            {
+                mismatch(render_type(use->type));
+                return nullptr;
+            }
+            if (pm.type.is_ptr() && use->kind == enk_operation && use->variant.operation.kind == eok_address_of)
+            {
+                // `&a[1]`; `p + 1` has pointer arithmetic's own diagnostic, and a conditional or the result is refused where the body reads through it
+                reject(
+                    Diag::unsupported_annotation, written->position,
+                    "a pointer argument of a quantifier that is not a bare pointer parameter of the contract (`&a[1]`: M4.5e2, decision 0061 item 1)");
+                return nullptr;
+            }
+            const Expr* x {expr(use)};
+            if (x == nullptr)
+            {
+                return nullptr;
+            }
+            if (x->type != pm.type)
+            {
+                mismatch(render_type(use->type));
+                return nullptr;
+            }
+            if (mentions_old(x) || vir::reads_heap(*x))
+            {
+                reject(
+                    Diag::unsupported_annotation, written->position,
+                    "an argument of a quantifier that reads memory or names `cerastes_old` (the read is written inside the function: M4.5e2, decision 0061 item 3, question 248)");
+                return nullptr;
+            }
+            spell_formals(x);
+            args.push_back(x);
+        }
+        // The body is encoded at every site that names `f`, and an expression with a side effect is encoded once per function (decision 0020 item 10): a
+        // call or a write in it is refused before it is read (item 4)
+        if (an_expr_node_ptr fx {first_forall_effect(fn.body, 0)}; fx != nullptr)
+        {
+            if (is_call_kind(fx->variant.operation.kind))
+            {
+                a_routine_ptr callee {direct_callee(fx)};
+                const SpecFn sf {callee != nullptr ? spec_fn(callee) : SpecFn::none};
+                if (sf == SpecFn::forall || sf == SpecFn::unsupported)
+                {
+                    refuse("inside the function of a quantifier (a nested quantifier: M4.8, question 249)");
+                }
+                else if (sf != SpecFn::none)
+                {
+                    reject(
+                        Diag::unsupported_annotation, at,
+                        "\"" + rname(callee) +
+                            "\" in the function of a quantifier (its body is a boolean expression over its parameters and their elements, decision 0061 item 4)");
+                }
+                else
+                {
+                    reject(Diag::call_in_annotation, at, callee != nullptr ? rname(callee) : std::string("a function"));
+                }
+            }
+            else
+            {
+                reject_args(Diag::annotation_side_effect, at,
+                            {"an assignment or an increment in the function of a quantifier"});
+            }
+            return nullptr;
+        }
+        ForallSite q;
+        q.id = next_bound_id_++;
+        q.site = at;
+        q.fname = fn.name;
+        q.bound_type = fn.params[0U].type.int_type;
+        for (size_t i {0U}; i < fn.params.size(); ++i)
+        {
+            q.slot[fn.params[i].var] = static_cast<int>(i);
+            q.names.push_back(fn.params[i].name);
+            q.types.push_back(fn.params[i].type);
+        }
+        q.args = args;
+        ForallSite* saved {cx_.forall};
+        cx_.forall = &q;
+        truth_context(fn.body);
+        const Expr* body {clause_bool(expr(fn.body), at)};
+        const bool ok {body != nullptr && forall_body_ok(*body, at)};
+        cx_.forall = saved;
+        if (!ok)
+        {
+            return nullptr;
+        }
+        if (q.read_classes == 0)
+        {
+            return refuse(
+                "whose function reads no element at an index that names the quantified variable as `i`, `i + c` or `i - c` (M4.5e2: a body with no such read states nothing about memory)");
+        }
+        {
+            std::set<std::pair<int, long long>> classes;
+            forall_classes_in(body, q.id, classes);
+            if (classes.size() > 1U)
+            {
+                if (const char* why {forall_multi_class_why(body, q.id)}; why != nullptr)
+                {
+                    return refuse(
+                        std::string("whose function has ") + why +
+                        ", beside reads of several classes (`p[i]` and `p[i + 1]`, or two pointers): each obligation row is over one class's binder (M4.5e2, decision 0061 item 7)");
+                }
+            }
+        }
+        std::string text {"forall(" + fn.name};
+        for (const Expr* a : args)
+        {
+            const std::string t {count_text(a)};
+            text += ", " + (t.empty() ? std::string("...") : t);
+        }
+        text += ")";
+        return b_.forall(q.id, q.bound_type, body, std::move(args), std::move(text), fn.name, loc_of(at));
     }
 
     // Decision 0052 item 2a: whether `x` reads the result or a place reached from it (a member, a load): `r`, `r->q`,
@@ -10042,11 +10913,34 @@ private:
                    "a call of \"" + name + "\" that the compiler evaluated at compile time");
             return nullptr;
         }
+        if (cx_.contract || cx_.loop_clause || cx_.annotation)
+        {
+            // Record 0061 item 2: the quantifier, in every position (a `check` included); cut 3 refuses the namespace spelling in all of them.
+            const SpecFn qf {spec_fn(callee)};
+            if (qf == SpecFn::forall)
+            {
+                return forall_site(e, ops);
+            }
+            if (qf == SpecFn::unsupported)
+            {
+                return forall_namespace(e, name, ops);
+            }
+        }
         if (cx_.contract || cx_.loop_clause)
         {
             // Decision 0037 item 5: the permission atoms, by entity, in both spellings (spec_atom refuses them outside a contract, decision 0038
             // item 10); before 0006's rejection of every other call.
             const SpecFn fn {spec_fn(callee)};
+            if (cx_.forall != nullptr && fn != SpecFn::none)
+            {
+                // record 0061 item 4: the body of a quantifier's function holds values and reads, never an atom
+                reject(
+                    Diag::unsupported_annotation, e->position,
+                    "\"" + name +
+                        "\" in the function of a quantifier (its body is a boolean expression over its parameters and their elements, "
+                        "decision 0061 item 4)");
+                return nullptr;
+            }
             if (fn == SpecFn::owns || fn == SpecFn::reads || fn == SpecFn::live)
             {
                 return spec_atom(e, fn, name, ops);
@@ -10069,11 +10963,6 @@ private:
                     Diag::unsupported_annotation, e->position,
                     "\"" + name +
                         "\" is the contract language of vlibc's `calloc` (its block holds zeros): a program's contract cannot say it (decision 0047 item 4)");
-                return nullptr;
-            }
-            if (fn == SpecFn::unsupported)
-            {
-                reject(Diag::unsupported_annotation, e->position, "\"" + name + "\" (a quantifier: M4.5e1c)");
                 return nullptr;
             }
         }

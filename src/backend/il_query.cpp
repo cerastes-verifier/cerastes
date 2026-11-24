@@ -63,7 +63,9 @@ bool is_spec_function_name(const std::string& n)
            // decision 0060 item 2
            n == "cerastes_owns_range" || n == "cerastes_reads_range" ||
            // decision 0052 item 7
-           n == "cerastes_owns_vlibc_block";
+           n == "cerastes_owns_vlibc_block" ||
+           // decision 0061 item 2
+           n == "cerastes_forall";
 }
 
 bool marked(a_routine_ptr r, Annot k)

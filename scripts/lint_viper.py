@@ -131,19 +131,25 @@ status 1) on:
   first slot `loc(block_of(B), offset_of(B))`, whose nested-conditional minimum may also hold the method's own `Perm` formals (decision 0060 item 6, audit
   round 2 S5);
 * the user quantifiers of decision 0061 item 11 (M4.5e1c; `cerastes_forall`): `forall q0: Int[, q1: Int ...] :: { loc(block_of(X), q0)[, ...] } body`, the
-  binders named `q<j>`, ONE trigger set holding one term per binder with X a variable, a body (antecedent and consequent) with no `acc`, `perm`,
-  `forperm`, `inhale` or `forall`; a clause of its own (under at most a guard `g ==> `) of a method's `requires`, `ensures`, `invariant` or
-  `assert`; the one permission it may hold is item 10's marked row, an unguarded `assert forall q0 :: { loc(block_of(X), q0) } reach ==>
-  acc(loc(block_of(X), q0).f, wildcard)` (reach heap-free) whose map entry carries `assert.failed[insufficient.permission]`: `wildcard`
-  stands nowhere else.  In a `<f>__wf` method (variant M of item 7) the heap does not exist: a read under a binder is a ghost function
-  `hvq_<p>_pre|post` of ONE domain per method tagged `// cerastes:domain-ok 0061` (bodiless `function f(a: Int|Block, ...): Int` and nothing
-  else: no axiom, no body, no contract; used by that `__wf` method alone); its `requires` that mention a ghost function are exactly item 7's
-  four assumed facts (the standard range of one application, one trigger set; `G(offset_of(p) + c) == ghost`; a reads place keeps its
-  value `[g ==> ] forall s :: { post(s) } { pre(s) } offset_of(p) <= s && s < offset_of(p) + n ==> post(s) == pre(s)`; two parameters on one
-  block `block_of(p) == block_of(q) ==> forall s :: { Gp(s) } { Gq(s) } Gp(s) == Gq(s)`: one trigger set per application a fact relates), and its
-  quantified `assert` rows are `[PRIOR ==> ] (forall q<j> :: { G(q<j>), ... } ...)` over ghost applications with no heap read, the prior's
-  quantifiers conjuncts of their own (a guard `g ==> ` allowed) and none inside a body; the binders of the facts and of the prior's clauses
-  are `s`, `s0`, ... (the ghost functions are named after the Viper formal, `hvq_<formal>_<state>`);
+  binders named `q<j>`, ONE trigger set holding one term per binder with X a variable, an antecedent that holds the type's range of the bound
+  variable (`lo_T <= (q0 - offset_of(X)) && (q0 - offset_of(X)) <= hi_T`), a body with no `acc`, `perm`, `forperm`, `inhale` or `forall` and no
+  computed `loc` over a binder (`loc(B, q0 + 1)`: T1's form); a clause of its own (under at most a guard `g ==> `) of a method's `requires`,
+  `ensures`, `invariant` or `assert`; the one permission it may hold is item 10's marked row, an unguarded `assert forall q0 :: { loc(block_of(X),
+  q0) } reach ==> acc(loc(block_of(X), q0).f, wildcard)` (reach heap-free) whose map entry carries `assert.failed[insufficient.permission]`:
+  `wildcard` stands nowhere else.  In a `<f>__wf` method (variant M of item 7) the heap does not exist: a read under a binder is a ghost function
+  `hvq_<method>__<formal>_pre|post` (result `Int`, `Bool` or `Ref`) of ONE domain per method tagged `// cerastes:domain-ok 0061` (bodiless `function f(a:
+  Int|Block, ...): Int|Bool|Ref` and nothing else: no axiom, no body, no contract; used by that `__wf` method alone); its `requires` that mention
+  a ghost function are exactly item 7's four assumed facts, each checked against the atoms of the method `f` the `__wf` belongs to (audit round 1,
+  B2): (a) the type range of one application, the element type's (an integer type's bounds, a pointer's well-formedness, none for `Bool`; the
+  ghost's result type is that type's Viper type), one trigger set; (b) the scalar tie `G(offset_of(p)[ + e]) == hv_<id>_<state>` of a formal ghost of
+  the function's own state, `e` an expression over the method's formals; (c) two parameters on one block, `block_of(p) == block_of(q) ==> forall s ::
+  { Gp(s) } { Gq(s) } Gp(s) == Gq(s)`, only between formals of the same cell field; (d) a reads place keeps its value, tied to a `reads_range(p, n)`
+  `requires` atom with an `ensures` partner of the same field, amount and count: `forall s :: { post(s) } { pre(s) } offset_of(p) <= s && s <
+  offset_of(p) + n ==> post(s) == pre(s)` under EXACTLY the conjunction of the two atoms' guards (none if neither has one), and for `reads(*p)` the
+  ground form `post(offset_of(p)) == pre(offset_of(p))` under the same guards; one trigger set per application a fact relates.  Its quantified
+  `assert` rows are `[PRIOR ==> ] (forall q<j> :: { G(q<j>), ... } ...)` over ghost applications with no heap read and no computed application, the
+  prior's quantifiers conjuncts of their own (a guard `g ==> ` allowed) and none inside a body; the binders of the facts and of the prior's clauses
+  are `s`, `s0`, ... (the ghost functions are named after their method and the Viper formal, `hvq_<method>__<formal>_<state>`: Viper names are program-wide);
 * an empty input set, and a MANIFEST that names a file which is not there.  The
   manifest is the set of files scripts/run_tests.py expects: its first line is
   `# run-id: <id>` (printed by the run), then one file per line.  Fewer files
@@ -3552,7 +3558,7 @@ def _loop_conjunct(q, perm_formals: frozenset[str] = frozenset()) -> tuple[str, 
 # in `requires`, `ensures`, `invariant` and `assert`.  The one permission it may hold is the marked row of item 10
 # (`assert forall q0: Int :: { loc(block_of(X), q0) } reach ==> acc(loc(block_of(X), q0).f, wildcard)`, an unguarded `assert`, whose
 # map entry carries `assert.failed[insufficient.permission]`): `wildcard` stands nowhere else.
-# In a `<f>__wf` method (variant M of item 7) the heap does not exist: a read under a binder is a ghost function `hvq_<p>_pre` or `hvq_<p>_post`
+# In a `<f>__wf` method (variant M of item 7) the heap does not exist: a read under a binder is a ghost function `hvq_<method>__<p>_pre` or `_post`
 # of ONE domain tagged `// cerastes:domain-ok 0061` (bodiless functions of `Int`/`Block` arguments and an `Int` result, no axiom, no body,
 # no contract), used by that method alone.  The method's assumed facts (`requires` with a ghost function or a user binder) have four shapes
 # (a) the type's range of an application, one trigger set holding the application; (b) an application at a scalar ghost's slot,
@@ -3568,9 +3574,10 @@ QUANT_FORBIDDEN_RE = re.compile(r"(?<![\w$'])(?:forall|acc|perm|forperm|inhale|a
 BINDERS_RE = re.compile(r"^forall\s+(?P<binders>" + r"[A-Za-z_$][\w$']*\s*:\s*[A-Za-z_$][\w$']*"
                         r"(?:\s*,\s*[A-Za-z_$][\w$']*\s*:\s*[A-Za-z_$][\w$']*)*)\s*::\s*", re.S)
 GHOST_DOMAIN_RE = re.compile(rf"^\s*domain\s+{IDENT}\s*\{{\s*$")
-GHOST_FUNCTION_RE = re.compile(rf"^\s*function\s+(?P<name>{IDENT})\s*\((?P<params>[^()]*)\)\s*:\s*Int\s*$")
+GHOST_FUNCTION_RE = re.compile(rf"^\s*function\s+(?P<name>{IDENT})\s*\((?P<params>[^()]*)\)\s*:\s*(?P<ret>Int|Bool|Ref)\s*$")
 GHOST_PARAM_RE = re.compile(rf"^\s*{IDENT}\s*:\s*(?:Int|Block)\s*$")
-HVQ_NAME_RE = re.compile(r"^hvq_(?P<p>.+)_(?P<state>pre|post)$")
+HVQ_TAIL_RE = re.compile(r"^(?P<p>.+)_(?P<state>pre|post)$")
+HV_NAME_RE = re.compile(r"^hv_.+_(?P<state>pre|post)$")
 GHOST_DOMAIN_RECORD = "0061"
 Q11 = "`forall` outside decision 0061 item 11"
 
@@ -3635,27 +3642,90 @@ def quantifier_problem(q, ghosts: frozenset[str] | None) -> str | None:
             return f"the binder `{name}` is `{typ}`, not `Int`"
     if len(set(names)) != len(names):
         return "a binder is named twice"
-    if len(triggers) != 1:
+    if ghosts is None and len(triggers) != 1:
         return f"a user quantifier has exactly one trigger set, found {len(triggers)}"
-    used = []
-    for term in triggers[0]:
-        if ghosts is None:
-            m = re.fullmatch(rf"loc\(\s*block_of\(\s*({IDENT})\s*\)\s*,\s*({IDENT})\s*\)", term)
-            if m is None or m.group(2) not in names:
-                return f"the trigger term `{term}` is not `loc(block_of(X), q<j>)` with X a variable and `q<j>` a binder"
-            used.append(m.group(2))
-        else:
-            m = re.fullmatch(rf"({IDENT})\(\s*({IDENT})\s*\)", term)
-            if m is None or m.group(1) not in ghosts or m.group(2) not in names:
-                return f"the trigger term `{term}` is not an application of a ghost function of the `domain-ok 0061` domain to a binder (no heap term in `f__wf`)"
-            used.append(m.group(2))
-    if sorted(used) != sorted(names):
-        return "the one trigger set holds one term per binder (every class's term)"
+    if not triggers:
+        return "a user quantifier has a trigger set"
+    parsed: list[dict[str, str]] = []  # per set: binder -> the function (or the heap cell's base) of its term
+    for tset in triggers:
+        by_binder: dict[str, str] = {}
+        for term in tset:
+            if ghosts is None:
+                m = re.fullmatch(rf"loc\(\s*block_of\(\s*({IDENT})\s*\)\s*,\s*({IDENT})\s*\)", term)
+                if m is None or m.group(2) not in names:
+                    return f"the trigger term `{term}` is not `loc(block_of(X), q<j>)` with X a variable and `q<j>` a binder"
+            else:
+                m = re.fullmatch(rf"({IDENT})\(\s*({IDENT})\s*\)", term)
+                if m is None or m.group(1) not in ghosts or m.group(2) not in names:
+                    return f"the trigger term `{term}` is not an application of a ghost function of the `domain-ok 0061` domain to a binder (no heap term in `f__wf`)"
+            if m.group(2) in by_binder:
+                return f"a trigger set holds two terms for the binder `{m.group(2)}`"
+            by_binder[m.group(2)] = m.group(1)
+        if sorted(by_binder) != sorted(names):
+            return "each trigger set holds one term per binder (every class's term)"
+        parsed.append(by_binder)
+    if len(parsed) > 1:
+        # question 257 (`f__wf` only): a class read in both states gets one set per state, the sets differing only in the `_pre`/`_post` of a class's function
+        state = re.compile(r"_(?:pre|post)$")
+        for by_binder in parsed[1:]:
+            for b in names:
+                if state.sub("", by_binder[b]) != state.sub("", parsed[0][b]):
+                    return f"the trigger sets differ only in the state (`_pre`/`_post`) of a class's ghost function, not in its formal or method (`{parsed[0][b]}` against `{by_binder[b]}`)"
+        if any(parsed[a] == parsed[b] for a in range(len(parsed)) for b in range(a)):
+            return "two trigger sets are the same"
     if QUANT_FORBIDDEN_RE.search(body):
         return "the body holds `acc`, `perm`, `forperm`, `inhale` or `forall`"
     if ghosts is not None and not _heap_free(body):
         return "the body of a row of `f__wf` reads the heap"
+    if not carries_type_range(body, names):
+        return ("the antecedent does not hold the type's range of the bound variable "
+                "(`lo_T <= (q0 - offset_of(X)) && (q0 - offset_of(X)) <= hi_T`; without it the quantifier ranges over values no `i` has)")
+    if computed_loc_problem(body, names, ghosts or frozenset()):
+        return "the body holds a computed `loc` term over a binder (`loc(block_of(X), q0 + 1)`: T1's form, whose instances never end; use a binder per class)"
     return None
+
+
+def carries_type_range(body: str, names: list[str]) -> bool:
+    """Whether the antecedent (before the first top-level `==>`) holds, as two adjacent conjuncts, the range of an integer type over an
+    expression of a binder (a prior inside the binder may stand before it)."""
+    parts = _split_top(body, "==>")
+    if len(parts) < 2:
+        return False
+    try:
+        conj = [norm_viper(x) for x in _flatten_and(parts[0])]
+    except ValueError:
+        return False
+    for lo_text, hi_text in zip(conj, conj[1:]):
+        lo = re.fullmatch(r"(-?[0-9]+)<=(.+)", lo_text)
+        hi = re.fullmatch(r"(.+)<=(-?[0-9]+)", hi_text)
+        if lo and hi and lo.group(2) == hi.group(1) and (int(lo.group(1)), int(hi.group(2))) in VIEW_STANDARD_RANGES \
+                and any(re.search(rf"(?<![\w$']){re.escape(n)}(?![\w$'])", lo.group(2)) for n in names):
+            return True
+    return False
+
+
+def computed_loc_problem(text: str, names: list[str], ghosts: frozenset[str] = frozenset()) -> bool:
+    """Whether `text` holds a `loc(B, e)` (or an application `G(e)` of a ghost function) whose index `e` is an expression over a binder rather
+    than the binder itself: T1's form, whose instances never end (S45 (b))."""
+    mentions = lambda index: index not in names and any(  # noqa: E731
+        re.search(rf"(?<![\w$']){re.escape(n)}(?![\w$'])", index) for n in names)
+    for m in re.finditer(r"(?<![\w$'])loc\(", text):
+        depth, i = 1, m.end()
+        while i < len(text) and depth:
+            depth += {"(": 1, ")": -1}.get(text[i], 0)
+            i += 1
+        args = _split_commas(text[m.end():i - 1])
+        if len(args) == 2 and mentions(args[1].strip()):
+            return True
+    if ghosts:
+        for m in re.finditer(r"(?<![\w$'])(?:" + "|".join(map(re.escape, sorted(ghosts))) + r")\(", text):
+            depth, i = 1, m.end()
+            while i < len(text) and depth:
+                depth += {"(": 1, ")": -1}.get(text[i], 0)
+                i += 1
+            if mentions(text[m.end():i - 1].strip()):
+                return True
+    return False
 
 
 def wildcard_row_problem(q) -> str | None:
@@ -3678,6 +3748,8 @@ def wildcard_row_problem(q) -> str | None:
         return f"the consequent `acc(loc(block_of({m.group(1)}), {k}).f, wildcard)` of the same base"
     if QUANT_FORBIDDEN_RE.search(parts[0]) or not _heap_free(parts[0]):
         return "a reach that reads no heap and holds no permission or quantifier"
+    if not carries_type_range(body, [k]):
+        return "an antecedent that holds the type's range of the bound variable"
     return None
 
 
@@ -3721,18 +3793,190 @@ def _plain_condition_problem(text: str) -> str | None:
     return None
 
 
-def wf_fact_verdict(rest: str, ghosts: frozenset[str]) -> str | None:
-    """Why the `requires` of an `f__wf` method that holds a ghost application or a user binder is none of item 7's four assumed facts, or None."""
+@dataclasses.dataclass(frozen=True)
+class RangeAtom:
+    """A `requires` or `ensures` row of the method an `f__wf` belongs to that names a place of a formal: `acc(loc(block_of(X), k).v_T[, amt])`
+    over `offset_of(X) <= k < offset_of(X) + count` (`kind` range), or `acc(X.v_T, amt)` (`cell`).  `amount` is a `Perm` formal (a `reads`
+    atom) or None (an `owns` atom); `guard` is the clause's guard as written, normalized."""
+    clause: str  # requires or ensures
+    kind: str  # range or cell
+    formal: str
+    field: str  # v_<t>
+    amount: str | None
+    count: str | None  # normalized count of a range
+    guard: str | None
+
+
+@dataclasses.dataclass
+class WfContext:
+    """What the facts of an `f__wf` method are checked against (record 0061 item 11): the ghost functions (name -> Viper result type), the
+    method's formals, and the atoms of the method it belongs to (`f` of `f__wf`)."""
+    ghosts: dict[str, str]
+    formals: frozenset[str]
+    atoms: list[RangeAtom]
+    method: str = ""  # the `__wf` method's own name without `__wf`: ghost functions are named `hvq_<method>__<formal>_<state>`
+
+    @property
+    def names(self) -> frozenset[str]:
+        return frozenset(self.ghosts)
+
+    def hvq(self, name: str):
+        """The match (groups `p` the Viper formal, `state`) of a ghost function named `hvq_<method>__<formal>_<pre|post>` after THIS method, else None
+        (Viper names are program-wide: an unqualified name collides between two functions)."""
+        prefix = f"hvq_{self.method}__"
+        return HVQ_TAIL_RE.match(name[len(prefix):]) if self.method and name.startswith(prefix) else None
+
+
+def _formal_names(src: Source, d: Decl) -> list[str]:
+    out = []
+    for f in method_formals(src, d):
+        m = re.match(rf"^\s*({IDENT})\s*:", f)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def method_atoms(src: Source, d: Decl) -> list[RangeAtom]:
+    """The place atoms of the clauses of method `d`: item 16's range rows of the value field (`acc(F.v_T[, amt])` under `offset_of(X) <= k <
+    offset_of(X) + count`) and the cell rows `acc(X.v_T, amt)` of a `reads` atom, each with its clause's guard."""
+    perm_formals = {m.group("name") for f in method_formals(src, d) if (m := PERM_FORMAL_RE.match(f))}
+    out: list[RangeAtom] = []
+    for lineno in range(d.line, d.end_line + 1):
+        m = QUANT_STMT_RE.match(src.code[lineno - 1])
+        if m is None or m.group("kw") not in ("requires", "ensures"):
+            continue
+        clause, rest = m.group("kw"), m.group("rest")
+        # a formal with no atom of its own (an alias `q == p` framed by p's atom) is read under a binder through `loc(block_of(q), q0).v_T`: that read
+        # names its element field (audit round 2, issue 1)
+        for read in re.finditer(rf"loc\(\s*block_of\(\s*({IDENT})\s*\)\s*,[^()]*\)\s*\.(v_[\w$']+)", rest):
+            out.append(RangeAtom(clause, "read", read.group(1), read.group(2), None, None, None))
+        guard, body = split_guard(rest)
+        q = parse_range_quantifier_full(body) if body is not None else None
+        if q is not None and not q[2]:
+            k, b, _extra, cons, lo, hi = q
+            acc = _range_acc(cons, k, b)
+            x = BLOCK_BASE_RE.match(_squash(b)).group(1)
+            high = norm_viper(hi)
+            if acc is not None and acc[0].startswith("v_") and norm_viper(lo) == f"offset_of({x})" and high.startswith(f"offset_of({x})+"):
+                amount = acc[1].strip() if acc[1] is not None else None
+                if amount is None or amount in perm_formals:
+                    out.append(RangeAtom(clause, "range", x, acc[0], amount, high[len(f"offset_of({x})+"):],
+                                         None if guard is None else norm_viper(guard)))
+            continue
+        for cell in re.finditer(rf"acc\(\s*({IDENT})\.(v_[\w$']+)\s*(?:,\s*({IDENT})\s*)?\)", rest):
+            if cell.group(3) is None or cell.group(3) in perm_formals:  # an owns(*p) atom has no amount
+                parts = _split_top(rest.strip(), "==>")
+                out.append(RangeAtom(clause, "cell", cell.group(1), cell.group(2), cell.group(3), None,
+                                     norm_viper(parts[0]) if len(parts) > 1 else None))
+    return out
+
+
+def _guard_conjuncts(guard: str | None) -> list[str] | None:
+    """The sorted normalized conjuncts of a guard (`[]` for none), None if it is not a parenthesized conjunction."""
+    if guard is None:
+        return []
+    try:
+        return sorted(norm_viper(x) for x in _flatten_and(guard))
+    except ValueError:
+        return None
+
+
+def _expected_guard(*atoms: RangeAtom) -> list[str]:
+    out: list[str] = []
+    for a in atoms:
+        if a.guard is not None:
+            out += sorted(norm_viper(x) for x in _flatten_and(a.guard))
+    return sorted(out)
+
+
+def _type_range_problem(field: str, ret: str, ghost: str, s: str, qbody: str) -> str | None:
+    """None if `qbody` is the type range of the element type of `field` over the application `ghost(s)` (and `ret` is that type's Viper type)."""
+    t = field[len("v_"):]
+    want = "Ref" if t.startswith("ptr_") else "Bool" if t == "bool" else "Int"
+    if ret != want:
+        return f"the ghost function `{ghost}` returns `{ret}`, but the element type `{t}` is `{want}`"
+    app = f"{ghost}({s})"
+    if want == "Bool":
+        return "a `Bool` element has no type range (nothing to assume)"
+    if want == "Ref":
+        return None if norm_viper(qbody) == norm_viper(_view_wf(app)) else "the range of a pointer element is its well-formedness (as today's scalar ghost has it)"
+    try:
+        parts = [norm_viper(x) for x in _flatten_and(qbody)]
+    except ValueError:
+        return "the type's range of the application"
+    if len(parts) == 2:
+        lo = re.fullmatch(rf"(-?[0-9]+)<={re.escape(app)}", parts[0])
+        hi = re.fullmatch(rf"{re.escape(app)}<=(-?[0-9]+)", parts[1])
+        if lo and hi:
+            low, high = int(lo.group(1)), int(hi.group(1))
+            if t in VIEW_INT_RANGES:
+                ok = (low, high) == VIEW_INT_RANGES[t]
+            elif t.startswith("enum_"):
+                ok = low <= 0 <= high
+            else:
+                ok = (low, high) in VIEW_STANDARD_RANGES
+            if ok:
+                return None
+    return f"the range of the element type `{t}` of the application (not another type's, not a narrower one)"
+
+
+def wf_fact_verdict(rest: str, ctx: WfContext) -> str | None:
+    """Why the `requires` of an `f__wf` method that holds a ghost application or a user binder is none of item 7's assumed facts, or None.
+    Each fact is checked against the method's own atoms (record 0061 item 11, audit round 1 B2): a false fact is a vacuous prior or a wrong pass."""
+    ghosts = ctx.ghosts
     text = rest.strip()
     inner = _strip_wrap(text)
-    # (b) an application at a scalar ghost's slot: G(offset_of(X) + c) == ghost
+    atoms_of = lambda p: [a for a in ctx.atoms if a.formal == p]  # noqa: E731
+    fields_of = lambda p: {a.field for a in ctx.atoms if a.formal == p}  # noqa: E731  (range and cell atoms: reads(*p) and owns(*p) too)
     flat = _squash(inner)
-    m = re.fullmatch(rf"({IDENT})\(offset_of\(({IDENT})\)\+([0-9]+)\)==({IDENT})", flat)
-    if m and m.group(1) in ghosts:
-        h = HVQ_NAME_RE.match(m.group(1))
-        if h is None or h.group("p") != m.group(2):
-            return "an application at a scalar ghost's slot names the base of its own function (`hvq_<p>_<state>(offset_of(<p>) + c)`)"
-        return None
+
+    # the ground forms (no quantifier): (d) of `reads(*p)`, optionally under the two atoms' guards, and (b) the scalar tie
+    if not FORALL_RE.search(text):
+        parts = _split_top(text, "==>")
+        gtext, body = (parts[0], _strip_wrap(text[len(parts[0]) + len("==>"):])) if len(parts) == 2 else (None, inner)
+        flat = _squash(body)
+        m = re.fullmatch(rf"({IDENT})\((.+)\)==({IDENT})\((.+)\)", flat)
+        if m and m.group(1) in ghosts and m.group(3) in ghosts:
+            h1, h2 = ctx.hvq(m.group(1)), ctx.hvq(m.group(3))
+            if h1 is None or h2 is None or h1.group("p") != h2.group("p") or {h1.group("state"), h2.group("state")} != {"pre", "post"} \
+                    or m.group(2) != m.group(4) or h1.group("state") != "post":
+                return "the ground form of a kept `reads(*p)` place is `hvq_p_post(offset_of(p)) == hvq_p_pre(offset_of(p))` of one base"
+            p = h1.group("p")
+            if m.group(2) not in (f"offset_of({p})", f"offset_of({p})+0"):
+                return f"the slot of a `reads(*{p})` place is `offset_of({p})`"
+            reads = [a for a in atoms_of(p) if a.kind == "cell" and a.clause == "requires" and a.amount is not None]
+            partners = [a for a in atoms_of(p) if a.kind == "cell" and a.clause == "ensures" and a.amount is not None]
+            for r in reads:
+                for e in partners:
+                    if r.field == e.field and r.amount == e.amount and _guard_conjuncts(gtext) == _expected_guard(r, e):
+                        return None
+            return (f"a kept `reads(*{p})` place needs a `requires` atom of `{p}` with an `ensures` partner (same field and amount) and exactly the "
+                    "conjunction of their two guards")
+        m = re.fullmatch(rf"({IDENT})\((.+)\)==({IDENT})", flat)
+        if m and m.group(1) in ghosts and gtext is None:
+            h = ctx.hvq(m.group(1))
+            if h is None:
+                return "the ghost functions of a fact are named `hvq_<method>__<formal>_pre` and `_post` after this `__wf` method"
+            p, st = h.group("p"), h.group("state")
+            if not atoms_of(p):
+                return f"`{p}` has no place atom in the method's contract: a read of `{p}` under a binder needs one"
+            idx = m.group(2)
+            if idx != f"offset_of({p})":
+                if not idx.startswith(f"offset_of({p})+"):
+                    return f"an application at a scalar ghost's slot is `hvq_{p}_{st}(offset_of({p}) + e)`"
+                e = idx[len(f"offset_of({p})+"):]
+                if not _heap_free(e) or QUANT_FORBIDDEN_RE.search(e) or any(w not in ctx.formals for w in re.findall(rf"(?<![\w$']){IDENT}", e)
+                                                                           if not w[0].isdigit()):
+                    return "the index of a scalar tie is an expression over the method's formals (no heap, permission or quantifier)"
+            hv = HV_NAME_RE.match(m.group(3))
+            if hv is None or m.group(3) not in ctx.formals:
+                return "the scalar ghost of a tie is a formal of the method named `hv_<id>_pre` or `hv_<id>_post`"
+            if hv.group("state") != st:
+                return (f"a tie joins the ghost function and the scalar ghost of ONE state (`hvq_{p}_{st}` against `{m.group(3)}`): "
+                        "a state-crossing tie makes the prior vacuous (audit round 1, B2)")
+            return None
+        return "none of item 7's facts: a type range, an application at a scalar ghost's slot, `reads` keeps its value, two parameters on one block"
+
     guard, body = None, None
     if FORALL_RE.match(inner):
         body = inner
@@ -3760,9 +4004,8 @@ def wf_fact_verdict(rest: str, ghosts: frozenset[str]) -> str | None:
         if mt is None or mt.group(1) not in ghosts:
             return f"the trigger term `{t[0]}` is not an application of a ghost function to the binder"
         sets.append(mt.group(1))
-    if guard is not None and (_plain_condition_problem(guard) or (len(sets) != 2 and False)):
+    if guard is not None and _plain_condition_problem(guard):
         return f"the guard of an assumed fact is {_plain_condition_problem(guard)}"
-    nb = norm_viper(qbody)
     # (a) the type's range of one application (no guard)
     if len(sets) == 1:
         g = sets[0]
@@ -3770,47 +4013,74 @@ def wf_fact_verdict(rest: str, ghosts: frozenset[str]) -> str | None:
             return "a fact that relates two applications has one trigger set per application it relates (a set holding the one term lets the other never trigger)"
         if guard is not None:
             return "the type range of an application is unguarded"
-        try:
-            parts = [norm_viper(x) for x in _flatten_and(qbody)]
-        except ValueError:
-            return "the type's range of the application"
-        if len(parts) == 2:
-            lo = re.fullmatch(rf"(-?[0-9]+)<={re.escape(g)}\({re.escape(s)}\)", parts[0])
-            hi = re.fullmatch(rf"{re.escape(g)}\({re.escape(s)}\)<=(-?[0-9]+)", parts[1])
-            if lo and hi:
-                low, high = int(lo.group(1)), int(hi.group(1))
-                if (low, high) in VIEW_STANDARD_RANGES or low <= 0 <= high:
-                    return None
-        return "the standard range of an integer type (or an enumeration's, `lo <= 0 <= hi`) of the one application"
+        h = ctx.hvq(g)
+        if h is None:
+            return "the ghost functions of a fact are named `hvq_<method>__<formal>_pre` and `_post` after this `__wf` method"
+        fields = fields_of(h.group("p"))
+        if len(fields) != 1:
+            return f"`{h.group('p')}` has no (or no single) element field in the method's atoms: its type range is the element type's"
+        return _type_range_problem(next(iter(fields)), ghosts[g], g, s, qbody)
     if len(sets) != 2 or sets[0] == sets[1]:
         return "an assumed fact relates one or two applications: one trigger set each"
-    hv = [HVQ_NAME_RE.match(g) for g in sets]
+    hv = [ctx.hvq(g) for g in sets]
     if None in hv:
-        return "the ghost functions of a fact are named `hvq_<p>_pre` and `hvq_<p>_post`"
+        return "the ghost functions of a fact are named `hvq_<method>__<formal>_pre` and `_post` after this `__wf` method"
     a, b = sets
-    # (c) a reads place keeps its value
+    # (d) a reads place keeps its value: tied to a `reads_range` atom with its partner, the atoms' bounds and the conjunction of their guards
     if hv[0].group("p") == hv[1].group("p") and {hv[0].group("state"), hv[1].group("state")} == {"pre", "post"}:
         p = hv[0].group("p")
         post, pre = (a, b) if hv[0].group("state") == "post" else (b, a)
         parts = _split_top(qbody, "==>")
-        if len(parts) == 2:
-            try:
-                ante = [norm_viper(x) for x in _flatten_and(parts[0])]
-            except ValueError:
-                ante = []
-            n_ok = len(ante) == 2 and ante[0] == f"offset_of({p})<={s}" and re.fullmatch(rf"{re.escape(s)}<offset_of\({re.escape(p)}\)\+.+", ante[1]) \
-                and _heap_free(ante[1]) and not re.search(rf"(?<![\w$']){re.escape(s)}(?![\w$'])", ante[1][len(f"{s}<offset_of({p})+"):])
-            if n_ok and norm_viper(_strip_wrap(parts[1])) == f"{post}({s})=={pre}({s})":
-                return None
-        return "`forall s :: { post(s) } { pre(s) } offset_of(X) <= s && s < offset_of(X) + n ==> post(s) == pre(s)` of one base"
-    # (b) two parameters on one block: block_of(X) == block_of(Y) ==> forall s :: { Gx(s) } { Gy(s) } Gx(s) == Gy(s)
+        if len(parts) != 2 or norm_viper(_strip_wrap(parts[1])) != f"{post}({s})=={pre}({s})":
+            return "`forall s :: { post(s) } { pre(s) } offset_of(p) <= s && s < offset_of(p) + n ==> post(s) == pre(s)` of one base"
+        try:
+            ante = [norm_viper(x) for x in _flatten_and(parts[0])]
+        except ValueError:
+            return "the antecedent is `offset_of(p) <= s && s < offset_of(p) + n`"
+        if len(ante) != 2 or ante[0] != f"offset_of({p})<={s}" or not ante[1].startswith(f"{s}<offset_of({p})+"):
+            return "the antecedent is `offset_of(p) <= s && s < offset_of(p) + n`"
+        count = ante[1][len(f"{s}<offset_of({p})+"):]
+        reads = [x for x in ctx.atoms if x.formal == p and x.kind == "range" and x.clause == "requires" and x.amount is not None]
+        partners = [x for x in ctx.atoms if x.formal == p and x.kind == "range" and x.clause == "ensures" and x.amount is not None]
+        for r in reads:
+            for e in partners:
+                if (r.field, r.amount, r.count) == (e.field, e.amount, e.count) and count == r.count \
+                        and _guard_conjuncts(guard) == _expected_guard(r, e):
+                    return None
+        return (f"a keep-its-value fact is tied to a `reads_range({p}, n)` atom of the method's `requires` with its `ensures` partner: its count is the "
+                "atoms', its guard exactly the conjunction of the two atoms' guards (an unguarded or wider fact lets a wrong contract's `__wf` verify, "
+                "S45 `unsound_evidence_unguarded_keep`)")
+    # (c) two parameters on one block, only between parameters whose pointees have the same cell field
     if hv[0].group("state") == hv[1].group("state") and hv[0].group("p") != hv[1].group("p"):
         x, y = hv[0].group("p"), hv[1].group("p")
-        if guard is not None and norm_viper(guard) in (f"block_of({x})==block_of({y})", f"block_of({y})==block_of({x})") \
-                and nb in (f"{a}({s})=={b}({s})", f"{b}({s})=={a}({s})"):
-            return None
-        return "`block_of(X) == block_of(Y) ==> forall s :: { Gx(s) } { Gy(s) } Gx(s) == Gy(s)` of two parameters in one state"
+        if guard is None or norm_viper(guard) not in (f"block_of({x})==block_of({y})", f"block_of({y})==block_of({x})") \
+                or nb_not_equal(qbody, a, b, s):
+            return "`block_of(X) == block_of(Y) ==> forall s :: { Gx(s) } { Gy(s) } Gx(s) == Gy(s)` of two parameters in one state"
+        fx, fy = fields_of(x), fields_of(y)
+        if not fx or fx != fy or len(fx) != 1:
+            return f"two parameters on one block are related only when their pointees have the same cell field (`{x}`: {sorted(fx)}, `{y}`: {sorted(fy)}; 0028 item 1)"
+        return None
     return "none of item 7's facts: a type range, an application at a scalar ghost's slot, `reads` keeps its value, two parameters on one block"
+
+
+def nb_not_equal(qbody: str, a: str, b: str, s: str) -> bool:
+    return norm_viper(qbody) not in (f"{a}({s})=={b}({s})", f"{b}({s})=={a}({s})")
+
+
+def _flatten_and_keeping_quantifiers(text: str) -> list[str]:
+    """`_flatten_and`, but a conjunct that is a quantifier (or a guard over one) is not split at the `&&` of its own antecedent."""
+    text = _strip_wrap(text)
+    if FORALL_RE.match(text) or (FORALL_RE.search(text) and split_guard(text)[1] is not None):
+        return [text]
+    parts = _split_top(text, "&&")
+    if len(parts) == 1:
+        return [text]
+    if len(_split_top(text, "||")) > 1 or len(_split_top(text, "==>")) > 1:
+        raise ValueError("an unparenthesized mix of `&&` with `||` or `==>`")
+    out: list[str] = []
+    for part in parts:
+        out += _flatten_and_keeping_quantifiers(part)
+    return out
 
 
 def wf_assert_verdict(rest: str, ghosts: frozenset[str]) -> str | None:
@@ -3833,7 +4103,7 @@ def wf_assert_verdict(rest: str, ghosts: frozenset[str]) -> str | None:
     prior = parts[0]
     conclusion = _strip_wrap(text[len(prior) + len("==>"):])
     try:
-        conjuncts = [_strip_wrap(c) for c in _flatten_and(prior)]
+        conjuncts = [_strip_wrap(c) for c in _flatten_and_keeping_quantifiers(prior)]
     except ValueError:
         return "the prior is a parenthesized conjunction"
     def guarded(t: str, what: str) -> str | None:
@@ -3878,6 +4148,17 @@ def ghost_domain_functions(src: Source, d: Decl) -> list[tuple[int, str]]:
         m = GHOST_FUNCTION_RE.match(src.code[lineno - 1])
         if m:
             out.append((lineno, m.group("name")))
+    return out
+
+
+def ghost_function_types(src: Source, decls: list[Decl]) -> dict[str, str]:
+    """name -> Viper result type of every ghost function of the `domain-ok 0061` domains."""
+    out: dict[str, str] = {}
+    for d in ghost_domains(src, decls).values():
+        for lineno in range(d.line + 1, block_close_line(src, d) + 1):
+            m = GHOST_FUNCTION_RE.match(src.code[lineno - 1])
+            if m:
+                out[m.group("name")] = m.group("ret")
     return out
 
 
@@ -3931,6 +4212,11 @@ def lint_ghost_domain_use(src: Source, decls: list[Decl], domains: dict[str, Dec
                 continue
             users[name].add(owner.name)
             domains_of.setdefault(owner.name, set()).add(name)
+        for lineno, fn in ghost_domain_functions(src, d):
+            for owner in sorted(users[name]):
+                if not fn.startswith(f"hvq_{owner[:-len('__wf')]}__"):
+                    add(lineno, f"the ghost function `{fn}` of `domain {name}` is not named `hvq_<method>__<formal>_<pre|post>` after the method `{owner[:-len('__wf')]}` "
+                                "that uses its domain (Viper names are program-wide: the method's name qualifies the function, decision 0061 item 7)")
         if not users[name]:
             add(d.line, f"`domain {name}` (decision 0061 item 11): no `__wf` method uses its ghost functions")
         elif len(users[name]) > 1:
@@ -3959,12 +4245,17 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
     for d in decls:
         if d.kind == "domain":
             domain_lines.update(range(d.line, d.end_line + 1))
-    ghosts = frozenset(f for d in ghost_domains(src, decls).values() for _l, f in ghost_domain_functions(src, d))
+    ghost_types = ghost_function_types(src, decls)
+    ghosts = frozenset(ghost_types)
     ghost_re = re.compile(r"(?<![\w$'])(?:" + "|".join(map(re.escape, sorted(ghosts))) + r")\s*\(") if ghosts else None
     for d in decls:
         if d.kind != "method":
             continue
         wf = d.name.endswith("__wf")
+        ctx = None
+        if wf:
+            base = next((b for b in decls if b.kind == "method" and b.name == d.name[:-len("__wf")]), None)
+            ctx = WfContext(ghost_types, frozenset(_formal_names(src, d)), method_atoms(src, base) if base is not None else [], d.name[:-len("__wf")])
         for lineno in range(d.line, d.end_line + 1):
             if lineno in domain_lines:
                 continue
@@ -3979,7 +4270,7 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
                 if not (has_user or (has_ghost and kind in ("requires", "ensures", "invariant"))):
                     continue
                 if kind == "requires":
-                    why = wf_fact_verdict(rest, ghosts)
+                    why = wf_fact_verdict(rest, ctx)
                 elif kind == "assert":
                     why = wf_assert_verdict(rest, ghosts)
                 else:

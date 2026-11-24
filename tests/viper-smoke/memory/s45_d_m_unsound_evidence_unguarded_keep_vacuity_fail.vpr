@@ -1,5 +1,5 @@
 // expect: error assert:assertion.false @ L120
-// S45 (d) vacuity: the wrong contract's well-formedness method with `assert false` last: reported, so the facts are consistent and the pass above is not vacuous.
+// S45 (d) vacuity of the unsound evidence s45_d_m_unsound_evidence_unguarded_keep.vpr: the wrong contract's well-formedness method with `assert false` last: reported, so the facts are consistent and the pass above is not vacuous.
 // S45 hand-written fixture of the target shapes of record 0061 (draft; plan .claude/plans/m4-5e1c-quantifiers.md section 5), written from the emitted shapes of e1b (build/m4.5e1c/baseline/vpr) and the S44 fixtures. No inhale or assume (except where a line says so: spike (r)).
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
 field v_int: Int
@@ -102,7 +102,7 @@ method kern_w(a: Ref, b: Ref, c: Int, n: Int, amt: Perm, l_b: Perm) returns (r: 
 method kern_w__wf(a: Ref, b: Ref, c: Int, n: Int, amt: Perm, l_b: Perm, res: Int)
   requires none < amt && amt < write
   requires none < l_b && l_b < write
-  requires b == a
+  // (the user clause `b == a` is a conjunct of each row's prior, as the encoder writes a pure user clause, and not an assumed requires of the __wf method)
   requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
   requires (b == null) || (((b == loc(block_of(b), offset_of(b))) && (0 <= offset_of(b))) && (offset_of(b) <= len(block_of(b))))
   requires (-2147483648 <= n) && (n <= 2147483647)

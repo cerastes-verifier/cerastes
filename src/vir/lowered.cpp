@@ -143,24 +143,27 @@ E old_(E a, std::string label)
     return e;
 }
 
-E forall_(std::string binder, std::vector<E> triggers, E body)
+namespace {
+bool is_identifier(const std::string& n)
 {
-    const auto ident = [](const std::string& n)
+    if (n.empty() || (std::isdigit(static_cast<unsigned char>(n[0U])) != 0))
     {
-        if (n.empty() || (std::isdigit(static_cast<unsigned char>(n[0U])) != 0))
+        return false;
+    }
+    for (char ch : n)
+    {
+        if (std::isalnum(static_cast<unsigned char>(ch)) == 0 && ch != '_')
         {
             return false;
         }
-        for (char ch : n)
-        {
-            if (std::isalnum(static_cast<unsigned char>(ch)) == 0 && ch != '_')
-            {
-                return false;
-            }
-        }
-        return true;
-    };
-    if (!ident(binder))
+    }
+    return true;
+}
+} // namespace
+
+E forall_(std::string binder, std::vector<E> triggers, E body)
+{
+    if (!is_identifier(binder))
     {
         throw std::logic_error("`" + binder + "` is not a Viper identifier for a quantifier's binder");
     }
@@ -169,8 +172,52 @@ E forall_(std::string binder, std::vector<E> triggers, E body)
         throw std::logic_error("a quantifier has at least one trigger");
     }
     auto e {make(LExpr::Kind::Forall)};
-    e->text = std::move(binder);
+    e->text = binder;
+    e->binders.push_back(LVar {std::move(binder), LType::Int});
     e->args = std::move(triggers);
+    e->a = std::move(body);
+    return e;
+}
+
+E forall_(std::vector<LVar> binders, std::vector<std::vector<E>> trigger_sets, E body)
+{
+    if (binders.empty())
+    {
+        throw std::logic_error("a quantifier has at least one binder");
+    }
+    for (size_t i {0U}; i < binders.size(); ++i)
+    {
+        if (!is_identifier(binders[i].name))
+        {
+            throw std::logic_error("`" + binders[i].name + "` is not a Viper identifier for a quantifier's binder");
+        }
+        for (size_t j {0U}; j < i; ++j)
+        {
+            if (binders[j].name == binders[i].name)
+            {
+                throw std::logic_error("a quantifier binds `" + binders[i].name + "` twice");
+            }
+        }
+    }
+    if (trigger_sets.empty())
+    {
+        throw std::logic_error("a quantifier has at least one trigger");
+    }
+    auto e {make(LExpr::Kind::Forall)};
+    e->text = binders.front().name;
+    e->binders = std::move(binders);
+    for (std::vector<E>& set : trigger_sets)
+    {
+        if (set.empty())
+        {
+            throw std::logic_error("a quantifier's trigger set has at least one term");
+        }
+        e->trigger_sizes.push_back(set.size());
+        for (E& t : set)
+        {
+            e->args.push_back(std::move(t));
+        }
+    }
     e->a = std::move(body);
     return e;
 }

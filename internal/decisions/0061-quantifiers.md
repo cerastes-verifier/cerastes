@@ -5,7 +5,11 @@
   plan's section 5; `internal/il-inventory.md`, chapter M4.5e1c; fixtures `tests/viper-smoke/memory/s45_*.vpr`), by
   Step 0's runs, by advisor checkpoint 1 (the guards of item 7's fact (d), the one-field restriction of facts (b) and
   (c), `f`'s `bool` result, reads through marked parameters, and an S45 addendum: two read classes through `f__wf`, the
-  one-term workaround, the guarded fact) and by audit round 1 (Opus, on Commit 1 `cbd3386`: every S45 fixture and the
+  one-term workaround, the guarded fact), by audit round 2 (Opus, on the snapshot `2dfc88d` of Parts A and B: no soundness hole; one
+  blocking item, the lint refusing the type-range fact of a formal with no atom of its own in an accepted program's
+  Viper, fixed by emitting facts (a)-(c) only for formals with an atom, item 7; one should-fix item, six pins of item
+  4's refusals; notes 3-10 taken where they name a fix; `build/m4.5e1c/auditor-report-2.md`) and by audit round 1 (Opus,
+  on Commit 1 `cbd3386`: every S45 fixture and the
   decisive P80 rows reproduced; two blocking items, both taken: B1 a trailing argument's own obligations (item 3), B2
   the lint admitting the unguarded keep fact and a state-crossing tie (item 11); eleven should-fix items, all taken:
   typed ghost functions (item 7), the guard's `i + 1` (item 6), the other forms of `f` (item 3), every
@@ -242,10 +246,12 @@ plan's decision table it took.
      have an atom of that cell field in the method's contract (as built after the lint's run over the emitted Viper: a
      formal with no atom, such as `q` in `requires(q == p)`, has no element field the lint can check, and a read
      through it is framed by another parameter's atom or reported unframed; losing its range fact can only add a false
-     alarm). **Listed limit** (as built): a read class read in both states (`a[i]` and `old(a[i])`) triggers its
-     obligations on its first read's ghost, so where no keep fact bridges the states (`owns_range`) a later obligation
-     that names only the other state's read may not be instantiated: a false alarm, fail closed (S45 (d)'s one-set
-     pattern; a VIR case pins it if it occurs). (Variant H, a heap form with a bodiless `f__wfp`,
+     alarm). **A read class read in both states** (`a[i]` and `old(a[i])`) has one trigger set per state, `{ hvq_m__a_pre(q0) }
+     { hvq_m__a_post(q0) }`, on its clause and its rows (question 257): with its first read's ghost only, a later
+     obligation over `owns_range` (no keep fact bridges the states) that names only the other state's read was never
+     instantiated, a false alarm (`fq_both_states_pre_only`, now a positive with its twin). More trigger sets only add
+     instantiations of assumed facts and clauses, which hold; each set is one ghost application over the binder, so
+     none loops. (Variant H, a heap form with a bodiless `f__wfp`,
      also passed S45 (d); the table builds M, and H's boundary of rejections is not needed.)
    - **Obligations of `E`** (0010 item 11's, framing, and in loops and checks the bound and the flag): each is one
      quantified row over its own read class's binder (an arithmetic obligation: over `q0`), under the site's `prior` and
@@ -255,7 +261,9 @@ plan's decision table it took.
 8. **`old` under the binder** (amends 0006 item 9's `old` rule). `cerastes_old(p[e])` and `cerastes_old(*p)` in `E`
    (the C spelling, in both modes; `cerastes::old` there stays the front end's error, question 251). A `forall` whose `f`
    holds one is accepted where `old` is accepted: in an `ensures` (and by item 12 in a loop invariant); elsewhere
-   `old_outside_ensures`, at the site. The read is the entry state's, framed by the `requires` atoms: in the method's contract the post read and `old(…)`
+   `old_outside_ensures`, at the site. `cerastes_old` of a parameter of `f` (`cerastes_old(n)`) or of the bound
+   variable is rejected with the generic message of `old` on a place other than a parameter (audit round 2, N7;
+   pinned). The read is the entry state's, framed by the `requires` atoms: in the method's contract the post read and `old(…)`
    around the whole guarded read, each its own framing chain (S45 (e): `set_one` and a caller that reads two untouched
    elements).
 
@@ -306,7 +314,11 @@ plan's decision table it took.
     range in its antecedent and holds no computed `loc` term (T1's form; audit round 1, N15). The unguarded keep fact
     and the state-crossing tie are must-fail self-tests. The ghost functions are named `hvq_<method>__<Viper formal>_pre` and `_post` (the lint strips and checks the method prefix), the facts'
     binders `s`, `s<j>`; obligation rows put the `prior` outside the binder. Each rule with twins (as built in Commit 1:
-    six rules, 22 tests); the existing pins of "a `forall` here is refused" (binders `k`, `i`, `x`) are unchanged (no
+    six rules, 22 tests; widened since for method-qualified names, cell-atom fields and per-state trigger sets in
+    `__wf` methods, where a set need not name a state its row's body reads, since triggers only restrict instantiation);
+    **what the lint cannot check** (audit round 2, N5): that a scalar tie's ghost `hv_eK_<st>` is the read of that
+    parameter at that index (ghost names do not encode the place); only the encoder's construction guarantees it. The
+    existing pins of "a `forall` here is refused" (binders `k`, `i`, `x`) are unchanged (no
     Flips D). Nothing else that holds a `forall` is admitted.
 
 12. **`cerastes_old` in a loop invariant** (Part D; amends 0038 item 6; P80 (f): the IL shapes of an `ensures`; S45

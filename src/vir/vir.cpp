@@ -866,6 +866,37 @@ const Expr* Builder::elem_addr(const Expr* base, const Expr* index, SrcLoc loc)
     return e;
 }
 
+const Expr* Builder::forall(int id, const IntType* t, const Expr* body, std::vector<const Expr*> args, std::string text,
+                            std::string f_name, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Forall, Type::bool_type(), std::move(loc))};
+    e->bound_id = id;
+    e->bound_type = t;
+    e->a = body;
+    e->args = std::move(args);
+    e->c_text = std::move(text);
+    e->forall_name = std::move(f_name);
+    return e;
+}
+
+const Expr* Builder::bound(int id, const IntType* t, std::string text, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Bound, Type::integer(t), std::move(loc))};
+    e->bound_id = id;
+    e->bound_type = t;
+    e->c_text = std::move(text);
+    return e;
+}
+
+const Expr* Builder::forall_arg(int id, int k, Type type, std::string text, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::ForallArg, type, std::move(loc))};
+    e->bound_id = id;
+    e->arg_index = k;
+    e->c_text = std::move(text);
+    return e;
+}
+
 const Expr* Builder::field(const Expr* a, int index, SrcLoc loc)
 {
     Type t {a->type}; // ill-typed on purpose when `a` is no struct value or the index is out of range
@@ -1197,6 +1228,8 @@ bool guard_ok(const Expr& e)
         case Expr::Kind::Call:
         case Expr::Kind::AssignE:
         case Expr::Kind::StoreE:
+        // record 0061 item 7: a quantifier is no guard (`forall(...) || owns(*p)` would make it the guard of an atom)
+        case Expr::Kind::Forall:
             return false;
         default:
             break;
@@ -1350,6 +1383,27 @@ bool same_pure_expr(const Expr& a, const Expr& b)
         case Expr::Kind::BoolToInt:
         case Expr::Kind::Old:
             return same_pure_operand(a.a, b.a);
+        // record 0061 item 5: the same binder and the same body (a body that reads memory is never equal, as above)
+        case Expr::Kind::Forall:
+        {
+            if (a.bound_id != b.bound_id || a.bound_type != b.bound_type || a.args.size() != b.args.size() ||
+                !same_pure_operand(a.a, b.a))
+            {
+                return false;
+            }
+            for (size_t k {0U}; k < a.args.size(); ++k)
+            {
+                if (!same_pure_operand(a.args[k], b.args[k]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        case Expr::Kind::Bound:
+            return a.bound_id == b.bound_id;
+        case Expr::Kind::ForallArg:
+            return a.bound_id == b.bound_id && a.arg_index == b.arg_index;
         default:
             return false; // a call, a read of memory, an atom, an assignment, ...: never "equal"
     }

@@ -1,6 +1,6 @@
-// expect: error wellformedness:insufficient.permission @ L85
 // expect: error assert:assertion.false @ L98
-// S45 (d) twin: the quantified ensures a[i] + 1 <= r is NOT under the guard (c != 0) although the atoms are: on the path where the guard is false the post-state read has no permission and no keep-its-value fact: TWO errors: Viper's own well-formedness check of the contract at the unguarded ensures (`wellformedness:insufficient.permission`) and the permission row of kern_g__wf (the framing by the GUARDED atom); the failed row is assumed, which assumes the guard, so the overflow row then passes (no one-error construction found: on the path where the guard is false the permission is gone with the fact, so the fact cannot be the only thing missing).
+// (first version: a second expected error, wellformedness:insufficient.permission @ L85, from a framing disjunct that left out the atom's guard c != 0; audit round 1, S9: the lowering never emits that form, 0037 item 7 and 0060 item 5 put the guard in D_i, and cerastes maps that error to exit 3)
+// S45 (d) twin: the quantified ensures a[i] + 1 <= r is NOT under the guard (c != 0) although the atoms are, and its framing disjunct carries the atom's guard (c != 0) as the lowering writes it (0037 item 7, 0060 item 5): on the path where the guard is false the ensures read is framed by nothing, so Viper's own well-formedness check of the contract holds, and the one error is the permission row of kern_g__wf (the framing by the GUARDED atom). The failed row is assumed, which assumes the guard, so the overflow row then passes: exactly ONE error.
 // S45 hand-written fixture of the target shapes of record 0061 (draft; plan .claude/plans/m4-5e1c-quantifiers.md section 5), written from the emitted shapes of e1b (build/m4.5e1c/baseline/vpr) and the S44 fixtures. No inhale or assume (except where a line says so: spike (r)).
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
 field v_int: Int
@@ -82,7 +82,7 @@ method kern_g(a: Ref, n: Int, c: Int, amt: Perm) returns (r: Int)
   ensures (c != 0) ==> (forall k: Int :: { loc(block_of(a), k) } ((offset_of(a) <= k) && (k < offset_of(a) + n)) ==> ((-2147483648 <= loc(block_of(a), k).v_int) && (loc(block_of(a), k).v_int <= 2147483647)))
   ensures (c != 0) ==> (acc(lvloc(block_of(a)).lv, amt))
   ensures (-2147483648 <= r) && (r <= 2147483647)
-  ensures forall q0: Int :: { loc(block_of(a), q0) } (-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) ==> (!(0 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) < n) || (((((block_of(loc(block_of(a), q0)) == block_of(a)) && (offset_of(a) <= offset_of(loc(block_of(a), q0))) && (offset_of(loc(block_of(a), q0)) < offset_of(a) + n)) ? loc(block_of(a), q0).v_int : 0) + 1) <= r)) //TWIN
+  ensures forall q0: Int :: { loc(block_of(a), q0) } (-2147483648 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) <= 2147483647) ==> (!(0 <= (q0 - offset_of(a)) && (q0 - offset_of(a)) < n) || (((((c != 0) && (block_of(loc(block_of(a), q0)) == block_of(a)) && (offset_of(a) <= offset_of(loc(block_of(a), q0))) && (offset_of(loc(block_of(a), q0)) < offset_of(a) + n)) ? loc(block_of(a), q0).v_int : 0) + 1) <= r)) //TWIN
 
 method kern_g__wf(a: Ref, n: Int, c: Int, amt: Perm, res: Int)
   requires none < amt && amt < write

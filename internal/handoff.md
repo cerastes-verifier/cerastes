@@ -1046,3 +1046,20 @@ Accept
   or cut), and a stop with no fail-closed option is parked for the owner instead of chosen.
 
 **Built overnight as recommended, for the owner's review (M4.5e1c, from 2026-11-24 02:30 UTC):**
+- **257** (Part B, il-analyst-2's VIR case `fq_both_states_pre_only`; a false alarm, fail closed, not unsoundness): in
+  f__wf a read class read in both states (`a[i]` and `old(a[i])`) triggered its quantified clause and rows on its first
+  read's ghost only, so over `owns_range` (no keep fact bridges the states) a later obligation naming only `old(a[0])`
+  was never instantiated. **Recommended and built:** one trigger set per state for such a class (`{ hvq_m__a_pre(q0) } {
+  hvq_m__a_post(q0) }`; more triggers only instantiate assumed facts that hold, and single ghost applications cannot
+  loop); the lint admits exactly that shape in `__wf` methods. The alternative was a pin lifted by M4.5e2 with question
+  253's family. Record 0061 item 7.
+- **256** (split point 1, the plan's section 7; a size and context question, not soundness): Parts A and B measured
+  +2,483/−80 `src/` and `include/` lines without the VIR self-test cases (+3,836 with them; `encode.cpp` +902,
+  `lower.cpp` +891, `check.cpp` +450), against the plan's 1,050–1,500 and its stop at 1,600, and past the Parts A–C limit
+  of 2,200. The overrun is round 1's additions (argument rows, typed ghosts, the forms of `f`, cut 3 in every position,
+  marked sites) and question 255's encoder mirrors, most of it rejection paths (fail closed). **Recommended and built:**
+  continue to Part C (its fill loop, max and tutorial chapter are not cut without asking) with a ceiling of about 700
+  lines for Part C's own delta (its estimate 300–450, at Part B's overrun); split point 2 at Commit 3 takes cut 1 (Part
+  D to M4.5e2) unless Part D, audit round 4, the port, the docs, the re-audit and the box run (84 minutes in e1b) fit
+  before the session's twelve hours end (about 10:35 UTC; 03:01 UTC at this point). The alternative was to stop after
+  Commit 2 and run Parts C and D as a session of their own. Advisor checkpoint 3 agreed.

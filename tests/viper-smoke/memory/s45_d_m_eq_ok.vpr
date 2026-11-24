@@ -95,23 +95,23 @@ method kern_eq(p: Ref, q: Ref, n: Int, amt_p: Perm, amt_q: Perm)
   ensures forall k: Int :: { loc(block_of(q), k) } ((offset_of(q) <= k) && (k < offset_of(q) + n)) ==> ((-2147483648 <= loc(block_of(q), k).v_int) && (loc(block_of(q), k).v_int <= 2147483647))
   ensures acc(lvloc(block_of(q)).lv, amt_q)
 
-method kern_eq__wf(p: Ref, q: Ref, n: Int, amt_p: Perm, amt_q: Perm, hv_p0: Int, hv_q0: Int)
+method kern_eq__wf(p: Ref, q: Ref, n: Int, amt_p: Perm, amt_q: Perm, hv_p0_pre: Int, hv_q0_pre: Int)
   requires none < amt_p && amt_p < write
   requires none < amt_q && amt_q < write
   requires (p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))
   requires (q == null) || (((q == loc(block_of(q), offset_of(q))) && (0 <= offset_of(q))) && (offset_of(q) <= len(block_of(q))))
   requires (-2147483648 <= n) && (n <= 2147483647)
-  requires (-2147483648 <= hv_p0) && (hv_p0 <= 2147483647)
-  requires (-2147483648 <= hv_q0) && (hv_q0 <= 2147483647)
+  requires (-2147483648 <= hv_p0_pre) && (hv_p0_pre <= 2147483647)
+  requires (-2147483648 <= hv_q0_pre) && (hv_q0_pre <= 2147483647)
   requires forall s: Int :: { hvq_p_pre(s) } (-2147483648 <= hvq_p_pre(s)) && (hvq_p_pre(s) <= 2147483647)
   requires forall s: Int :: { hvq_q_pre(s) } (-2147483648 <= hvq_q_pre(s)) && (hvq_q_pre(s) <= 2147483647)
-  requires hvq_p_pre(offset_of(p) + 0) == hv_p0
-  requires hvq_q_pre(offset_of(q) + 0) == hv_q0
+  requires hvq_p_pre(offset_of(p) + 0) == hv_p0_pre
+  requires hvq_q_pre(offset_of(q) + 0) == hv_q0_pre
 {
   assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p)))) && ((q != null) && ((q == loc(block_of(q), offset_of(q))) && (0 <= offset_of(q)) && (offset_of(q) <= len(block_of(q)))) && (0 <= n) && (offset_of(q) + n <= len(block_of(q)))))) ==> (forall q0: Int :: { hvq_p_pre(q0) } ((-2147483648 <= (q0 - offset_of(p)) && (q0 - offset_of(p)) <= 2147483647) && (0 <= (q0 - offset_of(p)) && (q0 - offset_of(p)) < n)) ==> ((block_of(loc(block_of(p), q0)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), q0))) && (offset_of(loc(block_of(p), q0)) < offset_of(p) + n))) //W
   assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p)))) && ((q != null) && ((q == loc(block_of(q), offset_of(q))) && (0 <= offset_of(q)) && (offset_of(q) <= len(block_of(q)))) && (0 <= n) && (offset_of(q) + n <= len(block_of(q)))))) ==> (forall q1: Int :: { hvq_q_pre(q1) } ((-2147483648 <= (q1 - offset_of(q)) && (q1 - offset_of(q)) <= 2147483647) && (0 <= (q1 - offset_of(q)) && (q1 - offset_of(q)) < n)) ==> ((block_of(loc(block_of(q), q1)) == block_of(q)) && (offset_of(q) <= offset_of(loc(block_of(q), q1))) && (offset_of(loc(block_of(q), q1)) < offset_of(q) + n))) //W
   assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p)))) && ((q != null) && ((q == loc(block_of(q), offset_of(q))) && (0 <= offset_of(q)) && (offset_of(q) <= len(block_of(q)))) && (0 <= n) && (offset_of(q) + n <= len(block_of(q))))) && !(n < 1)) ==> ((block_of(loc(block_of(q), offset_of(q) + 0)) == block_of(q)) && (offset_of(q) <= offset_of(loc(block_of(q), offset_of(q) + 0))) && (offset_of(loc(block_of(q), offset_of(q) + 0)) < offset_of(q) + n)) //W
   assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p)))) && ((q != null) && ((q == loc(block_of(q), offset_of(q))) && (0 <= offset_of(q)) && (offset_of(q) <= len(block_of(q)))) && (0 <= n) && (offset_of(q) + n <= len(block_of(q))))) && !(n < 1)) ==> ((block_of(loc(block_of(p), offset_of(p) + 0)) == block_of(p)) && (offset_of(p) <= offset_of(loc(block_of(p), offset_of(p) + 0))) && (offset_of(loc(block_of(p), offset_of(p) + 0)) < offset_of(p) + n)) //W
-  assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p)))) && ((q != null) && ((q == loc(block_of(q), offset_of(q))) && (0 <= offset_of(q)) && (offset_of(q) <= len(block_of(q)))) && (0 <= n) && (offset_of(q) + n <= len(block_of(q))))) && (forall s0: Int, s1: Int :: { hvq_p_pre(s0), hvq_q_pre(s1) } ((-2147483648 <= (s0 - offset_of(p)) && (s0 - offset_of(p)) <= 2147483647) && (s1 == offset_of(q) + (s0 - offset_of(p)))) ==> (!(0 <= (s0 - offset_of(p)) && (s0 - offset_of(p)) < n) || (hvq_p_pre(s0) == hvq_q_pre(s1)))) && ((n < 1) || (hv_q0 >= 0)) && !(n < 1)) ==> !(((hv_p0 - 1) < -2147483648) || (2147483647 < (hv_p0 - 1))) //W
+  assert ((((p != null) && ((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))) && (0 <= n) && (offset_of(p) + n <= len(block_of(p)))) && ((q != null) && ((q == loc(block_of(q), offset_of(q))) && (0 <= offset_of(q)) && (offset_of(q) <= len(block_of(q)))) && (0 <= n) && (offset_of(q) + n <= len(block_of(q))))) && (forall s0: Int, s1: Int :: { hvq_p_pre(s0), hvq_q_pre(s1) } ((-2147483648 <= (s0 - offset_of(p)) && (s0 - offset_of(p)) <= 2147483647) && (s1 == offset_of(q) + (s0 - offset_of(p)))) ==> (!(0 <= (s0 - offset_of(p)) && (s0 - offset_of(p)) < n) || (hvq_p_pre(s0) == hvq_q_pre(s1)))) && ((n < 1) || (hv_q0_pre >= 0)) && !(n < 1)) ==> !(((hv_p0_pre - 1) < -2147483648) || (2147483647 < (hv_p0_pre - 1))) //W
 }
 

@@ -1,5 +1,5 @@
 // expect: verified
-// S45 (d), for the record: a WRONG contract verifies under an UNGUARDED fact (c). requires b == a, requires (c != 0) ==> reads_range(a, n), requires owns_range(b, n) and every b[i] < 100, the partners in ensures, ensures b[i] + 1 <= r: when c == 0 b owns the slots and may write them, so the post-state b[i] + 1 can overflow, yet with fact (c) for a stated without the guard and the equal-block fact between the ghosts of a and b the post value equals the pre value and the row passes. The expectation is `verified`: that is the evidence.
+// UNSOUND EVIDENCE, not a positive test: the `verified` verdict below IS the defect (audit round 1, S10). A WRONG contract verifies because the keep-its-value fact is stated WITHOUT the guard of its atoms: requires b == a, requires (c != 0) ==> reads_range(a, n), requires owns_range(b, n) and every b[i] < 100, the partners in ensures, ensures b[i] + 1 <= r; when c == 0 b owns the slots and may write them, so the post-state b[i] + 1 can overflow, yet with the keep fact for a stated without the guard and the equal-block fact between the ghosts of a and b the post value equals the pre value and the row passes. Record 0061 item 7 (d) therefore states the fact under (g_r && g_e) and item 11's lint refuses this unguarded form (scripts/test_lint_viper.py, `a keep fact is tied to a reads atom`). Nothing may harvest this file as an admitted shape; its guarded twin is s45_d_m_guarded_wrong_contract_fail.vpr.
 // S45 hand-written fixture of the target shapes of record 0061 (draft; plan .claude/plans/m4-5e1c-quantifiers.md section 5), written from the emitted shapes of e1b (build/m4.5e1c/baseline/vpr) and the S44 fixtures. No inhale or assume (except where a line says so: spike (r)).
 // (hand-written spike fixture, not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it)
 field v_int: Int
@@ -102,7 +102,7 @@ method kern_w(a: Ref, b: Ref, c: Int, n: Int, amt: Perm, l_b: Perm) returns (r: 
 method kern_w__wf(a: Ref, b: Ref, c: Int, n: Int, amt: Perm, l_b: Perm, res: Int)
   requires none < amt && amt < write
   requires none < l_b && l_b < write
-  requires b == a
+  // (the user clause `b == a` is a conjunct of each row's prior, as the encoder writes a pure user clause, and not an assumed requires of the __wf method)
   requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
   requires (b == null) || (((b == loc(block_of(b), offset_of(b))) && (0 <= offset_of(b))) && (offset_of(b) <= len(block_of(b))))
   requires (-2147483648 <= n) && (n <= 2147483647)

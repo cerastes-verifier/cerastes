@@ -102,7 +102,7 @@ method kern_w(a: Ref, b: Ref, c: Int, n: Int, amt: Perm, l_b: Perm) returns (r: 
 method kern_w__wf(a: Ref, b: Ref, c: Int, n: Int, amt: Perm, l_b: Perm, res: Int)
   requires none < amt && amt < write
   requires none < l_b && l_b < write
-  requires b == a
+  // (the user clause `b == a` is a conjunct of each row's prior, as the encoder writes a pure user clause, and not an assumed requires of the __wf method)
   requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
   requires (b == null) || (((b == loc(block_of(b), offset_of(b))) && (0 <= offset_of(b))) && (offset_of(b) <= len(block_of(b))))
   requires (-2147483648 <= n) && (n <= 2147483647)
