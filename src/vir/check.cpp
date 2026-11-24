@@ -844,9 +844,46 @@ private:
         {
             err(f.loc, "function '" + f.c_name + "' has no closing-brace position");
         }
-        if (f.body == nullptr && f.trusted_reason.empty())
+        if (f.pure)
+        {
+            // Record 0062 items 2 and 5: a read `pure` function is neither a verified method (it has no statement body) nor a trusted contract (no reason to
+            // trust: its value `E` is what Viper's function defines).  Part A checks its shape only; part B adds the rules on `E` and on the contract.
+            if (f.body != nullptr)
+            {
+                err(f.loc, "the `pure` function '" + f.c_name + "' has a statement body (record 0062 item 5)");
+            }
+            if (!f.trusted_reason.empty())
+            {
+                err(f.loc, "the `pure` function '" + f.c_name +
+                               "' is trusted, which a defined function is not (record 0062 item 5)");
+            }
+            if (f.pure_body == nullptr)
+            {
+                err(f.loc, "the `pure` function '" + f.c_name + "' has no value expression (record 0062 item 5)");
+            }
+            else
+            {
+                expr(*f.pure_body, Ctx::Requires, false);
+                if (f.pure_body->type != f.ret)
+                {
+                    err(f.pure_body->loc, "the value of the `pure` function '" + f.c_name + "' is a " +
+                                              f.pure_body->type.str() + ", not its result type " + f.ret.str());
+                }
+            }
+            if (!f.ret.is_int() && !f.ret.is_bool())
+            {
+                err(f.loc,
+                    "the `pure` function '" + f.c_name + "' does not return an integer or a bool (record 0062 item 2)");
+            }
+        }
+        else if (f.body == nullptr && f.trusted_reason.empty())
         {
             err(f.loc, "function '" + f.c_name + "' has no body and no reason for trusting its contract");
+        }
+        else if (f.pure_body != nullptr)
+        {
+            err(f.loc,
+                "the function '" + f.c_name + "' has a `pure` value expression but is not `pure` (record 0062 item 5)");
         }
         for (const NamedConst& c : f.local_consts())
         {
@@ -3647,6 +3684,11 @@ private:
             case Expr::Kind::Call:
                 call(e, ctx);
                 break;
+            case Expr::Kind::Apply:
+                // Record 0062 item 5, M4.5e1d part A: refused in every position (fail closed) until part B admits it in a `check` and in the contract and body
+                // of a `pure` function, part C in an ordinary function's contract, part D in a loop invariant.
+                err(e.loc, "an application of a `pure` function (record 0062 item 4: not accepted here yet)");
+                break;
             case Expr::Kind::AssignE:
                 assign_value(e, ctx);
                 break;
@@ -4986,6 +5028,28 @@ private:
                 const Wr b {expr(e->b)};
                 absorb(out, a, true);
                 absorb(out, b, false);
+                break;
+            }
+            // Record 0062 item 5, part A: check_program refuses the node, so none reaches this walk.  An application is a value of its arguments, which are
+            // unsequenced siblings like a call's, with no sequence point after them (it writes nothing; what it reads is the callee's own places, part B's key).
+            case Expr::Kind::Apply:
+            {
+                std::vector<Wr> args;
+                for (const Expr* a : e->args)
+                {
+                    args.push_back(expr(a));
+                }
+                for (size_t i {0U}; i < args.size(); ++i)
+                {
+                    for (size_t j {i + 1U}; j < args.size(); ++j)
+                    {
+                        pair(args[i], args[j]);
+                    }
+                }
+                for (const Wr& a : args)
+                {
+                    absorb(out, a, false);
+                }
                 break;
             }
             case Expr::Kind::Call:

@@ -196,6 +196,12 @@ SiliconVerdict parse_silicon_output(const std::string& output, int exit_code)
     static const std::regex banner_re(R"(^Silicon \S+( \(.*\))?\s*$)");
     static const std::regex success_line_re(R"(^Silicon finished verification successfully\b.*$)");
     static const std::regex found_line_re(R"(^Silicon found (\d+) errors? in .*:\s*$)");
+    // Record 0062 item 11 (owner, question 275): the one warning Silicon may print about a Viper function we emit.  Fixed text before and after the
+    // expression (which may hold any character) and the function's own name, `pf_<name>__<id>`: the same words for a method, a prelude function or a
+    // `pf_` name without an id are not this warning.  Silicon prints it before its verdict, beside "verified" and beside errors alike, and it is
+    // accepted only there.
+    static const std::regex axiomatisation_warning_re(
+        R"(^Could not resolve expression .+ \([^)]*@\d+\.\d+(--\d+\.\d+)?\) during the axiomatisation of function pf_[A-Za-z_][A-Za-z0-9_]*__[0-9]+\. This typically happens if the expression is on an infeasible path, i\.e\. is dead code\. The unresolved expression will be replaced by a fresh symbol, i\.e\. an arbitrary value\.$)");
     std::istringstream in(output);
     std::string raw;
     std::string stray; // the first line that is neither part of a verdict nor of an error message
@@ -217,6 +223,10 @@ SiliconVerdict parse_silicon_output(const std::string& output, int exit_code)
         else if (strip(raw).empty())
         {
             continue;
+        }
+        else if (successes + founds == 0 && std::regex_match(raw, axiomatisation_warning_re))
+        {
+            continue; // accepted (record 0062 item 11) before the verdict line, where Silicon prints it; after it the line is stray like any other
         }
         else if (std::regex_match(raw, banner_re) && !std::regex_match(raw, success_line_re) &&
                  !std::regex_match(raw, found_line_re))
@@ -248,7 +258,8 @@ SiliconVerdict parse_silicon_output(const std::string& output, int exit_code)
     }
 
     // A verdict is accepted only if the output is the banner, one verdict line and its error list, nothing else
-    // (decision 0011 item 11): a warning, a stack trace or a second verdict means something else happened.
+    // (decision 0011 item 11): a warning, a stack trace or a second verdict means something else happened.  The one
+    // exception is Silicon's axiomatisation warning about a `pf_` function (record 0062 item 11), skipped above.
     if (successes + founds == 0)
     {
         v.problem = "Silicon did not produce a verdict (exit status " + std::to_string(exit_code) + ")";

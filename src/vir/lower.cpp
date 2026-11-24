@@ -882,7 +882,8 @@ public:
         }
         for (const Function& f : prog_.functions())
         {
-            if (!f.requires_.empty() || !f.ensures_.empty() || !f.decreases_.empty())
+            // a `pure` function (record 0062) has no `__wf` method yet: part B gives it its Viper function and its definition check
+            if (!f.pure && (!f.requires_.empty() || !f.ensures_.empty() || !f.decreases_.empty()))
             {
                 wf_method(f);
             }
@@ -9294,6 +9295,10 @@ private:
                     return {e.type.is_bool() ? low::bool_lit(true) : low::int_lit("0"), {}};
                 }
                 return fq_->args[static_cast<size_t>(e.arg_index)];
+            case Expr::Kind::Apply:
+                // record 0062, part A: check_program refuses an application, so none reaches lowering (part B lowers it)
+                internal_error(e.loc, "an application of a `pure` function reached lowering");
+                return {e.type.is_bool() ? low::bool_lit(true) : low::int_lit("0"), {}};
             case Expr::Kind::Atom:
                 // a written atom's rows are the loop's own (decision 0040 item 5); its own loads are reads of the
                 // invariant, framed like any (decision 0045 item 12)
@@ -14347,6 +14352,8 @@ private:
             case Expr::Kind::Deref:
             case Expr::Kind::Atom:
             case Expr::Kind::StoreE:
+            // record 0062 item 4: an application reads the places its callee's atoms name, so it touches memory whatever its arguments are
+            case Expr::Kind::Apply:
                 return true;
             case Expr::Kind::AssignE:
                 if (e->var != nullptr && e->var->address_taken)
@@ -20203,6 +20210,7 @@ private:
         switch (e.kind)
         {
             case Expr::Kind::Call:
+            case Expr::Kind::Apply:
             case Expr::Kind::Formal:
             case Expr::Kind::Old:
             case Expr::Kind::Result:
@@ -20557,6 +20565,12 @@ private:
 
     void function(const Function& f)
     {
+        if (f.pure)
+        {
+            // Record 0062 item 5: a read `pure` function is neither a verified method nor a trusted one.  It makes no method here; part B makes its Viper
+            // function (`LProgram::functions`).
+            return;
+        }
         fn_ = Fn {};
         fn_.f = &f;
         fn_.method = method_name(f);

@@ -52,6 +52,11 @@ const char* bin_text(BinOp op)
 // Fully parenthesized; a negative literal is parenthesized too.
 const char* type_name(low::LType t);
 
+// The name of the Viper function whose body is being printed (record 0062 item 6), or null: a `Fn` of that name is printed after a line-break marker, so that
+// every application of the function itself begins a line of its own (the position map is keyed by line).  Set only by `function()`.
+const std::string* g_break_before {nullptr};
+constexpr char kBreakMarker {'\x01'};
+
 std::string expr(const E& e, bool top = false)
 {
     if (!e)
@@ -94,7 +99,10 @@ std::string expr(const E& e, bool top = false)
         case LExpr::Kind::Fn:
         case LExpr::Kind::Dom:
         { // a prelude function, or a function of the Block domain (decision 0028 item 2)
-            std::string s {e->text + "("};
+            std::string s {(g_break_before != nullptr && e->kind == LExpr::Kind::Fn && e->text == *g_break_before
+                                ? std::string(1U, kBreakMarker)
+                                : std::string()) +
+                           e->text + "("};
             for (size_t i {0U}; i < e->args.size(); ++i)
             {
                 s += (i != 0U ? ", " : "") + expr(e->args[i], true);
@@ -340,7 +348,12 @@ void method(Printer& p, const low::LMethod& m)
         p.line(0, "domain " + m.ghost_domain + " {");
         for (const low::LGhostFn& g : m.ghost_fns)
         {
-            p.line(1, "function " + g.name + "(s: Int): " + type_name(g.result));
+            std::string params;
+            for (size_t i {0U}; i < g.params.size(); ++i)
+            {
+                params += (i != 0U ? ", " : "") + decl(g.params[i]);
+            }
+            p.line(1, "function " + g.name + "(" + params + "): " + type_name(g.result));
         }
         p.line(0, "}");
     }
@@ -413,6 +426,89 @@ void method(Printer& p, const low::LMethod& m)
     p.line(0, "}");
 }
 
+// A Viper function (record 0062 item 6).  The body prints on lines that each begin with an application of the function itself, except possibly the
+// first (see LFunction); a count that does not match `body_calls` is reported in `problems`.
+void function(Printer& p, const low::LFunction& f, std::vector<std::string>& problems)
+{
+    p.line(0, "");
+    if (!f.comment.empty())
+    {
+        p.line(0, "// " + f.comment);
+    }
+    for (const std::string& t : f.tags)
+    {
+        p.line(0, "// " + t);
+    }
+    std::string head {"function " + f.name + "("};
+    for (size_t i {0U}; i < f.formals.size(); ++i)
+    {
+        head += (i != 0U ? ", " : "") + decl(f.formals[i]);
+    }
+    head += std::string("): ") + type_name(f.result);
+    p.line(0, head);
+    for (const low::LClause& c : f.requires_)
+    {
+        p.line(1, "requires " + expr(c.expr, true), c.checks);
+    }
+    for (const low::LClause& c : f.ensures_)
+    {
+        p.line(1, "ensures " + expr(c.expr, true), c.checks);
+    }
+    {
+        // a function always has a `decreases` line: an empty one for a function that does not call itself, never `_` (item 6)
+        std::string measure;
+        for (size_t i {0U}; i < f.decreases_.size(); ++i)
+        {
+            measure += (i != 0U ? ", " : " ") + expr(f.decreases_[i], true);
+        }
+        std::vector<low::Check> checks;
+        if (!f.decreases_.empty())
+        {
+            checks.push_back(f.decreases_check);
+        }
+        p.line(1, "decreases" + measure, checks);
+    }
+    if (!f.body)
+    {
+        problems.push_back("the function " + f.name + " has no body");
+    }
+    const std::string* saved {g_break_before};
+    g_break_before = &f.name;
+    const std::string text {expr(f.body, true)};
+    g_break_before = saved;
+    std::vector<std::string> pieces;
+    {
+        size_t from {0U};
+        for (size_t at {text.find(kBreakMarker)}; at != std::string::npos; at = text.find(kBreakMarker, from))
+        {
+            pieces.push_back(text.substr(from, at - from));
+            from = at + 1U;
+        }
+        pieces.push_back(text.substr(from));
+    }
+    // pieces[0] is what comes before the first self-application (empty when the body begins with one)
+    if (pieces.size() - 1U != f.body_calls.size())
+    {
+        problems.push_back("the function " + f.name + " applies itself " + std::to_string(pieces.size() - 1U) +
+                           " times in its body, and " + std::to_string(f.body_calls.size()) + " map entries are given");
+    }
+    p.line(0, "{");
+    for (size_t k {0U}; k < pieces.size(); ++k)
+    {
+        if (k == 0U && pieces[0U].empty() && pieces.size() > 1U)
+        {
+            continue;
+        }
+        std::vector<low::Check> checks;
+        if (k != 0U && k - 1U < f.body_calls.size())
+        {
+            checks.push_back(f.body_calls[k - 1U]);
+        }
+        p.line(1, pieces[k], checks);
+    }
+    p.line(0, "}");
+}
+
 } // namespace
 
 Emitted emit(const low::LProgram& program, const EmitOptions& options)
@@ -430,6 +526,11 @@ Emitted emit(const low::LProgram& program, const EmitOptions& options)
     }
     const std::string prelude {prelude_text(program.prelude_used)};
     p.raw(prelude);
+    std::vector<std::string> function_problems;
+    for (const low::LFunction& f : program.functions)
+    {
+        function(p, f, function_problems);
+    }
     for (const low::LMethod& m : program.methods)
     {
         method(p, m);
@@ -437,6 +538,7 @@ Emitted emit(const low::LProgram& program, const EmitOptions& options)
     Emitted e;
     e.vpr = std::move(p.vpr());
     e.map = render_map(p.map(), &e.problems);
+    e.problems.insert(e.problems.end(), function_problems.begin(), function_problems.end());
     return e;
 }
 

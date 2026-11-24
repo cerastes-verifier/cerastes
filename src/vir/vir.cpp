@@ -585,6 +585,15 @@ const Expr* Builder::call(const Function* callee, std::vector<const Expr*> args,
     return e;
 }
 
+const Expr* Builder::apply(const Function* callee, std::vector<const Expr*> args, std::string text, SrcLoc loc)
+{
+    Expr* e {fresh(p_, Expr::Kind::Apply, callee->ret, std::move(loc))};
+    e->callee = callee;
+    e->args = std::move(args);
+    e->c_text = std::move(text);
+    return e;
+}
+
 const Expr* Builder::report_at(const Expr* a, SrcLoc loc, std::string note)
 {
     Expr* e {fresh(p_, Expr::Kind::ReportAt, a->type, std::move(loc))};
@@ -1230,6 +1239,8 @@ bool guard_ok(const Expr& e)
         case Expr::Kind::StoreE:
         // record 0061 item 7: a quantifier is no guard (`forall(...) || owns(*p)` would make it the guard of an atom)
         case Expr::Kind::Forall:
+        // record 0062 item 4: an application is no guard either (a guard is evaluated before the atoms, where the callee's own `requires` could not be shown)
+        case Expr::Kind::Apply:
             return false;
         default:
             break;
@@ -1324,7 +1335,8 @@ private:
 
 bool reads_heap(const Expr& e)
 {
-    if (e.kind == Expr::Kind::Deref || e.kind == Expr::Kind::Atom)
+    // record 0062 item 4: an application counts as a read of memory, whatever its callee reads (`old` over one would otherwise be read in the post-state)
+    if (e.kind == Expr::Kind::Deref || e.kind == Expr::Kind::Atom || e.kind == Expr::Kind::Apply)
     {
         return true;
     }
@@ -1404,6 +1416,9 @@ bool same_pure_expr(const Expr& a, const Expr& b)
             return a.bound_id == b.bound_id;
         case Expr::Kind::ForallArg:
             return a.bound_id == b.bound_id && a.arg_index == b.arg_index;
+        // an application reads memory (record 0062 item 4): never "equal", as a read of memory is not
+        case Expr::Kind::Apply:
+            return false;
         default:
             return false; // a call, a read of memory, an atom, an assignment, ...: never "equal"
     }

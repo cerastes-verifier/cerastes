@@ -445,7 +445,15 @@ struct Expr
         // item 3, M4.5e1c part B): inside the body every parameter of `f` other than the bound variable is one, a pointer base included; `type` is
         // that argument's type.  The value is the Forall's `args[arg_index]`, evaluated once at the site, outside the binder.  Valid only under its
         // Forall (check_program).
-        ForallArg
+        ForallArg,
+        // ---- applications of a `pure` function (record 0062 items 4 and 5; appended, M4.5e1d part A) ----
+        // `callee`(`args`...): an APPLICATION of the read `pure` function `callee` (`Function::pure`), a value of `callee->ret` computed from the
+        // encoded arguments (already converted to the parameter types, each evaluated once at the site, in the site's state).  `c_text` is the site's
+        // spelling (`sum_to(a, n)`) for messages.  Not `Kind::Call`: that is the code call lowering hoists as a statement; an application is an
+        // expression of a contract, a loop invariant, a `check` or a `pure` body, never hoisted.  `reads_heap` is true for it, whatever its callee reads
+        // (item 4): where a rule asks that an expression read no memory, an application is refused, and `old` over one is refused.  Part A plumbs it:
+        // check_program refuses it in every position (fail closed) until part B admits it.
+        Apply
     };
     Kind kind {Kind::Const};
     Type type; // the type of the value (Void only for a Call of a void function)
@@ -471,8 +479,8 @@ struct Expr
     // (`&p->q->x`), and `place_text`/`member_place` return it instead of rebuilding `(p->q)->x`.  Set by the encoder for the new places only: every load-free place
     // and every place of code keeps member_place's text (existing position maps must not change).
     bool user_spelling {false};
-    const Function* callee {nullptr}; // Call
-    std::vector<const Expr*> args;    // Call: already converted to the parameter types
+    const Function* callee {nullptr}; // Call, Apply
+    std::vector<const Expr*> args;    // Call, Apply: already converted to the parameter types
     AtomKind atom {AtomKind::Owns};   // Atom
     int amount {-1};                  // Atom: the number of the atom's ghost amount (see Kind::Atom)
     bool yields_old {false};          // AssignE, StoreE: the value is the old value `b` (x++, x--), not the new one
@@ -780,7 +788,14 @@ struct Function
     // lexicographically.  Empty for a function that is not part of a recursion cycle (then lowered as an empty `decreases`);
     // ignored for a function without a body (a trusted contract is assumed to terminate, 0013 item 5).
     std::vector<Clause> decreases_;
-    const Stmt* body {nullptr}; // null: a function used only through its contract (a trusted contract)
+    const Stmt* body {
+        nullptr}; // null: a function used only through its contract (a trusted contract), or a `pure` function (`pure_body`)
+    // Record 0062 items 2 and 5 (M4.5e1d): a `pure` function the encoder READ (a scalar result, a body of one expression): it is applied (`Expr::Kind::Apply`)
+    // in contracts, loop invariants and `check`s and lowered to a Viper function with its contract, neither a verified method nor a trusted contract.  It has no
+    // statement `body` and no `trusted_reason`; `pure_body` is its value `E` (encoded over `Formal`s, a pre-state contract expression), required when `pure`.
+    // The `requires_`, `ensures_` and `decreases_` are its contract and measure.
+    bool pure {false};
+    const Expr* pure_body {nullptr};
     // For a function without a body: why its contract is trusted ("declared here, defined in another unit" or
     // "trusted, never verified" for a function of a system file).  Required then; emitted as a comment tag.
     std::string trusted_reason;
@@ -801,9 +816,10 @@ struct Function
     // check_program accepts `Vlibc` only on a bodiless, trusted allocation or deallocation view.
     Allocator allocator {Allocator::Platform};
 
+    // A function with a statement body: lowered to a method and verified.  A `pure` function (record 0062) is neither verified nor trusted.
     bool verified() const
     {
-        return body != nullptr;
+        return !pure && body != nullptr;
     }
 
     // The local copy of parameter `k` that the body reads and assigns (created by add_param).
@@ -1076,7 +1092,8 @@ bool restrict_backed(const Function& f, int param, int* offender = nullptr);
 // `*s.q`) is judged by its innermost root (place_root): a global by its type, the result by the function's result type, a Formal by the loop over the parameters;
 // any other root of such a place fails closed.  restrict_backed never counts such an atom (it requires the atom's operand to BE the Formal).
 std::string restrict_hazard(const Function& f, int param);
-// Whether the expression reads the heap: it contains a `Deref` or an `Atom` (an `Old` of one included).
+// Whether the expression reads the heap: it contains a `Deref`, an `Atom` or an `Apply` (record 0062 item 4: an application counts as a read, whatever its
+// callee reads; an `Old` of one included).
 bool reads_heap(const Expr& e);
 // Structural equality of two pure expressions (record 0060 item 3: the partner rule of range atoms compares counts with it).  The two have the same shape
 // and the same leaves: kinds, types, operators, constants' values, the `Local` variable (the same `Var`), the `Formal`'s index.  Only the nodes of a pure
@@ -1242,6 +1259,8 @@ public:
     const Expr* to_bool(const Expr* a, SrcLoc loc);                       // a != 0
     const Expr* bool_to_int(Type to_int_type, const Expr* a, SrcLoc loc); // a ? 1 : 0
     const Expr* call(const Function* callee, std::vector<const Expr*> args, SrcLoc loc);
+    // An application of the read `pure` function `callee` (record 0062 item 5): type = callee->ret, `text` the site's spelling (`sum_to(a, n)`) for messages.
+    const Expr* apply(const Function* callee, std::vector<const Expr*> args, std::string text, SrcLoc loc);
     // `note` says what the obligation's own position is ("in the default argument", "in the macro"); empty: the default.
     const Expr* report_at(const Expr* a, SrcLoc loc, std::string note = "");
     // Record how the program spells the node's type ("signed char"); returns `e`.  For messages only.

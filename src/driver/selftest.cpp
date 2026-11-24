@@ -4,6 +4,8 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -286,6 +288,71 @@ void test_silicon_output(Checks& c)
     {
         SiliconVerdict v {parse_silicon_output("", 0)};
         c.expect(!v.verified && !v.problem.empty(), "no output is not a verdict");
+    }
+    {
+        // Record 0062 item 11 (question 275): Silicon's axiomatisation warning about a `pf_` function, exactly, and nothing else of the kind.
+        const auto warning = [](const std::string& function, const std::string& tail = "")
+        {
+            return "Could not resolve expression loc(block_of(a), offset_of(a)).v_int (program.vpr@57.86--57.122) during the axiomatisation of function " +
+                   function +
+                   ". This typically happens if the expression is on an infeasible path, i.e. is dead code. The unresolved expression will be replaced by a fresh symbol, i.e. an arbitrary value." +
+                   tail + "\n";
+        };
+        const std::string banner {"Silicon 1.1-SNAPSHOT (6b540aa4@(detached))\n"};
+        const std::string success {"Silicon finished verification successfully in 2.14s.\n"};
+        const std::string errors {
+            "Silicon found 1 error in 4.92s:\n"
+            "  [0] Assert might fail. Assertion x >= 0 might not hold. (program.vpr@15.10--15.142)\n"};
+        c.expect(parse_silicon_output(banner + warning("pf_dead_read__12") + success, 0).verified,
+                 "the axiomatisation warning of a `pf_` function is accepted beside verified");
+        c.expect(parse_silicon_output(
+                     banner + warning("pf_a__1") + warning("pf_a__1") + warning("pf_sum_to__20") + success, 0)
+                     .verified,
+                 "several such warnings are accepted");
+        {
+            SiliconVerdict v {parse_silicon_output(banner + warning("pf_sum_to__3") + errors, 1)};
+            c.expect(!v.verified && v.problem.empty() && v.errors.size() == 1U && v.errors[0U].line == 15,
+                     "the warning is accepted beside errors, which are read as before");
+        }
+        {
+            // an expression with parentheses, dots and the fixed words in it
+            const std::string odd {
+                "Could not resolve expression f(a, (b.c)) (during the axiomatisation of function g). (program.vpr@5.1--5.9) during the axiomatisation of function pf_f__4. This typically happens if the expression is on an infeasible path, i.e. is dead code. The unresolved expression will be replaced by a fresh symbol, i.e. an arbitrary value.\n"};
+            c.expect(parse_silicon_output(banner + odd + success, 0).verified,
+                     "the expression of the warning may hold any characters");
+        }
+        c.expect(!parse_silicon_output(banner + success + warning("pf_dead_read__12"), 0).verified,
+                 "the warning after the verdict line is a stray line, not accepted");
+        c.expect(!parse_silicon_output(banner + warning("m__wf") + success, 0).verified,
+                 "the warning for a method is not accepted");
+        c.expect(!parse_silicon_output(banner + warning("f_f__0") + success, 0).verified,
+                 "the warning for a method of the program is not accepted");
+        c.expect(!parse_silicon_output(banner + warning("c_div") + success, 0).verified,
+                 "the warning for a prelude function is not accepted");
+        c.expect(!parse_silicon_output(banner + warning("pf_sum_to") + success, 0).verified,
+                 "the warning for a `pf_` name without an id is not accepted");
+        c.expect(!parse_silicon_output(banner + warning("pf_sum_to__") + success, 0).verified,
+                 "the warning for a `pf_` name with an empty id is not accepted");
+        c.expect(!parse_silicon_output(banner + warning("pf_sum_to__1x") + success, 0).verified,
+                 "the warning for a `pf_` name whose id is not digits is not accepted");
+        c.expect(!parse_silicon_output(banner + warning("pf_sum_to__1", " Extra.") + success, 0).verified,
+                 "a warning with more words after it is not accepted");
+        {
+            std::string altered {warning("pf_sum_to__1")};
+            altered.replace(altered.find("infeasible"), 10U, "feasible");
+            c.expect(!parse_silicon_output(banner + altered + success, 0).verified,
+                     "a warning whose text differs is not accepted");
+            c.expect(!parse_silicon_output(banner + altered + errors, 1).problem.empty(),
+                     "a warning whose text differs is not accepted beside errors either");
+        }
+        c.expect(
+            !parse_silicon_output(
+                 banner +
+                     "WARNING: Could not resolve expression x (p.vpr@1.1) during the axiomatisation of function pf_a__1.\n" +
+                     success,
+                 0)
+                 .verified,
+            "a different warning is not accepted");
     }
 }
 
@@ -683,6 +750,122 @@ void test_emit_plumbing(Checks& c)
     c.expect(refused, "a quantifier without a trigger is refused");
 }
 
+// ---- what the emitter writes for a Viper function and a typed ghost function (record 0062 items 6 and 8; nothing builds these yet) ----
+
+void test_emit_function(Checks& c)
+{
+    using namespace low;
+    const auto row = [](const char* id, const char* category, int line, const char* message)
+    {
+        Check k;
+        k.viper_id = id;
+        k.meta.category = category;
+        k.meta.loc = vir::SrcLoc {"t.c", line, 3};
+        k.meta.message = message;
+        return k;
+    };
+    // `int sum(int *a, int n)`: a recursive function, its `requires` and `ensures` and its measure, each with a row; the self-application begins a line
+    LFunction f;
+    f.name = "pf_sum__1";
+    f.comment = "C/C++ function `sum`";
+    f.formals = {LVar {"a", LType::Ref}, LVar {"n", LType::Int}};
+    f.result = LType::Int;
+    LClause pre;
+    pre.expr = bin(BinOp::Le, int_lit("0"), var("n"));
+    pre.checks.push_back(row("not.wellformed", "internal", 4, "pre"));
+    f.requires_.push_back(pre);
+    LClause post;
+    post.expr = bin(BinOp::Ge, var("result"), int_lit("0"));
+    post.checks.push_back(row("postcondition.violated", "postcondition", 5, "post"));
+    post.checks.push_back(row("not.wellformed", "internal", 5, "post wf"));
+    f.ensures_.push_back(post);
+    f.decreases_ = {var("n")};
+    f.decreases_check = row("termination.failed", "termination", 6, "measure");
+    f.body = ite(bin(BinOp::Eq, var("n"), int_lit("0")), int_lit("0"),
+                 bin(BinOp::Add, fn("pf_sum__1", {var("a"), bin(BinOp::Sub, var("n"), int_lit("1"))}), int_lit("1")));
+    f.body_calls.push_back(row("termination.failed", "termination", 8, "call"));
+    // a function whose body begins with the self-application, and one that does not call itself (an empty `decreases`)
+    LFunction g;
+    g.name = "pf_g__2";
+    g.formals = {LVar {"n", LType::Int}};
+    g.result = LType::Bool;
+    g.decreases_ = {var("n")};
+    g.decreases_check = row("termination.failed", "termination", 11, "measure g");
+    g.body = fn("pf_g__2", {bin(BinOp::Sub, var("n"), int_lit("1"))});
+    g.body_calls.push_back(row("termination.failed", "termination", 12, "call g"));
+    LFunction h;
+    h.name = "pf_h__3";
+    h.formals = {LVar {"b", LType::Bool}};
+    h.result = LType::Int;
+    h.body = ite(var("b"), int_lit("1"), int_lit("2"));
+    // a ghost function of two typed parameters, beside one of the default slot
+    LMethod m;
+    m.name = "m__wf";
+    m.has_body = true;
+    m.ghost_domain = "Hva_m";
+    m.ghost_fns.push_back(LGhostFn {"hva_m__sum_pre", LType::Int, {LVar {"s0", LType::Ref}, LVar {"s1", LType::Int}}});
+    m.ghost_fns.push_back(LGhostFn {"hva_m__ok_post", LType::Bool, {LVar {"s0", LType::Bool}}});
+    m.ghost_fns.push_back(LGhostFn {"hvq_m__x_pre", LType::Int});
+    LProgram prog;
+    prog.functions = {f, g, h};
+    prog.methods.push_back(m);
+    const viper::Emitted e {viper::emit(prog)};
+    const auto has = [&](const std::string& what)
+    {
+        return e.vpr.find(what) != std::string::npos;
+    };
+    const auto line_of = [&](const std::string& what)
+    {
+        const size_t at {e.vpr.find(what)};
+        return at == std::string::npos ? -1
+                                       : 1 + static_cast<int>(std::count(
+                                                 e.vpr.begin(), e.vpr.begin() + static_cast<std::ptrdiff_t>(at), '\n'));
+    };
+    c.expect(e.problems.empty(), "the function program has no internal inconsistency");
+    c.expect(
+        has("function pf_sum__1(a: Ref, n: Int): Int\n  requires 0 <= n\n  ensures result >= 0\n  decreases n\n{\n"),
+        "a function has its parameters, its clauses, its measure and its body in braces");
+    c.expect(has("  (n == 0) ? 0 : (\n  pf_sum__1(a, n - 1) + 1)\n}\n"),
+             "the self-application in a body begins a line of its own");
+    c.expect(has("function pf_g__2(n: Int): Bool\n  decreases n\n{\n  pf_g__2(n - 1)\n}\n"),
+             "a body that begins with the self-application has no line before it");
+    c.expect(has("function pf_h__3(b: Bool): Int\n  decreases\n{\n  b ? 1 : 2\n}\n"),
+             "a function that does not call itself has an empty `decreases` line");
+    c.expect(has("function hva_m__sum_pre(s0: Ref, s1: Int): Int\n") &&
+                 has("function hva_m__ok_post(s0: Bool): Bool\n") && has("function hvq_m__x_pre(s: Int): Int\n"),
+             "a ghost function has typed parameters, and one `Int` slot by default");
+    c.expect(line_of("function pf_sum__1") < line_of("method m__wf"), "the functions come before the methods");
+    std::string problem;
+    const std::vector<MapRow> rows {parse_position_map(e.map, &problem)};
+    c.expect(problem.empty(), "the map of the function program is read by the driver");
+    const auto row_at = [&](int vpr_line, const char* id)
+    {
+        for (const MapRow& r : rows)
+        {
+            if (r.vpr_line == vpr_line && r.viper_id == id)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    c.expect(row_at(line_of("  requires 0 <= n"), "not.wellformed") &&
+                 row_at(line_of("  ensures result >= 0"), "postcondition.violated") &&
+                 row_at(line_of("  ensures result >= 0"), "not.wellformed") &&
+                 row_at(line_of("  decreases n\n{\n  (n == 0)"), "termination.failed"),
+             "the lines of a function's clauses and measure carry their rows");
+    c.expect(row_at(line_of("  pf_sum__1(a, n - 1) + 1)"), "termination.failed") &&
+                 row_at(line_of("  pf_g__2(n - 1)"), "termination.failed"),
+             "the line a self-application begins carries its row");
+    // a count of rows that is not the count of self-applications is reported
+    LProgram bad;
+    LFunction wrong {f};
+    wrong.body_calls.clear();
+    bad.functions.push_back(wrong);
+    c.expect(!viper::emit(bad).problems.empty(),
+             "self-applications and rows that do not match are an internal inconsistency");
+}
+
 // ---- a whole pipeline: VIR to Viper to Silicon to the verdict ------------------------------------------------
 
 struct Built
@@ -925,6 +1108,7 @@ int run_selftest(const SiliconTools& tools)
     test_report(c);
     test_marked_rows(c);
     test_emit_plumbing(c);
+    test_emit_function(c);
     test_array_types(c);
     test_internal_inconsistency(c);
     test_pipeline(c, tools);

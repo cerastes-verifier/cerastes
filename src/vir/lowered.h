@@ -250,11 +250,13 @@ struct LClause
     std::vector<Check> checks; // the failures Silicon can report at this clause's line
 };
 
-// A function of a `__wf` method's ghost domain (record 0061 item 7): `function <name>(s: Int): <result>`.
+// A function of a `__wf` method's ghost domain (record 0061 item 7): `function <name>(<params>): <result>`.  The parameters are typed (record 0062
+// item 8: a ghost function of an application takes one parameter per C parameter, `Int`, `Bool` or `Ref`); the default is 0061's one `Int` slot, `(s: Int)`.
 struct LGhostFn
 {
     std::string name;
     LType result {LType::Int};
+    std::vector<LVar> params {LVar {"s", LType::Int}};
 };
 
 struct LMethod
@@ -282,9 +284,41 @@ struct LMethod
     std::string trusted_reason; // bodyless methods: emitted as `// cerastes:trusted-contract <reason>`
 };
 
+// A Viper function with a contract and a body (record 0062 item 6): the lowering of a read `pure` function, `pf_<name>__<id>`.  Printed as
+//
+//     function <name>(<formals>): <result>
+//       requires ...          (one line per clause, each with its `checks`)
+//       ensures ...           (one line per clause, each with its `checks`)
+//       decreases <measure>   (always: an empty measure for a function that does not call itself; never `_`)
+//     {
+//       <body>
+//     }
+//
+// The body is one expression over the formals.  Every application of the function ITSELF in it (an `LExpr::Kind::Fn` whose `text` is `name`) begins a line
+// of its own, because the position map is keyed by line: the printer breaks the line before each one, in the order the text prints (an operand `a` before
+// `b`, an `Ite`'s condition, then, else, arguments in order), and writes the k-th one's `body_calls[k]` (the `termination.failed` row of that call) on the
+// line it begins.  The number of self-applications must equal `body_calls.size()` (the emitter reports a problem otherwise).
+struct LFunction
+{
+    std::string name;
+    std::string comment; // a `//` line above the function (the C/C++ function it stands for)
+    // `//` lines above the function line, each a lint tag
+    std::vector<std::string> tags;
+    std::vector<LVar> formals;
+    LType result {LType::Int};
+    std::vector<LClause> requires_;
+    std::vector<LClause> ensures_;
+    std::vector<E> decreases_; // empty: an empty `decreases` line
+    Check decreases_check;     // the map entry of a non-empty `decreases` line (termination.failed)
+    E body;
+    std::vector<Check> body_calls; // one per application of the function itself in `body`, in print order
+};
+
 struct LProgram
 {
     std::vector<LMethod> methods;
+    std::vector<LFunction>
+        functions; // the Viper functions of the read `pure` functions (record 0062), printed before the methods
     std::set<std::string> prelude_used; // the prelude functions the methods call (emit.cpp adds their dependencies)
     // The memory prelude (decision 0032 item 5), emitted only when `memory` is set: the fields `v_<t>: <type>` and `d_<t>: Bool` of each cell
     // type `<t>` (the key; the value is the type of `v_<t>`), `field lv: Bool`, and the Block domain with its four axioms.
