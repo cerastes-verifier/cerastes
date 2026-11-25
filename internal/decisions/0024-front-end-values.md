@@ -193,3 +193,5 @@ rejected).
 *2026-11-11, amended by 0059 (M4.5e1a): item 6 — `sizeof(a)` and `_Alignof(a)` of a local array written with an array declarator are accepted: its bound is checked as written at the declaration (0059 items 2 and 11); type operands, `typeof`, `decltype` and typedefs of array types stay rejected until M4.5e1e, and a local whose type reaches an array through them is rejected too.*
 
 *2026-11-24, amended by 0062 (M4.5e1d): item 2 — a block-scope static assertion in a read `pure` function's body is checked as in code; the region of an unread `pure` function and of a predicate stays exempt (0062 item 3).*
+
+*2026-11-25, amended by 0063 (M4.5e1e1): item 6 — array types of scalars are accepted wherever every bound in them is read as written: typedefs and aliases declared in a verified file, `typeof` and `decltype`, the type operand of `sizeof` and `_Alignof`; a wrapped bound is an `overflow` error at the bound; an array type reached through a typedef of a system header stays rejected (0063 item 14).*

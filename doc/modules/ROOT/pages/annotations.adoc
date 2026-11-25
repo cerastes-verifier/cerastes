@@ -964,7 +964,10 @@ invariant they may name any pointer variable, the object behind a pointer read f
 (xref:memory.adoc#loops[Loops]), but not a global itself, which every loop of a
 function that holds it keeps already. `owns(g)` and `reads(g)` of a global array name
 every element of it, and a contract may then read `g[i]`
-(xref:memory.adoc#global-arrays[Global arrays]). `owns_range` and `reads_range` take a pointer
+(xref:memory.adoc#global-arrays[Global arrays]); `owns(*p)` and `reads(*p)` of a structure
+with an array member name every element with the other members, and `owns(p->a)` and
+`reads(p->a)` the array member alone, after which a contract may read `p->a[i]`
+(xref:memory.adoc#array-members[Array members]). `owns_range` and `reads_range` take a pointer
 parameter and a count that reads no memory, in a function's `requires` and `ensures`
 (an `ensures` range gives back the `requires` range of the same kind, parameter and
 count), as a conjunct, after a condition that reads no memory and `||`, or as an arm of

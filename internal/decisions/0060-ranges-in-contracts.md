@@ -411,3 +411,5 @@ its decision table, and the item it revised. An outcome outside its table stops 
 - Programs accepted before e1b keep their Viper and maps byte for byte.
 
 *2026-11-24, amended by 0061 (M4.5e1c): item 1 — `cerastes_forall` and the full `carrays.c` port are lifted; items 11 and 12 — loops over ranges carry quantified invariants, and a `must_init` filler states its writes with one (`range_marker_pin_loop_filler.c`'s sibling); item 16 — the lint admits the user quantifiers and `f__wf` shapes of 0061 item 11.*
+
+*2026-11-25, amended by 0063 (M4.5e1e1): items 1 and 9 — `owns(g)` and `reads(g)` of a global array are range atoms over the whole array; a global array's or an array member's decay may be passed to `owns_range` and `reads_range`; ranges on part of them stay M4.5e2's (0063 items 7, 8).*

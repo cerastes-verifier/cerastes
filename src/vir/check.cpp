@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #include "check.h"
 
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <set>
@@ -930,11 +931,12 @@ private:
             {
                 err(f.loc, "the return type of '" + f.c_name + "' is a struct that is not in the program");
             }
-            else if (struct_has_array(*f.ret.struct_type))
+            else if (value_array_elems(*f.ret.struct_type) > kMaxByValueArrayElements)
             {
                 err(f.loc,
-                    "the return type of '" + f.c_name +
-                        "' is a struct with an array member (decision 0063 item 13: by value is M4.5e1e1 part E)");
+                    "the return type of '" + f.c_name + "' is a struct with more than " +
+                        std::to_string(kMaxByValueArrayElements) +
+                        " array elements passed by value (decision 0063 item 13, question 309: array values are M4.5f3)");
             }
         }
         else if (!(f.ret.is_void() || value_type(f.ret)))
@@ -959,11 +961,12 @@ private:
                     err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
                                              "' is a struct that is not in the program");
                 }
-                else if (struct_has_array(*f.params[k].type.struct_type))
+                else if (value_array_elems(*f.params[k].type.struct_type) > kMaxByValueArrayElements)
                 {
                     err(f.params[k].loc,
-                        "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
-                            "' is a struct with an array member (decision 0063 item 13: by value is M4.5e1e1 part E)");
+                        "parameter " + std::to_string(k + 1U) + " of '" + f.c_name + "' is a struct with more than " +
+                            std::to_string(kMaxByValueArrayElements) +
+                            " array elements passed by value (decision 0063 item 13, question 309: array values are M4.5f3)");
                 }
                 else if (!f.param_var(static_cast<int>(k))->address_taken)
                 {
@@ -3227,9 +3230,26 @@ private:
                 break;
             }
             case Stmt::Kind::ArrayCopy:
-                err(s.loc,
-                    "an array copy statement (decision 0063 items 4 and 13: structure values with array members, M4.5e1e1 part E)");
+            {
+                // decision 0063 items 4 and 13 (part E): the copy of the array member at `expr` into the one at `addr` (code only): two addresses of array members of one array type
+                if (s.addr == nullptr || s.expr == nullptr || !member_array_base(s.addr) || !member_array_base(s.expr))
+                {
+                    err(s.loc,
+                        "an array copy of something other than the addresses of two array members (decision 0063 item 13)");
+                    break;
+                }
+                if (s.addr->type != s.expr->type)
+                {
+                    err(s.loc, "an array copy between two array members of different types: " + s.expr->type.str() +
+                                   " into " + s.addr->type.str() + " (decision 0063 item 13)");
+                    break;
+                }
+                array_addr_ok_.insert(s.addr);
+                array_addr_ok_.insert(s.expr);
+                expr(*s.addr, Ctx::Body, false);
+                expr(*s.expr, Ctx::Body, false);
                 break;
+            }
         }
     }
 
@@ -3983,8 +4003,7 @@ private:
                 }
                 break;
             case Expr::Kind::ElemValue:
-                err(e.loc,
-                    "an element of an array member of a struct value (decision 0063 items 4 and 13: M4.5e1e1 part E)");
+                elem_value(e, ctx);
                 break;
             case Expr::Kind::ElemAddr:
             {
@@ -4125,11 +4144,11 @@ private:
             err(e.loc, "an expression of the struct type " + e.type.str() + ", which is not in the program");
             return;
         }
-        if (struct_has_array(*e.type.struct_type))
+        if (value_array_elems(*e.type.struct_type) > kMaxByValueArrayElements)
         {
-            err(e.loc,
-                "a struct value of " + e.type.str() +
-                    ", which has an array member (decision 0063 item 13: copies and by-value structures with an array member are M4.5e1e1 part E)");
+            err(e.loc, "a struct value of " + e.type.str() + ", which holds more than " +
+                           std::to_string(kMaxByValueArrayElements) +
+                           " array elements (decision 0063 item 13, question 309: array values are M4.5f3)");
             return;
         }
         if (struct_pos_.count(&e) == 0U)
@@ -4212,12 +4231,65 @@ private:
         }
     }
 
+    // `a.m[b]` (decision 0063 items 4 and 13): element `b` of the array member `index` of the struct value `a` (a Call, an Aggregate, a Field, or in a contract a Formal, the Result or an
+    // Old of one, as for a Field); `b` an Int expression (outside [0, count) is the lowering's `out-of-bounds` row); the type is the element type.
+    void elem_value(const Expr& e, Ctx ctx)
+    {
+        if (e.a == nullptr || e.b == nullptr)
+        {
+            err(e.loc, "an element of a struct value's array member with a missing operand");
+            return;
+        }
+        const Type& at {e.a->type};
+        const bool valid {at.is_struct() && at.struct_type != nullptr && structs_.count(at.struct_type) != 0U};
+        if (at.is_struct())
+        {
+            struct_pos_.insert(e.a);
+            if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
+            {
+                field_base_.insert(e.a);
+            }
+        }
+        expr(*e.a, ctx, false);
+        expr(*e.b, ctx, false);
+        if (!valid)
+        {
+            err(e.loc, "an element of a " + at.str() + ", not a struct value");
+            return;
+        }
+        const StructType& st {*at.struct_type};
+        if (e.index < 0 || static_cast<size_t>(e.index) >= st.members.size() ||
+            !st.members[static_cast<size_t>(e.index)].type.is_array() ||
+            st.members[static_cast<size_t>(e.index)].type.element == nullptr)
+        {
+            err(e.loc, "member " + std::to_string(e.index) + " of " + st.c_name + " is not an array member");
+            return;
+        }
+        const Type& el {*st.members[static_cast<size_t>(e.index)].type.element};
+        if (e.type != el)
+        {
+            err(e.loc, "an element of the array member '" + st.members[static_cast<size_t>(e.index)].name + "' of " +
+                           st.c_name + " has the wrong type");
+        }
+        if (!e.b->type.is_int())
+        {
+            err(e.b->loc, "the index of an element of a struct value's array member is not an integer");
+        }
+    }
+
     // A struct value built from its leaves (decision 0044 item 2): one argument per leaf, in struct_value_leaves order (decision 0063), exactly the leaf's type.  Code only.
     void aggregate_value(const Expr& e, Ctx ctx)
     {
         if (!e.type.is_struct() || e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0U)
         {
             err(e.loc, "an aggregate of the type " + e.type.str() + ", not a struct of the program");
+            return;
+        }
+        if (value_array_elems(*e.type.struct_type) > kMaxByValueArrayElements)
+        {
+            err(e.loc, "an aggregate of " + e.type.str() + ", which holds more than " +
+                           std::to_string(kMaxByValueArrayElements) +
+                           " array elements (decision 0063 item 13, question 309: array values are M4.5f3)");
             return;
         }
         const std::vector<StructLeaf> leaves {struct_value_leaves(*e.type.struct_type)};
@@ -4272,6 +4344,24 @@ private:
             }
         }
         return false;
+    }
+    // The number of array elements a struct VALUE of this type holds (decision 0063 item 13: the width of the value view's tuple beyond its other leaves): the sum of the counts of
+    // the array members of its nest.  A value of more than kMaxByValueArrayElements (vir.h) is M4.5f3's (questions 295, 309).
+    static unsigned long long value_array_elems(const StructType& st, int depth = 0)
+    {
+        unsigned long long n {0U};
+        for (const StructMember& m : st.members)
+        {
+            if (m.type.is_array())
+            {
+                n += m.type.count;
+            }
+            else if (depth < 64 && m.type.is_struct() && m.type.struct_type != nullptr)
+            {
+                n += value_array_elems(*m.type.struct_type, depth + 1);
+            }
+        }
+        return n;
     }
     // Whether a struct type has an `owning` or `ref_to_uninit` member anywhere in its nest (decision 0063 item 1, question 293: with an array member it is M4.5e1e2's)
     static bool struct_has_marked(const StructType& st, int depth = 0)
@@ -5871,6 +5961,25 @@ private:
         {
             std::vector<int> leaf_path {path};
             leaf_path.insert(leaf_path.end(), l.path.begin(), l.path.end());
+            if (l.array)
+            {
+                // decision 0063 items 11 and 13: an array leaf is written element by element; an element is its own object, keyed `{leaf path, -2, i}` or `{leaf path, -3, variable}`
+                for (const auto& [mk, key] : member_keys_)
+                {
+                    if (mk.first != base || mk.second.size() != leaf_path.size() + 2U ||
+                        !std::equal(leaf_path.begin(), leaf_path.end(), mk.second.begin()) ||
+                        (mk.second[leaf_path.size()] != -2 && mk.second[leaf_path.size()] != -3))
+                    {
+                        continue;
+                    }
+                    const auto hit {v.wu.find(key)};
+                    if (hit != v.wu.end())
+                    {
+                        report(hit->second, key);
+                    }
+                }
+                continue;
+            }
             const auto it {member_keys_.find({base, leaf_path})};
             if (it == member_keys_.end())
             {

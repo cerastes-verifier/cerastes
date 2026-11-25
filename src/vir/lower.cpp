@@ -94,9 +94,18 @@ std::string path_suffix(const std::vector<int>& path)
     }
     return r;
 }
-// The number of leaves of a struct (1 for any other type): the width of a value's tuple.
+// The name suffix of a leaf of the VALUE view (decision 0063 item 13): its path, and `_e<i>` for element `i` of an array member: `p_s__0_m1_e2`, `res_m1_e0`.
+std::string value_suffix(const StructLeaf& l)
+{
+    return path_suffix(l.path) + (l.elem >= 0 ? "_e" + std::to_string(l.elem) : std::string());
+}
+// The number of leaves of a struct (1 for any other type): the width of a value's tuple.  An array member contributes one leaf per element (the value view, decision 0063 item 13).
 size_t leaf_count(const Type& t)
 {
+    if (t.is_array())
+    {
+        return static_cast<size_t>(t.count);
+    }
     if (!t.is_struct())
     {
         return 1U;
@@ -121,6 +130,10 @@ std::pair<size_t, size_t> leaf_span(const StructType& st, int k)
 // A struct with a pointer leaf: its value carries pointers the caller must treat as uses (0037 item 3).
 bool has_pointer_leaf(const Type& t)
 {
+    if (t.is_array())
+    {
+        return t.element != nullptr && t.element->is_ptr();
+    }
     if (!t.is_struct())
     {
         return t.is_ptr();
@@ -1049,6 +1062,7 @@ private:
     {
         Type element;
         bool zero {false};
+        bool copy {false}; // `copy_arr_<t>`, the trusted copy of decision 0063 item 13
     };
     // The trusted allocation of each cell type used (decision 0032 item 4; 0028 item 17), before every other method: a fresh one-slot block, its
     // cell uninitialized (full permission to the value and the flag, the flag false), and its liveness cell with `lvloc(b) == loc(b, -2)`.
@@ -1146,8 +1160,9 @@ private:
                 m.loc = at;
                 m.message = std::string("internal check: ") +
                             (std::string(id) == "not.wellformed" ? "well-formedness of" : "Silicon's own check of") +
-                            " the trusted contract of the " + (aa.zero ? "initialization" : "allocation") +
-                            " of an array of `" + element.str() + "`";
+                            " the trusted contract of the " +
+                            (aa.copy ? "copy" : (aa.zero ? "initialization" : "allocation")) + " of an array of `" +
+                            element.str() + "`";
                 c.checks.push_back(low::Check {id, std::move(m)});
             }
             return c;
@@ -1166,6 +1181,60 @@ private:
         const E flag_acc {over_slots(low::acc(slot, "d_" + sfx))};
         low::LMethod m;
         m.decreases_assumed = true; // 0013 item 5
+        if (aa.copy)
+        {
+            // decision 0063 item 13: the contract of the loop `d[k] = s[k]` over two distinct blocks (S47 (g); the lint pins exactly this clause set): full permission to the destination's value and
+            // flag over `[0, n)` and the amount `rd` of the source's, every source flag set; back: the same permissions, each destination value the source's old value, each destination flag
+            // set, each source value unchanged and each source flag still set
+            const E d {low::var("d")};
+            const E sv {low::var("s")};
+            const E rd {low::var("rd")};
+            const E bd {block_of(d)};
+            const E bs {block_of(sv)};
+            const E slot_d {low::dom("loc", {bd, k})};
+            const E slot_s {low::dom("loc", {bs, k})};
+            auto over = [&](const E& slot, E body)
+            {
+                const E in {low::bin(BinOp::And, low::bin(BinOp::Le, low::int_lit("0"), k), low::bin(BinOp::Lt, k, n))};
+                return low::forall_("k", {slot}, low::bin(BinOp::Implies, in, std::move(body)));
+            };
+            const std::string vf {"v_" + sfx};
+            const std::string df {"d_" + sfx};
+            m.name = "copy_arr_" + sfx;
+            m.trusted_reason =
+                "the copy of n elements of " + element.str() +
+                " between two distinct blocks (decision 0063 item 13): it takes and returns full permission to the destination's value and flag fields over n slots and the amount rd of the source's fields; each destination value is the source's old value at the same index, each destination flag is set, each source value is unchanged and each source flag stays set; it is the contract of the loop d[k] = s[k] over two disjoint ranges";
+            m.formals.push_back(low::LVar {"d", low::LType::Ref});
+            m.formals.push_back(low::LVar {"s", low::LType::Ref});
+            m.formals.push_back(low::LVar {"n", low::LType::Int});
+            m.formals.push_back(low::LVar {"rd", low::LType::Perm});
+            E shape {low::bin(BinOp::Le, low::int_lit("1"), n)};
+            shape = low::bin(BinOp::And, shape, low::bin(BinOp::Eq, d, low::dom("loc", {bd, low::int_lit("0")})));
+            shape = low::bin(BinOp::And, shape, low::bin(BinOp::Eq, low::dom("len", {bd}), n));
+            shape = low::bin(BinOp::And, shape, low::bin(BinOp::Eq, sv, low::dom("loc", {bs, low::int_lit("0")})));
+            shape = low::bin(BinOp::And, shape, low::bin(BinOp::Eq, low::dom("len", {bs}), n));
+            m.requires_.push_back(clause(shape, true));
+            m.requires_.push_back(clause(low::bin(BinOp::Ne, bd, bs), true));
+            m.requires_.push_back(clause(low::bin(BinOp::And, low::bin(BinOp::Lt, low::no_perm(), rd),
+                                                  low::bin(BinOp::Le, rd, low::write_perm())),
+                                         true));
+            m.requires_.push_back(clause(over(slot_d, low::acc(slot_d, vf)), true));
+            m.requires_.push_back(clause(over(slot_d, low::acc(slot_d, df)), true));
+            m.requires_.push_back(clause(over(slot_s, low::acc(slot_s, vf, rd)), true));
+            m.requires_.push_back(clause(over(slot_s, low::acc(slot_s, df, rd)), true));
+            m.requires_.push_back(clause(over(slot_s, low::field(slot_s, df)), true));
+            m.ensures_.push_back(clause(over(slot_d, low::acc(slot_d, vf))));
+            m.ensures_.push_back(clause(over(slot_d, low::acc(slot_d, df))));
+            m.ensures_.push_back(clause(over(slot_s, low::acc(slot_s, vf, rd))));
+            m.ensures_.push_back(clause(over(slot_s, low::acc(slot_s, df, rd))));
+            m.ensures_.push_back(
+                clause(over(slot_d, low::bin(BinOp::Eq, low::field(slot_d, vf), low::old_(low::field(slot_s, vf))))));
+            m.ensures_.push_back(clause(over(slot_d, low::field(slot_d, df))));
+            m.ensures_.push_back(
+                clause(over(slot_s, low::bin(BinOp::Eq, low::field(slot_s, vf), low::old_(low::field(slot_s, vf))))));
+            m.ensures_.push_back(clause(over(slot_s, low::field(slot_s, df))));
+            return m;
+        }
         if (!aa.zero)
         {
             m.name = "alloc_arr_" + sfx;
@@ -1954,27 +2023,9 @@ private:
     }
 
     // The leaves of `st` in the OLD view (vir::struct_leaves), guarded (decision 0063 item 4, M4.5e1e1 part A): a structure with an array member reaches a site that
-    // treats every leaf as a cell (a leaf of the array's type, whose cell would be a 1-slot block) is an internal error, not a wrong row.  check_program refuses such a
-    // structure first, so no program reaches this; a part that lifts the refusal migrates each site to struct_object_leaves or struct_value_leaves before it does.  A
-    // structure without an array member gives the same list as vir::struct_leaves, so nothing else changes.
-    // The poison of decision 0063 item 4 for the walks that are not over struct_leaves (leaf_count, leaf_span, has_pointer_leaf, struct_lens): true, with an internal
-    // error, when `st` has an array member anywhere in its nest.  Neutral for every other structure.
-    bool array_member_poison(const StructType& st, const SrcLoc& at) const
-    {
-        if (!has_array_member(st))
-        {
-            return false;
-        }
-        errors_.push_back(Diag {
-            at,
-            "a structure with an array member reached a walk of its members that counts every member as one leaf (decision 0063 item "
-            "4: the object or the value view)"});
-        return true;
-    }
-    bool array_member_poison(const Type& t, const SrcLoc& at) const
-    {
-        return t.is_struct() && t.struct_type != nullptr && array_member_poison(*t.struct_type, at);
-    }
+    // treats every leaf as a cell (a leaf of the array's type, whose cell would be a 1-slot block) is an internal error, not a wrong row.  The sites of the object view
+    // (part C) and of the value view (part E: struct_value_leaves) do not call it; what still does is the owner and heap code (decision 0063 item 1's rejections come first).
+    // A structure without an array member gives the same list as vir::struct_leaves, so nothing else changes.
     std::vector<StructLeaf> leaves_of(const StructType& st, const std::string& root_text = "", bool arrow = false) const
     {
         std::vector<StructLeaf> out {struct_leaves(st, root_text, arrow)};
@@ -2264,7 +2315,7 @@ private:
                 continue;
             }
             const std::string key {(zero ? "zero_arr_" : "arr_") + suffix};
-            array_alloc_[key] = ArrayAlloc {element, zero};
+            array_alloc_[key] = ArrayAlloc {element, zero, false};
             const auto it {alloc_at_.find(key)};
             const bool earlier {
                 it == alloc_at_.end() ||
@@ -2274,6 +2325,21 @@ private:
             {
                 alloc_at_[key] = at;
             }
+        }
+    }
+    // The trusted copy `copy_arr_<t>(d, s, n, rd)` of decision 0063 item 13 (a key of alloc_at_ like the others).
+    void array_copy_site(const Type& element, const SrcLoc& at)
+    {
+        const std::string suffix {use_cell_type(element)};
+        const std::string key {"copy_arr_" + suffix};
+        array_alloc_[key] = ArrayAlloc {element, false, true};
+        const auto it {alloc_at_.find(key)};
+        const bool earlier {it == alloc_at_.end() || (at.file == it->second.file &&
+                                                      (at.line < it->second.line ||
+                                                       (at.line == it->second.line && at.column < it->second.column)))};
+        if (earlier)
+        {
+            alloc_at_[key] = at;
         }
     }
     // The cell suffix of the element of an array local.
@@ -2334,6 +2400,17 @@ private:
             base = member_ref(base, k);
         }
         return base;
+    }
+    // The cell of a leaf of the VALUE view in the struct object at `base` (decision 0063 item 13): the leaf's own cell, or for element `i` of an array member the slot `loc(member(X, k), i)`
+    // (the block term of the member's first slot: no local, no bound row: `i` is inside the member by construction and `len(member(X, k)) == N` is a fact of every structure object).
+    E leaf_place(const E& base, const std::vector<int>& path, int elem)
+    {
+        const E first {chain_ref(base, path)};
+        return elem >= 0 ? elem_slot(first, low::int_lit(std::to_string(elem))) : first;
+    }
+    E leaf_place(const E& base, const StructLeaf& l)
+    {
+        return leaf_place(base, l.path, l.elem);
     }
     // One cell of a struct object: the Ref of a leaf, its type and its spelling.
     struct Cell
@@ -4977,8 +5054,8 @@ private:
             base = low::var(t);
         }
         const auto [root_text, arrow] = struct_dest_root(*s.addr);
-        const std::vector<StructLeaf> plain {leaves_of(st)};
-        const std::vector<StructLeaf> named {leaves_of(st, root_text, arrow)};
+        const std::vector<StructLeaf> plain {struct_value_leaves(st)};
+        const std::vector<StructLeaf> named {struct_value_leaves(st, root_text, arrow)};
         if (vs[1U].leaves.size() != plain.size())
         {
             internal_error(
@@ -5007,7 +5084,7 @@ private:
         for (size_t i {0U}; i < plain.size(); ++i)
         {
             const std::string t {new_temp(low::LType::Ref)};
-            assign(out, t, chain_ref(base, plain[i].path));
+            assign(out, t, leaf_place(base, plain[i]));
             emit_assert(out, may_write(low::var(t), plain[i].type, false),
                         meta("permission", s.loc,
                              rooted_at_global(*s.addr)
@@ -5031,6 +5108,134 @@ private:
                 global_owner_after(lo, values[i], out);
             }
         }
+    }
+
+    // The first slot `loc(member(<chain>, k), 0)` with the chain's root a Viper variable (or a global's `loc(GB_g(), 0)`): any other root term is bound to a local first (decision 0063 item 15's grammar).
+    E rebind_member_root(const E& e, std::vector<low::LStmt>& out)
+    {
+        const E mb {first_slot_block(e)};
+        if (mb == nullptr)
+        {
+            return e;
+        }
+        const E& y {mb->args[0U]};
+        E ny {y};
+        if (first_slot_block(y) != nullptr)
+        {
+            ny = rebind_member_root(y, out);
+        }
+        else if (y->kind != low::LExpr::Kind::Var && !is_global_ref(y))
+        {
+            const std::string t {new_temp(low::LType::Ref)};
+            assign(out, t, y);
+            ny = low::var(t);
+        }
+        if (ny == y)
+        {
+            return e;
+        }
+        return low::dom("loc", {low::dom("member", {ny, mb->args[1U]}), low::int_lit("0")});
+    }
+    // The copy of the array member at `s.expr` into the one at `s.addr` (decision 0063 item 13; the array leaf of a whole-structure copy): the source's permission at its first slot's amount
+    // `rd` and every source flag, the destination's permission at `write` (marked rows, source first), then, unless the two are one object, `copy_arr_<t>(d, s, N, rd)`: where either place is
+    // reached through a pointer under the guard `d != s` (an exact self-copy does nothing), between two named objects unguarded (their blocks differ: Silicon proves it; the call's own row
+    // says so), and for the same named object not at all.
+    void array_copy_stmt(const Stmt& s, std::vector<low::LStmt>& out)
+    {
+        if (s.addr == nullptr || s.expr == nullptr || !member_array_elem_base(*s.addr) ||
+            !member_array_elem_base(*s.expr) || !(s.addr->type == s.expr->type))
+        {
+            internal_error(s.loc, "an array copy of anything but two array members of one type reached lowering");
+            return;
+        }
+        const Type& at {*s.addr->type.pointee};
+        place_nodes_[s.addr] = s.loc;
+        place_nodes_[s.expr] = s.loc;
+        const std::vector<LV> vs {full_exprs({s.addr, s.expr}, out)};
+        place_nodes_.erase(s.addr);
+        place_nodes_.erase(s.expr);
+        const std::string dst_name {new_temp(low::LType::Ref)};
+        assign(out, dst_name, rebind_member_root(vs[0U].e, out));
+        const std::string src_name {new_temp(low::LType::Ref)};
+        assign(out, src_name, rebind_member_root(vs[1U].e, out));
+        const E dt {low::var(dst_name)};
+        const E st {low::var(src_name)};
+        const std::string sfx {use_cell_type(*at.element)};
+        const std::string n_text {std::to_string(at.count)};
+        const std::string src_text {place_text(*s.expr)};
+        // the copy's whole source as written (`s`, `*q`, `p->t`): the structure the array member belongs to (record 0063 item 13's wording)
+        const std::string src_struct {s.expr->a != nullptr && s.expr->a->kind == Expr::Kind::AddrOf &&
+                                              !s.expr->a->c_text.empty() && s.expr->a->c_text[0U] == '&'
+                                          ? s.expr->a->c_text.substr(1U)
+                                          : (s.expr->a != nullptr ? place_text(*s.expr->a) : std::string())};
+        const std::string dst_text {place_text(*s.addr)};
+        const std::string rd_name {new_temp(low::LType::Perm)};
+        assign(out, rd_name, min_perm(value_perm(st, *at.element), flag_perm(st, *at.element)));
+        const E rd {low::var(rd_name)};
+        const std::string held {"copies " + quoted(src_text, "an array member") +
+                                ", whose elements the function may not hold (a callee may have kept them)"};
+        emit_assert(out, low::bin(low::BinOp::Lt, low::no_perm(), rd), meta("permission", s.loc, held));
+        emit_marked_row(out, range_perm(st, low::int_lit("0"), low::int_lit(n_text), "v_" + sfx, rd),
+                        meta("permission", s.loc, held));
+        emit_marked_row(out, range_perm(st, low::int_lit("0"), low::int_lit(n_text), "d_" + sfx, rd),
+                        meta("permission", s.loc, held));
+        {
+            const E k {low::var("k")};
+            const E slot {low::dom("loc", {block_of(st), k})};
+            const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, low::int_lit("0"), k),
+                                 low::bin(low::BinOp::Lt, k, low::int_lit(n_text)))};
+            emit_assert(out, low::forall_("k", {slot}, low::bin(low::BinOp::Implies, in, cell_flag(slot, *at.element))),
+                        meta("uninitialized", s.loc,
+                             "copies " + quoted(src_struct, "the structure") + ", whose member " +
+                                 quoted(src_text, "the array") + " may hold an element without a value"));
+        }
+        const std::string wr {"writes " + quoted(dst_text, "an array member") +
+                              " without owning every element of it: the object it belongs to may have ended"};
+        emit_marked_row(out, range_perm(dt, low::int_lit("0"), low::int_lit(n_text), "v_" + sfx),
+                        meta("permission", s.loc, wr));
+        emit_marked_row(out, range_perm(dt, low::int_lit("0"), low::int_lit(n_text), "d_" + sfx),
+                        meta("permission", s.loc, wr));
+        std::vector<int> dpath;
+        std::vector<int> spath;
+        const Expr* dr {member_root(s.addr, &dpath)};
+        const Expr* sr {member_root(s.expr, &spath)};
+        auto named_root = [](const Expr* r)
+        {
+            return r != nullptr && ((r->kind == Expr::Kind::AddrOf && r->var != nullptr) ||
+                                    (r->kind == Expr::Kind::GlobalAddr && r->global != nullptr));
+        };
+        const bool both_named {named_root(dr) && named_root(sr)};
+        const bool same_object {both_named && dpath == spath && dr->kind == sr->kind &&
+                                (dr->kind == Expr::Kind::AddrOf ? dr->var == sr->var : dr->global == sr->global)};
+        if (same_object)
+        {
+            return; // `t = t`: an exact self-copy changes nothing
+        }
+        array_copy_site(*at.element, s.loc);
+        std::vector<low::LStmt> call_stmts;
+        emit_assert(call_stmts, low::bin(low::BinOp::Ne, block_of(dt), block_of(st)),
+                    meta("internal", s.loc, "internal check: the two arrays of a copy are distinct blocks"));
+        low::LStmt c;
+        c.kind = low::LStmt::Kind::Call;
+        c.name = "copy_arr_" + sfx;
+        c.args = {dt, st, low::int_lit(n_text), rd};
+        c.check =
+            low::Check {"call.precondition",
+                        meta("internal", s.loc, "internal check: Silicon's own check of the copy of an array member")};
+        call_stmts.push_back(std::move(c));
+        if (both_named)
+        {
+            for (low::LStmt& x : call_stmts)
+            {
+                out.push_back(std::move(x));
+            }
+            return;
+        }
+        low::LStmt ifs;
+        ifs.kind = low::LStmt::Kind::If;
+        ifs.expr = low::bin(low::BinOp::Ne, dt, st);
+        ifs.then_body = std::move(call_stmts);
+        out.push_back(std::move(ifs));
     }
 
     // C's zero fill of an array member (decision 0063 items 4 and 6): `zero_arr_<t>(f, N)` over the member's first slot, bound to a local: every element zero, every flag set.  The member
@@ -9160,6 +9365,17 @@ private:
         return key_id(k);
     }
 
+    // The key of a leaf of the value view (decision 0063 item 13): an element of an array member is an object of its own (the member's path and the index), as the Sequencer's elements are.
+    int leaf_key(const Expr& a, const StructLeaf& l)
+    {
+        std::vector<int> more {l.path};
+        if (l.elem >= 0)
+        {
+            more.push_back(l.elem);
+        }
+        return key_of_addr_leaf(a, more);
+    }
+
     // The object a write or a read through the pointer expression `a` names (decision 0039 item 2): `&x` is the cell x, a pointer variable `v` is `*v`,
     // anything else is an object of its own.
     int key_of_addr(const Expr& a)
@@ -9333,7 +9549,7 @@ private:
         {
             if (e->type.is_struct())
             { // decision 0044 item 7: a struct write is a write of every leaf field
-                for (const StructLeaf& l : leaves_of(*e->type.struct_type))
+                for (const StructLeaf& l : struct_value_leaves(*e->type.struct_type))
                 {
                     mem_w_.insert(fkey(l.type));
                 }
@@ -9700,7 +9916,7 @@ private:
         {
             struct_ptr_uses(*e.a, stored, guard, gdep, full, true);
         }
-        const std::vector<StructLeaf> plain {leaves_of(st)};
+        const std::vector<StructLeaf> plain {struct_value_leaves(st)};
         if (stored.leaves.size() != plain.size())
         {
             internal_error(
@@ -9709,13 +9925,13 @@ private:
             return struct_value({}, {});
         }
         const std::pair<std::string, bool> root {struct_dest_root(*e.c)};
-        const std::vector<StructLeaf> named {leaves_of(st, root.first, root.second)};
+        const std::vector<StructLeaf> named {struct_value_leaves(st, root.first, root.second)};
         const Deps operands {since(full, effect_from, obl_from)};
         std::vector<int> keys;
         Deps wset {join(join(floor_, stored.dep), join(addr.dep, operands))};
         for (const StructLeaf& l : plain)
         {
-            keys.push_back(key_of_addr_leaf(*e.c, l.path));
+            keys.push_back(leaf_key(*e.c, l));
             const auto la {full.last_access.find(keys.back())};
             if (la != full.last_access.end())
             {
@@ -9730,7 +9946,7 @@ private:
             acc.key = keys[i];
             acc.field = fkey(plain[i].type);
             acc.write = true;
-            acc.place = chain_ref(addr.e, plain[i].path);
+            acc.place = leaf_place(addr.e, plain[i]);
             acc.text = named[i].text;
             acc.dep = addr.dep;
             acc.loc = e.loc;
@@ -9762,7 +9978,7 @@ private:
         }
         for (size_t i {0U}; i < plain.size(); ++i)
         {
-            const E place {chain_ref(base, plain[i].path)};
+            const E place {leaf_place(base, plain[i])};
             obl(full, nullptr, {}, may_write(place, plain[i].type, false), wset,
                 meta("permission", e.loc,
                      "writes " +
@@ -10184,13 +10400,7 @@ private:
             case Expr::Kind::ElemAddr:
                 return elem_addr(e, env, guard, gdep, full);
             case Expr::Kind::ElemValue:
-                // decision 0063 items 4 and 13 (M4.5e1e1 part A): built by the Builder and refused by check_program until part E lowers it
-                internal_error(e.loc,
-                               "an element of a struct value's array member reached lowering (decision 0063 item 13)");
-                return {e.type.is_bool()  ? low::bool_lit(true)
-                        : e.type.is_ptr() ? low::null_()
-                                          : low::int_lit("0"),
-                        {}};
+                return elem_value(e, env, guard, gdep, full);
             case Expr::Kind::Forall:
                 return forall_expr(e, env, guard, gdep, full);
             case Expr::Kind::Bound:
@@ -10251,6 +10461,42 @@ private:
         return r;
     }
 
+    // `a.m[b]` (decision 0063 items 4 and 13): element `b` of the array member `e.index` of the struct value `a`: an `ite` chain over the member's leaves of the value's tuple
+    // (the last leaf is the default: the obligation `0 <= b < N`, `out-of-bounds`, comes before every use), with that one obligation.
+    LV elem_value(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
+    {
+        if (e.a == nullptr || e.b == nullptr || !e.a->type.is_struct() || e.a->type.struct_type == nullptr ||
+            e.index < 0 || static_cast<size_t>(e.index) >= e.a->type.struct_type->members.size() ||
+            !e.a->type.struct_type->members[static_cast<size_t>(e.index)].type.is_array())
+        {
+            internal_error(e.loc, "an element of anything but a struct value's array member reached lowering");
+            return {low::int_lit("0"), {}};
+        }
+        const Type& at {e.a->type.struct_type->members[static_cast<size_t>(e.index)].type};
+        const LV a {lower(*e.a, env, guard, gdep, full)};
+        const LV i {lower(*e.b, env, guard, gdep, full)};
+        const auto [start, width] = leaf_span(*e.a->type.struct_type, e.index);
+        if (a.leaves.size() < start + width || width != static_cast<size_t>(at.count) || width == 0U)
+        {
+            internal_error(e.loc, "a struct value with fewer leaves than its type reached lowering");
+            return {low::int_lit("0"), {}};
+        }
+        const Deps dep {join(a.dep, i.dep)};
+        // (one atomic assertion, `!(i < 0 || N <= i)`, as every element row is: a conjunction would be two Silicon errors at one line)
+        const E inside {low::not_(low::bin(low::BinOp::Or, low::bin(low::BinOp::Lt, i.e, low::int_lit("0")),
+                                           low::bin(low::BinOp::Le, low::int_lit(std::to_string(width)), i.e)))};
+        obl(full, guard, gdep, inside, dep,
+            meta("out-of-bounds", e.loc,
+                 "reads " + quoted(e.c_text, "an element of the array member") +
+                     ", whose index may be outside the array"));
+        E v {a.leaves[start + width - 1U]};
+        for (size_t j {width - 1U}; j-- > 0U;)
+        {
+            v = low::ite(low::bin(low::BinOp::Eq, i.e, low::int_lit(std::to_string(j))), a.leaves[start + j], v);
+        }
+        return {v, dep};
+    }
+
     // `a.m` (decision 0044 item 2): the member's leaf (or the leaves of a nested struct member) of the value's tuple; no obligation of its own.
     LV field_of(const Expr& e, const Env& env, const E& guard, const Deps& gdep, Full& full)
     {
@@ -10261,10 +10507,6 @@ private:
             return {low::int_lit("0"), {}};
         }
         const LV a {lower(*e.a, env, guard, gdep, full)};
-        if (array_member_poison(*e.a->type.struct_type, e.loc))
-        {
-            return {low::int_lit("0"), {}};
-        }
         const auto [start, width] = leaf_span(*e.a->type.struct_type, e.index);
         if (a.leaves.size() < start + width)
         {
@@ -11826,7 +12068,7 @@ private:
         if (callee.ret.is_struct())
         {
             // decision 0044 item 4: one target per leaf, and 0037 item 3's case splits after each pointer leaf
-            for (const StructLeaf& l : leaves_of(*callee.ret.struct_type))
+            for (const StructLeaf& l : struct_value_leaves(*callee.ret.struct_type))
             {
                 const std::string t {new_temp(ltype(l.type))};
                 item.targets.push_back(t);
@@ -12136,15 +12378,11 @@ private:
     // (decision 0032 item 6): `p != null ==> perm(lvloc(block_of(p)).lv) > none`, with WF for a store into a pointer cell (decision 0040 item 2).
     void struct_ptr_uses(const Expr& operand, const LV& v, const E& guard, const Deps& gdep, Full& full, bool with_wf)
     {
-        if (array_member_poison(operand.type, operand.loc))
-        {
-            return;
-        }
         if (cmode_ != CMode::None || !has_pointer_leaf(operand.type))
         {
             return;
         }
-        const std::vector<StructLeaf> ls {operand.type.is_struct() ? leaves_of(*operand.type.struct_type)
+        const std::vector<StructLeaf> ls {operand.type.is_struct() ? struct_value_leaves(*operand.type.struct_type)
                                                                    : std::vector<StructLeaf> {}};
         for (size_t i {0U}; i < ls.size() && i < v.leaves.size(); ++i)
         {
@@ -13414,10 +13652,10 @@ private:
             if (t.is_struct())
             { // decision 0044 item 3: the leaves are the formals, holding the entry values
                 env.formals.push_back(nullptr);
-                for (const StructLeaf& l : leaves_of(*t.struct_type))
+                for (const StructLeaf& l : struct_value_leaves(*t.struct_type))
                 {
                     env.formal_leaves[k].push_back(
-                        low::var(formal_name(*fn_.f, static_cast<int>(k)) + path_suffix(l.path)));
+                        low::var(formal_name(*fn_.f, static_cast<int>(k)) + value_suffix(l)));
                 }
             }
             else
@@ -13427,9 +13665,9 @@ private:
         }
         if (fn_.f->ret.is_struct())
         { // decision 0044 item 4
-            for (const StructLeaf& l : leaves_of(*fn_.f->ret.struct_type))
+            for (const StructLeaf& l : struct_value_leaves(*fn_.f->ret.struct_type))
             {
-                env.result_leaves.push_back(low::var(std::string(kResult) + path_suffix(l.path)));
+                env.result_leaves.push_back(low::var(std::string(kResult) + value_suffix(l)));
             }
         }
         else if (!fn_.f->ret.is_void())
@@ -13521,16 +13759,16 @@ private:
         { // decision 0044 item 5: a struct store writes every destination leaf's key
             const std::string base_text {struct_dest_root(*target->addr).first};
             const bool base_arrow {struct_dest_root(*target->addr).second};
-            const std::vector<StructLeaf> rels {leaves_of(*target->st, base_text, base_arrow)};
-            std::vector<StructLeaf> plain {leaves_of(*target->st)};
+            const std::vector<StructLeaf> rels {struct_value_leaves(*target->st, base_text, base_arrow)};
+            std::vector<StructLeaf> plain {struct_value_leaves(*target->st)};
             for (size_t i {0U}; i < plain.size(); ++i)
             {
                 Acc a;
                 a.write = true;
                 a.loc = target->loc;
-                a.key = key_of_addr_leaf(*target->addr, plain[i].path);
+                a.key = leaf_key(*target->addr, plain[i]);
                 a.field = fkey(plain[i].type);
-                a.place = chain_ref(vs.front().e, plain[i].path);
+                a.place = leaf_place(vs.front().e, plain[i]);
                 a.dep = vs.front().dep;
                 a.text = rels[i].text;
                 path_.clear();
@@ -13756,7 +13994,7 @@ private:
                 array_zero_stmt(s, out);
                 break;
             case Stmt::Kind::ArrayCopy:
-                internal_error(s.loc, "an array copy statement reached lowering (decision 0063 item 13: part E)");
+                array_copy_stmt(s, out);
                 break;
         }
     }
@@ -14039,7 +14277,7 @@ private:
             // decision 0044 item 4: every leaf of the value (an aggregate of leaf reads, a call's or a member chain's results) goes into its result, before the scope
             // exits and the postconditions; a call's pointer leaf is a use of the pointer, as a returned pointer is
             const LV v {full_exprs({s.expr}, out, nullptr, false, nullptr, nullptr, false, 0).front()};
-            const std::vector<StructLeaf> ls {leaves_of(*s.expr->type.struct_type)};
+            const std::vector<StructLeaf> ls {struct_value_leaves(*s.expr->type.struct_type)};
             if (v.leaves.size() != ls.size())
             {
                 internal_error(
@@ -14047,7 +14285,7 @@ private:
             }
             for (size_t i {0U}; i < ls.size() && i < v.leaves.size(); ++i)
             {
-                assign(out, std::string(kResult) + path_suffix(ls[i].path), v.leaves[i]);
+                assign(out, std::string(kResult) + value_suffix(ls[i]), v.leaves[i]);
             }
         }
         else if (s.expr != nullptr)
@@ -15528,7 +15766,7 @@ private:
         }
         if (f.ret.is_struct())
         {
-            const std::vector<StructLeaf> ls {leaves_of(*f.ret.struct_type)};
+            const std::vector<StructLeaf> ls {struct_value_leaves(*f.ret.struct_type)};
             for (size_t i {0U}; i < ls.size(); ++i)
             {
                 if (ls[i].type.is_ptr())
@@ -15624,10 +15862,6 @@ private:
         if (e == nullptr)
         {
             return false;
-        }
-        if (array_member_poison(e->type, e->loc))
-        {
-            return true;
         }
         if (e->type.is_ptr() || (e->type.is_struct() && has_pointer_leaf(e->type)))
         {
@@ -16046,8 +16280,14 @@ private:
         };
         if (stored.is_struct())
         {
-            for (const StructLeaf& l : leaves_of(*stored.struct_type))
+            for (const StructLeaf& l : struct_value_leaves(*stored.struct_type))
             {
+                if (l.elem >= 0)
+                {
+                    // decision 0063 items 10 and 13: an element of a global's array leaf is written field-wide (it reaches every array place of the field), never as a held leaf
+                    w.fields.insert(cell_suffix(l.type));
+                    continue;
+                }
                 std::vector<int> full {path};
                 full.insert(full.end(), l.path.begin(), l.path.end());
                 note(std::move(full), l.type);
@@ -16104,7 +16344,7 @@ private:
             }
             else if (e->type.is_struct())
             { // decision 0044 item 7
-                for (const StructLeaf& l : leaves_of(*e->type.struct_type))
+                for (const StructLeaf& l : struct_value_leaves(*e->type.struct_type))
                 {
                     w.fields.insert(cell_suffix(l.type));
                 }
@@ -16196,7 +16436,7 @@ private:
                 }
                 else if (s->addr != nullptr && s->addr->type.pointee != nullptr && s->addr->type.pointee->is_struct())
                 { // decision 0044 item 5: a struct store writes every leaf field
-                    for (const StructLeaf& l : leaves_of(*s->addr->type.pointee->struct_type))
+                    for (const StructLeaf& l : struct_value_leaves(*s->addr->type.pointee->struct_type))
                     {
                         w.fields.insert(cell_suffix(l.type));
                     }
@@ -16209,12 +16449,14 @@ private:
                 writes_in_expr(s->expr, w);
                 break;
             case Stmt::Kind::ArrayZero:
-                // decision 0063 items 6 and 10: the zero fill of an array member writes its element field (field-wide, as a store to a member's element does)
+            case Stmt::Kind::ArrayCopy:
+                // decision 0063 items 6, 10 and 13: the zero fill and the copy of an array member write its element field (field-wide, as a store to a member's element does)
                 if (s->addr != nullptr && s->addr->type.pointee != nullptr && s->addr->type.pointee->element != nullptr)
                 {
                     w.fields.insert(cell_suffix(*s->addr->type.pointee->element));
                 }
                 writes_in_expr(s->addr, w);
+                writes_in_expr(s->expr, w);
                 break;
             case Stmt::Kind::Decl:
             case Stmt::Kind::Assign:
@@ -22044,6 +22286,7 @@ private:
         Type type;
         std::string name;
         std::vector<int> path;
+        int elem {-1}; // the index in the array member at `path` (decision 0063 item 13: the value view), else -1
     };
     std::vector<LeafVar> param_vars(const Function& f, int k) const
     {
@@ -22051,10 +22294,10 @@ private:
         std::vector<LeafVar> r;
         if (t.is_struct())
         {
-            for (const StructLeaf& l : leaves_of(*t.struct_type))
+            for (const StructLeaf& l : struct_value_leaves(*t.struct_type))
             {
-                const std::string n {formal_name(f, k) + path_suffix(l.path)};
-                r.push_back(LeafVar {low::var(n), l.type, n, l.path});
+                const std::string n {formal_name(f, k) + value_suffix(l)};
+                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem});
             }
         }
         else
@@ -22069,10 +22312,10 @@ private:
         std::vector<LeafVar> r;
         if (f.ret.is_struct())
         {
-            for (const StructLeaf& l : leaves_of(*f.ret.struct_type))
+            for (const StructLeaf& l : struct_value_leaves(*f.ret.struct_type))
             {
-                const std::string n {std::string(kResult) + path_suffix(l.path)};
-                r.push_back(LeafVar {low::var(n), l.type, n, l.path});
+                const std::string n {std::string(kResult) + value_suffix(l)};
+                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem});
             }
         }
         else if (!f.ret.is_void())
@@ -22292,7 +22535,7 @@ private:
                 for (const LeafVar& lv : fv)
                 {
                     const std::string t {new_temp(low::LType::Ref)};
-                    assign(m.body, t, chain_ref(root, lv.path));
+                    assign(m.body, t, leaf_place(root, lv.path, lv.elem));
                     emit_assert(m.body, may_write(low::var(t), lv.type, false),
                                 meta("internal", copy.loc,
                                      "internal check: the entry copy of `" + copy.name + "` is writable"));
@@ -22318,7 +22561,7 @@ private:
             const Var& copy {*f.param_var(static_cast<int>(k))};
             if (copy.address_taken && copy.type.is_struct() && copy.type.struct_type != nullptr)
             {
-                for (const StructLeaf& l : leaves_of(*copy.type.struct_type))
+                for (const StructLeaf& l : struct_value_leaves(*copy.type.struct_type))
                 {
                     if (l.owning)
                     {

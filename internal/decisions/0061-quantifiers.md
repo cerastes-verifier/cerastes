@@ -403,3 +403,5 @@ its decision table, and the item it revised. An outcome outside its table stops 
 - `cerastes_old` in loop invariants (item 12) is M4.5e2's, by cut 1.
 
 *2026-11-24, amended by 0062 (M4.5e1d): item 1 — calls of `pure` functions are lifted outside a quantifier's binder (0062 item 4); item 3 — a `forall` naming a function with a contract stays rejected, now naming M4.5e2 (question 265); item 4 — a `pure` function that no `forall` names is read when it is called or has a contract (0062 item 2); item 7 — `f__wf` also holds `hva_` ghost functions of applications with their facts (0062 item 8); item 11 — the lint admits `pf_` functions and the `hva_` facts (0062 item 12).*
+
+*2026-11-25, amended by 0063 (M4.5e1e1): item 1 — a named global array is an argument of `cerastes_forall` in a loop invariant and a `check`; in a contract it and array members stay rejected (M4.5e1e2; 0063 item 1).*

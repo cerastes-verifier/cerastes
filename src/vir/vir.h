@@ -253,6 +253,10 @@ std::vector<StructLeaf> struct_object_leaves(const StructType& s, const std::str
 // THE VALUE VIEW (decision 0063 items 4 and 13): a struct VALUE is the tuple of these leaves; an array member contributes one leaf per element, in index
 // order (`elem` 0, 1, ...; `type` the element type; `text` `s.a[0]`, `s.a[1]`).  The view of by-value parameters, results, aggregates and copies.
 std::vector<StructLeaf> struct_value_leaves(const StructType& s, const std::string& root_text = "", bool arrow = false);
+// The most array elements a struct VALUE may hold when it is passed or returned by value (decision 0063 item 13, question 309): every element is a Viper formal or result and a write of the
+// entry copy, and Silicon's time grows steeply with the count (the worst shape, a structure in and out by value with a caller that fills and stores it: 6 elements 19 s, 7 elements 25 s, 8
+// elements 35 s, 12 elements 129 s, 16 elements past 120 s).  The one constant: check_program's backstop and the encoder's rejection both read it.  A copy between objects has no limit.
+inline constexpr unsigned long long kMaxByValueArrayElements {7U};
 // The member paths at which `a` holds a slot of struct type `b`: `{}` (the empty path) when `a` is `b` itself, then each nested member that is `b`
 // (and `b`s nested deeper), in declaration order, depth first.  Empty vector: `a` does not contain `b` (decision 0043 item 9: two struct atoms
 // overlap iff one root is a nested slot of the other).

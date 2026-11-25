@@ -9808,6 +9808,41 @@ class BlockTermRowTests(unittest.TestCase):
                 probs = self.strict(self.fixture(self.member_method(lens=lens, rows=self.rows("member(p, 1)", n, "requires"))))
                 self.assertTrue(any("the method states no `len(member(p,1)) ==" in p for p in probs), probs)
 
+    def ptr_rows(self, b, n, kw, wf=None, field="ptr_int"):
+        """The rows of an array member of POINTER elements (audit round 4 S1): `acc` of the value and the flag, the flag, and the range of the value, which
+        is `WF` of the pointer (null, or its own block with 0 <= offset <= len)."""
+        q = self.A.q
+        v = f"loc({b}, k).v_{field}"
+        wf = wf or f"(({v} == null) || ((({v} == loc(block_of({v}), offset_of({v}))) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v})))))"
+        return [Check(f"  {kw} " + x, WF if kw == "requires" else P, "internal") for x in (
+            q(b, 0, n, f"acc(loc({b}, k).v_{field}, amt_0)"), q(b, 0, n, f"acc(loc({b}, k).d_{field}, amt_0)"), q(b, 0, n, f"loc({b}, k).d_{field}"),
+            q(b, 0, n, wf))]
+
+    def ptr_fixture(self, rows):
+        lines = self.fixture(self.member_method(rows=rows))
+        lines[0:0] = ["field v_ptr_int: Ref", "field d_ptr_int: Bool"]
+        return lines
+
+    def test_the_range_of_a_pointer_element_in_a_member_row_is_wf_of_the_pointer(self):
+        # `struct S { int *a[4]; int n; }` under owns(*p): the range consequent of the member's rows is the pointer's WF, the same text as a view's
+        self.assertEqual(self.strict(self.ptr_fixture(self.ptr_rows("member(p, 1)", 4, "requires"))), [])
+        b = "member(p, 1)"
+        v = f"loc({b}, k).v_ptr_int"
+        blk = f"loc(block_of({v}), offset_of({v}))"
+        bad = {
+            "no `null` disjunct": f"((({v} == {blk}) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v}))))",
+            "no lower bound on the offset": f"(({v} == null) || (({v} == {blk}) && (offset_of({v}) <= len(block_of({v})))))",
+            "no upper bound on the offset": f"(({v} == null) || (({v} == {blk}) && (0 <= offset_of({v}))))",
+            "the offset past the length by one": f"(({v} == null) || ((({v} == {blk}) && (0 <= offset_of({v}))) && (offset_of({v}) <= (len(block_of({v})) + 1))))",
+            "another pointer than the element": f"(({v} == null) || ((({v} == {blk}) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of(loc({b}, 0).v_ptr_int)))))",
+            "an integer range": "(((-2147483648) <= " + v + ") && (" + v + " <= 2147483647))",
+            "just `true`": "true",
+            "a disjunct that is always true": f"(({v} == null) || true)",
+        }
+        for what, wf in bad.items():
+            with self.subTest(what):
+                self.some(self.ptr_fixture(self.ptr_rows(b, 4, "requires", wf=wf)), "the consequent is not `acc(F.f)`")
+
     def test_a_row_that_leaves_the_grammar_is_refused(self):
         q = self.A.q
         b = "GB_g__1()"
@@ -10337,6 +10372,94 @@ class ArrayCopyTests(unittest.TestCase):
                 self.assertTrue(any("ghost amount" in p or "`rd`" in p for p in probs), (what, probs))
         # the pinned clause set is exempt from both (the other test) and so is a clean program
         self.assertEqual([p for p in lv.lint_vpr(*build(g.fixture() + self.lines()), "t.vpr", "t.vpr.map") if "global facts" in p or "ghost amount" in p or "`rd`" in p], [])
+
+
+class ArrayCopyCallTests(unittest.TestCase):
+    """Decision 0063 item 13, Part E: a call of the trusted `copy_arr_<t>` is preceded by an explicit row for each of its `requires` (the amount `rd` as the
+    minimum over the source's first slot, `none < rd`, the source's value, flag and flags rows, the destination's value and flag rows) and, immediately
+    before the call, the internal row `block_of(d) != block_of(s)`; a copy that may be a self-copy sits alone in `if (d != s) {`.  Each mutant drops or
+    changes one row and must be refused by this rule (the shapes are those of il-analyst-4's `earr_copy_*` outputs)."""
+
+    A = ArrayCopyTests("test_the_contract_is_clean_for_each_field_type")
+
+    @staticmethod
+    def rows(d="t__1", s="t__2", rd="t__3", n=3, t="int"):
+        def q(b, tail):
+            return f"  assert forall k: Int :: {{ loc(block_of({b}), k) }} ((0 <= k) && (k < {n})) ==> {tail}"
+        cs, cd = f"loc(block_of({s}), k)", f"loc(block_of({d}), k)"
+        return {
+            "rd": f"  {rd} := (perm({s}.v_{t}) < perm({s}.d_{t})) ? perm({s}.v_{t}) : perm({s}.d_{t})",
+            "pos": f"  assert none < {rd}",
+            "sv": q(s, f"acc({cs}.v_{t}, {rd})"), "sd": q(s, f"acc({cs}.d_{t}, {rd})"), "sf": q(s, f"{cs}.d_{t}"),
+            "dv": q(d, f"acc({cd}.v_{t})"), "dd": q(d, f"acc({cd}.d_{t})"),
+            "int": f"  assert block_of({d}) != block_of({s})",
+        }
+
+    def program(self, rows=None, guard=False, drop=(), after=(), call="  copy_arr_int(t__1, t__2, 3, t__3)", guard_text=None):
+        r = dict(self.rows() if rows is None else rows)
+        for k in drop:
+            r.pop(k)
+        order = ["rd", "pos", "sv", "sd", "sf", "dv", "dd"]
+        body = [r[k] for k in order if k in r]
+        tail = [r["int"]] if "int" in r else []
+        tail = tail + list(after)
+        call_lines = [guard_text or "  if (t__1 != t__2) {", *tail, call, "  }"] if guard else [*tail, call]
+        return [*self.A.A.fields("int", "Int"), "// cerastes:trusted-contract array copy", *self.A.lines()[len(self.A.A.fields("int", "Int")) + 1:],
+                "method m__1(v_a: Ref)", "  decreases", "{", "  var t__1: Ref", "  var t__2: Ref", "  var t__3: Perm", *body, *call_lines, "}"]
+
+    def probs(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "is called without its rows" in p]
+
+    def test_the_rows_of_the_emitter_are_clean(self):
+        self.assertEqual(self.probs(self.program()), [])
+        self.assertEqual(self.probs(self.program(guard=True)), [])
+        for t in ("bool", "ptr_int"):
+            with self.subTest(t=t):
+                self.assertEqual(self.probs(self.program(rows=self.rows(t=t), call=f"  copy_arr_{t}(t__1, t__2, 3, t__3)")), [])  # the callee is absent: not this rule's
+
+    def test_a_call_without_a_row_of_its_requires_is_refused(self):
+        for what, drop in {
+            "no amount": ("rd",), "no `none < rd`": ("pos",), "no source value permission": ("sv",), "no source flag permission": ("sd",),
+            "no source flags": ("sf",), "no destination value permission": ("dv",), "no destination flag permission": ("dd",),
+            "no internal row": ("int",),
+        }.items():
+            with self.subTest(what):
+                self.assertTrue(self.probs(self.program(drop=drop)), what)
+                self.assertTrue(self.probs(self.program(drop=drop, guard=True)), what + " (guarded)")
+
+    def test_a_row_that_is_not_the_rows_of_this_call_is_refused(self):
+        good = self.rows()
+        other = {"the amount of the destination": {"rd": good["rd"].replace("t__2", "t__1")},
+                 "the amount of the value permission alone": {"rd": good["rd"].replace("perm(t__2.v_int) < perm(t__2.d_int)) ? perm(t__2.v_int) : perm(t__2.d_int)", "perm(t__2.v_int)")},
+                 "the amount of the flag alone": {"rd": good["rd"].replace(" : perm(t__2.d_int)", " : perm(t__2.v_int)")},
+                 "a count other than the call's": {"sv": good["sv"].replace("(k < 3)", "(k < 2)")},
+                 "the source's rows at full permission": {"sv": good["sv"].replace(", t__3)", ")")},
+                 "the destination's rows over the source": {"dv": good["dv"].replace("block_of(t__1)", "block_of(t__2)")},
+                 "the internal row on other blocks": {"int": "  assert block_of(t__1) != block_of(t__3)"},
+                 "the internal row reversed": {"int": "  assert block_of(t__2) != block_of(t__1)"},
+                 "the amount of another suffix": {"dd": good["dd"].replace(".d_int", ".d_bool")}}
+        for what, change in other.items():
+            with self.subTest(what):
+                self.assertTrue(self.probs(self.program(rows={**good, **change})), what)
+
+    def test_the_internal_row_is_the_line_before_the_call_and_the_guard_is_the_pinned_one(self):
+        self.assertTrue(self.probs(self.program(after=["  assert none < t__3"])), "a row between the internal row and the call")
+        self.assertTrue(self.probs(self.program(guard=True, guard_text="  if (t__2 != t__1) {")), "the guard reversed")
+        self.assertTrue(self.probs(self.program(guard=True, guard_text="  if (t__1 == t__2) {")), "the guard is an equality")
+        self.assertTrue(self.probs(self.program(guard=True, guard_text="  if (t__1 != t__2 && t__3 == none) {")), "the guard has another conjunct")
+        lines = self.program(guard=True)
+        i = lines.index("  }", lines.index("  copy_arr_int(t__1, t__2, 3, t__3)"))
+        lines.insert(i, "  t__3 := none")  # a second statement in the guarded block
+        self.assertTrue(self.probs(lines), "the guarded block holds more than the call")
+        self.assertTrue(self.probs(self.program(call="  copy_arr_int(t__1, t__2, n, t__3)")), "a count that is not a literal")
+        self.assertTrue(self.probs(self.program(call="  copy_arr_int(loc(t__1, 0), t__2, 3, t__3)")), "an argument that is not a variable")
+
+    def test_a_method_that_only_carries_the_name_is_not_a_pinned_copy_and_its_calls_are_not_this_rules(self):
+        lines = self.program()
+        i = lines.index("method copy_arr_int(d: Ref, s: Ref, n: Int, rd: Perm)")
+        lines[i + 1] = "  requires true"
+        self.assertEqual(self.probs(lines), [])  # refused as a copy by the clause rule instead
+        self.assertTrue([p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "not the trusted array copy" in p])
 
 
 if __name__ == "__main__":

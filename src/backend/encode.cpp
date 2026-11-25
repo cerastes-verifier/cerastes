@@ -494,13 +494,13 @@ private:
             r.diag = Diag::unsupported_declaration;
             r.name += " (a `const` struct by value: const objects come with M4.6, decision 0044 item 3)";
         }
-        else if (r.ok && vir_type_has_array(r.t))
+        else if (r.ok && vir_value_over_limit(r.t))
         {
-            // decision 0063 item 13 (question 291): a structure value with an array member is M4.5e1e1's part E
+            // decision 0063 item 13 (question 295): a structure value is its array members' elements one by one, and past kMaxValueArrayElements of them it is M4.5f3's (array values)
             r.ok = false;
-            r.diag = Diag::unsupported_declaration;
-            r.name +=
-                " (a struct with an array member passed or returned by value: M4.5e1e1 part E, decision 0063 item 13)";
+            r.diag = Diag::unsupported_type;
+            r.name += " (more than " + std::to_string(kMaxValueArrayElements) +
+                      " array elements passed by value: array values, M4.5f3, decision 0063 item 13)";
         }
         return r;
     }
@@ -1637,9 +1637,121 @@ private:
         return finish(e, b_.elem_addr(a, zero, l));
     }
 
+    // `f().a[i]`, `S{...}.a[i]` and `(struct S){...}.a[i]` in code, and `s.a[i]` of a by-value struct parameter and `r.a[i]` of the result in a contract
+    // (decision 0063 item 13): element `i` of an array member of a structure VALUE, an `ElemValue` over the value's producer (a call, an aggregate, a Field chain, a
+    // formal or the result) with one `out-of-bounds` obligation of the lowering.  `*handled` is set when `e` is such a subscript (the result is then null if it was
+    // reported); a subscript over an object, a pointer or a named array is not handled.
+    const Expr* elem_value_read(an_expr_node_ptr e, bool* handled)
+    {
+        *handled = false;
+        auto ops {operands_of(e)};
+        if (ops.size() != 2U)
+        {
+            return nullptr;
+        }
+        an_expr_node_ptr base {nullptr};
+        an_expr_node_ptr index {nullptr};
+        if (ops[0U]->type != nullptr && has_type_kind(ops[0U]->type, tk_pointer))
+        {
+            base = ops[0U];
+            index = ops[1U];
+        }
+        else if (ops[1U]->type != nullptr && has_type_kind(ops[1U]->type, tk_pointer))
+        {
+            base = ops[1U];
+            index = ops[0U];
+        }
+        else
+        {
+            return nullptr;
+        }
+        an_expr_node_ptr mn {array_member_of_decay(base)};
+        if (mn == nullptr || !(cx_.contract ? contract_value_root(mn) : member_chain_over_value(mn)))
+        {
+            return nullptr;
+        }
+        *handled = true;
+        const SrcLoc l {loc_of(e->position)};
+        if (cx_.forall != nullptr)
+        {
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "an array member of a structure value in the function of a quantifier (a member is read by name in code only; M4.5e1e2, decision 0061 item 4)");
+            return nullptr;
+        }
+        auto mops {operands_of(mn)};
+        if (mops.size() != 2U)
+        {
+            reject(Diag::unsupported_expression, e->position, "an operation with an unexpected number of operands");
+            return nullptr;
+        }
+        const Expr* sv {cx_.contract ? contract_field_chain(mops[0U]) : struct_value_node(peel_value(mops[0U]))};
+        if (sv == nullptr)
+        {
+            return nullptr;
+        }
+        if (!sv->type.is_struct() || sv->type.struct_type == nullptr)
+        {
+            reject(Diag::unsupported_expression, e->position, "a member of a value that is not a struct");
+            return nullptr;
+        }
+        const int k {member_index(*sv->type.struct_type, mops[1U], mn->position)};
+        if (k < 0)
+        {
+            return nullptr;
+        }
+        if (!cx_.contract)
+        {
+            // a plain `char` index (-Wchar-subscripts, as for an object's element, decision 0059 item 4)
+            if (an_expr_node_ptr in {peel_generated_conversions(index)};
+                in != nullptr && in->kind != enk_constant && in->type != nullptr &&
+                skip_typerefs(in->type)->kind == tk_integer && !skip_typerefs(in->type)->variant.integer.enum_type &&
+                skip_typerefs(in->type)->variant.integer.int_kind == ik_char)
+            {
+                reject_args(Diag::char_subscripts, index->position, {member_spelling(mn)});
+                return nullptr;
+            }
+        }
+        ++cx_.no_read; // record 0062 item 4: an application in an index counts as a read of memory
+        const Expr* ix {expr(index)};
+        --cx_.no_read;
+        if (ix == nullptr)
+        {
+            return nullptr;
+        }
+        if (ix->type.is_bool())
+        {
+            ix = b_.bool_to_int(vir::Type::integer(prog_.int_type_of(prog_.c_int_bits(), true)), ix, l);
+        }
+        else if (!ix->type.is_int() || is_enum_type(ix->type))
+        {
+            reject(Diag::unsupported_expression, index->position,
+                   is_enum_type(ix->type) ? "an enumeration value as an array index (write a cast to an integer type)"
+                                          : "an array index that is not an integer");
+            return nullptr;
+        }
+        if (cx_.contract)
+        {
+            if (vir::reads_heap(*ix))
+            {
+                reject(Diag::unsupported_expression, index->position,
+                       "an index that reads memory in a contract (M4.5e2, decision 0060 item 1)");
+                return nullptr;
+            }
+            spell_formals(ix);
+        }
+        return finish(e, b_.elem_value(sv, k, ix, l));
+    }
+
     // `a[i]` as a read.
     const Expr* subscript_read(an_expr_node_ptr e)
     {
+        bool value_elem {false};
+        const Expr* ev {elem_value_read(e, &value_elem)};
+        if (value_elem)
+        {
+            return ev;
+        }
         const Expr* addr {subscript_address(e)};
         return addr == nullptr ? nullptr : finish(e, b_.deref(addr, loc_of(e->position)));
     }
@@ -8507,6 +8619,26 @@ private:
     {
         return t.is_array() || (t.is_struct() && t.struct_type != nullptr && vir_struct_has_array(*t.struct_type));
     }
+    // Decision 0063 item 13 (question 295): the number of array elements a structure VALUE holds (the value view's element leaves: every array member's count,
+    // nested by-value structures included).  A value passed, returned or built is limited to kMaxValueArrayElements; a copy has no limit.
+    static constexpr unsigned long long kMaxValueArrayElements {vir::kMaxByValueArrayElements};
+    static unsigned long long vir_value_array_elements(const vir::StructType& st)
+    {
+        unsigned long long n {0U};
+        for (const vir::StructLeaf& lf : vir::struct_object_leaves(st))
+        {
+            if (lf.array)
+            {
+                n += lf.count;
+            }
+        }
+        return n;
+    }
+    static bool vir_value_over_limit(const vir::Type& t)
+    {
+        return t.is_struct() && t.struct_type != nullptr &&
+               vir_value_array_elements(*t.struct_type) > kMaxValueArrayElements;
+    }
     // Whether a structure has an `owning` or `ref_to_uninit` member anywhere (by-value structure members included).
     static bool vir_struct_has_marked(const vir::StructType& st, int depth = 0)
     {
@@ -9994,6 +10126,15 @@ private:
             {
                 return nullptr;
             }
+            // `old(s.a[i])` of a by-value struct parameter (decision 0063 item 13): the element's entry value, as `old(s.x)`
+            bool value_elem {false};
+            ++cx_.old_depth;
+            const Expr* ev {elem_value_read(inner, &value_elem)};
+            --cx_.old_depth;
+            if (value_elem)
+            {
+                return ev == nullptr ? nullptr : finish(e, b_.old(ev, loc_of(e->position)));
+            }
             ++cx_.old_depth;
             const Expr* a {contract_element_address(inner, sops)};
             --cx_.old_depth;
@@ -11373,6 +11514,14 @@ private:
             if (!operand_count(in, 2U, sops))
             {
                 return nullptr;
+            }
+            bool value_elem {false};
+            ++cx_.old_depth;
+            const Expr* ev {elem_value_read(in, &value_elem)};
+            --cx_.old_depth;
+            if (value_elem)
+            {
+                return ev == nullptr ? nullptr : finish(ind, b_.old(ev, l));
             }
             ++cx_.old_depth;
             const Expr* a {contract_element_address(in, sops)};
@@ -14716,9 +14865,16 @@ private:
             return nullptr;
         }
         std::vector<const Expr*> args;
-        for (const vir::StructLeaf& lf : vir::struct_leaves(*st.struct_type))
+        for (const vir::StructLeaf& lf : vir::struct_value_leaves(*st.struct_type))
         {
-            args.push_back(b_.deref(leaf_address(a, lf.path, l), l));
+            // an element of an array member is a leaf of its own (decision 0063 item 13): the read of `a[i]` over the member's address, its rows the element
+            // read's (bound, permission, flag)
+            const Expr* la {leaf_address(a, lf.path, l)};
+            if (lf.elem >= 0)
+            {
+                la = b_.elem_addr(la, long_const(lf.elem, l), l);
+            }
+            args.push_back(b_.deref(la, l));
         }
         return b_.aggregate(st, std::move(args), l);
     }
@@ -15242,17 +15398,18 @@ private:
                (f_get_type_qualifiers(c->type, TRUE) & (TQ_VOLATILE | TQ_C11_ATOMIC)) != 0U;
     }
 
-    // Decision 0063 item 13 (question 291): a structure with an array member as a VALUE (passed, returned, copied, built by a literal) is part E's; until then it is
-    // rejected at the expression.  True when reported.
+    // Decision 0063 item 13 (question 295): a structure VALUE (an argument or a result read from an object, a literal's value) is the tuple of its array
+    // members' elements one by one, and past kMaxValueArrayElements elements it is M4.5f3's (array values).  The signature already refuses such a parameter and result; this is the
+    // same limit where a value is built.  A copy (`copy_struct`) is no value and has no limit.  True when reported.
     bool reject_array_value(const vir::Type& st, const a_source_position& at)
     {
-        if (!vir_type_has_array(st))
+        if (!vir_value_over_limit(st))
         {
             return false;
         }
-        reject(
-            Diag::unsupported_expression, at,
-            "a structure with an array member copied, passed, returned or built as a value (M4.5e1e1 part E, decision 0063 item 13)");
+        reject(Diag::unsupported_type, at,
+               "a structure with more than " + std::to_string(kMaxValueArrayElements) +
+                   " array elements passed, returned or built by value (array values: M4.5f3, decision 0063 item 13)");
         return true;
     }
 
@@ -15329,7 +15486,9 @@ private:
                 "two elements of a braced list used as a value, one of them with a side effect or a call (their order is C++'s, but a value's elements are unsequenced here: M8, decision 0044 item 6)");
             return nullptr;
         }
-        std::map<std::vector<int>, const Expr*> by_leaf;
+        // one argument per leaf of the VALUE view (decision 0063 item 13): an array member's elements are leaves of their own, in index order, and the elements
+        // a list does not write are zero
+        std::map<std::pair<std::vector<int>, long>, const Expr*> by_leaf;
         for (const InitElem& el : elems)
         {
             const Expr* x {init_element_value(*st.struct_type, el)};
@@ -15337,12 +15496,12 @@ private:
             {
                 return nullptr;
             }
-            by_leaf[el.path] = x;
+            by_leaf[{el.path, el.elem}] = x;
         }
         std::vector<const Expr*> args;
-        for (const vir::StructLeaf& lf : vir::struct_leaves(*st.struct_type))
+        for (const vir::StructLeaf& lf : vir::struct_value_leaves(*st.struct_type))
         {
-            auto it {by_leaf.find(lf.path)};
+            auto it {by_leaf.find({lf.path, static_cast<long>(lf.elem)})};
             if (it != by_leaf.end())
             {
                 args.push_back(it->second);
@@ -18780,6 +18939,12 @@ private:
         return true;
     }
 
+    // The constant `v` of type long: the index of an element leaf (decision 0063 item 13).
+    const Expr* long_const(long v, const SrcLoc& l)
+    {
+        return b_.int_const(vir::Type::integer(prog_.int_type("long", 64, true)), std::to_string(v), l);
+    }
+
     // The chain `&root->m1->...->mn` for the member path `path` (each member address built over the same root node).
     const Expr* leaf_address(const Expr* root, const std::vector<int>& path, const SrcLoc& l)
     {
@@ -18952,7 +19117,16 @@ private:
                         read_list = !elided && sole && zero && (c_mode || st.members.size() < 2U);
                     }
                 }
-                if (!read_list)
+                if (!read_list && !elided && !agg->explicit_braces_on_aggregate && agg->explicit_cast_applied)
+                {
+                    // the folded form of a struct temporary in an initializer's call: no braces flags at any level, so the written `S{{1, 2}, 3}` cannot be told from `S{1, 2, 3}`
+                    reject(
+                        Diag::unsupported_expression, cp,
+                        "a struct temporary with an array member inside the initializer of a variable (the front end folds it and drops its braces, so `S{{1, 2}, 3}` cannot be told from the elided `S{1, 2, 3}`; "
+                        "M8, decision 0044 item 6): assign the call's value in a statement, `int r; r = f(S{...});`");
+                    ok = false;
+                }
+                else if (!read_list)
                 {
                     reject(
                         Diag::unsupported_expression, cp,
@@ -19074,10 +19248,6 @@ private:
         {
             return;
         }
-        if (src->type.is_ptr() && src->type.pointee != nullptr && reject_array_value(*src->type.pointee, at))
-        {
-            return;
-        }
         if (!dest->type.is_ptr() || !src->type.is_ptr() || dest->type.pointee == nullptr ||
             src->type.pointee == nullptr || *dest->type.pointee != *src->type.pointee ||
             !dest->type.pointee->is_struct())
@@ -19115,17 +19285,34 @@ private:
         };
         const Expr* s_place {stable(src)};
         const Expr* d_place {stable(dest)};
-        const std::vector<vir::StructLeaf> leaves {vir::struct_leaves(*src->type.pointee->struct_type)};
-        std::vector<vir::Var*> tmps;
-        for (const vir::StructLeaf& lf : leaves)
+        // The OBJECT view (decision 0063 item 13): a cell leaf is read into a temporary and stored as before; an array member is one `ArrayCopy` of the
+        // destination's member over the source's (the guard against one object and the rows are lowering's), after the cells.  A copy has no limit on the
+        // elements (question 295's limit is for a value).
+        const std::vector<vir::StructLeaf> leaves {vir::struct_object_leaves(*src->type.pointee->struct_type)};
+        std::vector<vir::Var*> tmps(leaves.size(), nullptr);
+        for (size_t i {0U}; i < leaves.size(); ++i)
         {
-            vir::Var* t {cx_.fn->new_local("copy_" + std::to_string(tmps.size()), lf.type, l)};
-            tmps.push_back(t);
-            out.push_back(b_.decl(t, b_.deref(leaf_address(s_place, lf.path, l), l), l));
+            if (leaves[i].array)
+            {
+                continue;
+            }
+            vir::Var* t {cx_.fn->new_local("copy_" + std::to_string(i), leaves[i].type, l)};
+            tmps[i] = t;
+            out.push_back(b_.decl(t, b_.deref(leaf_address(s_place, leaves[i].path, l), l), l));
         }
         for (size_t i {0U}; i < leaves.size(); ++i)
         {
-            out.push_back(b_.store(leaf_address(d_place, leaves[i].path, l), b_.local(tmps[i], l), l));
+            if (!leaves[i].array)
+            {
+                out.push_back(b_.store(leaf_address(d_place, leaves[i].path, l), b_.local(tmps[i], l), l));
+            }
+        }
+        for (const vir::StructLeaf& lf : leaves)
+        {
+            if (lf.array)
+            {
+                out.push_back(b_.array_copy(leaf_address(d_place, lf.path, l), leaf_address(s_place, lf.path, l), l));
+            }
         }
     }
 
@@ -19138,10 +19325,6 @@ private:
         {
             reject(Diag::unsupported_expression, at,
                    "a struct store whose destination is not of a verified struct type");
-            return;
-        }
-        if (reject_array_value(*dest->type.pointee, at))
-        {
             return;
         }
         if (dest_node != nullptr && first_effect(dest_node) != nullptr)

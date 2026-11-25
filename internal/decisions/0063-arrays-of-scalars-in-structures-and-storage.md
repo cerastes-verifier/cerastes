@@ -1,6 +1,7 @@
 # 0063 — Arrays of scalars in structures and static storage (M4.5e1e1)
 
-- **Status:** draft (2026-11-25, M4.5e1e1), written before code (invariant 6) from section 7 of the plan
+- **Status:** accepted (2026-11-25, M4.5e1e1; the full `check.sh` on the box is left to the owner, at the owner's
+  request), written before code (invariant 6) from section 7 of the plan
   (`.claude/plans/m4-5e1e1-arrays-of-scalars.md`, written at M4.5e1e's planning and executed without re-planning);
   revised by P82's and S47's decision tables (the plan's section 6; `internal/il-inventory.md`, chapter M4.5e1e1;
   44 fixtures `tests/viper-smoke/memory/s47_*.vpr`; every row on its first branch, the table at the end), Step 0's
@@ -17,7 +18,10 @@
   Opus auditor, on Part C at `77d557b`: no blocking item; should-fix S1 a structure global's array leaf without
   liveness in `main`'s loops, S2 a call row's amount under a quantifier, S3 the lint's guarded length fact, S4 an
   abnormal end in a heap unit, all taken; notes N1, N4, N9 listed false alarms, items 7 and 10; N5–N7 items 4 and 6;
-  `build/m4.5e1e1/auditor-report-3.md`). Owner decisions:
+  `build/m4.5e1e1/auditor-report-3.md`); and by audit round 4 in two halves (4a on Commit 3 and the pages, 4b on Part E:
+  no blocking item; the lint for pointer-element array members, a false message for a C++ temporary, the copy's
+  message and the pages, all taken; `auditor-report-4a.md`, `-4b.md`), with the advisor's ruling 309 (the by-value
+  limit, item 13). Owner decisions:
   - At M4.5e1e's planning (2026-11-25): **290** M4.5e1e is two sessions, "scalars, then structures" (this record's
     arrays of scalars; M4.5e1e2's arrays of structures and of arrays); **291** a structure with an array member is
     copied and passed and returned by value in M4.5e1e ("Copy and by-value now"; item 13, the plan's Part E);
@@ -34,7 +38,8 @@
   - Standing: 69 (no EDG work), 77 (one context, under about 12 h), 160 (a new test's expect line corrected after
     its first run, listed in status), 176 (the owner handles CI), 277 (a twin with several real errors lists every
     one), 285 (a test slow on the box only because of what it must refute goes to `tests/long/` with a short twin).
-  - Questions settled with the advisor in this session (from 301): `internal/handoff.md` §8.
+  - Questions settled with the advisor in this session: 301–303, 305–309 (`internal/handoff.md` §8); 304 is open for
+    the owner.
 - **Milestone:** M4.5e1e1.
 - **Amends:** 0012 item 11 (the lint); 0024 item 6 (array types of scalars); 0028 items 5 and 16 (as built for
   arrays); 0041 items 2, 4, 5, 10 and 12; 0043 items 2, 3, 4, 6, 7, 8, 9, 11 and 13; 0044 items 2, 3, 4, 7 and 8;
@@ -96,7 +101,7 @@ construct rejected before this record; where an existing function is touched (`i
    | a contract place reached through a heap read (0045) with a structure that has an array member anywhere on its path, root included (`owns(*p->q)`, `p->q->a[i]` in a contract) | M4.5e1e2 (question 306) |
    | an `ensures` atom with no `requires` partner (0052) on an array member or a structure with an array member (`owns(*r)` of a result) | M4.5e1e2 |
    | a range on part of a global array or of an array member (`owns_range(g, n)`, `owns_range(p->a, n)`, `&g[2]` as a base); an atom on one element; `&g[i]` and `&p->a[i]` in a contract; a global initializer `&g[2]`, `int *gp = s.a;` or `&s.a[k]`; `g + i` | M4.5e2 |
-   | a structure value that holds more than 64 array elements, passed or returned by value (a copy has no limit) | M4.5f3 (question 295: array values as ghost sequences) |
+   | a structure value that holds more than 7 array elements, passed or returned by value (a copy has no limit) | M4.5f3 (questions 295 and 309: array values as ghost sequences) |
    | a read `pure` function over a structure or a global (0062 item 1, 0041 item 12) | M4.5f1 |
    | `const` arrays in any storage (a `const` global table, `static const`); `char s[] = "abc"`, `sizeof("abc")`, `sizeof((char[4]){0})` | M4.6 |
    | an array of owning pointers; `owning` or `ref_to_uninit` on an array | M4.8 |
@@ -334,9 +339,10 @@ construct rejected before this record; where an existing function is touched (`i
       the interval test, and `inv_place_disjunct` is unchanged.
     - Invariant and measure reads of `g[e]`, `s.a[e]` and `p->a[e]` are framed by these places, with 0059 item 8's
       `out-of-bounds` and `uninitialized` obligations.
-    - **Listed false alarm** (audit round 3, N9; 0043 item 11's rule, by design): a store to an array member of one
-      structure local in a loop reaches every array place of the element's field, so a loop that writes `t.a[2]`
-      cannot keep `s.a`'s values; a `check` after it relying on them fails.
+    - **Listed false alarm** (audit round 3, N9; 0043 item 11's rule, by design): a store to a member of one structure
+      local in a loop — an element of an array member or a cell member of the element's field — reaches every array
+      place of that field, so a loop that writes `t.a[2]` or `t.n` cannot keep `s.a`'s values (all `int`); a `check`
+      after it relying on them fails.
 
 11. **Sequencing** (0039 item 3, 0059 item 9). Object keys gain the element of a global array and of an array member
     (`g[0]` and `g[1]` are different objects; a global array is no longer one object). Two unsequenced accesses to
@@ -386,9 +392,10 @@ construct rejected before this record; where an existing function is touched (`i
       Silicon proves `block_of(d) != block_of(s)` for two distinct structure locals (and for a local against a
       `reads` parameter) from what the function holds, but does not decide a guard `d != s` between them from
       quantified permissions alone, so a guard there would leave a feasible branch that copies nothing (a false
-      alarm, never a proof). **Listed false alarm:** for a structure whose leaves of the element's field are all
-      array members, the guard between two places reached through `owns` parameters is not decided either, and a
-      read of the copied values after it may fail. Under the guard, `d != s` gives `block_of(d) != block_of(s)`: both are
+      alarm, never a proof). Between two places reached through `owns` parameters of a structure whose leaves of the
+      element's field are all array members, the guard is not decided by Silicon either, but on the branch where it
+      is false `d == s` and every relation the copy states already holds, so it costs nothing (audit round 4b, N6:
+      the feared false alarm does not reproduce). Under the guard, `d != s` gives `block_of(d) != block_of(s)`: both are
       first slots `loc(member(X, k), 0)` and `loc(member(Y, k), 0)` of array leaves at one index of one structure
       type, so `d != s` makes `X != Y`, `member_inv` makes the blocks differ.
     - **`copy_arr_<t>`** is a trusted method (`// cerastes:trusted-contract`), one per element cell type, as
@@ -416,9 +423,15 @@ construct rejected before this record; where an existing function is touched (`i
       argument per element (zero for the elements a literal does not write). `f().a[i]`, and `s.a[i]` of a by-value
       parameter in a contract, are `ElemValue`: the element at `i` (an `ite` chain over the member's elements) with one
       `out-of-bounds` obligation.
-    - **The limit** (question 295): a structure type whose value view holds more than 64 array elements is rejected
-      as a by-value parameter, result, argument or literal value (`unsupported_type`, "… more than 64 array elements
-      passed by value (array values: M4.5f3)"). A copy has no limit.
+    - **The limit** (question 295, changed by question 309): a structure type whose value view holds more than **7**
+      array elements is rejected as a by-value parameter, result, argument or literal value (`unsupported_type`, "…
+      more than 7 array elements passed by value (array values: M4.5f3 …)"). A copy has no limit. The number is one
+      constant, `vir::kMaxByValueArrayElements`, read by the encoder and by `check.cpp`'s backstop. **Why 7:** 64 did
+      not verify (a 64-element structure taken and returned by value timed out at Silicon's 600 s cap); on the worst
+      by-value shape (taken and returned by value, a caller passing an object and storing the result), measured alone
+      on the box: 6 elements 19 s, 7 25 s, 8 35 s, 12 129 s, 16 over 120 s (about 1.4 times per element, not
+      diagnosed); 7 is the largest count under about 30 s. The limit is per structure type: a call that passes several
+      such structures by value can still time out, which is an exit 3, never a proof (listed).
 
 14. **Computed array types** (amends 0024 item 6 for arrays of scalars).
     - A typedef or alias of an array type **declared in a verified file** is accepted when the type is item 2's, with

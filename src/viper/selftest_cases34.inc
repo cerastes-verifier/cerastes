@@ -133,77 +133,49 @@ void define_arrays_in_storage_rejections()
            f->body = k.blkc({k.decl(a, nullptr), k.b.array_zero(k.addr(a), k.at())});
            k.done(f);
        });
-    rc("arr_store_rej_array_copy_statement", "an array copy statement",
+    rc("arr_store_rej_array_copy_of_a_non_array",
+       "an array copy of something other than the addresses of two array members",
        [=](Kit& k)
        {
+           // the operands of an array copy are the addresses of array members (decision 0063 item 13)
            StructType* S {S_arr(k)};
            Function* f {k.fn("f", k.vd)};
            Var* s {k.scell(f, "s", S)};
            Var* t {k.scell(f, "t", S)};
-           f->body = k.blkc({k.decl(s, nullptr), k.decl(t, nullptr),
-                             k.b.array_copy(k.mem(k.addr(t), 0), k.mem(k.addr(s), 0), k.at())});
+           f->body = k.blkc({k.decl(s, nullptr), k.decl(t, nullptr), k.b.array_copy(k.addr(t), k.addr(s), k.at())});
+           k.done(f);
+       });
+    rc("arr_store_rej_array_copy_of_two_types", "an array copy between two array members of different types",
+       [=](Kit& k)
+       {
+           // struct U { int a[4]; long b[4]; }: u.a into u.b
+           StructType* U {k.strukt("U", {{"a", k.prog.array_of(k.i32, 4U)}, {"b", k.prog.array_of(k.i64, 4U)}})};
+           Function* f {k.fn("f", k.vd)};
+           Var* u {k.scell(f, "u", U)};
+           f->body = k.blkc({k.decl(u, nullptr), k.b.array_copy(k.mem(k.addr(u), 1), k.mem(k.addr(u), 0), k.at())});
            k.done(f);
        });
     // a function that returns a struct with an array member, and the element of its result
-    auto elem_value_of_call = [=](Kit& k, Function*& mk, StructType*& S)
-    {
-        S = S_arr(k);
-        mk = k.fn("mk", k.st(S));
-        k.trusted(mk);
-    };
-    rc("arr_store_rej_elem_value_in_code", "an element of an array member of a struct value",
+    rc("arr_store_rej_elem_value_of_a_cell_member", "is not an array member",
        [=](Kit& k)
        {
-           // int f(void) { return mk().a[1]; }
-           Function* mk {nullptr};
-           StructType* S {nullptr};
-           elem_value_of_call(k, mk, S);
-           Function* f {k.fn("f", k.i32)};
-           f->body = k.blk({k.ret(k.b.elem_value(k.call(mk, {}), 0, N(k, "1"), k.at()))});
-           k.done(f);
-       });
-    rc("arr_store_rej_elem_value_in_a_contract", "an element of an array member of a struct value",
-       [=](Kit& k)
-       {
-           // requires(s.a[1] == 0) of a by-value parameter `struct S s`
-           StructType* S {S_arr(k)};
-           Function* f {k.fn("f", k.vd, {{"s", k.st(S)}})};
-           k.req(f, k.eq(k.b.elem_value(k.F(f, 0), 0, N(k, "1"), k.at()), N(k, "0")));
-           f->body = k.blk({});
-           k.done(f);
-       });
-
-    // ---- the guards behind the refusals: lowering stops a refused program that reaches it (exit 3 in the driver) ----
-    ru("arr_store_guard_field_of_a_value", "reached a walk of its members that counts every member as one leaf",
-       [=](Kit& k)
-       {
-           // int f(void) { return mk().n; }: the position of member 1 in the tuple of leaves (leaf_span) would read a[1]
+           // int f(void) { return mk().n[1]; }: member 1 of the structure is a cell
            StructType* S {S_arr(k)};
            Function* mk {k.fn("mk", k.st(S))};
            k.trusted(mk);
            Function* f {k.fn("f", k.i32)};
-           f->body = k.blk({k.ret(k.b.field(k.call(mk, {}), 1, k.at()))});
+           f->body = k.blk({k.ret(k.b.elem_value(k.call(mk, {}), 1, N(k, "1"), k.at()))});
            k.done(f);
        });
-    ru("arr_store_guard_array_copy", "an array copy statement reached lowering",
-       [=](Kit& k)
-       {
-           StructType* S {S_arr(k)};
-           Function* f {k.fn("f", k.vd)};
-           Var* s {k.scell(f, "s", S)};
-           Var* t {k.scell(f, "t", S)};
-           f->body = k.blkc({k.decl(s, nullptr), k.decl(t, nullptr),
-                             k.b.array_copy(k.mem(k.addr(t), 0), k.mem(k.addr(s), 0), k.at())});
-           k.done(f);
-       });
-    ru("arr_store_guard_elem_value", "an element of a struct value's array member reached lowering",
+    rc("arr_store_rej_elem_value_with_a_pointer_index",
+       "the index of an element of a struct value's array member is not an integer",
        [=](Kit& k)
        {
            StructType* S {S_arr(k)};
            Function* mk {k.fn("mk", k.st(S))};
            k.trusted(mk);
            Function* f {k.fn("f", k.i32)};
-           f->body = k.blk({k.ret(k.b.elem_value(k.call(mk, {}), 0, N(k, "1"), k.at()))});
+           f->body = k.blk({k.ret(k.b.elem_value(k.call(mk, {}), 0, k.nul(k.ptr(k.i32)), k.at()))});
            k.done(f);
        });
 }
@@ -1443,20 +1415,20 @@ void define_member_arrays()
             k.done(f);
         });
     // ---- what check_program still refuses (the backstops of the record's table: questions 292-294, 306, by-value structures: part E) ----
-    rc("marr_rej_by_value_param", "is a struct with an array member",
+    rc("marr_rej_by_value_param", "array elements passed by value",
        [=](Kit& k)
        {
-           // void f(struct S s) {}
-           StructType* S {SA(k)};
+           // struct B { int a[N + 1]; }; void f(struct B s) {}  (questions 295 and 309: array values past kMaxByValueArrayElements elements are M4.5f3)
+           StructType* S {k.strukt("B", {{"a", k.prog.array_of(k.i32, kMaxByValueArrayElements + 1U)}})};
            Function* f {k.fn("f", k.vd, {{"s", k.st(S)}})};
            f->body = k.blk({});
            k.done(f);
        });
-    rc("marr_rej_by_value_result", "is a struct with an array member",
+    rc("marr_rej_by_value_result", "array elements passed by value",
        [=](Kit& k)
        {
-           // struct S mk(void);
-           StructType* S {SA(k)};
+           // struct B { int a[N + 1]; }; struct B mk(void);
+           StructType* S {k.strukt("B", {{"a", k.prog.array_of(k.i32, kMaxByValueArrayElements + 1U)}})};
            Function* mk {k.fn("mk", k.st(S))};
            k.trusted(mk);
        });
@@ -2226,6 +2198,448 @@ int check_array_views()
     const Expr* ev {k.b.elem_value(k.b.text(k.call(mk, {}), "mk()"), 1, k.num(k.i32, "1"), k.at())};
     expect(ev->type == k.i32 && ev->index == 1 && ev->c_text == "mk().a[1]", "ElemValue's type and spelling");
     return bad;
+}
+
+// ---- structure values with an array member (decision 0063 item 13, question 291; part E) ----
+// struct T { int n; int a[3]; }: the value view is the tuple (n, a[0], a[1], a[2]); a by-value parameter is four formals `p_s__0_m0, p_s__0_m1_e0, ...`, a result `res_m0, res_m1_e0, ...`, a copy between
+// objects is the cell stores and `ArrayCopy` of the array leaf (the lowering's rows, then `copy_arr_int` under the guard where a place is reached through a pointer).  Each rule has a case that
+// verifies (with its vacuity twin: `check(false)` at the end fails) and a twin that fails for one reason.
+void define_struct_array_values()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto TV = [](Kit& k)
+    {
+        return k.strukt("T", {{"n", k.i32}, {"a", k.prog.array_of(k.i32, 3U)}});
+    };
+    auto tail = [](Kit& k, std::vector<const Stmt*>& body)
+    {
+        if (k.vac_tail)
+        {
+            const Stmt* v {k.chk(k.no())};
+            body.push_back(v);
+            k.vac_loc = v->loc;
+        }
+    };
+    auto lcv = [](const char* name, const char* doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(std::string(name) + "_vacuity",
+           "the same with check(false) after everything: it fails (the rows are consistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    auto elem = [=](Kit& k, const Expr* base, const char* i)
+    {
+        return k.deref(k.b.elem_addr(k.mem(base, 1), N(k, i), k.at()));
+    };
+    auto set = [=](Kit& k, const Expr* base, const char* i, const char* v)
+    {
+        return k.store(k.b.elem_addr(k.mem(base, 1), N(k, i), k.at()), N(k, v));
+    };
+    // `t` with every member written: t.n = n; t.a = {a0, a1, a2}
+    auto fill = [=](Kit& k, Var* t, std::vector<const Stmt*>& body, const char* n, const char* a0, const char* a1,
+                    const char* a2)
+    {
+        body.push_back(k.decl(t, nullptr));
+        body.push_back(k.lstore(k.addr(t), 0, N(k, n)));
+        body.push_back(set(k, k.addr(t), "0", a0));
+        body.push_back(set(k, k.addr(t), "1", a1));
+        body.push_back(set(k, k.addr(t), "2", a2));
+    };
+    // the whole value of the object `&v`: (struct T){v.n, v.a[0], v.a[1], v.a[2]}
+    auto whole = [=](Kit& k, const StructType* T, const Expr* base)
+    {
+        return k.b.aggregate(k.st(T), {k.leaf(base, 0), elem(k, base, "0"), elem(k, base, "1"), elem(k, base, "2")},
+                             k.at());
+    };
+
+    // int get(struct T t) requires(t.a[1] == 5) ensures(r == t.a[1] + 1) { t.a[1] = t.a[1] + 1; return t.a[1]; }
+    // int use(void) { struct T s; s.n = 3; s.a = {4, 5, 6}; int r = get(s); check(r == 6); check(s.a[1] == 5 [wrong: == 6]); return r; }
+    auto by_value = [=](Kit& k, bool wrong, const Stmt** at)
+    {
+        StructType* T {TV(k)};
+        Function* get {k.fn("get", k.i32, {{"t", k.st(T)}})};
+        get->mark_address_taken(get->param_var(0));
+        const Expr* entry {k.b.elem_value(k.F(get, 0), 1, N(k, "1"), k.at())};
+        k.req(get, k.eq(entry, N(k, "5")));
+        k.ens(get, k.eq(k.R(get), k.add(k.b.elem_value(k.F(get, 0), 1, N(k, "1"), k.at()), N(k, "1"))));
+        const Expr* tp {k.addr(get->param_var(0))};
+        get->body = k.blkc({k.store(k.b.elem_addr(k.mem(tp, 1), N(k, "1"), k.at()), k.add(elem(k, tp, "1"), N(k, "1"))),
+                            k.ret(elem(k, tp, "1"))});
+        k.done(get);
+        Function* use {k.fn("use", k.i32)};
+        Var* s {k.scell(use, "s", T)};
+        Var* r {k.local(use, "r", k.i32)};
+        std::vector<const Stmt*> body;
+        fill(k, s, body, "3", "4", "5", "6");
+        body.push_back(k.decl(r, k.call(get, {whole(k, T, k.addr(s))})));
+        body.push_back(k.chk(k.eq(k.v(r), N(k, "6"))));
+        const Stmt* c {k.chk(k.eq(elem(k, k.addr(s), "1"), N(k, wrong ? "6" : "5")))};
+        body.push_back(c);
+        tail(k, body);
+        body.push_back(k.ret(k.v(r)));
+        use->body = k.blkc(body);
+        k.done(use);
+        *at = c;
+    };
+    lcv("earr_val_param",
+        "a by-value struct with an array member: the formals are the leaves, the callee changes its copy's element, the contract reads the entry value, the caller's object is unchanged",
+        [=](Kit& k)
+        {
+            const Stmt* c {nullptr};
+            by_value(k, false, &c);
+        });
+    lc("earr_val_param_caller_unchanged",
+       "check(s.a[1] == 6) after get(s): the callee changed only its copy, s.a[1] is still 5",
+       [=](Kit& k)
+       {
+           const Stmt* c {nullptr};
+           by_value(k, true, &c);
+           k.fail("check", c->loc);
+       });
+    // void f(struct T t) requires(t.a[2] == 9) { check(t.a[2] == 9); }   void use(void) { struct T s; s.n = 0; s.a = {1, 2, 9 [wrong: 8]}; f(s); }
+    auto requires_case = [=](Kit& k, bool wrong)
+    {
+        StructType* T {TV(k)};
+        Function* f {k.fn("f", k.vd, {{"t", k.st(T)}})};
+        f->mark_address_taken(f->param_var(0));
+        k.req(f, k.eq(k.b.elem_value(k.F(f, 0), 1, N(k, "2"), k.at()), N(k, "9")));
+        std::vector<const Stmt*> fb {k.chk(k.eq(elem(k, k.addr(f->param_var(0)), "2"), N(k, "9")))};
+        tail(k, fb);
+        f->body = k.blkc(fb);
+        k.done(f);
+        Function* use {k.fn("use", k.vd)};
+        Var* s {k.scell(use, "s", T)};
+        std::vector<const Stmt*> body;
+        fill(k, s, body, "0", "1", "2", wrong ? "8" : "9");
+        const Expr* call {k.call(f, {whole(k, T, k.addr(s))})};
+        body.push_back(k.es(call));
+        use->body = k.blkc(body);
+        k.done(use);
+        if (wrong)
+        {
+            k.fail("precondition", call->loc);
+        }
+    };
+    (void)requires_case;
+    lcv("earr_val_requires",
+        "s.a[2] of a by-value parameter in a requires: the caller passes a value that satisfies it, the callee's copy holds it",
+        [=](Kit& k)
+        {
+            requires_case(k, false);
+        });
+    lc("earr_val_requires_wrong", "the caller passes s.a[2] == 8 where the requires needs 9: precondition at the call",
+       [=](Kit& k)
+       {
+           requires_case(k, true);
+       });
+    // void f(struct T t, int i) requires(t.a[i] == 0) {}: the index is not known to be inside the array, and the contract's well-formedness asserts the bound (out-of-bounds), as every mode does
+    lc("earr_val_requires_unbounded",
+       "t.a[i] of a by-value parameter in a requires with no bound on i: out-of-bounds in the contract",
+       [=](Kit& k)
+       {
+           StructType* T {TV(k)};
+           Function* f {k.fn("f", k.vd, {{"t", k.st(T)}, {"i", k.i32}})};
+           f->mark_address_taken(f->param_var(0));
+           const Expr* ev {k.b.elem_value(k.F(f, 0), 1, k.F(f, 1), k.at())};
+           k.req(f, k.eq(ev, N(k, "0")));
+           f->body = k.blk({});
+           k.done(f);
+           k.fail("out-of-bounds", ev->loc);
+       });
+    // struct T mk(int x) ensures(r.n == x && r.a[1] == 7) { struct T v; v.n = x; v.a = {1, 7, 3}; return v; }
+    // int use(void) { struct T t; t = mk(2); check(t.n == 2 && t.a[1] == 7 [wrong: 8]); check(mk(2).a[1] == 7); return 0; }
+    auto result_case = [=](Kit& k, bool wrong)
+    {
+        StructType* T {TV(k)};
+        Function* mk {k.fn("mk", k.st(T), {{"x", k.i32}})};
+        k.ens(mk, k.land(k.eq(k.b.field(k.R(mk), 0, k.at()), k.F(mk, 0)),
+                         k.eq(k.b.elem_value(k.R(mk), 1, N(k, "1"), k.at()), N(k, "7"))));
+        Var* v {k.scell(mk, "v", T)};
+        std::vector<const Stmt*> mb;
+        fill(k, v, mb, "0", "1", "7", "3");
+        mb[1] = k.lstore(k.addr(v), 0, k.pv(mk, 0));
+        mb.push_back(k.ret(whole(k, T, k.addr(v))));
+        mk->body = k.blkc(mb);
+        k.done(mk);
+        Function* use {k.fn("use", k.i32)};
+        Var* t {k.scell(use, "t", T)};
+        const Stmt* c {k.chk(
+            k.land(k.eq(k.leaf(k.addr(t), 0), N(k, "2")), k.eq(elem(k, k.addr(t), "1"), N(k, wrong ? "8" : "7"))))};
+        Var* z {k.local(use, "z", k.i32)};
+        std::vector<const Stmt*> body {k.decl(t, nullptr), k.store(k.addr(t), k.call(mk, {N(k, "2")})), c,
+                                       k.decl(z, k.b.elem_value(k.call(mk, {N(k, "2")}), 1, N(k, "1"), k.at())),
+                                       k.chk(k.eq(k.v(z), N(k, "7")))};
+        tail(k, body);
+        body.push_back(k.ret(N(k, "0")));
+        use->body = k.blkc(body);
+        k.done(use);
+        if (wrong)
+        {
+            k.fail("check", c->loc);
+        }
+    };
+    lcv("earr_val_result",
+        "a by-value result with an array member: return v reads every element into the result leaves, the call's results are stored into t's cells, mk(2).a[1] is an element of the result",
+        [=](Kit& k)
+        {
+            result_case(k, false);
+        });
+    lc("earr_val_result_wrong", "check(t.a[1] == 8) after t = mk(2): the ensures says r.a[1] == 7",
+       [=](Kit& k)
+       {
+           result_case(k, true);
+       });
+    // struct T mk(void) ensures(r.a[0] == 1); int pick(int i) { return mk().a[i]; }: i is not known to be inside the array
+    lc("earr_val_result_index_outside", "mk().a[i] with an unconstrained i: out-of-bounds at the element",
+       [=](Kit& k)
+       {
+           StructType* T {TV(k)};
+           Function* mk {k.fn("mk", k.st(T))};
+           k.trusted(mk);
+           Function* pick {k.fn("pick", k.i32, {{"i", k.i32}})};
+           const Expr* ev {k.b.elem_value(k.call(mk, {}), 1, k.pv(pick, 0), k.at())};
+           pick->body = k.blk({k.ret(ev)});
+           k.done(pick);
+           k.fail_only("out-of-bounds", ev->loc, 1U, 0U);
+       });
+    // int g(struct T t) ensures(r == old(t.a[2]) && r == t.a[2]) { return t.a[2]; }: old over an element of a by-value parameter
+    lc("earr_val_old",
+       "old(t.a[2]) of a by-value parameter in an ensures: the entry value, the callee returns its copy's element",
+       [=](Kit& k)
+       {
+           StructType* T {TV(k)};
+           Function* g {k.fn("g", k.i32, {{"t", k.st(T)}})};
+           g->mark_address_taken(g->param_var(0));
+           const Expr* ev {k.b.elem_value(k.F(g, 0), 1, N(k, "2"), k.at())};
+           k.ens(g, k.land(k.eq(k.R(g), k.old(ev)), k.eq(k.R(g), k.b.elem_value(k.F(g, 0), 1, N(k, "2"), k.at()))));
+           g->body = k.blk({k.ret(elem(k, k.addr(g->param_var(0)), "2"))});
+           k.done(g);
+       });
+    // struct P { int *a[2]; }; void f(struct P s) requires(s.a[1] == NULL) { check(s.a[1] == NULL); }: an element that is a pointer is a pointer leaf (WF at entry)
+    lc("earr_val_pointer_elements",
+       "a by-value struct whose array member holds pointers: the element leaves are pointer formals, s.a[1] == NULL in a requires and in the callee's copy",
+       [=](Kit& k)
+       {
+           StructType* P {k.strukt("P", {{"a", k.prog.array_of(k.ptr(k.i32), 2U)}})};
+           Function* f {k.fn("f", k.vd, {{"s", k.st(P)}})};
+           f->mark_address_taken(f->param_var(0));
+           const Type ip {k.ptr(k.i32)};
+           k.req(f, k.eq(k.b.elem_value(k.F(f, 0), 0, N(k, "1"), k.at()), k.nul(ip)));
+           f->body = k.blk(
+               {k.chk(k.eq(k.deref(k.b.elem_addr(k.mem(k.addr(f->param_var(0)), 0), N(k, "1"), k.at())), k.nul(ip)))});
+           k.done(f);
+       });
+    // struct P { int *a[2]; int n; }; struct P mk(int *x) requires(live(x)) ensures(live(x) && r.a[0] == x) { struct P v; v.a[0] = x; v.a[1] = NULL; v.n = 1; return v; }
+    // void use(void) { int x; struct P t; t = mk(&x); check(t.a[0] == &x [wrong: t.a[1] == &x]); }
+    // The pointer elements are pointer leaves of the result (WF in the contract of the method, a lifetime row at their use by the caller's store and the return's reads).
+    auto pointer_result = [=](Kit& k, int mode)
+    {
+        const Type ip {k.ptr(k.i32)};
+        StructType* P {k.strukt("P", {{"a", k.prog.array_of(ip, 2U)}, {"n", k.i32}})};
+        Function* mk {k.fn("mk", k.st(P), {{"x", ip}})};
+        auto xs = [&]()
+        {
+            return k.b.text(k.F(mk, 0), "x");
+        };
+        k.req(mk, k.b.atom(AtomKind::Live, xs(), 0, k.at()));
+        const Expr* promise {k.land(k.b.atom(AtomKind::Live, xs(), 0, k.at()),
+                                    k.eq(k.b.elem_value(k.R(mk), 0, N(k, "0"), k.at()), k.F(mk, 0)))};
+        if (mode != 2)
+        {
+            promise = k.land(promise, k.eq(k.b.elem_value(k.R(mk), 0, N(k, "1"), k.at()), k.nul(ip)));
+        }
+        k.ens(mk, promise);
+        Var* v {k.scell(mk, "v", P)};
+        const Expr* vp {k.addr(v)};
+        auto pe = [&](const char* i)
+        {
+            return k.deref(k.b.elem_addr(k.mem(vp, 0), N(k, i), k.at()));
+        };
+        mk->body =
+            k.blkc({k.decl(v, nullptr), k.store(k.b.elem_addr(k.mem(vp, 0), N(k, "0"), k.at()), k.pv(mk, 0)),
+                    k.store(k.b.elem_addr(k.mem(vp, 0), N(k, "1"), k.at()), k.nul(ip)), k.lstore(vp, 1, N(k, "1")),
+                    k.ret(k.b.aggregate(k.st(P), {pe("0"), pe("1"), k.leaf(vp, 1)}, k.at()))});
+        k.done(mk);
+        Function* use {k.fn("use", k.vd)};
+        Var* x {k.cell(use, "x", k.i32)};
+        Var* t {k.scell(use, "t", P)};
+        const Expr* tp {k.addr(t)};
+        const Stmt* c {
+            k.chk(k.eq(k.deref(k.b.elem_addr(k.mem(tp, 0), N(k, mode == 1 ? "1" : "0"), k.at())), k.addr(x)))};
+        const Expr* mkcall {k.call(mk, {k.addr(x)})};
+        const Stmt* st {k.store(tp, mkcall)};
+        std::vector<const Stmt*> ub {k.decl(x, nullptr), k.decl(t, nullptr), st, c};
+        tail(k, ub);
+        use->body = k.blkc(ub);
+        k.done(use);
+        if (mode == 1)
+        {
+            k.fail("check", c->loc);
+        }
+        else if (mode == 2)
+        {
+            k.fail_only("lifetime", mkcall->loc, 2U, 1U);
+        }
+    };
+    lcv("earr_val_pointer_result",
+        "a by-value result whose array member holds pointers: the element leaves are pointer results, r.a[0] == x in the ensures, the caller stores them into t and compares t.a[0] with &x",
+        [=](Kit& k)
+        {
+            pointer_result(k, 0);
+        });
+    lc("earr_val_pointer_result_wrong", "check(t.a[1] == &x): the callee promises r.a[1] == NULL, the check fails",
+       [=](Kit& k)
+       {
+           pointer_result(k, 1);
+       });
+    lc("earr_val_pointer_result_unknown_element",
+       "the callee promises nothing about r.a[1]: the caller's store of the result uses a pointer that may point to an ended object (lifetime, at the call)",
+       [=](Kit& k)
+       {
+           pointer_result(k, 2);
+       });
+    // ---- the copy between objects (item 13: the cell stores, the array leaf by ArrayCopy) ----
+    // struct T s, t; s = {3, {1, 2, 3}}; t = s; check(t.n == 3 && t.a[2] == 3); t.a[0] = 9; check(s.a[0] == 1 && t.a[0] == 9); t = t;
+    auto copy_locals = [=](Kit& k, int mode)
+    {
+        // mode 0: positive; mode 1: s.a[2] never written (uninitialized at the copy); mode 2: check(t.a[2] == 4) (a wrong value)
+        StructType* T {TV(k)};
+        Function* f {k.fn("f", k.vd)};
+        Var* s {k.scell(f, "s", T)};
+        Var* t {k.scell(f, "t", T)};
+        std::vector<const Stmt*> body;
+        body.push_back(k.decl(s, nullptr));
+        body.push_back(k.lstore(k.addr(s), 0, N(k, "3")));
+        body.push_back(set(k, k.addr(s), "0", "1"));
+        body.push_back(set(k, k.addr(s), "1", "2"));
+        if (mode != 1)
+        {
+            body.push_back(set(k, k.addr(s), "2", "3"));
+        }
+        body.push_back(k.decl(t, nullptr));
+        body.push_back(k.lstore(k.addr(t), 0, k.leaf(k.addr(s), 0)));
+        const Stmt* copy {k.b.array_copy(k.mem(k.addr(t), 1), k.mem(k.addr(s), 1), k.at())};
+        body.push_back(copy);
+        const Stmt* c {k.chk(
+            k.land(k.eq(k.leaf(k.addr(t), 0), N(k, "3")), k.eq(elem(k, k.addr(t), "2"), N(k, mode == 2 ? "4" : "3"))))};
+        body.push_back(c);
+        if (mode == 0)
+        {
+            body.push_back(set(k, k.addr(t), "0", "9"));
+            body.push_back(
+                k.chk(k.land(k.eq(elem(k, k.addr(s), "0"), N(k, "1")), k.eq(elem(k, k.addr(t), "0"), N(k, "9")))));
+            body.push_back(k.b.array_copy(k.mem(k.addr(t), 1), k.mem(k.addr(t), 1), k.at()));
+            body.push_back(k.chk(k.eq(elem(k, k.addr(t), "0"), N(k, "9"))));
+        }
+        tail(k, body);
+        f->body = k.blkc(body);
+        k.done(f);
+        if (mode == 1)
+        {
+            k.fail("uninitialized", copy->loc);
+        }
+        else if (mode == 2)
+        {
+            k.fail("check", c->loc);
+        }
+    };
+    lcv("earr_copy_locals",
+        "t = s between two structure locals: the cell, then the array leaf by copy_arr_int (the source's rows, the destination's rows); the copy is independent; t = t does nothing",
+        [=](Kit& k)
+        {
+            copy_locals(k, 0);
+        });
+    lc("earr_copy_unwritten",
+       "s.a[2] is never written: copying s reads an element without a value, uninitialized at the copy",
+       [=](Kit& k)
+       {
+           copy_locals(k, 1);
+       });
+    lc("earr_copy_wrong_value", "check(t.a[2] == 4) after the copy of s.a = {1, 2, 3}: the destination holds 3",
+       [=](Kit& k)
+       {
+           copy_locals(k, 2);
+       });
+    // void cp(struct T *p, struct T *q) requires(owns(*p) && reads(*q)) ensures(owns(*p) && reads(*q) && p->a[2] == q->a[2]) { *p = *q; }   [wrong: requires(reads(*p) && reads(*q))]
+    auto copy_ptrs = [=](Kit& k, bool dst_reads)
+    {
+        StructType* T {TV(k)};
+        auto ps = [&](Function* f, int i)
+        {
+            return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+        };
+        const Type pt {k.ptr(k.st(T))};
+        Function* cp {k.fn("cp", k.vd, {{"p", pt}, {"q", pt}})};
+        const AtomKind pk {dst_reads ? AtomKind::Reads : AtomKind::Owns};
+        k.req(cp, k.land(k.b.atom(pk, ps(cp, 0), 0, k.at()), k.b.atom(AtomKind::Reads, ps(cp, 1), 1, k.at())));
+        k.ens(cp, k.land(k.land(k.b.atom(pk, ps(cp, 0), 0, k.at()), k.b.atom(AtomKind::Reads, ps(cp, 1), 1, k.at())),
+                         k.eq(k.deref(k.b.elem_addr(k.mem(ps(cp, 0), 1), N(k, "2"), k.at())),
+                              k.deref(k.b.elem_addr(k.mem(ps(cp, 1), 1), N(k, "2"), k.at())))));
+        const Stmt* cell {k.store(k.mem(k.pv(cp, 0), 0), k.deref(k.mem(k.pv(cp, 1), 0)))};
+        const Stmt* arr {k.b.array_copy(k.mem(k.pv(cp, 0), 1), k.mem(k.pv(cp, 1), 1), k.at())};
+        cp->body = k.blkc({cell, arr});
+        k.done(cp);
+        if (dst_reads)
+        {
+            k.fail("permission", cell->loc);
+        }
+    };
+    lc("earr_copy_through_pointers",
+       "*p = *q with owns(*p) and reads(*q): the cell, then the array leaf under the guard (the two first slots differ), the postcondition reads the copied element",
+       [=](Kit& k)
+       {
+           copy_ptrs(k, false);
+       });
+    lc("earr_copy_destination_reads",
+       "the same with reads(*p): the destination is only readable, permission at the write of its cell",
+       [=](Kit& k)
+       {
+           copy_ptrs(k, true);
+       });
+    // void self(struct T *p) requires(owns(*p)) ensures(owns(*p) && p->a[1] == old(p->a[1])) { *p = *p; }: an exact self-copy
+    lc("earr_copy_self_through_pointer",
+       "*p = *p: the guard d != s is false, the array copy does nothing, the elements are unchanged",
+       [=](Kit& k)
+       {
+           StructType* T {TV(k)};
+           const Type pt {k.ptr(k.st(T))};
+           Function* self {k.fn("self", k.vd, {{"p", pt}})};
+           auto ps = [&]()
+           {
+               return k.b.text(k.F(self, 0), "p");
+           };
+           k.req(self, k.b.atom(AtomKind::Owns, ps(), 0, k.at()));
+           const Expr* a1 {k.deref(k.b.elem_addr(k.mem(ps(), 1), N(k, "1"), k.at()))};
+           k.ens(self, k.land(k.b.atom(AtomKind::Owns, ps(), 0, k.at()), k.eq(a1, k.old(a1))));
+           const Stmt* cell {k.store(k.mem(k.pv(self, 0), 0), k.deref(k.mem(k.pv(self, 0), 0)))};
+           const Stmt* arr {k.b.array_copy(k.mem(k.pv(self, 0), 1), k.mem(k.pv(self, 0), 1), k.at())};
+           self->body = k.blkc({cell, arr});
+           k.done(self);
+       });
+    // a structure of exactly kMaxByValueArrayElements elements is a by-value parameter: struct B { int a[N]; } void f(struct B b) requires(b.a[N-1] == 1) { check(b.a[N-1] == 1); }
+    // (the limit, question 309: N + 1 is a rejection case above; the worst shape, a structure in and out by value with a filling caller, takes 25 s at N = 7)
+    lc("earr_val_limit_elements",
+       "a structure that holds exactly the most array elements a value may hold is passed by value: the entry copy writes every element, the contract reads the last",
+       [=](Kit& k)
+       {
+           const unsigned last {static_cast<unsigned>(kMaxByValueArrayElements) - 1U};
+           StructType* B {k.strukt("B", {{"a", k.prog.array_of(k.i32, kMaxByValueArrayElements)}})};
+           Function* f {k.fn("f", k.vd, {{"b", k.st(B)}})};
+           f->mark_address_taken(f->param_var(0));
+           const std::string idx {std::to_string(last)};
+           k.req(f, k.eq(k.b.elem_value(k.F(f, 0), 0, N(k, idx.c_str()), k.at()), N(k, "1")));
+           f->body = k.blk({k.chk(
+               k.eq(k.deref(k.b.elem_addr(k.mem(k.addr(f->param_var(0)), 0), N(k, idx.c_str()), k.at())), N(k, "1")))});
+           k.done(f);
+       });
 }
 
 } // namespace

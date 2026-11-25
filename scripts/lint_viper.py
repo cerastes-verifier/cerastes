@@ -3753,6 +3753,66 @@ def lint_array_allocations(src: Source, decls: list[Decl], add: Callable[[int, s
             add(d.line, f"`method {d.name}` is not the {what} of decision 0059 item 3: {why}")
 
 
+ARR_COPY_CALL_RE = re.compile(rf"^\s*(?P<name>copy_arr_[A-Za-z0-9_$']+)\s*\((?P<args>.*)\)\s*$")
+
+
+def array_copy_call_problem(src: Source, d: Decl, n: int, t: str, args: list[str]) -> str | None:
+    """Decision 0063 item 13: a call `copy_arr_<t>(D, S, N, RD)` is preceded, in its method, by an explicit row for every `requires` of the trusted copy, so
+    that no omitted row can let Silicon prove a copy it did not check: `RD` is a local assigned the minimum of the value and the flag permission of the
+    source's first slot `S` (`(perm(S.v_t) < perm(S.d_t)) ? perm(S.v_t) : perm(S.d_t)`, the amount the caller holds), `assert none < RD`, the source's
+    value and flag permissions at `RD` and its flags over `[0, N)` and the destination's value and flag permissions over `[0, N)` (marked `forall` rows
+    over `block_of(S)` and `block_of(D)`), and, immediately before the call, `assert block_of(D) != block_of(S)` (the `internal` row).  The call is
+    alone or the only statement of an `if (D != S) {` block (the guard of a copy that may be a self-copy)."""
+    if len(args) != 4 or not all(re.fullmatch(r"[A-Za-z_$][\w$']*", a) for a in (args[0], args[1], args[3])) or not re.fullmatch(r"[1-9][0-9]*", args[2]):
+        return "its arguments are not three variables and a literal count"
+    dst, s_, cnt, rd = args
+    body = [(k, norm_viper(src.code[k - 1])) for k in range(d.body_line, n) if src.code[k - 1].strip()]
+    texts = {c for _k, c in body}
+
+    def q(blk: str, tail: str) -> str:
+        return norm_viper(f"assert forall k: Int :: {{ loc(block_of({blk}), k) }} ((0 <= k) && (k < {cnt})) ==> {tail}")
+    cs, cd = f"loc(block_of({s_}), k)", f"loc(block_of({dst}), k)"
+    first = norm_viper(f"{rd} := (perm({s_}.v_{t}) < perm({s_}.d_{t})) ? perm({s_}.v_{t}) : perm({s_}.d_{t})")
+    want = {
+        "the amount `RD` as the minimum over the source's first slot": first,
+        "`assert none < RD`": norm_viper(f"assert none < {rd}"),
+        "the source's value permission at `RD`": q(s_, f"acc({cs}.v_{t}, {rd})"),
+        "the source's flag permission at `RD`": q(s_, f"acc({cs}.d_{t}, {rd})"),
+        "the source's flags": q(s_, f"{cs}.d_{t}"),
+        "the destination's value permission": q(dst, f"acc({cd}.v_{t})"),
+        "the destination's flag permission": q(dst, f"acc({cd}.d_{t})"),
+    }
+    for what, text in want.items():
+        if text not in texts:
+            return f"no row for {what} before the call"
+    prev = [(k, c) for k, c in body if k < n]
+    if not prev or prev[-1][1] != norm_viper(f"assert block_of({dst}) != block_of({s_})"):
+        return f"the line before the call is not `assert block_of({dst}) != block_of({s_})` (the internal row)"
+    if len(prev) >= 2 and prev[-2][1].startswith("if("):
+        if prev[-2][1] != norm_viper(f"if ({dst} != {s_}) {{"):
+            return f"the call's guard is not `if ({dst} != {s_}) {{`"
+        nxt = [c for k, c in [(k, norm_viper(src.code[k - 1])) for k in range(n + 1, d.end_line + 1) if src.code[k - 1].strip()]][:1]
+        if nxt != ["}"]:
+            return "the guarded block holds more than the call"
+    return None
+
+
+def lint_array_copy_calls(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """The call sites of the trusted `copy_arr_<t>` (decision 0063 item 13; `array_copy_call_problem`)."""
+    pinned = {d.name for d in decls if is_pinned_array_copy(src, d)}
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        for n in range(d.body_line, d.end_line + 1):
+            m = ARR_COPY_CALL_RE.match(src.code[n - 1])
+            if m is None or m.group("name") not in pinned:
+                continue
+            args = [a.strip() for a in m.group("args").split(",")]
+            why = array_copy_call_problem(src, d, n, m.group("name")[len(ARR_COPY_PREFIX):], args)
+            if why is not None:
+                add(n, f"`{m.group('name')}` is called without its rows (decision 0063 item 13): {why}")
+
+
 # The quantified rows (decision 0059 items 7 and 8).  Viper refuses `perm` under a quantifier, so a permission check over a
 # range is an `assert forall k :: { loc(B, k) } lo <= k && k < hi ==> acc(loc(B, k).f)` row with exactly one field, whose
 # `insufficient.permission` is the row's own failure (the map's `assert.failed[insufficient.permission]`); B, lo and hi read no
@@ -4046,6 +4106,15 @@ def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays:
     return out
 
 
+def _block_type_range(cons: str, cell: str, t: str) -> bool:
+    """`_std_type_range` for a row of `parse_block_row` (whose text has lost its grouping parentheses, so an `||` inside a conjunction no longer
+    parses): an integer, boolean or enumeration range as before; the range of a pointer element `ptr_<t>` (an array member of pointers under `owns(*p)`)
+    is `WF` of its value, compared in the same normal form (audit round 4 S1)."""
+    if t.startswith("ptr_"):
+        return norm_viper(cons) == norm_viper(_view_wf(f"{cell}.v_{t}"))
+    return _std_type_range(cons, cell, t)
+
+
 def block_row_problem(kw: str, guard: str | None, q: dict[str, str], gbs: set[str], arrays: dict[str, int], roots: set[str],
                       lens: dict[str, set[int]], perm_formals: frozenset[str]) -> str | None:
     """Decision 0063 item 15: why the quantified `requires` or `ensures` row `q` (under `guard`) over a block TERM is not one of an array atom's
@@ -4084,14 +4153,14 @@ def block_row_problem(kw: str, guard: str | None, q: dict[str, str], gbs: set[st
     sides = _split_top(cons, "==>")
     if len(sides) == 1:
         rm = re.search(rf"{re.escape(cell)}\.v_({IDENT})", cons)
-        if rm and _std_type_range(cons, cell, rm.group(1)):
+        if rm and _block_type_range(cons, cell, rm.group(1)):
             return None
     elif len(sides) == 2:
         am = re.fullmatch(rf"old\({re.escape(cell)}\.d_({IDENT})\)", sides[0])
         if am and sides[1] == f"{cell}.d_{am.group(1)}":
             return None if kw == "ensures" else "`old` in a `requires`"
         am = re.fullmatch(rf"{re.escape(cell)}\.d_({IDENT})", sides[0])
-        if am and _std_type_range(sides[1], cell, am.group(1)):
+        if am and _block_type_range(sides[1], cell, am.group(1)):
             return None
     return "the consequent is not `acc(F.f)`, the flag, the type's range or a flag implication"
 
@@ -6211,6 +6280,7 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_remainders(src, decls, add)
     lint_allocations(src, decls, add)
     lint_array_allocations(src, decls, add)
+    lint_array_copy_calls(src, decls, add)
     has_globals, global_facts = lint_globals(src, decls, add)
     quantified = classify_quantified_lines(src, decls)
     lint_ghost_amounts(src, decls, add, quantified.wildcard_rows | frozenset(n for n, (why, wild) in pf_requires.items() if wild and why is None))
