@@ -485,3 +485,5 @@ summarized here):
 *2026-10-27, amended by 0029 (M4.5a, effective from M4.5e1): item 9 — `forall`'s body may also be a named `predicate` or `pure` function whose first parameter is the quantified variable (`cerastes_forall(f, free...)` in C, `cerastes::forall(f, free...)` in C++; 0029 item 4); `owns_block` and `live` join the spec functions (0029 item 3).*
 
 *2026-11-24, amended by 0061 (M4.5e1c): item 9 and its `old` rule — C's quantifier is `cerastes_forall(f, free...)` with a `pure` function whose one `return` is inlined at the site; `cerastes_old` may stand in such a body named by a `forall` in an `ensures`; `cerastes verify` rejects every `cerastes::forall` (the lambda form: M7) (0061 items 2, 3, 8).*
+
+*2026-11-24, amended by 0062 (M4.5e1d): item 8 — a `pure` function that an annotation calls, or that carries a contract, is read by `cerastes verify`: its body is checked and its calls in annotations are applications (0062 items 2-4); item 10 — `call_in_annotation` admits `pure` functions, and a `pure` function that breaks 0062 item 3's rules is `pure_function`.*

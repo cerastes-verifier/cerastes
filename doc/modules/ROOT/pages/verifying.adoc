@@ -33,6 +33,10 @@ include::example$verifying/midpoint.cpp[tag=source]
 midpoint.cpp: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
 ----
 
+The number counts the function bodies verified and the pure functions that `cerastes verify` read and checked
+(xref:annotations.adoc#pure-functions[Pure functions]); a function that is only declared here, with a contract, is
+trusted and not counted. A file with nothing to verify is refused (exit status 2), never reported as verified.
+
 The command takes these options and no others. An option that is not in this
 table is refused with exit status 2, even if the front end would accept it:
 verification must not depend on a diagnostic that was switched off or a
@@ -106,9 +110,13 @@ checked like your own code: a body in it is verified, and nothing in it is
 checked less than in your files.
 
 The bodies of functions marked `CERASTES_PREDICATE` and `CERASTES_PURE` are
-specification and are not verified. In this version a call of one of them in
-executable code is rejected, and in a contract only `cerastes::old` may be
-called.
+specification: no code calls them, and a call of one of them in executable code is
+rejected. A pure function that an annotation calls, or that carries a `requires`, an
+`ensures` or a `decreases`, is checked on its own: every operation of its body, its
+`ensures` and its termination, each reported in the function, and it counts among the
+functions verified (xref:annotations.adoc#pure-functions[Pure functions]). Its calls in
+annotations are checked where they stand. The body of a pure function that nothing calls
+and that has no contract, and of a predicate, is not verified.
 
 [#vlibc]
 == The C library: vlibc
@@ -273,7 +281,8 @@ not be negative, and the later ones may be anything. A function that is not in
 a recursion cycle needs no measure. A loop, or a function in a cycle (direct
 recursion, or mutual recursion through other functions of the file), without
 one is rejected, because a program whose termination is not shown cannot be
-called verified:
+called verified (a pure function that calls itself needs one too, and pure functions
+may not call each other in a cycle: xref:annotations.adoc#pure-functions[Pure functions]):
 
 [source,cpp]
 ----
@@ -781,9 +790,9 @@ operand of a `,` whose value is used, and, in pass:[C++], in
 Some expressions are valid C and pass:[C++] but rarely mean what they say, and
 clang or GCC warns about them by default or with `-Wall`. cerastes rejects them,
 in both modes and also in annotations, even when only one compiler warns, in one
-language (the body of a `CERASTES_PREDICATE` or `CERASTES_PURE` function is not
-verified yet, so these rules do not reach it either, except the `return` of a pure function
-that `cerastes_forall` names, which they reach as they reach an annotation, reported at the `forall`):
+language (they reach the body of a pure function that `cerastes verify` reads, reported in
+the function, and the `return` of a pure function that `cerastes_forall` names, reported at the
+`forall`; the body of a predicate, and of a pure function that is not read, is not verified):
 
 * `sizeof` of a parameter written as an array (`void f(int a[4])` with `sizeof(a)`, or
   `sizeof(a) / sizeof(a[0])`), which is the size of a pointer
@@ -1085,8 +1094,9 @@ Like a named constant's initializer, a static assertion is checked at the entry
 of every function it applies to (a file-scope one in all of them), so a failing
 one is reported once and hides the other errors of those functions until it is
 fixed. A static assertion in a function body is checked wherever it stands (in
-a loop, a `switch` or a nested block), except in the body of a
-`CERASTES_PREDICATE` or `CERASTES_PURE` function, which is not verified yet.
+a loop, a `switch` or a nested block), in the body of a pure function that
+`cerastes verify` reads too, except in the body of a `CERASTES_PREDICATE` function and of a
+pure function that is not read, which are not verified.
 
 A condition that calls a function (`std::numeric_limits<int>::max()`), uses a
 type trait (`std::is_integral_v<int>`, `+__is_integral(int)+`) or a concept
@@ -1296,7 +1306,10 @@ The constructs that are rejected in this version are:
 ----
 include::example$verifying/enum_arithmetic_rejected.c[tag=source]
 ----
-* *Annotations:* a call of a predicate or a pure function, `fold` and `unfold`, every
+* *Annotations:* a call of a predicate, a call of a pure function in the positions
+  xref:annotations.adoc#pure-calls[Calling a pure function] lists as rejected, a pure function
+  that breaks the rules of xref:annotations.adoc#pure-functions[Pure functions] (mutual
+  recursion among them), `fold` and `unfold`, every
   `cerastes::forall` (write `cerastes_forall`), and the forms and positions of `forall` that
   xref:annotations.adoc#forall[forall] lists as rejected: a quantifier inside another, under `!`, on
   the left of `||`, in a measure, and an `E` whose index or reads it does not accept yet.

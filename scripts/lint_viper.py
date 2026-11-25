@@ -4473,19 +4473,22 @@ def loop_clause_scopes(src: Source, d: Decl) -> dict[int, frozenset[str]]:
     return out
 
 
-def _reads_as_markers(norm_text: str, accept: Callable[[str, str], bool]) -> str:
-    """The normalized text with each read `(membership ? loc(block_of(p), q<j>).v_<t> : 0)` whose membership is an interval of `p` that `accept(p, count)`
-    allows replaced by the marker `@rd(p,q<j>)`."""
+def _reads_as_markers(norm_text: str, accept: Callable[[str, str], bool], cross: bool = False) -> str:
+    """The normalized text with each read `(membership ? loc(block_of(p), q<j>).v_<t> : 0)` whose membership is an interval `[r, r + count)` that
+    `accept(r, count)` allows replaced by the marker `@rd(p,q<j>)`.  `r` is `p` in a contract (the read pointer's own interval); with `cross`, as in a
+    loop's `invariant` line, it may be another pointer (a site atom's, the method's formal `p_a` while the read names the loop's variable `v_a`):
+    the membership test is about the cell's block and offset, so the read is of a cell that atom holds either way."""
     def site(m: re.Match) -> str:
-        return f"@rd({m.group(1)},{m.group(2)})" if accept(m.group(1), norm_viper(m.group(3))) else m.group(0)
+        return f"@rd({m.group(1)},{m.group(2)})" if accept(m.group(3), norm_viper(m.group(4))) and (cross or m.group(1) == m.group(3)) else m.group(0)
 
-    return re.sub(rf"block_of\(loc\(block_of\(({IDENT})\),(q[0-9]+)\)\)==block_of\(\1\)&&offset_of\(\1\)<=offset_of\(loc\(block_of\(\1\),\2\)\)"
-                  rf"&&offset_of\(loc\(block_of\(\1\),\2\)\)<offset_of\(\1\)\+([^?]+?)\?loc\(block_of\(\1\),\2\)\.v_[\w$']+:0", site, norm_text)
+    return re.sub(rf"block_of\(loc\(block_of\(({IDENT})\),(q[0-9]+)\)\)==block_of\(({IDENT})\)&&offset_of\(\3\)<=offset_of\(loc\(block_of\(\1\),\2\)\)"
+                  rf"&&offset_of\(loc\(block_of\(\1\),\2\)\)<offset_of\(\3\)\+([^?]+?)\?loc\(block_of\(\1\),\2\)\.v_[\w$']+:0", site, norm_text)
 
 
-def app_guard_quantifier_problem(code: str, scope: str, pfs: dict[str, PfInfo], site_counts: dict[str, set[str]]) -> str | None:
+def app_guard_quantifier_problem(code: str, scope: str, pfs: dict[str, PfInfo], site_counts: dict[str, set[str]], cross: bool = False) -> str | None:
     """Decision 0062 items 7 and 12 (cut 2): a line holds a user quantifier (`forall q<j>`) only as a parenthesized conjunct of the guard of an application
-    (in a `pf_` body, a method's `requires` or `ensures`, a call's or a return's `assert` row), and then it is the quantified `requires` clause of an applied
+    (in a `pf_` body, a method's `requires` or `ensures`, a call's or a return's `assert` row, a loop's `invariant` line: with `cross`, whose
+    reads may name another pointer than the site atom whose interval is their membership), and then it is the quantified `requires` clause of an applied
     callee at that application's arguments.  `scope` is the text that holds the applications (the line; a `pf_` function's whole body), `site_counts` the
     counts of the atoms of the site (a method's or function's own atoms, by pointer) whose interval the element reads' membership may be, besides the
     callee's own interval at the arguments.  The reads are compared as markers.  None when each quantifier of the line is one of those; else why not."""
@@ -4519,7 +4522,7 @@ def app_guard_quantifier_problem(code: str, scope: str, pfs: dict[str, PfInfo], 
                 break
         if end < 0:
             return "a quantifier of an application's guard is not closed on its line"
-        got = _reads_as_markers(norm_viper(code[m.start():end]), lambda p, c: c in allowed.get(p, set()))
+        got = _reads_as_markers(norm_viper(code[m.start():end]), lambda p, c: c in allowed.get(p, set()), cross)
         if got not in expected:
             return ("a quantifier of a line is the quantified clause of the `requires` of a function applied there, at that application's "
                     "arguments, its element reads over the interval of the callee at the arguments or of an atom of the site (the guard of the "
@@ -4597,13 +4600,15 @@ def classify_quantified_lines(src: Source, decls: list[Decl]) -> QuantifiedLines
                 else:
                     why = f"a `{kind}` of an `f__wf` method holds no quantifier and no ghost application (item 7's facts are `requires`, its rows `assert`)"
                 out.verdicts[lineno] = (why is None, "" if why is None else f"{Q11}: in an `f__wf` method: {why}", False)
-            elif USER_QUANT_RE.search(code) and PF_ANY_RE.search(code) and kind in ("requires", "ensures", "assert"):
-                # the quantified clause of an applied callee, a conjunct of the application's guard (decision 0062 item 7, cut 2)
+            elif USER_QUANT_RE.search(code) and PF_ANY_RE.search(code) and kind in ("requires", "ensures", "assert", "invariant"):
+                # the quantified clause of an applied callee, a conjunct of the application's guard (decision 0062 item 7, cut 2); in a
+                # loop's `invariant` line (the user's conjunct, whose value is `(G ? pf : 0)`) and the lines that restate it under `prior ==>`
+                # (the obligation lines of item 9's form), whatever else the line holds (the quantifier check reads only its quantifiers)
                 site: dict[str, set[str]] = {}
                 for atom in method_atoms(src, d):
                     if atom.kind == "range" and atom.count is not None:
                         site.setdefault(atom.formal, set()).add(atom.count)
-                why = app_guard_quantifier_problem(code, code, pfs, site)
+                why = app_guard_quantifier_problem(code, code, pfs, site, kind == "invariant")
                 out.verdicts[lineno] = (why is None, "" if why is None else f"{Q11}: {why}", False)
             elif USER_QUANT_RE.search(code):
                 if kind not in ("requires", "ensures", "invariant", "assert"):

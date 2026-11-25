@@ -282,3 +282,5 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
   every method's first `requires` in their unit.
 - Passing or returning a partly initialized structure is reported, stricter than C, as copying one is (question 92).
 - Contracts that read through a pointer member, a pointer to a pointer or a pointer global wait for M4.5c2b.
+
+*2026-11-24, amended by 0062 (M4.5e1d): item 4 — a `pure` function that takes or returns a structure by value is rejected, its message naming M4.5f1 (0062 item 1).*

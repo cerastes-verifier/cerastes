@@ -7,16 +7,16 @@ that exist today, where each may be written, and what each means.
 [IMPORTANT]
 ====
 `cerastes verify` (xref:verifying.adoc[Verifying a program]) checks `requires`,
-`ensures`, `invariant`, `decreases` and `check` in functions over integers and `bool`. The
-other parts of this page are parsed, type-checked and placed on the function
-or statement they belong to, and the mistakes listed under <<not-allowed>> are
-rejected, but nothing checks what they mean yet. `cerastes verify` does not
-accept them in a program it verifies: a `fold` or `unfold` statement is
-rejected (`cerastes-unsupported_statement`), and so is any call in an
-annotation other than `cerastes::old` (`cerastes-call_in_annotation`), which
-includes the predicates, pure functions and specification functions that this
-page describes. Their declarations are accepted. The rest of this page states
-what they will mean, so that you can write them now.
+`ensures`, `invariant`, `decreases` and `check`, the specification functions that
+xref:memory.adoc[Memory and ownership] describes, and pure functions and the calls of
+them in annotations (<<pure-functions>>). Predicates, `fold` and `unfold` are parsed,
+type-checked and placed on the function or statement they belong to, and the mistakes
+listed under <<not-allowed>> are rejected, but nothing checks what they mean yet: in a
+program that `cerastes verify` verifies, a `fold` or `unfold` statement is rejected
+(`cerastes-unsupported_statement`), and so is a call in an annotation of anything but
+`cerastes::old`, a specification function or a pure function
+(`cerastes-call_in_annotation`), a predicate included. The rest of this page states what
+they will mean, so that you can write them now.
 ====
 
 Everything on this page is a test. Each example is compiled by cerastes's
@@ -737,7 +737,9 @@ include::example$annotations/errors/decreases_prefix.cpp[tag=bad]
 ----
 
 What a measure proves, and what `cerastes verify` requires (a measure on every loop and
-every function in a recursion cycle), is on xref:verifying.adoc[Verifying a program].
+every function in a recursion cycle), is on xref:verifying.adoc[Verifying a program]. A pure
+function that calls itself needs a measure too, which may not read memory or call a function;
+a failure is reported at the recursive call (<<pure-functions>>).
 
 == check
 
@@ -776,11 +778,91 @@ include::example$annotations/predicates.cpp[tag=pure]
 A predicate returns `bool`, cannot also be `pure`, and has no `requires` or
 `ensures`. A pure function does not return `void`, and may have a contract. The
 body of either is ordinary pass:[C++] and may use the specification functions
-below. In an annotation, a call to one is an ordinary call (`cerastes verify`
-does not accept it yet, see above). A pure function *named*, not called, as the first
-argument of `cerastes_forall` is read by `cerastes verify`: its one `return` is inlined at
-the quantifier (<<forall>>). A contract on such a function is rejected there; elsewhere a
-pure function's contract is not read yet.
+below.
+
+[#pure-functions]
+=== Pure functions in cerastes verify
+
+`cerastes verify` *reads* a pure function when an annotation calls it (a `check`, a function's `requires` or
+`ensures`, a loop invariant, or the body or contract of another pure function that it reads), or when the function
+carries a `requires`, an `ensures` or a `decreases`. It checks a function it reads once, whether or not anything
+calls it, and counts it among the functions it verified. A pure function that nothing calls and that has no
+contract is not read, and its body is not checked; one that only `cerastes_forall` names is inlined at the
+quantifier (<<forall>>).
+
+[source,c]
+----
+include::example$annotations/pure_functions.c[tag=tri]
+----
+
+A pure function that `cerastes verify` reads:
+
+* is defined in a file that it verifies (a call of a pure function with no body in the program is rejected: the
+  contract manifest of a later milestone lifts it);
+* returns `bool`, an integer type or an enumeration, and takes parameters of those types or pointers to them (or
+  to pointers);
+* has a body that is exactly one `return` statement, around which braces and block-scope static assertions may
+  stand (each assertion is checked as in any function);
+* returns an expression that may hold what an annotation may hold, element reads `p[i]` and `*p` through its
+  pointer parameters, and calls of pure functions that are read, itself included;
+* is not a member function, a template, variadic, `constexpr` or `consteval`, or a predicate.
+
+A function that breaks one of these rules is `cerastes-pure_function`, and the message says which rule. In the
+returned expression an assignment, `pass:[++]`, `--`, a comma, a global or a `static` local, the address of a parameter,
+`cerastes_old`, an ownership or reading annotation (`cerastes_owns`, `cerastes_reads`, …), `cerastes_forall`, a
+local declaration, a read through a pointer loaded from memory (`**pp`), and a call of anything but a pure function
+are each rejected with the diagnostic that the same construct has in an annotation.
+
+*Its contract.* A `requires` holds value clauses that read no memory, `cerastes_reads(*p)` and
+`cerastes_reads_range(p, n)` on the function's own pointer parameters (each a conjunct of its own, with no
+condition), `cerastes_forall` clauses, and calls of other pure functions that read no memory. An `ensures(r, …)` holds value clauses over
+the parameters, the result and the elements its `requires` reads; it holds no ownership annotation and no `old` (a
+pure function has one state). A `decreases` is as on any function, and reads no memory and calls nothing.
+
+[source,c]
+----
+include::example$annotations/pure_functions.c[tag=sum]
+----
+
+*Recursion.* A pure function that calls itself in its own body needs a `decreases`, or it is
+`cerastes-missing_decreases`. Two pure functions that call each other, and a function that its own `requires` or
+`ensures` reaches again, are rejected (`cerastes-unsupported_annotation`).
+
+*What is checked.* `cerastes verify` checks a pure function it reads in three ways, and reports each in the function:
+
+* every operation of the returned expression, with the categories of
+  xref:error-messages.adoc[Error messages] (an overflow, a division, the conversion at the `return`, a read that its
+  `requires` does not own, a call of another pure function outside that function's `requires`), at the operation;
+* its `ensures`: `postcondition` at the `return`, with a note at the clause;
+* its termination: `termination` at the recursive call, with a note at the `decreases`.
+
+[#pure-calls]
+=== Calling a pure function in an annotation
+
+A call of a pure function may stand in a function's `requires` and `ensures`, in a loop invariant, in a `check`, and
+in the body and contract of a pure function that is read: anywhere an expression of that annotation may stand,
+under `!`, `||` and `?:` too. Each argument is evaluated once, where the call stands, with its own checks. The
+callee's `requires` is checked there: a part of it that may not hold is `precondition` (with a note at the
+callee's clause), and an element it reads that the place of the call does not own is `permission`. In a loop
+invariant, the loop must hold every element the callee reads.
+
+[source,c]
+----
+include::example$annotations/pure_functions.c[tag=check]
+----
+
+What a call means is the value of the callee's returned expression at the arguments, read where the call stands.
+Where `cerastes verify` checks a contract on its own (before any body runs), it knows a call's value only through the
+callee's `ensures` and the range of the result's type: a bound the contract needs within that range belongs in the
+callee's `ensures`.
+`cerastes verify` unfolds a recursive function's definition one step at a time: a `check` at known arguments may need
+one written step per unfolding, as the example shows (`tri(1)` and `tri(2)` before `tri(3) == 6`, `sum_to(a, 1)`
+before `sum_to(a, 2)`).
+
+A call of a pure function is rejected in a `decreases`, in the count or the condition of an ownership or reading
+annotation, in an element's index, as a trailing argument of `cerastes_forall`, under `old`, and in the body of a
+function that `cerastes_forall` names. A call of a pure function from code is
+`cerastes-spec_call_in_code` (<<not-allowed>>).
 
 `fold(e)` and `unfold(e)` are statements. Their argument is a call to a
 predicate: `fold` records that the predicate's condition holds and may be used
@@ -917,8 +999,10 @@ What `f` must be, for `cerastes verify`:
 
 * A pure function (`CERASTES_PURE`), not a predicate, defined in a file that `cerastes
   verify` reads (a prototype first is fine), whose body is exactly one `return E;` and whose
-  result is `bool`. It has no `requires`, `ensures` or `decreases`, and it is not a member
-  function, a template or variadic. It is named as `f` or `&f`; a cast, a function pointer,
+  result is `bool`. It has no `requires`, `ensures` or `decreases` (such a function is a pure
+  function that `cerastes verify` reads on its own, <<pure-functions>>, and naming it here is
+  `cerastes-unsupported_annotation`: a call under the quantifier comes with pointer
+  arithmetic), and it is not a member function, a template or variadic. It is named as `f` or `&f`; a cast, a function pointer,
   a lambda, `*f`, a comma or a `?:` is not accepted.
 * Its first parameter has an integer type other than `bool` and the enumerations. Every
   other parameter is a `bool`, an integer, an enumeration, or a pointer to one of those or to
@@ -1075,8 +1159,9 @@ An annotation does not change anything. It must not contain:
 This includes the body of a lambda written in the annotation. The front end
 alone accepts a call to a function that is not a specification function, and so
 an overloaded `operator=` (or any other overloaded operator), which is a call.
-`cerastes verify` rejects every call in an annotation other than
-`cerastes::old` (`cerastes-call_in_annotation`), the implicit ones included.
+`cerastes verify` rejects every call in an annotation other than `cerastes::old`, a
+specification function and a pure function (`cerastes-call_in_annotation`), the implicit ones
+included; where a call of a pure function may stand is in <<pure-calls>>.
 
 Every annotation is checked, in whatever file it is: a header, a system header,
 a header of xref:verifying.adoc#vlibc[vlibc] or a directory given with
@@ -1312,8 +1397,9 @@ taken, or it is named in a template. The one exception is the C spelling: `ceras
 and `cerastes_old(*p)` may stand in the body of a pure function that `cerastes_forall` names
 in an `ensures`, where the quantifier reads each element's value on entry (<<forall>>); named
 by a `forall` anywhere else, such a body is reported by `cerastes verify` as
-`cerastes-old_outside_ensures` at the `forall`. `cerastes::old` in a pure body stays the front
-end's error in every case.
+`cerastes-old_outside_ensures` at the `forall`, and a pure function whose body holds it cannot be
+called (<<pure-functions>>). `cerastes::old` in a pure body stays the front end's error in every
+case.
 
 [source,cpp]
 ----

@@ -54,6 +54,18 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   `compound_assign_expr`, `inc_dec_expr`; for `x++`/`x--`, `b` is the one `Local x` node that `a` also uses, the old
   value, and the value of the node is `b`) and `Comma(a, b)` (only where its value is used; `a` may be a `void` call).
   A top-level assignment is still the statement `Assign`, and a discarded comma is the statements of its operands.
+- **Pure functions (M4.5e1d, record 0062).** `Function::pure` marks a `pure` function the encoder read; it has no statement `body` and no `trusted_reason`, so it is neither
+  a verified method nor a trusted contract (`verified()` is `!pure && body != nullptr`). `Function::pure_body` is its value `E`: one Int or Bool expression over `Formal`s, a pre-state
+  contract expression, with the front end's generated conversion at the `return` as a `Convert` node (its obligation is the `conversion` row of the function's `__wf`);
+  `requires_`, `ensures_` and `decreases_` are its contract and measure. `Expr::Kind::Apply` is an **application** of such a function: `callee`, the encoded `args` (already of the parameter
+  types, each a site expression, evaluated once in the site's state) and `c_text`, the site's spelling (`sum_to(a, n)`). It is not a `Call` (the code call lowering hoists as a statement): it is an
+  expression of a contract, a `check` or a `pure` body. **`reads_heap` is true for it** whatever its callee reads, so every rule that asks for "reads no memory" (an atom's count or guard, an
+  element's index, a `forall`'s trailing argument) refuses an application by itself; `guard_ok` is false for it; `same_pure_expr` never calls two applications equal; `expr_touches` is true.
+  `Builder::apply(callee, args, text, loc)` builds one. `check.cpp` (`apply_node`, `pure_body_rules`, `pure_contract_rules`, `application_graph`) admits an `Apply` in a `check`, in the body,
+  `requires` and `ensures` of a `pure` function and (Part C) in an ordinary function's `requires` and `ensures`; never in a measure, under `Old` or under a `Forall`'s binder (a loop invariant admits it since Part D). It checks the callee (`pure` with a value expression), arity, parameter and result types, that a pointer an atom of the callee names is a `Formal` (a contract, a
+  `pure` body) or a pointer `Local` that is not address-taken or the `AddrOf` of a named array (a `check`), that a `pure_body` holds no `Old`, atom, quantifier, write or call, that the atoms of a
+  `pure` function's `requires` are `reads`/`reads_range` of a `Formal` as top-level conjuncts, and that **the graph of applications over bodies and contracts has no cycle but a function's own
+  application of itself in its body** (lowering has the same backstop over the emitted functions, as `check_cycles` has for methods).
 - `Stmt`: `Decl(var, init)` (since M4.2c, decision 0019, `init` may be null: a local declared without an
   initializer), `Assign(var, e)`, `ExprStmt(e)` (a call, a discarded value; only its obligations
   and effects count), `If(c, then, else)`, `While(cond, invariants[], measure[], body, step?, form, jump_id)`,
@@ -1124,6 +1136,62 @@ chapter M4.5e1c, with P80's IL facts). No Viper function is emitted for `f`: its
   argument used as a value; in a `check`, a read the binder does not index and pointer elements (259); an argument that reads memory; `cerastes_old` in a loop invariant (cut 1, question 260)
   and in a `check`; structure members and global arrays under the binder (e1e). A `pure` function with a contract or a `predicate` named by `cerastes_forall` is e1d's and M4.5f1's.
 
+**Pure functions (M4.5e1d, record 0062).** A `pure` function that an annotation applies, or that carries a `requires`, an `ensures` or a `decreases`, is **read** (record item 2) and
+lowered to a Viper function with its contract and a definition check; an application of it is a Viper application of that function. The Viper spikes are `tests/viper-smoke/memory/s46_*`
+(S46 and P81 in `internal/il-inventory.md`, chapter M4.5e1d).
+
+- **The Viper function (`pure_function`, `pf_lines`).** Named `pf_<name>__<id>` (`<id>` the VIR function id, digits only: question 274). Formals as a method's `p_<name>__<k>`, no ghost amount;
+  `// cerastes:result <lo> <hi>` after the signature states the C result type's range (the lint checks fact (i) against it). `requires`: the parameters' type ranges and each pointer's shape
+  line, then the user's clauses in order: a value clause as a method's contract has it; an atom in the **minimal shape** (S46 (a), form Min): its pure lines (`p != null`, the shape,
+  `0 <= n`, `offset_of(p) + n <= len(block_of(p))`, one `requires` per conjunct) and the permission `forall k :: { loc(block_of(p), k) } in-range ==> acc(loc(block_of(p), k).v_<t>, wildcard)`
+  (a cell atom: the three lines for one slot). No `acc` of the flag field or the liveness cell and no flag line, and no line that states the result's range (callers learn a bound from the
+  function's `ensures`; `__wf` assumes the range). `ensures`: the user's clauses, one line each, `result` for the result. `decreases`: the user's measure, or an **empty `decreases` line** for a
+  function that does not call itself; never `_` and never no line (with none Silicon checks nothing, S46 (a)). The body is `E`, lowered in the function's own contract form (one state, the entry
+  state with every `requires` site in view); **every application of the function itself begins a line of its own** (`LFunction::body_calls`, the emitter breaks the line: the map is keyed by line).
+  `pf_lines` is the one list that is the function's own `requires`, the guard `G` and the condition `V` of fact (ii): the guard can never be stronger than the rows assert.
+- **The prelude** prints an empty `decreases` line on every prelude function **in a program that holds a `pf_` function, and only there** (S46 (a): an application of a prelude function from a
+  function that has a `decreases` line needs one), so no existing program's Viper changes (`prelude_text(used, empty_decreases)`).
+- **The guard `G` and the rows at an application** (item 7). A guard is the conjunction of (i) for each atom of the callee the disjunction, over the enclosing contract's unmarked sites of that cell
+  field, of "the site's guard, the same block, the callee's interval inside the site's" (one site must hold the whole interval: a listed limit; a marked site frames no application) and (ii)
+  every other line of the callee's precondition that reads no memory, at the arguments by substitution (`apply_conjuncts`, `apply_guard`, `apply_frame`). Per mode (`apply_node`):
+  **Method** (a method's contract, a call, a return: the clause is lowered again over the arguments) and a `pure` body: `(G ? pf_g(args) : d)`, `d` the type's default, so Viper's own check of the
+  contract or the function can never fail on it; the obligations are the `__wf` method's rows. **`Wf`**: the application is a ghost function `hva_<m>__<g>_<pre|post>` (below) and each conjunct of `G` is
+  a row `prior ==> conjunct`: a **frame** conjunct is `permission` ("calls `g`, which needs to read `a[0..n)`, without the permission to read it"), an atom's pure line or a value clause is
+  `precondition` with a note at the callee's clause, a range or a shape is `internal`. **`None` (a `check`)**: first the callee's parameter ranges and pointer shapes at the arguments (`internal`),
+  then per callee atom its pure lines (`precondition`; question 278: first, so a count past an array is one error), then 0061 item 10's rows over its interval in the binder form (the null and liveness
+  rows for a pointer base, the bound of a named array, the marked wildcard rows `v_T` and `d_T`, the flag row, then the element-range row, `internal`), then one `precondition` assert per value clause,
+  then the fact with the bare application (a failed row is assumed afterwards, so Viper's own `application.precondition` is silent). A `cerastes_forall` in the callee's `requires` (cut 2) is, at an
+  application, the quantifier it would be written at the site with the arguments in place of the parameters, lowered by 0061 in the site's mode, one `precondition` row and one more conjunct of `G`.
+  **`Inv`** (loop invariants): the next bullet.
+- **Loop invariants (`CMode::Inv`, `apply_inv`; Part D, owner questions 283 and 284).** An application in the invariant of a `while` or `do ... while` loop is lowered, before the user's clause and in
+  evaluation order, as rows on the loop's own places: **the framing** of each callee atom, that its interval lies inside one place the loop holds (a range place or an array place; no quantifier), asserted at entry
+  and at the back edge as a read's framing is (`permission`, a message of the contract's form with the interval, `a[0..i)`, named as the loop's own place); then one `obligation_clause` invariant line per
+  obligation, in the order `apply_check` gives a `check`: **per callee atom its pure lines as `precondition` rows** (question 283: `p != null`, the shape, `0 <= n`, `offset_of(p) + n <= len(block_of(p))`, with the note
+  at the callee's clause; the parameters' ranges and pointer shapes stay in the guard only), a named array's bound (`out-of-bounds`), the flags over the interval in 0061's `q0` form, guarded by the framing
+  (`uninitialized`), and each value clause of the callee (`precondition`). The application inside the clause is **guarded** by the same inclusion and value clauses, `(G ? pf_g(args) : d)`, as `inv_elem` guards a read, so
+  Viper's own check of the clause never meets an application outside the callee's precondition; but where the guard is false the clause is read with the default `d`, and a clause that the default breaks
+  (`s == 0` while `s` grows) fails as `invariant-preserved` beside the framing row: the guard hides the native error, not the user-visible one. A loop whose invariant holds an application of a function with an atom carries its places (`expr_touches`). An unframed application is more than one error (S46 (d), question 277:
+  the framing assert at entry and at the back edge, the callee's pure line, and where the default breaks the clause `invariant-preserved`); the tests expect every one. A quantified clause of the callee's `requires` (cut 2) is
+  the quantifier it would be written at the site, as 0061 item 9 lowers a loop's quantifier (a top-level conjunct invariant line with its framing and flag rows). Two arrays with a pair of places need the entry case split
+  `if (lvloc(block_of(b)) == lvloc(block_of(a))) { }` before the snapshots, as 0060 item 11 has it. A pointer argument that an atom names is a pointer variable that is not address-taken or a named local array, as in
+  a `check`; a callee with an atom over pointer elements is refused in an invariant (R3-S2, M4.5e2). **The invariant of a `do ... while (0)` loop** (`do_once`, no loop, question 284): an application there is checked like
+  a `check` (`CMode::None`: the same rows, then the fact asserted as `invariant-entry`); `check.cpp` treats that invariant as a check for an application.
+- **`f__wf` for a read function and for contracts with applications** (items 8 and 9). Every read function has its definition-check method `pf_<name>__<id>__wf` (`wf_method`, whether or not it has a
+  contract): the `requires` clauses, then **the body as one more clause of the entry state** (every obligation of `E`: the operations' ranges, each read's framing by the function's own atoms, each
+  application's rows, the conversion at the `return`, reported in the function at the operation), then the `ensures` clauses' own obligations, then the measure's. Silicon's own check of the Viper function
+  proves the `ensures` and the termination; those two are reported from it (the two native rows, §5), and anything else it reports is an internal error. An application in a contract is a **ghost
+  function** of the method's domain `Hvq_<m>` (`hva_<m>__<g>_<pre|post>(args)`: one parameter per C parameter, `Int`, `Bool` or `Ref`, the callee's result type; `<m>` the `__wf` method without `__wf`,
+  `<g>` the callee's full Viper name; `LGhostFn` has typed parameters), with no axiom, and the assumed facts are: **(i)** the result's type range (an integer result only, unguarded); **(ii)** the callee's
+  `ensures` at the arguments **under `V`**, the callee's value `requires`, pure lines and quantified clauses at the arguments (the guard is what makes it sound: an `ensures` outside the callee's `requires`
+  may be false, S46 (c) (2u)), for a clause that reads no memory and holds no quantifier or application; **(iii)** the keep fact (`wf_keep_facts`): for a post-state application whose arguments read no memory and
+  whose every callee atom is on the same cell field with a bare-variable pointer argument, under both atoms' guards, the same block and the inclusion of the callee's interval in the `reads` atom's,
+  `hva_..._post(args) == hva_..._pre(args)`. Listed limits (false alarms, fail closed; question 279, M4.8): fact (i) is not written for an enumeration result, fact (ii) not for a callee whose `requires` holds an
+  application, and the definition of `g` is not known in `f__wf`.
+- **Termination** (item 10): the encoder records the applications among read functions, from bodies and contracts; a self-application in a body needs a `decreases`, every other cycle is rejected
+  (M4.5f2); Silicon's termination plugin checks the function against its measure; a failure is `termination` at the recursive call. An application is not a call of a method, so `compute_cycles` is unchanged.
+- **The definition check's argument** (audit round 1 checks it): by induction on the measure, the Viper body computes in unbounded integers, the `__wf` rows show under the `requires`, with every inner
+  application's `ensures`, that no operation of `E` overflows, divides by zero, converts out of range or reads what it may not; so the two values agree.
+
 ## 4. Viper shape
 
 ```
@@ -1151,6 +1219,22 @@ method f_g__1(...) returns (res: Int) requires ... ensures ...
 method f_f__0__wf(p_a__0: Int, ..., res: Int)              // well-formedness of the contract
 ```
 
+A read `pure` function (M4.5e1d) is a Viper `function` printed before the methods, with its own definition-check method:
+
+```
+// C/C++ function `tri` (a `pure` function, record 0062)
+function pf_tri__0(p_n__0: Int): Int // cerastes:result -2147483648 2147483647
+  requires <the parameters' ranges, the pointer shapes>
+  requires <the user's requires, an atom in the minimal shape>
+  ensures  <the user's ensures, `result`>
+  decreases p_n__0                                         // or an empty `decreases` for a function that does not call itself
+{
+  <E: an application of itself begins a line of its own>
+}
+// well-formedness of the contract of C/C++ function `tri`
+method pf_tri__0__wf(p_n__0: Int, res: Int)                // the body, the ensures and the measure as obligations (domain Hvq_pf_tri__0 above it, if it applies a function)
+```
+
 **Memory prelude** (M4.5b1a; only when the program has a pointer type or a cell, so every other program keeps its
 Viper): `field v_<t>` and `field d_<t>: Bool` per cell type, sorted, and `field lv: Bool`; `// cerastes:domain-ok 0028`
 and `domain Block` with `loc`, `len`, `block_of`, `offset_of`, `member`, `parent_of`, `index_of`, `lvloc` and the four
@@ -1170,7 +1254,7 @@ the liveness cell), ending in `decreases _`; `lint_viper.py`'s `lint_globals` pi
 A heap program (decision 0047) adds `field tok: Bool` and its views, bodiless methods tagged with vlibc's reason
 followed by `; typed view: one <T> (<n> bytes), decision 0047`.
 
-Names: every identifier has a prefix that says what it is: functions `f_<name>__<id>` (and `...__wf`), formals
+Names: every identifier has a prefix that says what it is: functions `f_<name>__<id>` (and `...__wf`), the Viper functions of read `pure` functions `pf_<name>__<id>` (and `pf_<name>__<id>__wf`; `<id>` digits only), the ghost functions of an application `hva_<m>__<g>_<pre|post>`, formals
 `p_<name>__<k>`, locals `v_<name>__<id>`, temporaries `t__<k>`, the result `res`, labels `l_end`, prelude
 functions `c_*`. A character that is not alphanumeric is written `_x<hex>`, `$` as `_D_`.
 
@@ -1199,6 +1283,16 @@ One line per check, tab-separated, UTF-8, `\n`-terminated:
   writes its id as `assert.failed[insufficient.permission]`: the second column is `<id>[<reason>]`, the reason the one Silicon gives when the
   permission is missing; every other row is written as before. `parse_position_map` reads the bracket and refuses any pair but exactly
   `assert.failed[insufficient.permission]` (a malformed id is a map problem, exit 3).
+- **A Viper function** (M4.5e1d, record 0062 items 11 and 12): each `requires` line has an `internal` row (`not.wellformed`); each `ensures` line has the user row `postcondition.violated` -> `postcondition` (at
+  the function's `return`, with a note at the clause: "`g` may not satisfy its `ensures`") and an `internal` `not.wellformed`; a non-empty `decreases` line has the `termination.failed` entry the rule
+  for methods asks for (Silicon does not report there); **each body line that begins with an application of the function itself has the `termination.failed` row of that call** (`termination` at the
+  recursive call, with a note at the measure). Both native rows go through the existing reasons (`assertion.false` and the three termination reasons), so `report.cpp` and the map's format do not change; every
+  other row on a function is `internal`.
+- **One accepted warning** (record 0062 item 11, question 275). Silicon prints, before its verdict, `Could not resolve expression <e> (<file>@<l>.<c>--<l>.<c>) during the axiomatisation of function <f>.
+  This typically happens if the expression is on an infeasible path, i.e. is dead code. The unresolved expression will be replaced by a fresh symbol, i.e. an arbitrary value.` when a memory read or an application in
+  a `pf_` function's body or `ensures` stands on a branch no path satisfying the `requires` reaches (it can stand beside "verified"). `src/driver/silicon_output.cpp` and `run_tests.py` accept exactly that line,
+  **only before the verdict line**, when `<f>` matches `pf_[A-Za-z_][A-Za-z0-9_]*__[0-9]+`; the same words for a method, a prelude function or a `pf_` name without a digits-only id, a changed word, or the line after the verdict
+  stay an unexpected line (exit 3). The argument that it is sound (the fresh symbol replaces the expression only inside the definitional axiom, which holds only where the `requires` holds) is record 0062 item 11.
 - The driver matches each Silicon error by its `.vpr` line and id (the id before the bracket); no match is exit 3 (0011 item 11). A row's reason must be
   `assertion.false` (`tuple.false`, `tuple.condition.false` or `termination.condition.false` for `termination.failed`) as today; a **marked row accepts
   exactly its expected reason** instead, mapped to the row's category and message, so `assertion.false` on it, `qp.not.injective` anywhere, and
@@ -1215,6 +1309,15 @@ Fails on: `inhale`/`assume` without `// cerastes:inhale-ok <reason>` (invariant 
 (`lint_heap_token`): `field tok: Bool` exactly when `tok` is used; `tok` only as `loc(block_of(…), -1).tok` in a
 `requires`, `ensures`, `invariant` or `assert` line or a snapshot's `perm(…)`, never in an `exhale`, `inhale`, assignment,
 condition or `var`; `forperm` only as `assert forperm t: Ref [t.tok] :: <E>` on a `leak` row.
+
+**Pure functions (M4.5e1d, record 0062 item 12).** A top-level `function` is a prelude function (by name, its body under today's prelude rules, and an empty `decreases` line admitted where the file holds a `pf_` function
+and only there), a `pf_<name>__<id>` function (digits only) or a function that applies only prelude functions (the lint's own fixtures; it can neither recurse nor reach a `pf_` function). A `pf_` function is bodied, has one
+`decreases` line (a measure or empty, never `_` or `*`), `requires` lines in exactly the minimal shapes (`wildcard` is admitted there and on 0061 item 10's marked row, nowhere else), `ensures` lines with no `acc`, `perm`, `old`
+or `inhale` and a body with no `acc`, `perm`, `old`, `forperm`, `inhale` or `assume`; it needs the map entries of §5 and its `pf_<name>__<id>__wf` method. A `pf_` application may stand in a `pf_` function, a method's
+`requires` and `ensures`, an `invariant` and an `assert`, never in a `__wf` method (there it is a ghost function), never in a `decreases` line, and `HEAP_READ_RE` counts it as a heap read. The ghost domain of a `__wf` method may hold
+`hva_<method>__<callee>_<pre|post>` functions of `Int`, `Bool` and `Ref` parameters; the assumed facts have exactly the shapes (i) to (iii) of §3 (fact (ii) under `V` with its quantified clauses, the keep fact under both atoms' guards and
+the inclusion read from the callee's own atoms, fact (i)'s range checked against the `// cerastes:result` tag; each unguarded form is a must-fail self-test). A user quantifier of 0061's shape is admitted in a `pf_` function's `requires` and
+`ensures` and as a conjunct of an application's guard.
 
 ## 7. Matching IL to VIR *(M3-1, M3-4)*
 
@@ -1652,3 +1755,22 @@ mirrors `check.cpp`, so the user meets the encoder's message); `forall_body_ok` 
 `reject_marked_read` maps a `ForallArg` to its argument (0042 item 6). `cerastes_old` under the binder is `old_c`'s in an `ensures` and `old_outside_ensures` at the site elsewhere. *Truth:* a loop
 invariant or a `check` that holds a quantifier keeps its Bool tree through C's `&&` of type `int` (`holds_forall` beside `holds_atom` in `clause_bool`), as a contract does. The shape rules of
 annotation expressions (the `-Wall` shapes, R5 and R9) reach `E` through `truth_context`, reported at the site.
+
+**Pure functions in the encoder (M4.5e1d, record 0062).** *Which are read* (item 2): lazily and by walking the annotations, never from the IL's `called` flag (P81 (b): false for a function only annotations name).
+`read_pure(r, at)` reads a function once (`pure_`, memoised; a function met again while it is being read returns its `vir::Function`, which is how self-recursion and a cycle through a contract are seen); its entry points
+are the run loop (a `pure` function with a body that carries a `requires`, `ensures` or `decreases`, after `spec_routine_clean`, the checks `Encoder::run` always made on a spec routine: a function they reject is not read
+further) and `application()` (an annotation that applies it). *The function* (`pure_function_rules`, tag **`pure_function`** in `diagnostics.def`, reported at the call, or at the function when only its contract made it read):
+defined in a verified file (a call of one that is not: `unsupported_annotation`, M6), not a member, template, instance, lambda, variadic, `constexpr` or `consteval`, a result that is `bool`, an integer or an enumeration, parameters that are
+those or pointers to them (to a pointer at any depth), no `restrict`, `check_signature`. *The body* (`read_pure_statements`): blocks, `static_assert`s (each entity of a `stmk_decl` that is a static assertion goes to
+`encode_block_static_assertion` with the function's own context: it becomes a local constant of the function, checked by the prologue of its `__wf`; any other entity is a local declaration, `pure_function`) and exactly one trailing
+`return E;`. `E` is encoded from a **copy** of the expression (`clone_pure_expr`, nodes in `pure_nodes_`) whose parameter variables are `enk_param_ref`s, so that it goes through the contract path unchanged (reads through the
+parameters, framing, R1-R13, the conversion at the `return`) with `Ctx::pure_fn` and `Ctx::pure_body` set (`encode_pure_body`; an assignment or `++` in `E` is `annotation_side_effect`, found by `first_pure_write`). *The contract*
+(`encode_contract` sets `Ctx::pure_fn`; `pure_clause_ok` checks each clause): value clauses that read no memory (`value_reads_memory`), `reads`/`reads_range` of a parameter as top-level conjuncts, no atom and no `old` in the `ensures`, no
+memory in the measure, no read through a pointer loaded from memory (`loaded_read`). *Applications* (`application()`, from `call()` when the callee is `pure`): `unsupported_annotation` under `old`, in a `decreases`, in a
+position that reads no memory (`Ctx::no_read` is raised around an atom's count, an index and a `cerastes_forall`'s trailing arguments), in the guard of an atom (`application_in_guard`); `call_in_annotation` under a quantifier's
+binder; an application is accepted in a `check`, a loop invariant (the `do ... while (0)` one included), a contract and a `pure` function; otherwise `Builder::apply` after reading the callee. An argument is `expr()` of the site expression with the one generated qualifier conversion of a pointer peeled
+(P81 (d)); a named local array in a `check` is `AddrOf(array local)`, as `cerastes_forall` takes it; a pointer a callee's atom or quantifier names must be a bare parameter (a contract, a `pure` body) or a pointer variable
+that is not address-taken or a named local array (a `check`), `&a[1]` and `&x` are `unsupported_annotation`, and an argument for a parameter a callee's quantifier names reads no memory. *The graph* (`check_pure_cycles`, item 10):
+`pure_edges_` holds the applications among read functions; a self-application without a `decreases` is `missing_decreases` at the definition, a cycle through two functions is `unsupported_annotation` at each definition, a cycle
+through a contract at the application. The success line counts each read function (`verified_functions()`: question 281). `check_block_static_assertions` exempts the region of a `predicate` and of a `pure` function that was not
+read, and no other.

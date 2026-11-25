@@ -1465,6 +1465,460 @@ void define_pure_contract_applications()
        });
 }
 
+// Record 0062 item 7's loop-invariant bullet, M4.5e1d Part D: an application in a loop's invariant.  The framing of each callee atom (its interval inside ONE range place or array place the loop holds) is a
+// `permission` assert at entry and at the back edge; the callee's pure lines, a named array's bound, the flags over the interval (0061's binder form under the framing) and the value clauses are invariant lines
+// before the user's; the application is `(G ? pf_g(args) : d)`.  A loop that holds an application carries its places.
+void define_pure_loop_applications()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.b.text(k.num(k.i32, v), v);
+    };
+    auto PI = [](Kit& k)
+    {
+        return k.ptr(k.i32);
+    };
+    auto fx = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    auto RR = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::ReadsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    auto RO = [=](Kit& k, Function* f, int p, int n, int amount)
+    {
+        return k.b.range_atom(AtomKind::OwnsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
+    };
+    auto app = [](Kit& k, const Function* f, std::vector<const Expr*> args, const char* text)
+    {
+        return k.b.apply(f, std::move(args), text, k.at());
+    };
+    auto lcv = [](const char* name, const char* doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(std::string(name) + "_vacuity",
+           "the same with check(false) after everything: it fails (what the program assumes is not inconsistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    auto vac_fn = [=](Kit& k)
+    {
+        if (k.vac_tail)
+        {
+            Function* g {k.fn("vac", k.vd)};
+            const Stmt* v {k.chk(k.no())};
+            g->body = k.blk({v});
+            k.done(g);
+            k.vac_loc = v->loc;
+        }
+    };
+    // long sum_to(const int *a, int n) requires(0 <= n && reads_range(a, n)) [ensures(r, -2147483648LL * n <= r && r <= 2147483647LL * n)] decreases(n) { return n == 0 ? 0 : sum_to(a, n - 1) + a[n - 1]; }
+    auto mk_sum = [=](Kit& k, bool bounded, const Expr** add_out)
+    {
+        Function* f {k.fn("sum_to", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        f->pure = true;
+        k.req(f, k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), RR(k, f, 0, 1, 0)));
+        if (bounded)
+        {
+            k.ens(f, k.land(k.le(k.mul(k.num(k.i64, "-2147483648"), k.cv(k.i64, fx(k, f, 1))), k.R(f)),
+                            k.le(k.R(f), k.mul(k.num(k.i64, "2147483647"), k.cv(k.i64, fx(k, f, 1))))));
+        }
+        k.dec(f, fx(k, f, 1));
+        const Expr* nm1 {k.sub(k.F(f, 1), k.num(k.i32, "1"))};
+        const Expr* self {app(k, f, {k.F(f, 0), nm1}, "sum_to(a, n - 1)")};
+        const Expr* elem {k.deref(k.b.elem_addr(k.F(f, 0), k.sub(k.F(f, 1), k.num(k.i32, "1")), k.at()))};
+        *add_out = k.add(self, k.cv(k.i64, elem));
+        f->pure_body = k.cond(k.eq(k.F(f, 1), k.num(k.i32, "0")), k.num(k.i64, "0"), *add_out);
+        k.done(f);
+        return f;
+    };
+    // long sum(const int *a, int n) requires(0 <= n [&& n < 2147483647] && reads_range(a, n)) ensures(r, reads_range(a, n) && r == sum_to(a, n))
+    //     { long s = 0; int i = 0; while (i < n) invariant(0 <= i && i <= n && s == sum_to(a, i)) decreases(n - i) { s = s + a[i]; i = i + 1; } return s; }
+    // `variant`: 0 the sum, 1 the clause says + 1 (not established), 2 the clause applies sum_to(a, i + 1), 3 the body adds a[i] + 1, 4 sum_to has no bound, 5 owns_range and the body writes a[0]
+    struct Sum
+    {
+        Clause inv;
+        const Expr* loop_add {nullptr};
+        const Expr* pure_add {nullptr};
+        const Stmt* ret {nullptr};
+        const Expr* app_in_inv {nullptr};
+    };
+    auto mk_loop_sum = [=](Kit& k, int variant, Sum* out)
+    {
+        Function* g {mk_sum(k, variant != 4, &out->pure_add)};
+        Function* f {k.fn("sum", k.i64, {{"a", PI(k)}, {"n", k.i32}})};
+        const bool owns {variant == 5};
+        const Expr* pre {k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), owns ? RO(k, f, 0, 1, 0) : RR(k, f, 0, 1, 0))};
+        if (variant == 2)
+        {
+            pre = k.land(pre, k.lt(fx(k, f, 1), k.num(k.i32, "2147483647")));
+        }
+        k.req(f, pre);
+        k.ens(f, k.land(owns ? RO(k, f, 0, 1, 0) : RR(k, f, 0, 1, 0),
+                        k.eq(k.R(f), app(k, g, {k.F(f, 0), k.F(f, 1)}, "sum_to(a, n)"))));
+        Var* s {k.local(f, "s", k.i64)};
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* count {variant == 2 ? k.add(k.v(i), k.num(k.i32, "1")) : k.v(i)};
+        out->app_in_inv = app(k, g, {k.pn(f->param_var(0)), count}, "sum_to(a, i)");
+        const Expr* value {variant == 1 ? k.add(out->app_in_inv, k.num(k.i64, "1")) : out->app_in_inv};
+        out->inv = k.cl(k.land(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))), k.eq(k.v(s), value)));
+        const Expr* elem {k.deref(k.b.elem_addr(k.pn(f->param_var(0)), k.v(i), k.at()))};
+        const Expr* addend {k.cv(k.i64, elem)};
+        if (variant == 3)
+        {
+            addend = k.add(addend, k.num(k.i64, "1"));
+        }
+        out->loop_add = k.add(k.v(s), addend);
+        std::vector<const Stmt*> body;
+        if (owns)
+        {
+            body.push_back(k.store(k.b.elem_addr(k.pn(f->param_var(0)), N(k, "0"), k.at()), N(k, "5")));
+        }
+        body.push_back(k.asg(s, out->loop_add));
+        body.push_back(k.incS(i));
+        const Stmt* lp {k.whl(k.lt(k.v(i), k.pv(f, 1)), {out->inv}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))}, k.blkc(body))};
+        out->ret = k.ret(k.v(s));
+        f->body = k.blk({k.decl(s, k.num(k.i64, "0")), k.decl(i, N(k, "0")), lp, out->ret});
+        k.done(f);
+    };
+    lcv("ctd_sum_param",
+        "s == sum_to(a, i) over reads_range(a, n): the framing at entry and the back edge, the flags and the lines as invariant lines, the exact sum; the return's postcondition rests on the invariant",
+        [=](Kit& k)
+        {
+            Sum x;
+            mk_loop_sum(k, 0, &x);
+            vac_fn(k);
+        });
+    lc("ctd_sum_param_plus_one",
+       "the clause says s == sum_to(a, i) + 1: `invariant-entry` at the clause (the failed row is assumed, the entry value contradicts it: nothing else)",
+       [=](Kit& k)
+       {
+           Sum x;
+           mk_loop_sum(k, 1, &x);
+           k.fail("invariant-entry", x.inv.loc);
+       });
+    lc("ctd_sum_param_next_index",
+       "the clause applies sum_to(a, i + 1), one element past what the loop holds: the framing (permission, one line: entry and back edge), the entry and preservation of the clause, and the return's postcondition",
+       [=](Kit& k)
+       {
+           Sum x;
+           mk_loop_sum(k, 2, &x);
+           k.fail("permission", x.app_in_inv->loc, 2U);
+           k.fail("invariant-entry", x.inv.loc);
+           k.fail("invariant-preserved", x.inv.loc);
+           k.fail("postcondition", x.ret->loc);
+       });
+    lc("ctd_sum_param_body_plus_one", "the body adds a[i] + 1: `invariant-preserved` at the clause",
+       [=](Kit& k)
+       {
+           Sum x;
+           mk_loop_sum(k, 3, &x);
+           k.fail("invariant-preserved", x.inv.loc);
+       });
+    lc("ctd_sum_param_no_bound",
+       "sum_to without its bound: the overflow in the function's body and the overflow of s + a[i] in the loop",
+       [=](Kit& k)
+       {
+           Sum x;
+           mk_loop_sum(k, 4, &x);
+           k.fail("overflow", x.pure_add->loc);
+           k.fail("overflow", x.loop_add->loc);
+       });
+    lc("ctd_sum_owns_write_prefix",
+       "the loop writes a[0], inside the summed prefix, over owns_range: the application reads the written cell, `invariant-preserved`",
+       [=](Kit& k)
+       {
+           Sum x;
+           mk_loop_sum(k, 5, &x);
+           k.fail("invariant-preserved", x.inv.loc);
+       });
+    // ---- a loop that holds nothing the callee reads ----
+    // long unframed(const int *a, const int *b, int n) requires(0 <= n && reads_range(a, n)) ensures(r, reads_range(a, n)) { ... invariant(0 <= i && i <= n && s == sum_to(b, i)) ... s = s + a[i] }
+    lc("ctd_unframed",
+       "the clause applies sum_to over b, of which the function holds nothing: the framing (permission, entry and back edge), the callee's pure line `b != null` at entry (question 283: pure lines are rows), and the clause as preserved (the application defaults to 0 while s grows)",
+       [=](Kit& k)
+       {
+           const Expr* add {nullptr};
+           Function* g {mk_sum(k, true, &add)};
+           Function* f {k.fn("unframed", k.i64, {{"a", PI(k)}, {"b", PI(k)}, {"n", k.i32}})};
+           k.req(f, k.land(k.ge_c(fx(k, f, 2), k.i32, "0"), RR(k, f, 0, 2, 0)));
+           k.ens(f, RR(k, f, 0, 2, 0));
+           Var* s {k.local(f, "s", k.i64)};
+           Var* i {k.local(f, "i", k.i32)};
+           const Expr* ap {app(k, g, {k.pn(f->param_var(1)), k.v(i)}, "sum_to(b, i)")};
+           const Clause inv {
+               k.cl(k.land(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 2))), k.eq(k.v(s), ap)))};
+           const Expr* elem {k.deref(k.b.elem_addr(k.pn(f->param_var(0)), k.v(i), k.at()))};
+           const Stmt* lp {k.whl(k.lt(k.v(i), k.pv(f, 2)), {inv}, {k.cl(k.sub(k.pv(f, 2), k.v(i)))},
+                                 k.blkc({k.asg(s, k.add(k.v(s), k.cv(k.i64, elem))), k.incS(i)}))};
+           f->body = k.blk({k.decl(s, k.num(k.i64, "0")), k.decl(i, N(k, "0")), lp, k.ret(k.v(s))});
+           k.done(f);
+           k.fail("permission", ap->loc, 2U);
+           k.fail_only("precondition", ap->loc, 10U, 0U);
+           k.fail("invariant-preserved", inv.loc);
+       });
+    // ---- a local array: the array place, the bound and the flags ----
+    // long local_loop() { int a[3]; a[0] = 1; a[1] = 2; [a[2] = 3;] int i = 0; while (i < 2) invariant(0 <= i && i <= 2) invariant(sum_to(a, <3|4>) <= 6442450941) decreases(2 - i) { i = i + 1; } return 0; }
+    auto mk_local = [=](Kit& k, bool all_written, int count, const Expr** ap, Clause* inv)
+    {
+        const Expr* add {nullptr};
+        Function* g {mk_sum(k, true, &add)};
+        Function* f {k.fn("local_loop", k.i64)};
+        Var* a {f->new_local("a", k.prog.array_of(k.i32, 3U), k.at())};
+        f->mark_address_taken(a);
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> st {k.decl(a, nullptr)};
+        for (int j {0}; j < (all_written ? 3 : 2); ++j)
+        {
+            st.push_back(k.store(k.b.elem_addr(k.addr(a), N(k, std::to_string(j).c_str()), k.at()),
+                                 N(k, std::to_string(j + 1).c_str())));
+        }
+        st.push_back(k.decl(i, N(k, "0")));
+        *ap = app(k, g, {k.addr(a), N(k, std::to_string(count).c_str())}, "sum_to(a, 3)");
+        *inv = k.cl(k.le(*ap, k.num(k.i64, "6442450941")));
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "2")),
+                              {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le_c(k.v(i), k.i32, "2"))), *inv},
+                              {k.cl(k.sub(N(k, "2"), k.v(i)))}, k.blkc({k.incS(i)}))};
+        st.push_back(lp);
+        if (k.vac_tail)
+        {
+            const Stmt* v {k.chk(k.no())};
+            st.push_back(v);
+            k.vac_loc = v->loc;
+        }
+        st.push_back(k.ret(k.num(k.i64, "0")));
+        f->body = k.blkc(st);
+        k.done(f);
+    };
+    lcv("ctd_local_array",
+        "sum_to(a, 3) over a local array written in full: the loop carries the array place, the flags hold on entry, the bound is the function's ensures",
+        [=](Kit& k)
+        {
+            const Expr* ap {nullptr};
+            Clause inv;
+            mk_local(k, true, 3, &ap, &inv);
+        });
+    lc("ctd_local_array_unwritten",
+       "a[2] is unwritten: the flag row over the interval, `uninitialized`, at the clause (the value clause holds by the function's ensures)",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           Clause inv;
+           mk_local(k, false, 3, &ap, &inv);
+           k.fail_only("uninitialized", ap->loc, 2U, 0U);
+       });
+    // ---- a loop that also fills another array ----
+    // long sum_copy(const int *a, int *b, int n) requires(0 <= n && reads_range(a, n) && owns_range(b, n)) ensures(r, reads_range(a, n) && owns_range(b, n) && r == sum_to(a, n))
+    //     { long s = 0; int i = 0; while (i < n) invariant(0 <= i && i <= n && s == sum_to(a, i)) decreases(n - i) { b[i] = a[i]; s = s + a[i]; i = i + 1; } return s; }
+    lcv("ctd_copy",
+        "a loop that also fills b (an owns place beside the reads place): the write does not touch what sum_to reads, so the clause is kept",
+        [=](Kit& k)
+        {
+            const Expr* add {nullptr};
+            Function* g {mk_sum(k, true, &add)};
+            Function* f {k.fn("sum_copy", k.i64, {{"a", PI(k)}, {"b", PI(k)}, {"n", k.i32}})};
+            k.req(f, k.land(k.ge_c(fx(k, f, 2), k.i32, "0"), k.land(RR(k, f, 0, 2, 0), RO(k, f, 1, 2, 1))));
+            k.ens(f, k.land(k.land(RR(k, f, 0, 2, 0), RO(k, f, 1, 2, 1)),
+                            k.eq(k.R(f), app(k, g, {k.F(f, 0), k.F(f, 2)}, "sum_to(a, n)"))));
+            Var* s {k.local(f, "s", k.i64)};
+            Var* i {k.local(f, "i", k.i32)};
+            const Expr* ap {app(k, g, {k.pn(f->param_var(0)), k.v(i)}, "sum_to(a, i)")};
+            const Clause inv {
+                k.cl(k.land(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 2))), k.eq(k.v(s), ap)))};
+            const Expr* rd {k.deref(k.b.elem_addr(k.pn(f->param_var(0)), k.v(i), k.at()))};
+            const Stmt* wr {k.store(k.b.elem_addr(k.pn(f->param_var(1)), k.v(i), k.at()),
+                                    k.deref(k.b.elem_addr(k.pn(f->param_var(0)), k.v(i), k.at())))};
+            const Stmt* lp {k.whl(k.lt(k.v(i), k.pv(f, 2)), {inv}, {k.cl(k.sub(k.pv(f, 2), k.v(i)))},
+                                  k.blkc({wr, k.asg(s, k.add(k.v(s), k.cv(k.i64, rd))), k.incS(i)}))};
+            f->body = k.blk({k.decl(s, k.num(k.i64, "0")), k.decl(i, N(k, "0")), lp, k.ret(k.v(s))});
+            k.done(f);
+            vac_fn(k);
+        });
+    // ---- a callee with a quantified clause (cut 2): the int sum ----
+    auto small_q = [=](Kit& k, int id, const Expr* a, const Expr* n)
+    {
+        const Expr* i {k.b.bound(id, k.i32.int_type, "i", k.at())};
+        const Expr* x0 {k.b.forall_arg(id, 0, PI(k), a->c_text.empty() ? "a" : a->c_text, k.at())};
+        const Expr* x1 {k.b.forall_arg(id, 1, k.i32, n->c_text.empty() ? "n" : n->c_text, k.at())};
+        const Expr* rd {k.deref(k.b.elem_addr(x0, i, k.at()))};
+        const Expr* in {k.land(k.ge_c(i, k.i32, "0"), k.lt(i, x1))};
+        const Expr* body {k.lor(k.lnot(in), k.land(k.ge_c(rd, k.i32, "-1000"),
+                                                   k.le_c(k.deref(k.b.elem_addr(x0, i, k.at())), k.i32, "1000")))};
+        return k.b.forall(id, k.i32.int_type, body, {a, n}, "forall(small_at)", "small_at", k.at());
+    };
+    // int smallsum(const int *a, int n) requires(0 <= n && n <= 1000 && reads_range(a, n) && forall(small_at, a, n)) ensures(r, -1000 * n <= r && r <= 1000 * n) decreases(n)
+    //     { return n == 0 ? 0 : smallsum(a, n - 1) + a[n - 1]; }
+    // int ssum(const int *a, int n) requires(<the same> [without the forall]) ensures(r, reads_range(a, n) && r == smallsum(a, n))
+    //     { int s = 0; int i = 0; while (i < n) invariant(0 <= i && i <= n && s == smallsum(a, i)) decreases(n - i) { s = s + a[i]; i = i + 1; } return s; }
+    auto mk_ssum = [=](Kit& k, bool clause, const Expr** ap, Clause* inv, const Expr** ens_ap, const Expr** add_out)
+    {
+        Function* g {k.fn("smallsum", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
+        g->pure = true;
+        k.req(g, k.land(k.land(k.land(k.ge_c(fx(k, g, 1), k.i32, "0"), k.le_c(fx(k, g, 1), k.i32, "1000")),
+                               RR(k, g, 0, 1, 0)),
+                        small_q(k, 1, fx(k, g, 0), fx(k, g, 1))));
+        k.ens(g, k.land(k.le(k.mul(k.num(k.i32, "-1000"), k.F(g, 1)), k.R(g)),
+                        k.le(k.R(g), k.mul(k.num(k.i32, "1000"), k.F(g, 1)))));
+        k.dec(g, k.F(g, 1));
+        const Expr* nm1 {k.sub(k.F(g, 1), k.num(k.i32, "1"))};
+        const Expr* self {app(k, g, {k.F(g, 0), nm1}, "smallsum(a, n - 1)")};
+        const Expr* elem {k.deref(k.b.elem_addr(k.F(g, 0), k.sub(k.F(g, 1), k.num(k.i32, "1")), k.at()))};
+        g->pure_body = k.cond(k.eq(k.F(g, 1), k.num(k.i32, "0")), k.num(k.i32, "0"), k.add(self, elem));
+        k.done(g);
+        Function* f {k.fn("ssum", k.i32, {{"a", PI(k)}, {"n", k.i32}})};
+        const Expr* base {
+            k.land(k.land(k.ge_c(fx(k, f, 1), k.i32, "0"), k.le_c(fx(k, f, 1), k.i32, "1000")), RR(k, f, 0, 1, 0))};
+        k.req(f, clause ? k.land(base, small_q(k, 2, fx(k, f, 0), fx(k, f, 1))) : base);
+        *ens_ap = app(k, g, {k.F(f, 0), k.F(f, 1)}, "smallsum(a, n)");
+        k.ens(f, k.land(RR(k, f, 0, 1, 0), k.eq(k.R(f), *ens_ap)));
+        Var* s {k.local(f, "s", k.i32)};
+        Var* i {k.local(f, "i", k.i32)};
+        *ap = app(k, g, {k.pn(f->param_var(0)), k.v(i)}, "smallsum(a, i)");
+        *inv = k.cl(k.land(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 1))), k.eq(k.v(s), *ap)));
+        const Expr* rd {k.deref(k.b.elem_addr(k.pn(f->param_var(0)), k.v(i), k.at()))};
+        const Stmt* lp {k.whl(k.lt(k.v(i), k.pv(f, 1)), {*inv}, {k.cl(k.sub(k.pv(f, 1), k.v(i)))},
+                              k.blkc({k.asg(s, *add_out = k.add(k.v(s), rd)), k.incS(i)}))};
+        f->body = k.blk({k.decl(s, N(k, "0")), k.decl(i, N(k, "0")), lp, k.ret(k.v(s))});
+        k.done(f);
+    };
+    lcv("ctd_forall_sum",
+        "the int sum: the callee's quantified clause at (a, i) is one more obligation of the invariant and a conjunct of the guard; the function's own clause gives it",
+        [=](Kit& k)
+        {
+            const Expr* ap {nullptr};
+            Clause inv;
+            const Expr* ens_ap {nullptr};
+            const Expr* add {nullptr};
+            mk_ssum(k, true, &ap, &inv, &ens_ap, &add);
+            vac_fn(k);
+        });
+    lc("ctd_forall_sum_noclause",
+       "the enclosing function does not require the clause: the callee's quantified clause is a `precondition` row of the invariant; it holds at entry (i is 0, the range [0, i) is empty) and the iteration is what fails it (a[i] is not known to be small: `invariant-preserved`, the second check of the row); the sum of s and a[i] may overflow, and the contract's own application lacks the clause in its `__wf`",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           Clause inv;
+           const Expr* ens_ap {nullptr};
+           const Expr* add {nullptr};
+           mk_ssum(k, false, &ap, &inv, &ens_ap, &add);
+           k.fail_only("precondition", ap->loc, 14U, 13U);
+           k.fail("overflow", add->loc);
+           k.fail_only("precondition", ens_ap->loc, 7U, 6U);
+       });
+    // ---- a `do ... while (0)` loop's invariant: asserted once, an application takes the check form (owner, question 284) ----
+    // int sq(int x) requires(-999 <= x && x <= 999) { return x * x; }
+    // int f(int y) requires(<-9 <= y && y <= 9 | -4000 <= y && y <= 4000>) { int s = 0; invariant(s == 0 || s == sq(y) [+ the false variant: s == sq(y)]) do { s = y * y; } while (0); return s; }
+    auto mk_once = [=](Kit& k, int variant, const Expr** ap, Clause* inv)
+    {
+        Function* g {k.fn("sq", k.i32, {{"x", k.i32}})};
+        g->pure = true;
+        k.req(g, k.range(k.F(g, 0), k.i32, "-999", "999"));
+        g->pure_body = k.mul(k.F(g, 0), k.F(g, 0));
+        k.done(g);
+        Function* f {k.fn("f", k.i32, {{"y", k.i32}})};
+        k.req(f, variant == 2 ? k.range(k.F(f, 0), k.i32, "-4000", "4000") : k.range(k.F(f, 0), k.i32, "-9", "9"));
+        Var* s {k.local(f, "s", k.i32)};
+        *ap = app(k, g, {k.pv(f, 0)}, "sq(y)");
+        // variant 2 puts the application first, so that it is always evaluated (in variant 0 the `||` skips it while s is 0)
+        *inv = k.cl(variant == 1   ? k.eq(k.v(s), *ap)
+                    : variant == 2 ? k.lor(k.eq(k.v(s), *ap), k.eq(k.v(s), N(k, "0")))
+                                   : k.lor(k.eq(k.v(s), N(k, "0")), k.eq(k.v(s), *ap)));
+        const int id {k.jid()};
+        const Stmt* body {k.blk({k.asg(s, k.mul(k.pv(f, 0), k.pv(f, 0)))})};
+        const Stmt* w {k.loop(k.no(), {*inv}, {}, body, nullptr, LoopForm::DoOnce, id)};
+        std::vector<const Stmt*> st {k.decl(s, N(k, "0")), w};
+        if (k.vac_tail)
+        {
+            const Stmt* v {k.chk(k.no())};
+            st.push_back(v);
+            k.vac_loc = v->loc;
+        }
+        st.push_back(k.ret(k.v(s)));
+        f->body = k.blk(st);
+        k.done(f);
+    };
+    lcv("ctd_do_once",
+        "do { s = y * y; } while (0) with the invariant s == 0 || s == sq(y): the check form (the value clause a row, then the fact), asserted as `invariant-entry`",
+        [=](Kit& k)
+        {
+            const Expr* ap {nullptr};
+            Clause inv;
+            mk_once(k, 0, &ap, &inv);
+        });
+    lc("ctd_do_once_false_fact", "the invariant s == sq(y) is false at entry (s is 0): `invariant-entry` at the clause",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           Clause inv;
+           mk_once(k, 1, &ap, &inv);
+           k.fail("invariant-entry", inv.loc);
+       });
+    lc("ctd_do_once_outside_requires",
+       "y is outside what sq requires (|y| <= 999): the callee's value clause (both bounds), `precondition`, at the application",
+       [=](Kit& k)
+       {
+           const Expr* ap {nullptr};
+           Clause inv;
+           mk_once(k, 2, &ap, &inv);
+           k.fail("precondition", ap->loc, 2U);
+       });
+    // ---- the checker's rules for an application in a loop invariant ----
+    auto mk_get = [=](Kit& k)
+    {
+        Function* g {k.fn("get", k.i32, {{"p", PI(k)}})};
+        g->pure = true;
+        k.req(g, k.b.atom(AtomKind::Reads, fx(k, g, 0), 0, k.at()));
+        g->pure_body = k.deref(k.F(g, 0));
+        k.done(g);
+        return g;
+    };
+    auto loop_with = [=](Kit& k, const std::function<const Expr*(Function*, Var*)>& clause, bool address_taken)
+    {
+        Function* g {mk_get(k)};
+        Function* f {k.fn("h", k.vd, {{"q", PI(k)}})};
+        k.req(f, k.b.atom(AtomKind::Reads, fx(k, f, 0), 0, k.at()));
+        Var* i {k.local(f, "i", k.i32)};
+        Var* p {k.local(f, "p", PI(k))};
+        if (address_taken)
+        {
+            f->mark_address_taken(p);
+        }
+        (void)g;
+        const Stmt* lp {k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(clause(g, p))}, {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                              k.blkc({k.incS(i)}))};
+        f->body = k.blkc({k.decl(p, k.pn(f->param_var(0))), k.decl(i, N(k, "0")), lp});
+        k.done(f);
+    };
+    rc("ctd_apply_invariant_address_taken_pointer", "not a pointer variable that is not address-taken",
+       [=](Kit& k)
+       {
+           loop_with(
+               k,
+               [&](Function* g, Var* p)
+               {
+                   return k.eq(app(k, g, {k.pn(p)}, "get(p)"), N(k, "0"));
+               },
+               true);
+       });
+    rc("ctd_apply_invariant_pointer_not_a_variable", "not a pointer variable that is not address-taken",
+       [=](Kit& k)
+       {
+           loop_with(
+               k,
+               [&](Function* g, Var* p)
+               {
+                   return k.eq(app(k, g, {k.b.elem_addr(k.pn(p), N(k, "1"), k.at())}, "get(&p[1])"), N(k, "0"));
+               },
+               false);
+       });
+    (void)N;
+}
+
 // Record 0062 item 5: the rules `check_program` repeats as backstops of the encoder's own rejections.
 void define_pure_function_rejections()
 {
@@ -1485,18 +1939,6 @@ void define_pure_function_rejections()
         Function* f {k.fn("use", k.vd)};
         return f;
     };
-    rc("pure_apply_in_invariant", "outside a `check`",
-       [=](Kit& k)
-       {
-           Function* g {small(k)};
-           Function* f {caller(k)};
-           Var* i {k.local(f, "i", k.i32)};
-           f->body =
-               k.blk({k.decl(i, k.num(k.i32, "0")), k.whl(k.lt(k.v(i), k.num(k.i32, "3")), {k.cl(ap(k, g, {k.v(i)}))},
-                                                          {k.cl(k.sub(k.num(k.i32, "3"), k.v(i)))},
-                                                          k.blk({k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))});
-           k.done(f);
-       });
     rc("pure_apply_in_c_assert", "outside a `check`",
        [=](Kit& k)
        {

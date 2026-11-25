@@ -2704,12 +2704,14 @@ private:
                     // lowering gives them), so no_ptr_ stays false.  A permission atom is accepted in a loop's invariant (decision 0040 item 5), not in
                     // that of a `do ... while (0)`: it is asserted once like a `check`.
                     in_invariant_ = !once;
+                    in_once_invariant_ = once;
                     if (!once)
                     {
                         mark_forall_positions(c.expr, true);
                     }
                     expr(*c.expr, Ctx::Annot, false);
                     in_invariant_ = false;
+                    in_once_invariant_ = false;
                     if (!c.expr->type.is_bool())
                     {
                         err(c.expr->loc, "an invariant is not a bool");
@@ -4488,18 +4490,18 @@ private:
 
     // ---- applications of `pure` functions (record 0062 items 4 and 5; M4.5e1d part B) ----
 
-    // An application `g(args)`: in a `check`, in the `requires` and `ensures` of any function and in the body of a `pure` function (a loop invariant is part D's and stays refused here, fail
-    // closed between the parts), never under a quantifier's binder, in a measure or under `old`.  The callee is a `pure` function with a value expression, with
+    // An application `g(args)`: in a `check`, in a loop's invariant (a `do ... while (0)` one in the check form), in the `requires` and `ensures` of any function and in the body of a `pure` function, never under a quantifier's
+    // binder, in a measure or under `old`.  The callee is a `pure` function with a value expression, with
     // the arity and parameter types of the arguments.  A pointer argument that an atom of the callee names is, in a contract or a `pure` function, a parameter of the function and, in a
     // `check`, a pointer variable or the decay of a named array: the rows of the application name that pointer as a variable (item 4).
     void apply(const Expr& e, Ctx ctx)
     {
-        const bool in_check {ctx == Ctx::Annot && in_check_ && !in_invariant_};
+        const bool in_check {ctx == Ctx::Annot && (in_check_ || in_invariant_ || in_once_invariant_)};
         const bool in_pure {apply_ok_ && (ctx == Ctx::Requires || ctx == Ctx::Ensures)};
         if (!in_check && !in_pure)
         {
             err(e.loc,
-                "an application of a `pure` function outside a `check`, a `requires` and an `ensures` and the body of a `pure` function (record 0062 item 4: a loop invariant is part D's, a measure, a guard and code never)");
+                "an application of a `pure` function outside a `check`, a loop invariant, a `requires` and an `ensures` and the body of a `pure` function (record 0062 item 4: a measure, a guard and code never)");
             return;
         }
         if (cur_forall_ != nullptr)
@@ -4841,6 +4843,8 @@ private:
     std::set<const Expr*> seen_effects_;
     // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
     bool in_invariant_ {false};
+    // the invariant of a `do ... while (0)` loop is asserted once like a `check`: an application there takes the check form (owner, question 284)
+    bool in_once_invariant_ {false};
     bool in_check_ {false}; // a `check` statement's expression (not C's `assert`): a quantifier may stand there
     // Record 0062 item 4: the body, `requires` and `ensures` of a `pure` function are being checked (a measure never is): an application may stand there
     bool apply_ok_ {false};

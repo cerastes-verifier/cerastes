@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L16
 // mode: c23, c++20
 // twin: tests/memory/forall_requires_read.c
-// Pins: 0061 item 3 (question 252; lifted by M4.5e1d): f with a decreases is unsupported_annotation
+// Pins: 0061 item 3 (question 252): f with a decreases is unsupported_annotation; M4.5e1d leaves it rejected (a forall naming a function with a contract: M4.5e2, question 265)
 // Pre-registered from record 0061 item 3 (Part B), before the code
 #include <cerastes.h>
 #include <stddef.h>

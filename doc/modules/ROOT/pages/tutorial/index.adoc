@@ -84,7 +84,8 @@ text says. The messages in the output blocks are copied from a run.
   structures as values.
 . xref:tutorial/heap.adoc[The heap]: `malloc`, `free`, leaks and owning locals.
 . xref:tutorial/arrays.adoc[Arrays and quantifiers]: local arrays, ranges in
-  contracts, and facts about every element with `cerastes_forall`.
+  contracts, facts about every element with `cerastes_forall`, and the exact sum of an
+  array with a recursive pure function.
 
 Pointer arithmetic, predicates over linked structures, and pass:[C++] templates are
 not supported yet; each gets its chapter in the version that supports it. Until

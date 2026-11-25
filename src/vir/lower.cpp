@@ -1769,6 +1769,10 @@ private:
         E qante;
         std::string in_fn;
         SrcLoc note_loc;
+        // Record 0062 item 7 (M4.5e1d part D): the read is the interval of a callee's atom, `ptr` for `ivl` elements, named by `app` (the application's callee); its framing is the interval inside ONE
+        // range place or array place of the loop
+        E ivl;
+        const Function* app {nullptr};
     };
     struct Framing
     {
@@ -4249,10 +4253,52 @@ private:
         }
         return low::implies(low::and_(prior, r.guard), any);
     }
+    // The interval `[ptr, ptr + ivl)` of an application's atom inside one range place of the loop (its guard, the same block, `lo <= offset`, `offset + ivl <= hi`) or inside one array place the
+    // loop carries (`0 <= offset`, `offset + ivl <= count`): the framing of item 7's loop-invariant bullet, no quantifier
+    E inv_interval_frame(const InvRead& r)
+    {
+        using low::BinOp;
+        const std::string sfx {cell_suffix(r.type)};
+        const E off {low::dom("offset_of", {r.ptr})};
+        const E end {low::bin(BinOp::Add, off, r.ivl)};
+        E any;
+        const auto add = [&](const E& d)
+        {
+            any = any ? low::bin(BinOp::Or, any, d) : d;
+        };
+        if (inv_arrays_ != nullptr)
+        {
+            for (const ArrayPlace& ap : *inv_arrays_)
+            {
+                if (cell_suffix(ap.element) == sfx)
+                {
+                    add(low::and_(low::and_(low::bin(BinOp::Eq, block_of(r.ptr), block_of(low::var(var_name(*ap.var)))),
+                                            low::bin(BinOp::Le, low::int_lit("0"), off)),
+                                  low::bin(BinOp::Le, end, low::int_lit(std::to_string(ap.count)))));
+                }
+            }
+        }
+        if (inv_ranges_ != nullptr)
+        {
+            for (const RangePlace& rp : *inv_ranges_)
+            {
+                if (rp.cmp == sfx)
+                {
+                    add(low::and_(low::and_(rp.guard, low::bin(BinOp::Eq, block_of(r.ptr), block_of(rp.base))),
+                                  low::and_(low::bin(BinOp::Le, rp.lo, off), low::bin(BinOp::Le, end, rp.hi))));
+                }
+            }
+        }
+        return any ? any : low::bool_lit(false);
+    }
     // The disjunction of the loop's places that frame the read `r`: what the framing assert requires
     E inv_framing_any(const InvRead& r)
     {
         E any;
+        if (r.ivl)
+        {
+            return inv_interval_frame(r);
+        }
         if (r.cell != nullptr)
         {
             for (const Place& pl : *inv_places_)
@@ -4314,6 +4360,12 @@ private:
         low::Meta m;
         m.category = "permission";
         m.loc = r.loc.known() ? r.loc : c.loc;
+        if (r.app != nullptr)
+        {
+            m.message = std::string("this loop ") + what + " calls `" + r.app->c_name + "`, which reads " +
+                        quoted(r.text, "memory") + ", which this loop does not hold";
+            return m;
+        }
         m.message = r.cell != nullptr
                         ? std::string("this loop ") + what + " reads `" + r.cell->name + "`, whose object a callee kept"
                         : std::string("this loop ") + what + " reads " + quoted(r.text, "an object") +
@@ -6082,6 +6134,54 @@ private:
         return out;
     }
     // The argument of a call that a site's pointer parameter receives (a global site has none).
+    // The user's spelling of an argument of a call or an application: its `c_text` when the encoder gave one, else a rebuild from what the node is (a variable, a constant, `+ - *` of
+    // spellable operands, an implicit conversion); empty if there is none (record 0062 item 7: the rows name the callee's interval in source terms)
+    static std::string arg_spelling(const Expr& x, int depth = 0)
+    {
+        if (!x.c_text.empty())
+        {
+            return x.c_text;
+        }
+        if (depth > 4)
+        {
+            return std::string();
+        }
+        switch (x.kind)
+        {
+            case Expr::Kind::Local:
+                return x.var != nullptr ? x.var->name : std::string();
+            case Expr::Kind::AddrOf:
+                return x.var != nullptr ? "&" + x.var->name : std::string();
+            case Expr::Kind::Const:
+                return x.type.is_int() ? x.value : std::string();
+            case Expr::Kind::Convert:
+                return x.explicit_cast || x.a == nullptr ? std::string() : arg_spelling(*x.a, depth + 1);
+            case Expr::Kind::Binary:
+            {
+                const char* op {x.bop == BinaryOp::Add   ? "+"
+                                : x.bop == BinaryOp::Sub ? "-"
+                                : x.bop == BinaryOp::Mul ? "*"
+                                                         : nullptr};
+                if (op == nullptr || x.a == nullptr || x.b == nullptr)
+                {
+                    return std::string();
+                }
+                const auto operand = [&](const Expr& o)
+                {
+                    const std::string t {arg_spelling(o, depth + 1)};
+                    return !t.empty() && x.bop == BinaryOp::Mul && o.kind == Expr::Kind::Binary && o.c_text.empty() &&
+                                   o.bop != BinaryOp::Mul
+                               ? "(" + t + ")"
+                               : t;
+                };
+                const std::string l {operand(*x.a)};
+                const std::string r {operand(*x.b)};
+                return l.empty() || r.empty() ? std::string() : l + " " + op + " " + r;
+            }
+            default:
+                return std::string();
+        }
+    }
     const Expr& site_arg(const AtomSite& s, const Expr& call) const
     {
         return *call.args[static_cast<size_t>(site_key(s))];
@@ -6121,9 +6221,23 @@ private:
     // The same, from the argument a call passes: `x` for `&x`, `*q` for `q`.
     // A range atom as the call spells it (record 0060 item 8): the argument the pointer parameter receives and the argument the count is (a count that is a bare parameter, a
     // constant), `a[0..3)`; empty when either has no spelling, so that no spelling the user did not write is printed.
-    std::string range_call_text(const AtomSite& s, const Expr& call) const
+    std::string range_call_text(const AtomSite& s, const Expr& call, bool spelled = false) const
     {
         const Expr& base {site_arg(s, call)};
+        std::string base_text {spelled ? arg_spelling(base) : base.c_text};
+        if (spelled)
+        {
+            // a named array that decays to its first element is spelled as the user wrote it, `a`, not `(&a)` (in C `(&a)[k]` is the k-th whole array); a scalar's explicit `&g` stays
+            const Expr* decayed {&base};
+            while (decayed->kind == Expr::Kind::Convert && !decayed->explicit_cast && decayed->a != nullptr)
+            {
+                decayed = decayed->a;
+            }
+            if (decayed->kind == Expr::Kind::AddrOf && decayed->var != nullptr && decayed->var->type.is_array())
+            {
+                base_text = decayed->var->name;
+            }
+        }
         const Expr* c {s.atom->b};
         while (c != nullptr && c->kind == Expr::Kind::Convert && c->a != nullptr)
         {
@@ -6133,18 +6247,19 @@ private:
         if (c != nullptr && c->kind == Expr::Kind::Formal && c->index >= 0 &&
             static_cast<size_t>(c->index) < call.args.size())
         {
-            count = call.args[static_cast<size_t>(c->index)]->c_text;
+            count = spelled ? arg_spelling(*call.args[static_cast<size_t>(c->index)])
+                            : call.args[static_cast<size_t>(c->index)]->c_text;
         }
         else if (c != nullptr && c->kind == Expr::Kind::Const)
         {
             count = c->c_text.empty() ? c->value : c->c_text;
         }
-        if (base.c_text.empty() || count.empty())
+        if (base_text.empty() || count.empty())
         {
             return std::string();
         }
         // `&a[i]` over `n` elements is `a[i..i + n)` when both are numbers, `a[0..n)` when `i` is 0
-        const std::string& bt {base.c_text};
+        const std::string& bt {base_text};
         const size_t open {bt.rfind('[')};
         if (bt.size() > 3U && bt[0U] == '&' && bt.back() == ']' && open != std::string::npos && open > 1U)
         {
@@ -6165,11 +6280,12 @@ private:
         }
         return postfix_operand_text(bt) + "[0.." + count + ")";
     }
-    std::string site_call_text(const AtomSite& s, const Expr& call) const
+    // `spelled`: the callee is a `pure` function applied in an annotation (record 0062 item 7): an argument without a `c_text` is respelled from its node; a call keeps e1b's exact text
+    std::string site_call_text(const AtomSite& s, const Expr& call, bool spelled = false) const
     {
         if (site_is_range(s))
         {
-            return range_call_text(s, call);
+            return range_call_text(s, call, spelled);
         }
         if (site_is_global(s) || !s.via.empty())
         {
@@ -6177,7 +6293,7 @@ private:
             // 0045)
             return site_text(s);
         }
-        const std::string& txt {site_arg(s, call).c_text};
+        const std::string txt {spelled ? arg_spelling(site_arg(s, call)) : site_arg(s, call).c_text};
         const std::string base {txt.empty() ? std::string() : (txt[0U] == '&' ? txt.substr(1U) : "*" + txt)};
         if (s.path.empty() || base.empty())
         {
@@ -20152,7 +20268,9 @@ private:
         for (const Clause& c : s.invariants)
         {
             Full full;
+            once_invariant_ = true;
             LV v {lower(*c.expr, body_env(), nullptr, {}, full)};
+            once_invariant_ = false;
             pure_full(full, *c.expr, "a loop invariant");
             for (Obl& o : full.obls)
             {
@@ -20976,6 +21094,8 @@ private:
     std::map<const Function*, std::vector<PfLine>> pf_lines_cache_;
     // the self-application nodes of the body being lowered: the position of each (the emitter's `body_calls`)
     std::map<const low::LExpr*, SrcLoc> self_apps_;
+    bool once_invariant_ {
+        false}; // the invariant of a `do ... while (0)` loop is being lowered (the wording of an application's rows)
     bool cbody_ {false}; // the body of a `pure` function is being lowered (the wording of a row)
     // an application in `f__wf` (item 8): its ghost function, the callee, the state and the lowered arguments
     struct WfApp
@@ -21346,7 +21466,11 @@ private:
     {
         if (cmode_ == CMode::None)
         {
-            return "this `check`";
+            return once_invariant_ ? "this loop invariant" : "this `check`";
+        }
+        if (cmode_ == CMode::Inv)
+        {
+            return "this loop invariant";
         }
         if (cf_ == nullptr)
         {
@@ -21367,7 +21491,7 @@ private:
                 low::Meta m {
                     meta("permission", app.loc,
                          who + " calls `" + g.c_name + "`, which reads " +
-                             quoted(c.site != nullptr ? site_call_text(*c.site, app) : std::string(), "memory") +
+                             quoted(c.site != nullptr ? site_call_text(*c.site, app, true) : std::string(), "memory") +
                              ", without owning it")};
                 m.has_note = true;
                 m.note_loc = c.loc;
@@ -21384,7 +21508,7 @@ private:
                 low::Meta m {meta(
                     "precondition", app.loc,
                     who + " calls `" + g.c_name + "`, whose `requires` may not hold: " +
-                        quoted(c.site != nullptr ? site_call_text(*c.site, app) : std::string(),
+                        quoted(c.site != nullptr ? site_call_text(*c.site, app, true) : std::string(),
                                "the memory it reads") +
                         " needs a pointer that is not null and a count that is not negative and within the object")};
                 m.has_note = true;
@@ -21480,9 +21604,7 @@ private:
         }
         if (cmode_ == CMode::Inv)
         {
-            internal_error(
-                e.loc, "an application of a `pure` function in a loop invariant reached lowering (record 0062 part D)");
-            return {inv_dummy(e.type), {}};
+            return apply_inv(e, g, args, adep, env, guard, gdep, full);
         }
         const std::vector<ApplyConj> conj {apply_conjuncts(g, args, env, true)};
         // The callee's quantified clauses at the arguments (item 7): each is the quantifier as if written at the site, lowered by 0061 in this mode
@@ -21566,6 +21688,151 @@ private:
         return {low::fn(ghost, args), adep};
     }
 
+    // An application in a loop invariant (item 7, M4.5e1d part D).  The framing of each callee atom is an `InvRead` (its interval inside one place the loop holds: asserted at entry and at the back edge
+    // like a read's); the rows are obligation clauses before the user's line (the callee's pure lines and value clauses, a named array's bound, the flags over the interval in 0061's binder form under the
+    // framing); the value is `(G ? pf(args) : d)`, G the callee's lines at the arguments, its quantified clauses and the framing.
+    LV apply_inv(const Expr& e, const Function& g, const std::vector<E>& args, const Deps& adep, const Env& env,
+                 const E& guard, const Deps& gdep, Full& full)
+    {
+        using low::BinOp;
+        std::vector<ApplyConj> conj {apply_conjuncts(g, args, Env {}, false)};
+        Env aenv;
+        aenv.formals = args;
+        aenv.formal_leaves.resize(args.size());
+        struct AtomRow
+        {
+            const AtomSite* site;
+            E base;
+            E count;
+            E any;
+            bool named;
+            std::string place;
+        };
+        std::vector<AtomRow> atoms;
+        for (const AtomSite& gs : atoms_of(g).sites)
+        {
+            if (gs.in_ensures)
+            {
+                continue;
+            }
+            const size_t key {static_cast<size_t>(site_key(gs))};
+            const Expr& argx {*e.args[key]};
+            const E base {args[key]};
+            if (base == nullptr || base->kind != low::LExpr::Kind::Var)
+            {
+                internal_error(e.loc,
+                               "the pointer an application's `reads` names is not a variable (a loop invariant)");
+                return {inv_dummy(e.type), adep};
+            }
+            E count {low::int_lit("1")};
+            if (site_is_range(gs))
+            {
+                Full scratch;
+                count = lower(*gs.atom->b, aenv, nullptr, Deps {}, scratch).e;
+            }
+            InvRead r;
+            r.ptr = base;
+            r.type = site_pointee(gs);
+            r.loc = e.loc;
+            r.text = site_call_text(gs, e, true);
+            r.guard = guard;
+            r.app = &g;
+            if (site_is_range(gs))
+            {
+                r.ivl = count;
+            }
+            const E any {inv_framing_any(r)};
+            inv_reads_.push_back(std::move(r));
+            ApplyConj fc;
+            fc.kind = ApplyConj::Kind::Frame;
+            fc.cond = any;
+            fc.site = &gs;
+            fc.loc = gs.atom->loc;
+            conj.push_back(std::move(fc));
+            const bool named {argx.kind == Expr::Kind::AddrOf && argx.var != nullptr && argx.var->type.is_array()};
+            atoms.push_back(AtomRow {&gs, base, count, any, named, named ? argx.var->name : arg_spelling(argx)});
+        }
+        // the callee's quantified clauses at the arguments, lowered as if written here (0061 item 9's rows come with the lowering)
+        std::vector<E> quants;
+        std::vector<const PfLine*> qlines;
+        for (const PfLine& l : pf_lines(g))
+        {
+            if (l.kind != PfLine::Kind::Quant)
+            {
+                continue;
+            }
+            const Expr* site {apply_site_forall(e, *l.node)};
+            quants.push_back(lower(*site, env, guard, gdep, full).e);
+            qlines.push_back(&l);
+        }
+        // the rows, in the order the rows of a `check` have (owner, question 283: "Rows, as elsewhere"): per atom its pure lines (`precondition`, the note at the callee's clause), the bound of a named
+        // array and the flags over the interval, then the value clauses and the quantified clauses.  The callee's parameter ranges and pointer shapes are conjuncts of G only
+        size_t atom_no {0U};
+        for (const AtomRow& a : atoms)
+        {
+            for (const ApplyConj& c : conj)
+            {
+                if (c.kind == ApplyConj::Kind::AtomLine && c.site == a.site)
+                {
+                    obl(full, guard, gdep, c.cond, adep, apply_row_meta(c, e, g));
+                }
+            }
+            const Type& t {site_pointee(*a.site)};
+            IntType idx_type;
+            idx_type.bits = 32;
+            idx_type.is_signed = true;
+            const IntType* bound_type {&idx_type};
+            if (site_is_range(*a.site) && a.site->atom->b->type.is_int() && a.site->atom->b->type.int_type != nullptr)
+            {
+                bound_type = a.site->atom->b->type.int_type;
+            }
+            const std::string binder {"q" + std::to_string(atom_no++)};
+            const E q {low::var(binder)};
+            const E off {low::bin(BinOp::Sub, q, low::dom("offset_of", {a.base}))};
+            const E ante {
+                low::and_(range_check(off, *bound_type),
+                          low::and_(low::bin(BinOp::Le, low::int_lit("0"), off), low::bin(BinOp::Lt, off, a.count)))};
+            const E slot {low::dom("loc", {block_of(a.base), q})};
+            const auto row = [&](const E& reach, const E& cond)
+            {
+                return low::forall_({low::LVar {binder, low::LType::Int}}, {{slot}}, low::implies(reach, cond));
+            };
+            const std::string place {quoted(a.place, "the memory")};
+            if (a.named)
+            {
+                const E in {low::not_(low::bin(BinOp::Or, low::bin(BinOp::Lt, q, low::int_lit("0")),
+                                               low::bin(BinOp::Le, low::dom("len", {block_of(a.base)}), q)))};
+                low::Meta m {meta("out-of-bounds", e.loc,
+                                  "this loop invariant calls `" + g.c_name + "`, which reads an element of " + place +
+                                      ", whose index may be outside the array")};
+                obl(full, guard, gdep, row(ante, in), adep, std::move(m));
+            }
+            low::Meta fm {meta("uninitialized", e.loc,
+                               "this loop invariant calls `" + g.c_name + "`, which reads an element of " + place +
+                                   " before it is given a value")};
+            obl(full, guard, gdep, row(low::and_(ante, a.any), cell_flag(slot, t)), adep, std::move(fm));
+        }
+        for (const ApplyConj& c : conj)
+        {
+            if (c.kind == ApplyConj::Kind::Value)
+            {
+                obl(full, guard, gdep, c.cond, adep, apply_row_meta(c, e, g));
+            }
+        }
+        for (size_t i {0U}; i < quants.size(); ++i)
+        {
+            ApplyConj qc;
+            qc.kind = ApplyConj::Kind::Value;
+            qc.cond = quants[i];
+            qc.loc = qlines[i]->loc;
+            qc.text = qlines[i]->text;
+            obl(full, guard, gdep, qc.cond, adep, apply_row_meta(qc, e, g));
+        }
+        const E gd {apply_guard(conj, quants)};
+        const E call {low::fn(method_name(g), args)};
+        return {gd ? low::ite(gd, call, inv_dummy(e.type)) : call, adep};
+    }
+
     // An application in a `check` (item 7): the rows first (the callee's parameter ranges and pointer shapes at the arguments, per atom its pure lines, the rows of record 0061 item 10 over its
     // interval and the element range, then each value clause), then the fact with the bare application, whose own Viper check holds because every row was asserted (a failed row is assumed).
     LV apply_check(const Expr& e, const Function& g, const std::vector<E>& args, const Deps& adep, const Env& env,
@@ -21634,7 +21901,7 @@ private:
                 return low::forall_({low::LVar {binder, low::LType::Int}}, {{slot}}, low::implies(reach, cond));
             };
             const std::string text {gs.atom->a != nullptr ? gs.atom->a->c_text : std::string()};
-            const std::string base_text {named ? argx.var->name : argx.c_text};
+            const std::string base_text {named ? argx.var->name : arg_spelling(argx)};
             const std::string place {quoted(base_text, "the memory")};
             const auto where = [&](low::Meta m)
             {

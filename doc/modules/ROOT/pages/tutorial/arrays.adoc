@@ -135,6 +135,57 @@ arrays_max_strict.c:31: error: postcondition: the postcondition of `max_of` may 
 arrays_max_strict.c:19: note: this is the postcondition
 ----
 
+== The exact sum
+
+A quantifier says something about each element. The sum of the elements is one value computed from all of them, and a
+contract names it with a pure function that `cerastes verify` reads: here `prefix_sum(a, n)` adds `a[0]` to
+`a[n - 1]`, one element at a time from the end.
+
+[source,c]
+----
+include::example$tutorial/arrays_sum.c[tag=source]
+----
+
+[source,console]
+----
+arrays_sum.c: verified (2 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`prefix_sum` has a contract of its own, and `cerastes verify` checks it once:
+
+* `cerastes_reads_range(a, n)` in its `requires` says which elements its body may read; a read outside them would be an
+  error in `prefix_sum`.
+* `CERASTES_DECREASES(n)` is its measure: the recursive call is made with `n - 1`, so the recursion ends.
+* The `ensures` bounds the result. The body computes in `long long`, and the bound is what shows that
+  `prefix_sum(a, n - 1) + a[n - 1]` cannot overflow; a caller that adds to a sum learns the same bound from it.
+
+The loop's invariant says that `s` is the sum of the elements read so far. On entry `i` is `0` and the sum of no
+element is `0`; after an iteration, `prefix_sum(a, i + 1)` is `prefix_sum(a, i) + a[i]`, which `cerastes verify` gets
+by unfolding the definition once; on exit `i` is `n`, and the invariant is the `ensures`. Each call of `prefix_sum` in
+an annotation is checked where it stands: the invariant may call it only over elements that the loop holds.
+
+Claim one element too many, `s == prefix_sum(a, i + 1)`, and the proof fails in several ways at once (the
+`requires` also bounds `n` below `INT_MAX`, so that `i + 1` cannot overflow and the errors are only these): the
+invariant reads `a[i]`, which the loop does not hold when `i` is `n`; it is false on entry; an iteration does not keep
+it; and the `ensures`, which rests on the invariant, may not hold at the `return`.
+
+[source,c]
+----
+include::example$tutorial/arrays_sum_offbyone.c[tag=source]
+----
+
+[source,console]
+----
+arrays_sum_offbyone.c:25: error: invariant-entry: this loop invariant may not hold on entry
+arrays_sum_offbyone.c:25: error: invariant-preserved: this loop invariant may not be preserved by an iteration
+arrays_sum_offbyone.c:25: error: permission: this loop invariant calls `prefix_sum`, which reads `a[0..i + 1)`, which this loop does not hold
+arrays_sum_offbyone.c:31: error: postcondition: the postcondition of `sum` may not hold
+arrays_sum_offbyone.c:21: note: this is the postcondition
+----
+
+xref:memory.adoc#array-values[A value computed from an array] lists what `cerastes verify` does not compute by itself,
+and xref:annotations.adoc#pure-functions[Pure functions] the rules for a pure function's body and contract.
+
 == What is next
 
 A loop that changes an array in place, such as adding one to every element, needs to speak

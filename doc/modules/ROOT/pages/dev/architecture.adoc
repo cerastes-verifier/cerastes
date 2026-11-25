@@ -129,6 +129,29 @@ related to the scalar ghosts and to the element type's range by assumed facts wh
 invariant and in a `check` the quantifier's pointer argument is a pointer variable or a named local array. What is not read is
 rejected with a message naming the session that will read it (the encoding specification lists them).
 
+A `pure` function that an annotation applies, or that carries a contract, is the third (decision
+{gh}/internal/decisions/0062-pure-functions.md[0062]). The encoder _reads_ it once (`read_pure` in `encode.cpp`): its signature, its
+contract, and its one `return E;`, which it encodes from a copy of the expression whose parameters are contract references, so that `E` follows
+exactly the rules of a `requires` clause. In VIR the function carries `pure` and `pure_body`, and a call of it in an annotation is an
+`Apply` node, which counts as a read of memory wherever a rule asks for an expression that reads none. `lower.cpp` writes a Viper
+_function_ `+pf_<name>__<id>+` (printed before the methods, with its contract, its measure and a body whose recursive calls each begin a line)
+and, for every read function, a definition-check method `+pf_<name>__<id>__wf+` that asserts every obligation of the body, the `ensures` and
+the measure, reported in the function at the operation. Silicon's own check of the function proves the `ensures` and the termination;
+those two rows are the only ones a user sees from it, and the position map says so. An application is `(guard ? pf_g(args) : default)` in a
+contract, so that Viper's check of the contract can never fail on it, and a row at each application (the permission to the places the callee
+reads, then the pure lines and value clauses of its `requires`) says what the guard assumed. In a well-formedness method an application is a ghost
+function `+hva_<method>__<callee>_<pre|post>+` of the method's domain, related to the callee's `ensures` and to the value it had on entry by assumed facts
+the lint pins. The prelude's functions print an empty `decreases` line in a program that holds a `+pf_+` function, and nowhere else.
+
+In a `check` the rows come first: the permission to the places the callee reads, then the callee's pure lines and value clauses as `precondition`
+rows, then the bound of a named array and the flag that every element read has a value, and only then the fact itself, so that a missing permission
+is told apart from a wrong value (a failed row is assumed afterwards, so Viper's own check of the application is silent). In a loop invariant the
+application also has a guard, as in a contract (the places the loop holds contain what the callee reads, and its value clauses hold), but the rows still come
+first: the framing, that the loop's places contain the interval the callee reads, is asserted at entry and at the back edge, then the callee's pure lines, the
+bound and the flags as invariant lines. The guard keeps Viper's own check of the application silent, not the user's: where it is false the clause is read with a
+default value, and a clause that the default breaks is reported as the invariant failing to be preserved, beside the framing row.
+The invariant of a `do ... while (0)` loop is no loop: its application is checked like a `check` and the fact is `invariant-entry`.
+
 To keep the Viper of a run:
 
 [source,sh]

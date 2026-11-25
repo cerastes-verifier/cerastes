@@ -19,6 +19,7 @@
 #include "lower.h"
 #include "pipeline.h"
 #include "report.h"
+#include "silicon.h"
 #include "silicon_output.h"
 #include "vir.h"
 #include "verify_config.h"
@@ -289,6 +290,11 @@ void test_silicon_output(Checks& c)
         SiliconVerdict v {parse_silicon_output("", 0)};
         c.expect(!v.verified && !v.problem.empty(), "no output is not a verdict");
     }
+    c.eq(silicon_prover_count(0U), 1, "an unknown hardware thread count runs one prover");
+    c.eq(silicon_prover_count(1U), 1, "one thread runs one prover");
+    c.eq(silicon_prover_count(8U), 8, "a machine of 8 threads runs 8 provers");
+    c.eq(silicon_prover_count(16U), 16, "a machine of 16 threads runs 16 provers");
+    c.eq(silicon_prover_count(172U), 16, "a machine of 172 threads runs 16 provers");
     {
         // Record 0062 item 11 (question 275): Silicon's axiomatisation warning about a `pf_` function, exactly, and nothing else of the kind.
         const auto warning = [](const std::string& function, const std::string& tail = "")

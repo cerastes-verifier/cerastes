@@ -740,6 +740,52 @@ argument other than a parameter (in a contract) or a pointer variable or local a
 or a `check`), the shapes a loop invariant or a `check` does not accept yet (above), structure members and global arrays
 under the quantifier, and the positions xref:annotations.adoc#forall[forall] lists.
 
+[#array-values]
+=== A value computed from an array
+
+A quantifier states a fact about each element; a value computed from all of them, such as their sum, is a pure
+function that `cerastes verify` reads (xref:annotations.adoc#pure-functions[Pure functions]). Its `requires` reads
+the range with `cerastes_reads_range`, its body is one `return`, and a recursive one carries a measure:
+
+[source,c]
+----
+include::example$memory/exact_sum.c[tag=sum_to]
+----
+
+A loop that computes the sum states, in its invariant, that the running total is the function's value over the
+prefix it has read. `cerastes verify` proves that the invariant holds on entry, that one iteration keeps it (the
+function's definition, unfolded once, relates `sum_to(a, i + 1)` to `sum_to(a, i)`), and that on exit it gives the
+`ensures`:
+
+[source,c]
+----
+include::example$memory/exact_sum.c[tag=sum]
+----
+
+Each call of a pure function in an annotation is checked where it stands. In a loop invariant, the loop must hold
+every element the function reads (here the loop holds `a[0]` to `a[n - 1]`, which the function's `requires` reads
+from `a[0]` to `a[i - 1]`); an element it does not hold, or one that has no value yet, is an error at the invariant.
+A write inside the summed prefix changes the function's value, and the invariant is then not kept.
+
+What `cerastes verify` does not compute by itself:
+
+* Where it checks a contract on its own, it knows a call's value only through the callee's `ensures` and the range of
+  the result's type (here all of `long long`): the tighter bound in the `ensures` of `sum_to` is what lets the
+  caller's arithmetic be checked, and what makes the loop's `s + a[i]` safe.
+  Without it, the function's own addition and the loop's are reported as `overflow`.
+* It unfolds a recursive definition one step at a time: a `check` at known arguments may need one written step
+  per element (`check(sum_to(a, 1) == a[0])` before `check(sum_to(a, 2) == a[0] + a[1])`).
+* One range of the caller must hold every element a call reads: a call over elements held by two different
+  ranges is reported as `permission`.
+* A pointer argument of a call, for a parameter that the callee reads through, is a parameter (in a contract) or a
+  pointer variable or a local array (in a loop invariant or a `check`); `&a[1]` or `p + 1` there is rejected.
+* A call in a loop invariant or a `check` of a function that reads elements which are themselves pointers (`+int **+`,
+  with `cerastes_reads_range(pp, n)`) is rejected; the same call in a contract is accepted. A pointer argument that
+  pass:[C++] converts below its first level (an `+int **+` for a `const int *const *` parameter) is rejected, as the same
+  conversion is elsewhere (<<pointers-to-pointers>>).
+* A call over the range of a parameter marked `CERASTES_MUST_INIT` or `CERASTES_REF_TO_UNINIT` is reported as
+  `permission`, even where the function has given every element a value: a call does not read a marked range yet.
+
 [#globals]
 == Global variables
 
@@ -1795,6 +1841,14 @@ These are rejected with a diagnostic, never approximated
   loop);
 * globals defined in another file, `volatile`, `_Atomic`, `const` structure and
   thread-local globals, `static const` locals, and global arrays;
+* for pure functions (<<array-values>>): a call in a `decreases`, in the count or the
+  condition of an ownership or reading annotation, in an element's index, as a trailing
+  argument of `cerastes_forall`, under `old` and in the body of a function that
+  `cerastes_forall` names; two pure functions that call each other, or a function that its
+  own contract reaches again; a pure function that returns a pointer or a structure, reads a
+  global or reads through a pointer loaded from memory; `owns`, `owns_range`, `live` or a
+  conditional atom in its `requires`, and any atom in its `ensures`; `cerastes_forall` naming a
+  function that has a contract; predicates, `fold` and `unfold`;
 * the structure features listed in <<structures>>;
 * `owns`, `reads` and `live` in a `do … while (0)` invariant or a measure, and of
   a global itself in an invariant (`cerastes_owns(g)`: the loop holds it

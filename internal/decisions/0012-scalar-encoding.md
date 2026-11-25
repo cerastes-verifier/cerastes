@@ -184,3 +184,5 @@ verifies; Viper's `\` and `%` on `Int` are Euclidean (`(-7)\2 == -4`, `(-7)%2 ==
 *2026-10-29, amended by 0038 (M4.5b1c1): item 8 — a loop condition that touches memory (a pointer node, a cell, `&`, `*`) is lowered in 0020 item 7's top-test shape, its checks asserts at every evaluation, since Viper refuses `perm` in an invariant clause; no invariant or measure clause holds `perm`.*
 
 *2026-11-11, amended by 0059 (M4.5e1a): item 12 — automatic local arrays of one dimension (bool, integers, enumerations, pointers to objects) are accepted (0059); the rest of arrays stays rejected, each lifted where 0059 item 1's table says.*
+
+*2026-11-24, amended by 0062 (M4.5e1d): item 11 — beside the prelude, a program may hold the Viper functions of read `pure` functions (`pf_<name>__<id>`, with a `requires`, an `ensures` and a `decreases`); the prelude functions print an empty `decreases` in such a program only (0062 items 6, 12).*

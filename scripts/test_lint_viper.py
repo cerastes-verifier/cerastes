@@ -9113,6 +9113,136 @@ class SiteGuardQuantifierTests(unittest.TestCase):
         self.assertTrue(any(p.startswith(f"t.vpr:{hits[0] + 1}:") for p in probs), probs)
 
 
+class InvariantGuardQuantifierTests(unittest.TestCase):
+    """Decision 0062 item 7 (cut 2) in a loop's `invariant` line (Part D; the emitted `ctd_forall_sum`): the user's conjunct `s == (G ? pf(a, i) : 0)` whose
+    guard G holds the callee's quantified `requires` clause at the arguments (`a`, `i`), its element reads' membership the interval of the method's own atom
+    (the formal `p_a` with the count `p_n`) while the read names the loop's variable `v_a`; and the lines that restate it under `prior ==>`.  The fixture
+    is `SiteGuardQuantifierTests.CONTRACT` (the emitted callee and trusted `sq`) plus a method with a loop whose invariant lines are made from `sq`'s `ensures`
+    application by renaming (the arguments to the loop's variables, the read's membership kept on the formal).  Twins: another element condition, another
+    bound, an interval that is neither the site's nor the callee's, a read pointer that is not the callee's argument, the cross form outside an `invariant`,
+    an unparenthesized quantifier, a line that applies nothing."""
+
+    MEMBER = ("(block_of(loc(block_of(p_a__0), q0)) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(p_a__0), q0)))) && "
+              "(offset_of(loc(block_of(p_a__0), q0)) < (offset_of(p_a__0) + p_n__1))")
+    MEMBER_CROSS = ("(block_of(loc(block_of(v_a__0), q0)) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(v_a__0), q0)))) && "
+                    "(offset_of(loc(block_of(v_a__0), q0)) < (offset_of(p_a__0) + p_n__1))")
+    INCLUSION = ("(((block_of(p_a__0) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(p_a__0))) && "
+                 "((offset_of(p_a__0) + p_n__1) <= (offset_of(p_a__0) + p_n__1)))")
+    INCLUSION_LOOP = ("(((block_of(v_a__0) == block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(v_a__0))) && "
+                      "((offset_of(v_a__0) + v_i__3) <= (offset_of(p_a__0) + p_n__1)))")
+
+    @classmethod
+    def value(cls):
+        base = SiteGuardQuantifierTests.CONTRACT
+        lines = base.split("\n")
+        ens = next(l for l in lines if l.startswith("  ensures res == ") and "forall q0" in l)
+        v = ens[len("  ensures res == "):]
+        assert cls.MEMBER in v and cls.INCLUSION in v and v.endswith("? pf_smallsum__0(p_a__0, p_n__1) : 0)")
+        v = v.replace(cls.MEMBER, "@MEMBER@").replace(cls.INCLUSION, "@INCLUSION@")
+        v = v.replace("p_a__0", "v_a__0").replace("p_n__1", "v_i__3")
+        return v.replace("@MEMBER@", cls.MEMBER_CROSS).replace("@INCLUSION@", cls.INCLUSION_LOOP)
+
+    @classmethod
+    def program(cls, invariants=None, kind="invariant"):
+        base = SiteGuardQuantifierTests.CONTRACT
+        lines = base.split("\n")
+        start = next(i for i, l in enumerate(lines) if l.startswith("method f_sq__1("))
+        header = []
+        for l in lines[start:]:
+            if l.startswith("  ensures") or l.startswith("  decreases"):
+                break
+            header.append(l)
+        header[0] = header[0].replace("f_sq__1", "f_lp__2")
+        value = cls.value()
+        user = "((v_i__3 >= 0) && (v_i__3 <= v_n__1)) && (v_s__2 == " + value + ")"
+        invs = invariants if invariants is not None else [user, "(" + user + ") ==> (!(((v_n__1 - v_i__3) < (-2147483648)) || (2147483647 < (v_n__1 - v_i__3))))"]
+        body = ["  ensures ((-2147483648) <= res) && (res <= 2147483647)", "  decreases _", "{",
+                "  var v_a__0: Ref", "  var v_n__1: Int", "  var v_i__3: Int", "  var v_s__2: Int", "  v_a__0 := p_a__0", "  v_n__1 := p_n__1",
+                "  v_i__3 := 0", "  v_s__2 := 0",
+                "  while (v_i__3 < v_n__1)"]
+        body += [f"    {kind} {x}" for x in invs]
+        body += ["    decreases v_n__1 - v_i__3", "  {", "    v_i__3 := v_i__3 + 1", "  }", "  res := v_s__2", "}"]
+        return base + "\n" + "\n".join(header + body) + "\n"
+
+    def probs(self, text):
+        return text.split("\n"), lv.lint_vpr(text, None, "t.vpr", "t.vpr.map")
+
+    @staticmethod
+    def user_lines(lines):
+        return [i for i, l in enumerate(lines, start=1) if l.startswith("    ") and "forall q0" in l and "pf_smallsum__0(v_a__0, v_i__3)" in l]
+
+    def item11(self, text):
+        lines, probs = self.probs(text)
+        hits = self.user_lines(lines)
+        self.assertEqual(len(hits), 2, hits)
+        return {n: [p for p in probs if p.startswith(f"t.vpr:{n}:") and "decision 0061 item 11" in p] for n in hits}
+
+    def test_the_emitted_invariant_lines_are_clean(self):
+        for n, got in self.item11(self.program()).items():
+            self.assertEqual(got, [], (n, got))
+
+    def test_the_twins_of_the_user_invariant_line(self):
+        cases = {
+            "a weaker element condition": (">= (-1000)", ">= (-999)"),
+            "another bound": ("(offset_of(p_a__0) + p_n__1))", "(offset_of(p_a__0) + (p_n__1 - 1)))"),
+            "an interval that is neither the site's nor the callee's": ("< (offset_of(p_a__0) + p_n__1))", "< (offset_of(p_a__0) + (p_n__1 - 3)))"),
+            "a read pointer that is not the callee's argument": ("loc(block_of(v_a__0), q0)) == block_of(p_a__0)", "loc(block_of(p_a__0), q0)) == block_of(p_a__0)"),
+            "a membership pointer that is not an atom of the site": ("== block_of(p_a__0)) && (offset_of(p_a__0) <= offset_of(loc(block_of(v_a__0), q0)))",
+                                                                  "== block_of(v_a__0)) && (offset_of(v_a__0) <= offset_of(loc(block_of(v_a__0), q0)))"),
+        }
+        for label, (old, new) in cases.items():
+            for which in (0, 1):
+                with self.subTest(case=label, line=which):
+                    text = self.program()
+                    lines = text.split("\n")
+                    n = self.user_lines(lines)[which]
+                    self.assertIn(old, lines[n - 1], label)
+                    lines[n - 1] = lines[n - 1].replace(old, new)
+                    got = self.item11("\n".join(lines))
+                    self.assertTrue(any("applied there" in p for p in got[n]), (label, n, got[n]))
+
+    def test_the_other_line_of_a_twin_stays_clean(self):
+        text = self.program()
+        lines = text.split("\n")
+        n = self.user_lines(lines)[0]
+        lines[n - 1] = lines[n - 1].replace(">= (-1000)", ">= (-999)")
+        got = self.item11("\n".join(lines))
+        other = [k for k in got if k != n]
+        self.assertTrue(got[n])
+        self.assertEqual(got[other[0]], [])
+
+    def test_the_cross_form_is_for_an_invariant_only(self):
+        # the same conjunct in a method's `ensures` or a call's `assert` stays refused: a contract's read membership is the read pointer's own interval
+        for kind in ("ensures", "assert"):
+            with self.subTest(kind=kind):
+                text = self.program(kind=kind)
+                lines, probs = self.probs(text)
+                hits = self.user_lines(lines)
+                self.assertTrue(hits)
+                for n in hits:
+                    self.assertTrue(any(p.startswith(f"t.vpr:{n}:") and "applied there" in p for p in probs), (kind, n))
+
+    def test_an_unparenthesized_quantifier_and_a_line_that_applies_nothing(self):
+        text = self.program()
+        lines = text.split("\n")
+        n = self.user_lines(lines)[0]
+        bare = list(lines)
+        bare[n - 1] = bare[n - 1].replace("&& (forall q0", "&& forall q0", 1)
+        probs = lv.lint_vpr("\n".join(bare), None, "t.vpr", "t.vpr.map")
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") and "parenthesized" in p for p in probs), probs)
+        nothing = list(lines)
+        nothing[n - 1] = nothing[n - 1].replace("pf_smallsum__0(v_a__0, v_i__3)", "pf_other__9(v_a__0, v_i__3)")
+        probs = lv.lint_vpr("\n".join(nothing), None, "t.vpr", "t.vpr.map")
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), probs)
+
+    def test_an_invariant_quantifier_of_the_old_shapes_is_unchanged(self):
+        # a loop conjunct of decision 0059 item 8 in an invariant line that applies no pure function keeps its own verdict
+        text = self.program(invariants=["forall k: Int :: { loc(block_of(p_a__0), k) } ((offset_of(p_a__0) <= k) && (k < (offset_of(p_a__0) + p_n__1))) ==> acc(loc(block_of(p_a__0), k).v_int, amt_0)"])
+        lines, probs = self.probs(text)
+        n = next(i for i, l in enumerate(lines, start=1) if l.startswith("    invariant forall k"))
+        self.assertEqual([p for p in probs if p.startswith(f"t.vpr:{n}:")], [])
+
+
 class KeepFactCellTests(unittest.TestCase):
     """Decision 0062 item 8 (iii), cell atoms (audit round 3, R3-S1): the keep fact over a method's `reads(*p)` atom and its `ensures` partner, as lowering
     emits it (the audit's `k2_heap_guard_cell`: `flip` reads `*a` under `*flag != 0` in the requires and in the ensures, and applies `get(a)`, whose

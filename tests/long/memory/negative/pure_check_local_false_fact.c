@@ -1,8 +1,8 @@
 // expect: error check @ L19
 // mode: c23, c++20
 // twin: tests/memory/pure_check_local_array.c
-// Pins: 0062 item 7 (S46 (f)): a false fact over an application in a check on a local array is the check error
-// Pre-registered from record 0062 (Part B), before the code: check
+// Pins: 0062 item 7 (S46 (f)): a false fact over an application in a check on a local array is the check error. Moved to tests/long/ in M4.5e1d (owner question 285: 226-356 s measured on the x86-64 box). Pre-registered from record 0062 (Part B), before the code: check
+// timeout: 1800
 #include <cerastes.h>
 
 CERASTES_PURE long long sum_to(const int *a, int n)

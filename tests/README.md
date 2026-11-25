@@ -342,6 +342,18 @@ refuse a `.vpr` file that the current MANIFEST does not list (a stale file).
 repository (the harness self-test) writes under `build/vpr/external/`.
 `--update-golden` leaves verify tests alone, and does not clear `build/vpr/`.
 
+**Silicon's axiomatisation warning** (decision 0062 item 11, owner question 275). A program with a read `pure`
+function (a Viper function `pf_<name>__<id>`) can make Silicon print, before its verdict, `Could not resolve expression
+<e> (<file>@<l>.<c>--<l>.<c>) during the axiomatisation of function pf_<name>__<id>. This typically happens if the
+expression is on an infeasible path, i.e. is dead code. The unresolved expression will be replaced by a fresh symbol,
+i.e. an arbitrary value.` The harness and the driver accept exactly this line, whatever the verdict, and only when it
+stands before the verdict line and names a `pf_` function with a digits-only id (`_AXIOMATISATION_WARNING_RE` in
+`scripts/run_tests.py`; `src/driver/silicon_output.cpp` reads the same text, and the self-test runs both readers on
+the same samples). Any other warning, and this line for another function or for a name that is not `pf_<name>__<digits>`,
+are stray lines: no verdict, exit status 3, a failing test whatever it expects. After the verdict the line is stray too,
+except that after an error entry it joins that entry's text, as any continuation line does (audit round 1, N2; the two
+readers agree). The warning is not an outcome and a test does not list it.
+
 ### Verify options
 
 `// verify-options: --strict-init` (decision 0042) adds the words after the colon to the
@@ -697,6 +709,8 @@ self-test run included: the self-test guard rejects any `-j` on that line). Each
 which is why CI sets `CERASTES_JOBS=3`: three fit the 7 GB of its runner, eight do not (the Linux job, with 4
 cores and 16 GB, sets 4). `scripts/walker_oracle.py` keeps its own default
 (`min(8, cores)`, for its front-end runs only) and does not read `CERASTES_JOBS`.
+
+Inside one worker, a Silicon run starts at most 16 parallel provers: `--numberOfParallelVerifiers min(cpu count, 16)`, from `run_silicon` of `run_tests.py` for a `.vpr` test and from the driver (`src/driver/silicon.cpp`) for `cerastes verify` (M4.5e1d, owner question 286: Silicon's default of one prover per hardware thread cost about 30 s of startup on a big box). No outcome depends on it; `SiliconProverCapTests` pins the harness's command line.
 
 ## The PR tier (`--pr-base`, `CERASTES_CHECK_BASE`)
 
@@ -1231,3 +1245,28 @@ Reasons are Viper reason ids: `assertion.false`, `insufficient.permission`,
 
 Categories for C and C++ tests are the driver's: see
 [Categories for C and C++ tests](#categories-for-c-and-c-tests).
+
+### The rows of a Viper function (`pure_function`, decision 0062)
+
+A read `pure` function is a Viper `function` named `pf_<name>__<id>` (a digits-only id), not a method, and the driver maps
+only two kinds of its rows to errors (decision 0062 item 11); every other row on a function is `internal` and a test
+that reaches one fails as a tool failure:
+
+| Row | Viper error | C/C++ category | Reported at |
+|---|---|---|---|
+| a line of a `pf_` function's `ensures` | `postcondition.violated` | `postcondition` | the function's `return` (the position of the returned expression), with a note at the clause |
+| a line of its body that begins with an application of the function itself | `termination.failed` | `termination` | the recursive call, with a note at the `decreases` |
+
+Every other row on a function is `internal`; the obligations of a function's body (an overflow, a read its `requires` do not
+frame, a callee's `requires`) are reported through other rows (decision 0062 items 6 and 7). A twin whose failing row is inside a `pure` body gives that function no `ensures`, or one that holds for any
+value (a guarded body takes its default where the row fails, and a real `ensures` may then fail beside it: S46 (a)).
+`tests/viper-smoke/memory/s46_*.vpr` are the hand-written fixtures of these rows. A `pf_` function with no `decreases`
+and a self-application is `missing_decreases`, rejected before Viper.
+
+The tag `pure_function` (`cerastes-pure_function`) is a `pure` function that `cerastes verify` reads and cannot encode; the
+message names the rule it breaks (the list is in the annotations page). Today the pins that name the tag are
+`tests/scalar/negative/reject_pure_{two_statements,local_declaration,constexpr}` and
+`tests/memory/negative/reject_pure_{returns_pointer,struct_pointer_parameter}`; the other rules of the list are pinned
+under the tag of the construct (for example a member function is `unsupported_declaration`, a `void` result
+`pure_returns_void`), and a rule with no pin yet (a template, a variadic function) is pending. A rejection of a construct *inside* a returned expression keeps the tag of the same construct in an annotation
+(`call_in_annotation`, `old_outside_ensures`, `unsupported_annotation`).

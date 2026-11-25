@@ -27,8 +27,16 @@ struct SiliconRun
     std::string vpr_name;
 };
 
+// The number of provers Silicon runs in parallel (`--numberOfParallelVerifiers`): the hardware's thread count, at
+// least 1 (`hardware_concurrency` may be 0) and at most 16.  Silicon's own default is one per core, which costs about
+// 33 s of start-up on a 172-core machine (owner question 286); on a machine of 16 threads or fewer the cap changes
+// nothing.
+// scripts/run_tests.py's run_silicon uses the same rule.
+int silicon_prover_count(unsigned hardware_threads);
+
 // Writes `vpr` as program.vpr in a new private temporary directory, runs
-//     java -Xss128m -jar <jar> --z3Exe <z3> --numberOfErrorsToReport 0 program.vpr
+//     java -Xss128m -jar <jar> --z3Exe <z3> --numberOfErrorsToReport 0 --numberOfParallelVerifiers <n> program.vpr
+// (n = silicon_prover_count(hardware threads): at most 16, decision 0011 item 11)
 // there with a clean environment, and removes the directory.  `timeout_seconds` is a wall-clock limit for the
 // whole process group (0 kills it at once); it is killed, with Z3, when the limit passes.
 SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int timeout_seconds);

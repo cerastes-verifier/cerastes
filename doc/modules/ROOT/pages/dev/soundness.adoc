@@ -69,6 +69,18 @@ between two parameters on one block, and the keep fact of a `reads_range` atom t
 under the guards of both atoms (without them it would let a wrong contract verify). The lint also refuses a quantifier with no
 type range for the bound variable and a computed `loc` term in the body (the form with one binder, which does not finish on neighbours).
 
+A read `pure` function adds two more things Silicon is asked to accept, argued in decision
+{gh}/internal/decisions/0062-pure-functions.md[0062]. First, its Viper function has a definitional axiom that Silicon emits only for a function that
+verified; the lint requires a `decreases` line on every `+pf_+` function (with none Silicon checks nothing, and a recursive function that
+never decreases would verify), a `+pf_<name>__<id>__wf+` method that holds the definition check, and a body, an `ensures` and a
+`requires` of the exact shapes the encoding specification lists (the permission is `wildcard` in those lines and nowhere else). Second, the
+facts a well-formedness method assumes about an application's ghost function are assumptions: the result's type range, the callee's `ensures`
+at the arguments (only under the callee's own precondition, because an `ensures` outside it may be false and would make every later row
+vacuous: the lint refuses the unguarded form), and the keep fact for a `reads` atom that comes back (only under both atoms' guards and the
+inclusion of the callee's interval). The driver accepts exactly one Silicon warning, `Could not resolve expression ... during the axiomatisation of function`
+for a `+pf_+` function and before the verdict: it is printed when no explored path evaluates an expression, and the replacement symbol is used only inside
+the definitional axiom, whose value never depends on it for an argument that satisfies the `requires` (the argument, with its source, is in the decision).
+
 == Trusted contracts
 
 Some results rest on a contract that nothing here verifies.

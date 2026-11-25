@@ -1,6 +1,6 @@
 # 0062 — Pure functions (M4.5e1d)
 
-- **Status:** draft (2026-11-24, M4.5e1d), written before code (invariant 6) from the plan's section 6
+- **Status:** accepted (2026-11-25, M4.5e1d; drafted 2026-11-24), written before code (invariant 6) from the plan's section 6
   (`.claude/plans/m4-5e1d-pure-functions.md`, approved 2026-11-24); to be revised only by P81's and S46's decision
   tables (the plan's section 5; `internal/il-inventory.md`, chapter M4.5e1d; fixtures
   `tests/viper-smoke/memory/s46_*.vpr`), by Step 0's runs and by audit round 1 (Opus, on Commit 1 `92294b7`: every
@@ -16,7 +16,12 @@
   the snapshot `62f79b5` of Part C: no blocking item; four should-fix items, all taken: the keep fact over a cell atom
   admitted by the lint with a test, an application over a range of pointer elements in a `check` or a loop invariant
   rejected, the pointer-argument conversion peeled one qualifier level only, a source pin for an application in an
-  atom's guard; `build/m4.5e1d/auditor-report-3.md`). Owner decisions:
+  atom's guard; `build/m4.5e1d/auditor-report-3.md`) and by audit round 4 (Opus, on the snapshot `7f1a494` of Part D
+  and the pages; probes on the x86-64 box: no blocking item, so it is also the plan's re-audit; should-fix items R4-S1
+  to R4-S4 taken: a contract's check knows an application's result through the callee's `ensures` and the result
+  type's range (fact (i)), a pure function's `requires` calls only functions that read no memory, the pages list the
+  rejections of round 3's R3-S2 and R3-S3 and item 7's marked-range false alarm, and `internal/encoding.md` states the
+  loop form's guard as built; R4-S5 a listed limit, fail closed: two of the auditor's wrong probes, a `must_init` filler whose invariant also applies a function over the range it is still filling, time out at 300 s on the box (exit 3) instead of reporting `uninitialized`; the prefix-only twin verifies in 36 s; item 7 and the handoff's questions; `build/m4.5e1d/auditor-report-4.md`). Owner decisions:
   - At M4.5e1's planning (2026-11-11): **226** a `forall` inlines its function's body; a call of a `pure` function
     anywhere else waits for e1d. **227** the exact sum is in M4.5e1: e1d takes `pure` bodies, their calls and their
     recursion from M4.5f1/f2; M4.5f1 keeps predicates, `fold`/`unfold` and pure functions over predicates.
@@ -58,16 +63,29 @@
     accepts, not from an ordinary `requires`; **281** "Count read pure functions": a read `pure` function counts as one
     function verified (item 9; amends 0011 item 9); **282** "Keep fix + add pin": item 8's listed false alarm (a
     callee known only through its `ensures`) has a pinned negative test beside the positive that gives the callee an
-    `ensures`. **279**
+    `ensures`; **283** "Rows, as elsewhere": in a loop invariant a callee atom's pure lines are explicit `precondition`
+    rows, as in contracts and checks (an application outside its callee's `requires` whose interval passes the framing
+    would otherwise take its default silently, an approximation); **284** "Accept, check form": an application in a
+    `do … while (0)` loop's invariant (0014 item 3: straight-line code) takes the `check` form of item 7, its fact
+    asserted as that invariant's `invariant-entry`. **279**
     (the test-mutator's lint found two facts of item 8 that `f__wf` cannot assume safely, outside the plan: fact
     (i) for an enumeration result, fact (ii) for a callee whose `requires` holds an application) "Accept, M4.8": both
-    are listed limits, fail closed (item 8).
+    are listed limits, fail closed (item 8). **285** (plan section 11's 120 s rule: on the x86-64 box, where the owner
+    now has every test run (2026-11-24), the false facts of `pure_sum_caller_write_between.c` and
+    `pure_check_local_false_fact.c` take 226–356 s, one Z3 refutation over the sum of a 3- or 4-element array: 34 s
+    for 2 elements, 207 s for 3, 251 s for 4; the recommendation was two-element programs) "Move to tests/long/": both
+    move unchanged to `tests/long/memory/negative/` (record 0057), and `pure_sum_caller.c` keeps a default-tier twin
+    (question 207's rule) in `pure_sum_caller_write_between_short.c`, the same program over 2 elements; **286**
+    "Fix now in e1d": the driver and `run_tests.py` pass Silicon `--numberOfParallelVerifiers` min(hardware threads,
+    16); Silicon's default, one prover per hardware thread, cost every run on the 172-thread box about 33 s of startup
+    (a trivial method: 37 s by default, 8 s with 16), and on a 16-thread Mac the cap changes nothing (amends 0011
+    item 11).
   - Standing: 69 (no EDG work), 77 (one context), 160 (a new test's expect line may be corrected after its first run,
     each listed in status), 176 (the owner handles CI).
 - **Milestone:** M4.5e1d.
 - **Amends:** 0006 items 8 and 10; 0010 item 11; 0011 items 4, 7, 9 and 10's messages; 0012 item 11; 0013 items 2, 4, 5
   and 8; 0024 item 2 and 0025 item 5 (the exemption of a spec routine's region); 0037 item 7; 0041 item 12; 0042 item 4
-  and 0044 item 4 (their messages); 0061 items 1, 3, 4, 7 and 11.
+  and 0044 item 4 (their messages); 0061 items 1, 3, 4, 7 and 11; 0011 item 11 (the prover cap, question 286).
 
 ## Context
 
@@ -240,7 +258,9 @@ the branch of the plan's decision table it took.
    - **The guard `G`** of an application is the conjunction of (i) for each atom of the callee, the disjunction over the
      enclosing contract's unmarked sites of that cell field of "the site's guard, the same block, and the callee's
      interval inside the site's" (a cell atom is an interval of one slot; **one site must hold the whole interval**: a
-     listed limit; a marked site frames no application, as 0061 item 7 has it for quantified reads), and (ii) every
+     listed limit; a marked site frames no application, as 0061 item 7 has it for quantified reads; and a loop that fills a
+     `must_init` range while its invariant applies a function over the part not yet filled may time out, exit 3,
+     instead of `uninitialized`: audit round 4's R4-S5, fail closed), and (ii) every
      other line of the callee's Viper precondition that reads no memory, at the arguments: the parameters' ranges, each
      atom's pure line, each value clause. The callee's element-range line follows from (i): a site that frames an
      application promises it. **One helper computes `G`'s conjuncts for the guard and for the rows**, so the guard can
@@ -260,7 +280,7 @@ the branch of the plan's decision table it took.
    - **A method's contract (`CMode::Method`), a `pure` function's body and contract:** the application is `(G ?
      pf_g(args) : d)`, `d` the type's default, so that Viper's own check of the contract or the function can never fail;
      the rows are the `__wf` method's (item 8): per atom one `permission` row ("the contract of `f` calls `g`, which
-     reads `a[0]` to `a[n - 1]`, without owning them"), per value clause one `precondition` row ("the contract of `f`
+     reads `a[0..n)`, without owning them"), per value clause one `precondition` row ("the contract of `f`
      calls `g`, whose `requires` may not hold: `0 <= n`", with a note at the callee's clause).
    - **A call and a return** (`CMode::Call`, `CMode::Ret`): the clause's `precondition` or `postcondition` rows as today
      (one per clause, per conjunct where `push_clauses` splits): the clause is lowered again over the arguments, so the
@@ -269,8 +289,7 @@ the branch of the plan's decision table it took.
      postcondition, as today.
    - **A loop invariant (`CMode::Inv`):** before the user's clause, in evaluation order, the framing of each callee atom:
      **its interval lies inside one place the loop holds** (a range place or an array place; no quantifier), asserted at
-     entry and at the back edge as a read's framing is (`permission`, "this loop invariant calls `g`, which reads `a[0]`
-     to `a[i - 1]`, which this loop does not hold"); then one `obligation_clause` invariant line per obligation: a named
+     entry and at the back edge as a read's framing is (`permission`, "this loop invariant calls `g`, which reads `a[0..i)`, which this loop does not hold"); then one `obligation_clause` invariant line per obligation: a named
      array's bound (`out-of-bounds`), the flags over the interval in 0061's `q0` form, guarded by the framing
      (`uninitialized`), each value clause of the callee (`precondition`); the application in the clause is guarded by the
      same inclusion and value clauses, as `inv_elem` guards a read. A loop whose invariant holds an application of a
@@ -282,7 +301,7 @@ the branch of the plan's decision table it took.
      tests expect every error the driver prints (question 254's rule). Two arrays with a pair of places need the
      entry case split `if (lvloc(block_of(b)) == lvloc(block_of(a))) { }` before the snapshots, as 0060 item 11 has
      it (S46 (d)'s copy loop).
-   - **A `check` (`CMode::None`):** **first the callee's parameter ranges and pointer shapes at the arguments** (audit
+   - **A `check` (`CMode::None`), and a `do … while (0)` loop's invariant (question 284):** **first the callee's parameter ranges and pointer shapes at the arguments** (audit
      round 1, S5: S46 (f) writes them as rows; without them the native `application.precondition` would fail, an exit
      3), then per callee atom **its pure lines** (`p != null`, the shape, `0 <= n`,
      `offset_of(p) + n <= len(block_of(p))`; `precondition`, question 278: in the planned order a count past a local
@@ -299,7 +318,7 @@ the branch of the plan's decision table it took.
      | a `pure` function's own body | `G` | its own `requires` | its own `requires` |
      | a method's contract | `G` | the framing site (unmarked) | the site's range line |
      | a call, a return | `G` over the arguments | `call_atoms`' and the return's marked rows | their range rows |
-     | a loop invariant | `G` over the places | the place's conjuncts | the place's range conjunct |
+     | a loop invariant | `G` over the places, the atoms' pure lines and value clauses also as `precondition` rows (question 283) | the place's conjuncts | the place's range conjunct |
      | a `check` | the `precondition` rows, the parameters' ranges and pointer shapes among them (audit round 1, S5) | the marked rows | the `internal` row above |
 
 8. **`f__wf`** (amends 0037 item 7 and 0061 item 7; variant M stays: the method is heap-free and applies no function).

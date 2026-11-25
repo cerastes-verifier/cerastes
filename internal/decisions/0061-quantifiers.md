@@ -401,3 +401,5 @@ its decision table, and the item it revised. An outcome outside its table stops 
 - Programs accepted before e1c keep their Viper and maps byte for byte, except `tests/memory/verifast/carrays.c`, whose
   contracts the port strengthened (Flips C; its expectations unchanged).
 - `cerastes_old` in loop invariants (item 12) is M4.5e2's, by cut 1.
+
+*2026-11-24, amended by 0062 (M4.5e1d): item 1 — calls of `pure` functions are lifted outside a quantifier's binder (0062 item 4); item 3 — a `forall` naming a function with a contract stays rejected, now naming M4.5e2 (question 265); item 4 — a `pure` function that no `forall` names is read when it is called or has a contract (0062 item 2); item 7 — `f__wf` also holds `hva_` ghost functions of applications with their facts (0062 item 8); item 11 — the lint admits `pf_` functions and the `hva_` facts (0062 item 12).*

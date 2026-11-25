@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 #include <vector>
 
 extern char** environ;
@@ -44,6 +45,11 @@ struct TempDir
 };
 
 } // namespace
+
+int silicon_prover_count(unsigned hardware_threads)
+{
+    return static_cast<int>(hardware_threads < 1U ? 1U : (hardware_threads > 16U ? 16U : hardware_threads));
+}
 
 SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int timeout_seconds)
 {
@@ -125,8 +131,17 @@ SiliconRun run_silicon(const SiliconTools& tools, const std::string& vpr, int ti
     posix_spawnattr_setpgroup(&attr, 0); // its own process group, so that a timeout reaches Z3 too
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETPGROUP);
 
-    std::vector<std::string> argv_s {
-        tools.java, "-Xss128m", "-jar", tools.jar, "--z3Exe", tools.z3, "--numberOfErrorsToReport", "0", run.vpr_name};
+    std::vector<std::string> argv_s {tools.java,
+                                     "-Xss128m",
+                                     "-jar",
+                                     tools.jar,
+                                     "--z3Exe",
+                                     tools.z3,
+                                     "--numberOfErrorsToReport",
+                                     "0",
+                                     "--numberOfParallelVerifiers",
+                                     std::to_string(silicon_prover_count(std::thread::hardware_concurrency())),
+                                     run.vpr_name};
     std::vector<char*> argv;
     for (std::string& s : argv_s)
     {

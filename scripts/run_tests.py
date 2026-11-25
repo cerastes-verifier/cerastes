@@ -2487,9 +2487,21 @@ def run_tool(cmd: list[str], env: dict[str, str], timeout: int) -> ToolRun:
                    proc.stderr.decode("utf-8", "surrogateescape"))
 
 
+# Silicon starts one prover per hardware thread by default; on a big box that is dozens of Z3 processes whose startup alone costs about 30 s a run
+# (M4.5e1d, owner question 286).  The harness and the driver (src/driver/silicon.cpp) pass the same cap: no outcome depends on it.
+SILICON_PROVER_CAP = 16
+
+
+def silicon_command(path: Path, env: dict[str, str]) -> list[str]:
+    """The command line of one Silicon run on a `.vpr` file: the number of parallel provers is the hardware thread count, at most `SILICON_PROVER_CAP`."""
+    provers = min(os.cpu_count() or 1, SILICON_PROVER_CAP)
+    return [env["CERASTES_JAVA"], "-Xss128m", "-jar", env["SILICON_JAR"],
+            "--z3Exe", env["Z3_EXE"], "--numberOfErrorsToReport", "0",
+            "--numberOfParallelVerifiers", str(provers), str(path)]
+
+
 def run_silicon(path: Path, exp: Expectation, env: dict[str, str]) -> list[Outcome]:
-    cmd = [env["CERASTES_JAVA"], "-Xss128m", "-jar", env["SILICON_JAR"],
-           "--z3Exe", env["Z3_EXE"], "--numberOfErrorsToReport", "0", str(path)]
+    cmd = silicon_command(path, env)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
                               timeout=SILICON_TIMEOUT_S)

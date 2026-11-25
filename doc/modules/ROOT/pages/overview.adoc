@@ -85,7 +85,10 @@ does not own. Today that covers, in C23 and in pass:[C++]20:
   pointers to their elements), contracts over ranges of elements
   (`cerastes_owns_range(p, n)`, `cerastes_reads_range(p, n)`), facts about every
   element (`cerastes_forall(f, a, n)` with a pure function `f`, in contracts, loop
-  invariants and checks), and single objects
+  invariants and checks), values computed from elements by pure functions, recursive
+  ones included, whose bodies and contracts are checked and which contracts, loop
+  invariants and checks may call (xref:annotations.adoc#pure-functions[Pure functions]),
+  and single objects
   allocated with `malloc` and
   `calloc` and released with `free`, with leaks reported
   (xref:memory.adoc[Memory and ownership]).

@@ -50,6 +50,8 @@ A call may not satisfy a `CERASTES_REQUIRES` clause of the function it calls. It
 
 The verifier could not show that the arguments meet the callee's precondition on every path that reaches the call. Here `use_half` passes `m`, which may be odd, to `half`, which requires an even number.
 
+A call of a pure function in an annotation (xref:annotations.adoc#pure-calls[Calling a pure function]) is checked against the callee's `requires` where the call stands, and a part of it that may not hold is a `precondition` error at the call, with a note at the callee's clause; in a `check`, a range that the callee reads is checked first, so a count past the end of an array is reported here, as the callee's requirement, not as `out-of-bounds`.
+
 [source,cpp]
 ----
 include::example$error-messages/precondition_error.cpp[tag=source]
@@ -73,6 +75,8 @@ include::example$error-messages/precondition_fixed.cpp[tag=source]
 A `CERASTES_ENSURES` clause may not hold when the function returns. It is reported at the `return` statement that may leave the clause false (or at the closing brace of a `void` function), with a note at the clause.
 
 The value the function returns, together with what is known about the parameters, does not imply the clause. In the example the function returns one more than the contract allows.
+
+For a pure function that `cerastes verify` reads (xref:annotations.adoc#pure-functions[Pure functions]), an `ensures` that its returned expression may not satisfy is reported at the function's `return`, with a note at the clause.
 
 [source,cpp]
 ----
@@ -212,6 +216,8 @@ An arithmetic operation may produce a value that does not fit its type, signed o
 
 Signed overflow is undefined behaviour in C and pass:[C++], so cerastes treats it as an error rather than assuming it wraps. Unsigned arithmetic is defined to wrap, but cerastes does not wrap it either: `u - v` with `u < v`, a sum or product past the largest value, `-u` for `u != 0`, and `pass:[++]` or `--` past either end of an `unsigned int` (or wider) give this error too, with a message such as "unsigned `unsigned int` addition may overflow (cerastes does not wrap)". See xref:integer-semantics.adoc#unsigned[Integer semantics] for the exact rules. The error also appears for arithmetic inside a contract.
 
+In the body of a pure function that `cerastes verify` reads, an operation that may overflow is reported in the function, at the operation. Where a contract uses the result of a call of a pure function, it knows that result only through the callee's `ensures` and the range of the result's type: a tighter bound the contract needs belongs in the `ensures`.
+
 [source,cpp]
 ----
 include::example$error-messages/overflow_error.cpp[tag=source]
@@ -347,6 +353,8 @@ include::example$error-messages/missing_return_fixed.cpp[tag=source]
 A termination measure (`CERASTES_DECREASES`) may be negative, or may not decrease. For a loop it is reported at the loop's `CERASTES_DECREASES` clause, and for a recursive function at the recursive call, with a note at the callee's measure. A recursive call that another call of the same expression may precede (`f(n - 1) + f(n - 2)`) is checked where C may make it, before the other call, and reported the same way (xref:verifying.adoc#calls[Calls in expressions]).
 
 The measure must get smaller from one iteration to the next (for a function, from the entry to each recursive call), and must not be negative when the loop condition holds. A measure that stays the same, grows, or can go below zero does not show that the loop or recursion ends, so cerastes does not accept it. In the example the body forgot to add 1 to `i`.
+
+A pure function that calls itself is checked the same way: a recursive call whose measure may not decrease, or may be negative, is reported at the call, with a note at the function's measure.
 
 [source,cpp]
 ----
@@ -587,6 +595,8 @@ right is missing:
 * at a loop invariant's `owns`, `reads` or `live` when the loop starts without
   what it names, or when two of its `owns` may name one object, and at the
   closing brace of the loop's body when an iteration ends without it.
+
+A pure function's body may read only what its `requires` reads (`cerastes_reads`, `cerastes_reads_range`): another read is reported at the read, in the function. A call of a pure function needs the place of the call to own what the callee reads: a contract must own or read the callee's range, a loop must hold it, and a `check` must have it; otherwise the call is a `permission` error at the call.
 
 A local variable exists only until its block ends; a pointer to it is then
 *dangling*, and reading or writing through it is undefined behaviour in C and

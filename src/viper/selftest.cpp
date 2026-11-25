@@ -1834,6 +1834,7 @@ int main(int argc, char** argv)
     define_quantifier_loops();
     define_pure_functions();
     define_pure_contract_applications();
+    define_pure_loop_applications();
     define_pure_function_rejections();
     int bad {0};
     for (const Case& c : lowering_cases())

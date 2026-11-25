@@ -318,3 +318,5 @@ locals and parameters. Facts: P63 (the IL of globals and `static` locals) and S3
   rejected, so `program_start` stays reached once.
 
 *2026-11-24, amended by 0061 (M4.5e1c): item 12 — a `pure` body that a `forall` names is inlined at the site, and reading a global there is rejected as in any annotation (0061 item 4).*
+
+*2026-11-24, amended by 0062 (M4.5e1d): item 12 — a read `pure` function's body is encoded now; a global or `static` local in it stays rejected until M4.5f1 (0062 items 1, 3).*

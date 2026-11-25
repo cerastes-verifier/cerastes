@@ -658,7 +658,7 @@ tests/scalar/static_assert_nested.c:55:11:relop:>->>=	the guard decides only a b
 tests/scalar/static_assert_nested.c:55:13:literal:0->1	the guard decides only a branch whose sole statement is a block static assertion, which is checked in the function's prologue whatever the path (0024 item 2), so the mutant hides no check and leaves the value unchanged
 tests/scalar/static_assert_nested.c:9:30:drop-conjunct:&& n <= 100->	weaker bound on n: the loop only counts i up to n (i++ stays below n) and returns i, so no overflow needs the bound
 tests/scalar/static_assert_nested.c:9:38:literal:100->101	weaker bound on n: the loop only counts i up to n (i++ stays below n) and returns i, so no overflow needs the bound
-tests/scalar/static_assert_pure_body.c:13:3:delete-stmt:return x + x;->;	the body of a pure function is not encoded before M4.5f, so deleting its return changes nothing the verifier reads
+tests/scalar/static_assert_pure_body.c:13:3:delete-stmt:return x + x;->;	the body of a pure function is not read: nothing calls it, so deleting its return changes nothing the verifier reads
 tests/scalar/static_assert_pure_body.c:17:23:drop-conjunct:0 <= a &&->	weaker bound on a: a + 1 does not overflow for the extra inputs (a <= 101, or any negative a)
 tests/scalar/static_assert_pure_body.c:17:38:literal:100->101	weaker bound on a: a + 1 does not overflow for the extra inputs (a <= 101, or any negative a)
 tests/scalar/uninit_guarded_comma.c:10:27:relop:==->!=	the result of g is discarded: its postcondition feeds nothing

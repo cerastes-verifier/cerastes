@@ -5744,7 +5744,7 @@ private:
     }
 
     // `g(e_1, ..., e_m)`, a call of a `pure` function in an annotation (record 0062 item 4).  Where an application may not stand it is the rejection that
-    // names where it is lifted; in a loop invariant it is still `call_in_annotation` (part D).
+    // names where it is lifted; a call under a quantifier's binder stays `call_in_annotation` (M4.5e2).
     const Expr* application(an_expr_node_ptr e, a_routine_ptr callee, const std::vector<an_expr_node_ptr>& ops)
     {
         const std::string name {rname(callee)};
@@ -5772,9 +5772,9 @@ private:
             return refuse(
                 "in a position that must read no memory (the count of an atom, an element's index, a trailing argument of `cerastes_forall`: a call counts as a read there; M4.5e2)");
         }
-        if (!cx_.check_clause && !cx_.contract)
+        if (!cx_.check_clause && !cx_.contract && !cx_.loop_invariant)
         {
-            reject(Diag::call_in_annotation, at, name); // a loop invariant: part D lifts it
+            reject(Diag::call_in_annotation, at, name);
             return nullptr;
         }
         vir::Function* f {read_pure(callee, at)};
@@ -8220,8 +8220,9 @@ private:
         }
     }
 
-    // A `pure` or `predicate` body is not encoded (0011 item 4), so nothing else would see a mutable global or a `static` local in it: rejected here until
-    // M4.5f1 encodes those bodies with the permissions a global needs (decision 0041 item 12; audit round 2, SF2).  Named constants stay allowed.
+    // A mutable global or a `static` local in a `pure` or `predicate` body is rejected here, read or not (decision 0041 item 12; audit round 2, SF2): the body of a
+    // read `pure` function is encoded (record 0062), but with the permissions of its own parameters only, so a global in it waits for M4.5f1.  Named constants
+    // stay allowed.
     static Encoder*& spec_scan_self()
     {
         static Encoder* p {nullptr};

@@ -263,3 +263,5 @@ contracts, call sites, ghost amounts), in `internal/il-inventory.md`, "M4.5b1b".
 *2026-11-12, amended by 0060 (M4.5e1b): items 5–10 — range atoms (`owns_range`, `reads_range`) and element reads `p[e]` in contracts: framing by the interval test, ghost values per element, partners by kind, parameter and count and by path, and their rows at entry, calls and returns (0060 items 3–9). Item 2 — `restrict` may be backed by `owns_range(p, n)` (0060 item 14). Item 15 — the `owns_range` row is lifted.*
 
 *2026-11-24, amended by 0061 (M4.5e1c): item 7 — `f__wf` of a contract holding a quantifier keeps every row of today's method and reads under the binder through ghost functions of the slot with four assumed facts (variant M); a contract without one keeps its `f__wf` byte for byte (0061 item 7).*
+
+*2026-11-24, amended by 0062 (M4.5e1d): item 7 — an application in a contract is a ghost function `hva_<m>__<g>_<pre|post>` of `f__wf`'s domain with three assumed facts (the result's range, the callee's `ensures` under its value `requires`, the keep fact), and in the method's contract it is guarded by `G` (0062 items 7, 8).*

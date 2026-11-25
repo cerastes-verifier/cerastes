@@ -236,6 +236,48 @@ class SiliconOutputTests(unittest.TestCase):
         self.assertIsNotNone(rt.parse_silicon_output(out, 1).problem)
 
 
+class SiliconProverCapTests(unittest.TestCase):
+    """M4.5e1d (owner question 286): a `.vpr` run passes `--numberOfParallelVerifiers <n>`, n the hardware thread count capped at 16, as the driver
+    does (src/driver/silicon.cpp).  Twins: a harness without the option, a cap not applied, a cap too low, no thread count, and the command that
+    `run_silicon` really runs."""
+
+    ENV = {"CERASTES_JAVA": "java", "SILICON_JAR": "s.jar", "Z3_EXE": "z3"}
+
+    def command(self, cpus):
+        with mock.patch.object(rt.os, "cpu_count", return_value=cpus):
+            return rt.silicon_command(Path("t.vpr"), self.ENV)
+
+    def provers(self, cmd):
+        self.assertEqual(cmd.count("--numberOfParallelVerifiers"), 1, cmd)
+        return cmd[cmd.index("--numberOfParallelVerifiers") + 1]
+
+    def test_the_count_is_the_thread_count_up_to_the_cap(self):
+        for cpus, want in ((1, "1"), (4, "4"), (8, "8"), (15, "15"), (16, "16")):
+            with self.subTest(cpus=cpus):
+                self.assertEqual(self.provers(self.command(cpus)), want)
+
+    def test_a_bigger_box_is_capped_at_16(self):
+        for cpus in (17, 32, 128, 256):
+            with self.subTest(cpus=cpus):
+                self.assertEqual(self.provers(self.command(cpus)), "16")
+        self.assertEqual(rt.SILICON_PROVER_CAP, 16)
+
+    def test_an_unknown_thread_count_is_one_prover(self):
+        self.assertEqual(self.provers(self.command(None)), "1")
+
+    def test_the_rest_of_the_command_is_unchanged(self):
+        cmd = self.command(8)
+        self.assertEqual(cmd[:8], ["java", "-Xss128m", "-jar", "s.jar", "--z3Exe", "z3", "--numberOfErrorsToReport", "0"])
+        self.assertEqual(cmd[-1], "t.vpr")
+
+    def test_run_silicon_runs_that_command(self):
+        proc = mock.Mock(stdout=SUCCESS, stderr="", returncode=0)
+        with mock.patch.object(rt.os, "cpu_count", return_value=64), \
+                mock.patch.object(rt.subprocess, "run", return_value=proc) as run:
+            rt.run_silicon(Path("t.vpr"), rt.Expectation("verified", [], ["c++20"]), self.ENV)
+        self.assertEqual(self.provers(run.call_args.args[0]), "16")
+
+
 class StrictSiliconVerdictTests(unittest.TestCase):
     """A verdict is the banner, exactly one verdict line and its error list, nothing else (decision 0011
     item 11).  Each case is a mutation of SUCCESS or TWO_ERRORS that must be "no verdict"/a problem."""
@@ -17349,7 +17391,11 @@ class DefaultJobsTests(FakeFrontEndCase):
 
     def test_the_source_has_no_other_default(self):
         source = (rt.ROOT / "scripts" / "run_tests.py").read_text()
-        self.assertEqual(source.count("os.cpu_count()"), 1, "only default_jobs() knows the CPU count")
+        # the CPU count is read by default_jobs() (the default -j) and, since M4.5e1d (owner question 286), by silicon_command() (the cap on Silicon's
+        # provers, pinned by SiliconProverCapTests): no third place
+        self.assertEqual(source.count("os.cpu_count()"), 2, "only default_jobs() and silicon_command() know the CPU count")
+        self.assertEqual(source.split("def silicon_command")[1].split("\ndef ")[0].count("os.cpu_count()"), 1)
+        self.assertEqual(source.split("def default_jobs")[1].split("\ndef ")[0].count("os.cpu_count()"), 1)
         self.assertRegex(source, r'(?m)^ *args\.jobs = default_jobs\(\)$')
         self.assertRegex(source, r'"-j", "--jobs", type=int, default=None')
 

@@ -15,7 +15,9 @@
 // Tampering with the macros of this header is not supported.
 //
 // Write CERASTES_PREDICATE and CERASTES_PURE first in the declaration, before
-// `static`, `constexpr` and the return type.  CERASTES_OWNING marks a pointer parameter: the function owns its
+// `static`, `constexpr` and the return type.  `cerastes verify` reads a CERASTES_PURE function that has a body in the file and is applied in an annotation
+// or carries a contract (decision 0062): its body, contract and termination are checked, and a call of it in a contract, a loop invariant or a CERASTES_CHECK is
+// an application of the function; a call in code is still an error.  CERASTES_OWNING marks a pointer parameter: the function owns its
 // pointee unless the pointer is null (decision 0040 item 3).  Write it before the parameter's type or after its name.
 // CERASTES_OWNING_N(n) marks a pointer parameter that owns the elements p[0..n) unless the pointer is null, `n` an earlier parameter or an expression over
 // earlier parameters and constants (decision 0060 item 13).
