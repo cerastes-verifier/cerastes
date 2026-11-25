@@ -1,0 +1,62 @@
+// expect: error assert:assertion.false @ L60
+// S48 (e) twin: the unknown-value form of program_start (only the type range per leaf): a check g[0].x == 1 fails alone (no value is known).
+// (hand-written spike fixture of record 0064 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// program start, the unknown-value form: the type range per leaf (0063 item 9's escape direction, per leaf)
+method program_start_unknown()
+  ensures (len(GB_g__1()) == 3) && (lvloc(GB_g__1()) == loc(GB_g__1(), (-2)))
+  ensures forall k: Int :: { loc(GB_g__1(), k) } (((0 <= k) && (k < 3))) ==> ((len(member(loc(GB_g__1(), k), 0)) == 1) && (len(member(loc(GB_g__1(), k), 1)) == 1))
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 0), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(GB_g__1(), k), 0), 0).v_int)
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 0), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(GB_g__1(), k), 0), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 0), 0) } (((0 <= k) && (k < 3))) ==> loc(member(loc(GB_g__1(), k), 0), 0).d_int
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 1), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(GB_g__1(), k), 1), 0).v_int)
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 1), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(GB_g__1(), k), 1), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 1), 0) } (((0 <= k) && (k < 3))) ==> loc(member(loc(GB_g__1(), k), 1), 0).d_int
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 0), 0) } (((0 <= k) && (k < 3))) ==> (((-2147483648) <= loc(member(loc(GB_g__1(), k), 0), 0).v_int) && (loc(member(loc(GB_g__1(), k), 0), 0).v_int <= 2147483647))
+  ensures forall k: Int :: { loc(member(loc(GB_g__1(), k), 1), 0) } (((0 <= k) && (k < 3))) ==> (((-2147483648) <= loc(member(loc(GB_g__1(), k), 1), 0).v_int) && (loc(member(loc(GB_g__1(), k), 1), 0).v_int <= 2147483647))
+  ensures acc(lvloc(GB_g__1()).lv)
+  decreases _
+method f_main()
+{
+  var v_g: Ref
+  var tw: Ref
+  var tr: Ref
+  var v_i: Int
+  var v_s: Int
+  var v_r: Int
+  var kl_0: Perm
+  var t6: Perm
+  program_start_unknown()
+  v_g := loc(GB_g__1(), 0)
+  assert !((offset_of(v_g) + 0 < 0) || (len(block_of(v_g)) <= offset_of(v_g) + 0)) //BOUND
+  tr := loc(member(loc(block_of(v_g), offset_of(v_g) + 0), 0), 0)
+  assert perm(tr.v_int) > none //PERM
+  assert tr.d_int //INIT
+  v_r := tr.v_int
+  assert v_r == 1 //CHECK
+}
+

@@ -1,0 +1,58 @@
+// expect: error assert:assertion.false @ L54
+// S48 (b) twin: a callee with reads_range(p, n) writes p[0].x: the write-permission row fails alone (the assumed row contradicts the ghost amount below write).
+// (hand-written spike fixture of record 0064 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// reads_range(p, n) over struct P at the ghost amount, and a write p[0].x = 1: the write-permission row fails alone (the assumed row contradicts amt_0 < write)
+method peek_w(p: Ref, n: Int, amt_0: Perm)
+  requires none < amt_0 && amt_0 < write
+  requires p != null
+  requires (p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))
+  requires 0 <= n
+  requires (offset_of(p) + n) <= len(block_of(p))
+  requires forall k: Int :: { loc(block_of(p), k) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> ((len(member(loc(block_of(p), k), 0)) == 1) && (len(member(loc(block_of(p), k), 1)) == 1))
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 0), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> acc(loc(member(loc(block_of(p), k), 0), 0).v_int, amt_0)
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 0), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> acc(loc(member(loc(block_of(p), k), 0), 0).d_int, amt_0)
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 0), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> loc(member(loc(block_of(p), k), 0), 0).d_int
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 0), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> (loc(member(loc(block_of(p), k), 0), 0).d_int ==> (((-2147483648) <= loc(member(loc(block_of(p), k), 0), 0).v_int) && (loc(member(loc(block_of(p), k), 0), 0).v_int <= 2147483647)))
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 1), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> acc(loc(member(loc(block_of(p), k), 1), 0).v_int, amt_0)
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 1), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> acc(loc(member(loc(block_of(p), k), 1), 0).d_int, amt_0)
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 1), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> loc(member(loc(block_of(p), k), 1), 0).d_int
+  requires forall k: Int :: { loc(member(loc(block_of(p), k), 1), 0) } (((offset_of(p) <= k) && (k < (offset_of(p) + n)))) ==> (loc(member(loc(block_of(p), k), 1), 0).d_int ==> (((-2147483648) <= loc(member(loc(block_of(p), k), 1), 0).v_int) && (loc(member(loc(block_of(p), k), 1), 0).v_int <= 2147483647)))
+  requires acc(lvloc(block_of(p)).lv, amt_0)
+  requires 1 <= n
+{
+  var tr: Ref
+  var tw: Ref
+  var v_r: Int
+  assert p != null //NULL
+  assert perm(lvloc(block_of(p)).lv) > none //LIVEROW
+  assert !((offset_of(p) + 0 < 0) || (len(block_of(p)) <= offset_of(p) + 0)) //BOUND
+  tw := loc(member(loc(block_of(p), offset_of(p) + 0), 0), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 1
+  tw.d_int := true
+}
+

@@ -122,7 +122,7 @@ cmd_snap() {
 cmd_setup() {
   local lane="$1"
   check_lane "$lane"
-  box_cmd "test -d \$HOME/$dir/$lane || cp -a $seed \$HOME/$dir/$lane"
+  box_cmd "mkdir -p \$HOME/$dir && (test -d \$HOME/$dir/$lane || cp -a $seed \$HOME/$dir/$lane)"
   box_cmd "docker inspect ${prefix}${lane} >/dev/null 2>&1 || docker run -d --init --name ${prefix}${lane} -v \$HOME/$dir/$lane:/work/cerastes -e CERASTES_CI_PROFILE=ubuntu-26.04 -e CERASTES_JOBS=$jobs $image sleep infinity"
 }
 
@@ -183,7 +183,7 @@ self_test() {
       fail=1
     fi
   }
-  want='+ ssh b@h: test -d $HOME/d/il || cp -a $HOME/d/work $HOME/d/il
+  want='+ ssh b@h: mkdir -p $HOME/d && (test -d $HOME/d/il || cp -a $HOME/d/work $HOME/d/il)
 + ssh b@h: docker inspect p-il >/dev/null 2>&1 || docker run -d --init --name p-il -v $HOME/d/il:/work/cerastes -e CERASTES_CI_PROFILE=ubuntu-26.04 -e CERASTES_JOBS=4 img sleep infinity'
   check setup "$want" setup il
   want='+ git bundle create /tmp/box_lane_x.bundle refs/tmp/x
