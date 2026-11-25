@@ -196,8 +196,8 @@ alarm, not unsoundness, and is fixed in e1f with question 242's row order (S45 (
 **M4.5e1e is two sessions** (owner, 2026-11-25, question 290: its planning's surveys put it at 3,800–7,200 `src/`
 lines, and e1d landed 3,654 in 11.5 hours): e1e1 is planned in full
 (`.claude/plans/m4-5e1e1-arrays-of-scalars.md`), and e1e2 plans briefly after it (that plan's section 14). A
-structure with an array member is copied and passed by value in M4.5e1e (question 291): e1e1's last part, or
-e1e2's first if e1e1's split point moves it.
+structure with an array member is copied and passed by value in M4.5e1e (question 291): e1e1's last part, which
+runs unless it would pass the twelve-hour cap (question 300) and is e1e2's first part otherwise.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 

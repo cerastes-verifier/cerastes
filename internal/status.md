@@ -116,11 +116,11 @@ and question 266 leave to M4.5e2, M4.5f1, M4.5f2 and M6.
 `origin/main` = `68384d1`). M4.5e1e's planning followed, at a session that only planned: the owner cut M4.5e1e in
 two (question 290: M4.5e1e1, arrays of scalars in structures and static storage; M4.5e1e2, arrays of structures
 and arrays of arrays), put whole-structure copies and by-value passing of a structure with an array member in
-M4.5e1e (question 291), asked that questions go to the Fable advisor first, and asked for less testing (a test
-budget per plan).
+M4.5e1e (question 291), to run in e1e1 unless that would pass twelve hours (question 300), asked that questions
+go to the Fable advisor first, and asked for less testing (a test budget per plan).
 
 **First step for the next session:** the owner reviews handoff §8's questions 292–299 (defaults, each fail
-closed), pushes `main`, and removes e1d's worktrees `.claude/worktrees/m4.5e1d` and
+closed) and the Flips of the plan's section 10, pushes `main`, and removes e1d's worktrees `.claude/worktrees/m4.5e1d` and
 `.claude/worktrees/m4.5e1d-audit` and its branch (handoff §2). Then **M4.5e1e1** from
 `.claude/plans/m4-5e1e1-arrays-of-scalars.md` with the opening prompt of handoff §2 (no plan mode), or M4.5e1f
 (short) or M4.5e2 first.

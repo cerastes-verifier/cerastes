@@ -65,9 +65,9 @@ invariants, the exact sum; no cut). e1e1 is planned in full.
   carries a contract; a `pure` function with no body in the unit cannot be called; one session with split points
   (questions 264–272: e1d's plan, sections 1 and 13).
 - **At e1e's planning (2026-11-25):** e1e is cut in two, "scalars, then structures" (question 290); a structure
-  with an array member is copied and passed by value in M4.5e1e (question 291); a question goes to the Fable
-  advisor first; a plan carries a test budget (e1e1's plan, sections 3, 12 and 15; questions 292–299 are its
-  defaults, for review).
+  with an array member is copied and passed by value in M4.5e1e (question 291), in e1e1 unless that would pass
+  the twelve-hour cap (question 300); a question goes to the Fable advisor first; a plan carries a test budget
+  (e1e1's plan, sections 3, 12 and 15; questions 292–299 are its defaults, for review).
 
 **Standing:** 69 (no EDG work), 77 (one context), 160 (a new test's expect line may be corrected after its first
 run, each listed in status), 176 (the owner handles CI); `check.sh` once, at the end, on the x86-64 box; no test
@@ -199,7 +199,7 @@ of `git show 68384d1:.claude/plans/m4-5e1-arrays.md`. Against the sketch:
 ## 8. Open questions
 
 None here: 229–233 are answered (section 1), and so are 238–289 (the records' headers; `internal/handoff.md` §8)
-and 290–291 (e1e1's plan, section 15, which also lists its defaults 292–299).
+and 290, 291 and 300 (e1e1's plan, section 15, which also lists its defaults 292–299).
 
 ## 9. Inputs
 

@@ -30,7 +30,8 @@ approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes m
   `src/` lines, more than one session. **M4.5e1e1** (arrays of scalars in structures and static storage; record
   0063) is next: `.claude/plans/m4-5e1e1-arrays-of-scalars.md`, planned in full for the ensemble, 2,340–4,475
   lines for its Parts A–D and 600–1,050 more for Part E (structure values with array members: question 291),
-  which runs in e1e1 only under its split point 2. **M4.5e1e2** (arrays of structures and arrays of arrays) has
+  which runs in e1e1 unless that would pass the twelve-hour cap (question 300): the session may take ten to
+  twelve hours. **M4.5e1e2** (arrays of structures and arrays of arrays) has
   its scope and inputs in that plan's section 14 and plans briefly after e1e1.
 - **Two process changes from the owner (2026-11-25):** a question goes to the Fable advisor first and to the
   owner only if it is still open (§8); a session's plan carries a test budget, and a run that is not in it is not
@@ -44,7 +45,16 @@ approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes m
 ## 2. Owner steps
 
 1. **Review** questions 292–299 in §8: each is a default M4.5e1e1's plan builds on, fail closed, with its
-   alternative. An answer changes a row of the plan, not the plan; unanswered, they stand.
+   alternative. An answer changes a row of the plan, not the plan; unanswered, they stand. **And the plan's
+   section 10, its Flips,** which §4.2's standing pre-approval covers once a plan lists them: about twenty
+   rejection pins retired for positives of the same programs (a global array, a `static` array, an array member,
+   an array literal, the array typedef, `typeof`, `decltype` and `sizeof` pins), **two re-expected from a
+   rejection to `error overflow`** (`reject_sizeof_array_huge.c`, `reject_contract_sizeof_array.c`: their
+   wrapping bound is now checked as written), about a dozen whose message names a new lifter, and the rest
+   unchanged. Also for review: the planner read "a fable auditor" in the request as the Fable advisor of earlier
+   sessions and kept the Opus `soundness-auditor` as the reviewer (one row of the plan's section 2 to change
+   otherwise); and R4 in the plan's Step 0, a defect of the lint found by reading (a program with a global and a
+   zero-filled local array would be refused today; no test combines them).
 2. **Push** `main` (this planning's commit), so that M4.5e1e1 branches from `origin/main`.
 3. **Remove** e1d's worktrees `.claude/worktrees/m4.5e1d` and `.claude/worktrees/m4.5e1d-audit`, then the branch
    `m4.5e1d-pure-functions`; the local refs `refs/tmp/e1d-*` go with the worktree's repository. On the box,
@@ -69,7 +79,7 @@ approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes m
 6. **Or another session first** (`plan.md`'s M4.5 table): M4.5e1f (short: questions 238 and 242, from S45 (r), §3
    "M4.5e1f"; it may run before or after e1e1, whose plan holds either way) or M4.5e2 (pointer arithmetic; its
    `malloc(n * sizeof(struct S))` waits for M4.5e1e2). Each plans with `plan.md`'s opening prompt. Questions
-   start at 300.
+   start at 301.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -258,7 +268,7 @@ section 10)
 
 **M4.5e1e2 Arrays of structures and arrays of arrays:** its scope, its inputs and the survey facts in hand are
 section 14 of `.claude/plans/m4-5e1e1-arrays-of-scalars.md`; M4.5e1e1's handoff adds what it cut or moved (its
-Part E under split point 2, cuts 3–7, questions 292–294) and S47 (x)'s two verdicts.
+Part E if the twelve-hour rule moved it, cuts 3–7, questions 292–294) and S47 (x)'s two verdicts.
 
 **M4.5e2 Pointer arithmetic** (needs e1a and e1b; e1e2 for arrays of structures on the heap)
 - Signed/unsigned and enumeration variants through `void*` cannot be written [M4.5a]; accepted completeness gap for
@@ -691,8 +701,8 @@ answers, questions 206–214); M4.5d2b2d about 1,960 against 740–1,170 (the au
 them) against 2,200–3,450; M4.5e1b +2,754/−155 (+6,289 with them) against 2,050–3,050; M4.5e1c +3,514/−294 (+6,038
 with them) against 1,500–2,200, with one cut; M4.5e1d +3,654/−195 (+5,721 with them) against 3,350–5,000 (a design
 check against `lower.cpp` calibrated on what e1c landed), with no cut, in 11.5 hours. M4.5e1e1's estimate
-(2,340–4,475 for Parts A–D, 600–1,050 more for Part E) comes from three read-only surveys compared with the
-commits of e1a, e1b, c1, c2a and b2a.
+(2,340–4,475 for Parts A–D, 600–1,050 more for Part E, which runs unless it would pass twelve hours: question
+300) comes from three read-only surveys compared with the commits of e1a, e1b, c1, c2a and b2a.
 
 **Pre-approved** (owner): a session may retire or re-expect exactly the rejection pins its plan lists (its "Flips"),
 and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:`
@@ -1071,7 +1081,7 @@ handoffs:
 asked: their answers are below), `git show bdf3581:internal/handoff.md` §8 has 238–246 as asked, with the
 owner's inline answers to 238–242, and `git show 9ab9a1e:internal/handoff.md` §8 has 247–263 as asked. Records
 0055–0058 hold what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3. Questions 264–272 are
-M4.5e1d's planning's, 273–289 its session's and 290–299 M4.5e1e's planning's, below.
+M4.5e1d's planning's, 273–289 its session's and 290–300 M4.5e1e's planning's, below.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).
@@ -1102,7 +1112,7 @@ M4.5e1d's planning's, 273–289 its session's and 290–299 M4.5e1e's planning's
 
 Other answers that steer a later session are in that session's notes (§3, §4) or its plan: 66, 79, 189, 194, 196,
 212, 215, 216, 222, 225, 246, 249, 262 and 267 (M4.8), 78 (M4.6), 120, 229, 236, 237, 253, 255, 259, 260, 261,
-265, 266 and 287 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 290–299 (M4.5e1e1's plan, sections 1 and 15), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
+265, 266 and 287 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 290–300 (M4.5e1e1's plan, sections 1, 8 and 15), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
 256–258 and 263 (M4.5e1c's plan and record 0061), 238 and 242 (M4.5e1f), 252 and 264–272 (M4.5e1d's plan), 269
 (M6), 230, 234 and 241 (M8).
 
@@ -1144,8 +1154,12 @@ questions as asked are in `git show 68384d1:internal/handoff.md` §8.
   `struct S t = s;`) verify in M4.5e1e, by-value passing staying rejected until M4.5f3? **"Copy and by-value
   now"**: both are in M4.5e1e (the recommendation was the copy as a last part and first cut). Built as item 13
   and Part E of M4.5e1e1's plan: the copy through a trusted `copy_arr_<t>`, by value as one Viper value per
-  element. Part E runs in e1e1 only under its split point 2 (Parts A–D under 3,300 lines and 7.5 hours);
-  otherwise it opens M4.5e1e2, still in M4.5e1e.
+  element.
+- **300** When does Part E run, Parts A–D alone being estimated at 2,340–4,475 lines? **"Unless it passes 12
+  hours"** (the recommendation): after array members are committed, Part E runs in e1e1 whenever the remaining
+  work fits under the twelve-hour cap; only if it does not fit does it open M4.5e1e2, reported in the status
+  entry, without a stop to ask. The alternatives were "only if the session is short" (under 3,300 lines and 7.5
+  hours: in effect the option 291 declined) and a stop to ask at that split point.
 
 **Defaults M4.5e1e1's plan builds on, for the owner's review** (the planner's and the advisor's; each fail
 closed: a rejection with a diagnostic and a pin, never a wrong proof; answer inline, or leave them):
@@ -1167,4 +1181,4 @@ closed: a rejection with a diagnostic and a pin, never a wrong proof; answer inl
 - **299** Question 285's answer becomes the standing rule for a test that is slow on the box because of what it
   must refute (`tests/long/` with a short default-tier twin), settled with the advisor at its part.
 
-The next questions start at 300.
+The next questions start at 301.

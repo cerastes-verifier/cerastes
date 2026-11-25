@@ -40,8 +40,11 @@ block `member(r, k)` of length n) and S26 measured it; nothing of it is built fo
 - **290** (2026-11-25): M4.5e1e is cut "scalars, then structures": e1e1 and e1e2 as above.
 - **291** (2026-11-25): a structure with an array member is copied (`t = s;`, `struct S t = s;`) **and** passed and
   returned by value in M4.5e1e ("Copy and by-value now"; the recommendation was the copy as a first cut and
-  by-value in M4.5f3). They are this plan's **Part E**, its last part: section 8's split point 2 decides whether
-  Part E runs in e1e1 or opens e1e2 (either way it is in M4.5e1e).
+  by-value in M4.5f3). They are this plan's **Part E**, built after array members.
+- **300** (2026-11-25): **Part E runs in e1e1 unless that would pass the twelve-hour cap** ("Unless it passes 12
+  hours"): after Commit 3 it runs whenever the remaining work (Part E, its audit, the pages, the box check) fits
+  under the cap; only if it does not fit does it open M4.5e1e2 instead, reported in the status entry, without a
+  stop to ask. It is not cut to hold the session short.
 - **226–233, 236, 237** (M4.5e1's planning): section 1 of `.claude/plans/m4-5e1-arrays.md`.
 - **Standing:** 69 (no EDG work), 77 (one context, under about 12 h), 160 (a new test's expect line may be
   corrected after its first run, each listed in status), 176 (the owner handles CI), 285 (a test that is slow on
@@ -100,8 +103,8 @@ estimate and e1d inside its own, so read the tops as likely):
 | E | (V) structure values with array members | 250–450 | 350–600 | 600–1,050 |
 
 **2,340–4,475 for Parts A–D; 2,940–5,525 with Part E.** Beside it the lint: 500–900 lines with 600–1,000 in its
-self-test. Parts A–D are an e1d-sized session; Part E is expected to run in e1e1 only if they land near the
-bottom (section 8's split point 2).
+self-test. Parts A–D are an e1d-sized session, and with Part E the session may run ten to twelve hours (question
+300: the owner chose that over a short session); section 3's budget is what makes room for it.
 
 ## 2. The ensemble
 
@@ -126,22 +129,27 @@ bottom (section 8's split point 2).
 - **Advisor checkpoints:** (1) the record draft with P82's and S47's outcomes mapped to section 6's tables,
   before audit round 1; (2) every question, and any outcome outside a table (section 12); (3) the split points
   at Commit 2 and at Commit 3; (4) any cut; (5) before the box run.
-- **Every test run is on the x86-64 box** (owner, 2026-11-24), in a lane of its own per agent that builds:
-  `~/cerastes-e1e1/{base,work,audit}` on `matt@clang4.cpp.al`, each a copy of the `ubuntu-26.04` checkout with
-  its own container (`internal/handoff.md` §6 has the recipe; Step 0 sets them up or adopts `~/cerastes-e1d`'s).
-  `base` holds the baseline at the session's base commit, `work` the joined builds and every test run, `audit`
-  the auditor's snapshots. Work is shipped as a commit object in a git bundle. The Mac builds to compile and
-  runs nothing but a single-file probe whose box round trip would cost more than the run (say so when choosing
-  it). The final `check.sh` runs in `~/cerastes-s8/p-ubuntu-26.04`.
+- **Every test run is on the x86-64 box** (owner, 2026-11-24), **in a lane of its own per agent that builds**
+  (several agents may use the box at once): `~/cerastes-e1e1/{base,il,edg,work,audit}` on `matt@clang4.cpp.al`,
+  each a copy of the `ubuntu-26.04` checkout with its own container (`internal/handoff.md` §6 has the recipe;
+  Step 0 sets them up, from `~/cerastes-e1d`'s if they are still there). `base` holds the baseline at the
+  session's base commit and is not rebuilt; `il` is the current il-analyst's (its VIR cases through Silicon);
+  `edg` is edg-backend's (its half's build and `rejections.py`); **`work` holds the joined builds, the
+  regenerations and the test-mutator's runs**; `audit` the auditor's snapshots. Work is shipped as a commit
+  object in a git bundle. The Mac builds to compile and runs nothing but a single-file probe whose box round
+  trip would cost more than the run (say so when choosing it). The final `check.sh` runs in
+  `~/cerastes-s8/p-ubuntu-26.04`.
 - **Builds:** every agent that edits `src/` builds its own change on the Mac through the lock (`lockf
-  build/m4.5e1e1/build.lock cmake --build build/cmake`). The `work` lane has one builder at a time, the agent
-  the orchestrator names; nothing builds there during a run.
+  build/m4.5e1e1/build.lock cmake --build build/cmake`) and in its own lane. The `work` lane is built by
+  edg-backend only, for a joined proof; nothing builds there during a run.
 - **The runner** (`scripts/run_tests.py`; it locks `build/vpr`) has one holder at a time in the `work` lane: the
   test-mutator, except while il-analyst-1 runs S47's fixtures (from R3's end until Commit 1). Everyone else uses
   `build/cerastes verify <file> --keep-vpr`.
 - **`lower.cpp`, `vir.h`, `vir.cpp`, `check.cpp`, `lowered.*`, `emit.cpp` have one holder at a time:**
-  edg-backend in Part A, il-analyst-2 in Parts B and D, il-analyst-3 in Parts C and E, with a commit between
-  holders. An agent that needs a change in another's file asks the orchestrator, who passes it on.
+  edg-backend in Part A, il-analyst-2 in Parts B and D, il-analyst-3 in Parts C and E, with a commit or an audit
+  snapshot between holders. il-analyst-2 ends at round 2's snapshot; **il-analyst-3, who starts from that
+  snapshot, applies round 2's fixes to those files** before Commit 2. An agent that needs a change in another's
+  file asks the orchestrator, who passes it on.
 - **Every agent** (the orchestrator puts this in each briefing):
   - reads `CLAUDE.md`, this plan, record 0063 and the files it is assigned; edits only its own files;
   - **any question stops that work and goes to the orchestrator, who takes it to the advisor first** (section
@@ -179,7 +187,13 @@ part.** Before that, each part's run repeated the earlier parts' tests (333, the
    (`scripts/vprdiff.py`). This session expects **no existing program's Viper or map to change** (section 7 says
    why for each item): while that holds, no existing test is run before the box check. A test's last pass
    stands while its `.vpr` and `.map` are identical to that run's, `src/driver/**` and `scripts/run_tests.py`
-   are unchanged since, and the host is the same.
+   are unchanged since, and the host is the same. **Byte identity says nothing about a lint that changed:** a
+   joined proof after a change to `scripts/lint_viper.py` also runs the lint over the regeneration and over the
+   VIR self-test's output (about a minute each) and `test_lint_viper.py`. **If `src/driver/**` changes** (P82 (g)
+   may add a front-end diagnostic to verify mode's errors): a change to the front end's options is covered by
+   the regeneration (a test that no longer compiles has no `.vpr`, and `vprdiff` lists it) and by
+   `rejections.py`; a change to how Silicon's output is read or reported is not expected here and goes to the
+   advisor with the list of tests to rerun.
 2. **A new test runs once,** when its part is joined, and again only if `vprdiff` against the previous part's
    regeneration shows its Viper or map changed, or its expectation was corrected. A part's run never includes
    the earlier parts' tests.
@@ -208,7 +222,7 @@ part.** Before that, each part's run repeated the earlier parts' tests (333, the
 | R1–R3 and M (section 5) | test-mutator, lane `work`, frozen binaries | Step 0 | today's outcomes; the staging pins; `rejections.py`'s base | the same |
 | S47's fixtures, one file per run | il-analyst-1, lane `work` | section 6 | the decision tables | 93 fixtures |
 | the half's own proof: new VIR cases through Silicon; the build | each implementer | each part | a half is proved before it is joined | the same |
-| joined proof: regen and `vprdiff` against the baseline and the previous part; `rejections.py --base` | edg-backend, lane `work` | each part, once | rule 1; the Flips | the same |
+| joined proof: regen and `vprdiff` against the baseline and the previous part; the VIR self-test's output against the baseline's (existing cases identical); `rejections.py --base`; **where the lint changed since the last joined proof:** `lint_viper.py` over the regeneration and over the VIR self-test's output, and `test_lint_viper.py` | edg-backend (the lint runs: test-mutator), lane `work` | each part, once | rule 1; the Flips; M4.5d2b2b lost a box run to a lint that the last fixes had outrun | the same, the lint only at the end |
 | the part's new tests, once, timed | test-mutator, lane `work` | each part, after the joined proof, builds held | invariant 2; rule 3 | the cumulative set at every part |
 | the auditor's probes | soundness-auditor, lane `audit` | each round | its judgement, bounded by rule 8 | unbounded |
 | **preflight**, once: `format.sh --check`; `py_compile`; `run_tests.py --check-headers`; `mutate.py --validate`; `test_run_tests.py`; `test_lint_viper.py`; regen and `lint_viper.py` over it; the VIR self-test directory, its lint, `VIR_CASES_MIN`; `rejections.py --base`; `build_docs.sh`; `check_doc_examples.py` (source and `--html`) | test-mutator and edg-backend, lane `work` | after the last audit's fixes | `check.sh`'s steps 4, 6, 8, 9 and 11 for what the session touched, so the 50-minute run cannot fail late on them | the same list **plus a full `run_tests.py` on the Mac (1 h 50) and a third round** |
@@ -334,9 +348,11 @@ in one batch, the preflight), with the pages, the status entry and the handoff w
    one hoisted copy (**nested copies: the advisor, then the owner**). CI recorded only (`gh run list --workflow
    ci.yml --limit 5`). Whether M4.5e1f has landed (the record's number). One question to the advisor, to check
    that it answers.
-2. **edg-backend.** The box lanes (`~/cerastes-e1e1/{base,work,audit}`: `internal/handoff.md` §6's recipe; if
-   `~/cerastes-e1d` and its image are still there, copy from them), each at the base commit, built with
-   `scripts/bootstrap.sh --build-only`. **`scripts/box_lane.sh`** (`setup`, `ship <ref>`, `build`, `run <command>`
+2. **edg-backend.** The box lanes (`~/cerastes-e1e1/{base,il,edg,work,audit}`: `internal/handoff.md` §6's
+   recipe; if `~/cerastes-e1d` and its image are still there, copy from them; `df -h` first, and fewer lanes with
+   a note in status if the disk is short), each at the base commit, built with `scripts/bootstrap.sh
+   --build-only`. **One ship–build–run round trip is timed** (a one-line change to `lower.cpp`, shipped, built,
+   one test run): over five minutes goes to the advisor (the inner loop of three implementers depends on it). **`scripts/box_lane.sh`** (`setup`, `ship <ref>`, `build`, `run <command>`
    for a named lane; shellcheck clean; the commands e1d typed by hand): at most thirty minutes, otherwise the
    recipe by hand and a note in status. The baseline before any change to `src/`: `scripts/regen_vpr.py` and the
    VIR self-test into the `base` lane's `build/e1e1-base/`; frozen binaries kept in the `work` lane for R1–R4.
@@ -370,7 +386,7 @@ excerpt).** A row's "If not" says what is built instead; "the advisor" means sec
 | (c) **initializers of a structure with an array member:** `{{1, 2, 3, 4}, 5}`, `{.a = {1, 2}, .n = 3}`, `{0}`, `{}`, brace elision `{1, 2, 3, 4, 5}`, a partial inner list, non-constant elements, `{.a = {[1] = 2}}`, an excess inner element; the same for a structure global | the member's elements are a nested `ck_aggregate` at the member's position, with trailing zeros absent; elision is told from a nested list by the flags 0043 item 6 reads for nested structures; an array designator is a `ck_designator` with `array_element`; a global's list is constant with P38's limit | elision not told from a nested list: every list without the inner braces is rejected except `{0}` (as 0043 item 6 does for nested structures when it cannot tell), recorded |
 | (d) **values:** `t = s;`, `struct S t = s;`, `*p = *q;`, `f(s)`, `return s;`, `f().a[1]`, `(struct S){{1, 2}, 3}` as an argument and under `&` | the copy is `eok_assign` (or a `dik_expression` of the source) as for any trivially copyable structure (P65); a by-value argument and result have 0044's shapes; `f().a[1]` is a subscript over a decay of a field of the call's value | a copy that the IL shows as a call or an element-wise expansion: **the advisor** (Part E's copy rule is then written on that shape) |
 | (e) **array compound literals (C23):** `int *p = (int[]){1, 2, 3};`, as an argument, `(int[]){1, 2, 3}[i]`, `(int[2]){1}`, in a loop condition; the same in C++20 | the shapes of 0044 item 7's scalar and structure literals (P67): `is_compound_literal` on the initializer, the enclosing block as EDG wraps it (P67 H4), the elements in e1a's aggregate shape; C++ accepts it silently or with a diagnostic | C: a shape `literal_address` cannot place in a block: array literals stay rejected (**cut 4 without asking**, M4.5e1e2). C++: whatever EDG does, the encoder rejects (as today), recorded |
-| (f) **computed types:** `typedef int vec3[3]; vec3 v = {1, 2, 3};` at file and block scope, `typedef char big[65536u * 65536u + 1];`, `using T3 = int[3];`, `typeof(a) b;`, `typeof(int[3]) b;`, `decltype(a) b;`, `sizeof(int[3])`, `sizeof(vec3)`, `sizeof(int[2 * 2])`, `_Alignof(int[3])`, `static_assert(sizeof(a) == 12)`; C++'s `const int N = 4; int a[N];` and a wrapped `N` | the typedef's `tk_array` entry holds the bound constant with its `expr` as a declarator's does (P78 (a)), and a variable declared through it reaches the same entry through a typeref; a type operand's array entry is reachable from the `sizeof` node with its bound's `expr`; the local-constant bound has no `expr`, and its `lerk_array_bound` referrer holds `var N` (P78 F1) | a bound's `expr` not reachable for a typedef or a type operand: that form stays rejected (its pin re-pointed to M8), recorded; no stop. The referrer of a local-constant bound not readable, or `N`'s own initializer without an `expr`: **cut 3 without asking** (the bound that names a local constant stays rejected, M8) |
+| (f) **computed types:** `typedef int vec3[3]; vec3 v = {1, 2, 3};` at file and block scope, `typedef char big[65536u * 65536u + 1];`, `using T3 = int[3];`, `typeof(a) b;`, `typeof(int[3]) b;`, `decltype(a) b;`, `sizeof(int[3])`, `sizeof(vec3)`, `sizeof(int[2 * 2])`, `_Alignof(int[3])`, `static_assert(sizeof(a) == 12)`; C++'s `const int N = 4; int a[N];` and a wrapped `N` | the typedef's `tk_array` entry holds the bound constant with its `expr` as a declarator's does (P78 (a)), and a variable declared through it reaches the same entry through a typeref; a type operand's array entry is reachable from the `sizeof` node with its bound's `expr`; the local-constant bound has no `expr`, and its `lerk_array_bound` referrer holds `var N` (P78 F1); **a typedef of an array type from a system header** (`<setjmp.h>`'s `jmp_buf`) used for a local shows the typedef's declaration position outside the verified files, as 0043 item 2 reads it for a system structure | a bound's `expr` not reachable for a typedef or a type operand: that form stays rejected (its pin re-pointed to M8), recorded; no stop. The referrer of a local-constant bound not readable, or `N`'s own initializer without an `expr`: **cut 3 without asking** (the bound that names a local constant stays rejected, M8). A system typedef's position not telling it from a verified file's: every array reached through a typedef the unit did not declare in a file it verifies is rejected by the file of the typedef's entity, and if that cannot be read either, typedefs of array types stay rejected (**the advisor**) |
 | (g) **the compiler matrix M** (clang and GCC, both modes, no flag / `-Wall` / `-Wall -Wextra`) for the new source shapes: the initializer forms of (c); `g[3]` and `s.a[4]` with a constant index outside; `if (g)`, `if (s.a)`, `g == NULL`; `sizeof(g) / sizeof(g[0])`; a block-scope array typedef, used and unused; a by-value structure with an array member; a compound literal's decay | **rule, not a decision** (0020 item 5's union of the first two tiers): a shape that warns without a flag or at `-Wall` is rejected like the compilers, by the rule e1a and c1 already have for its local form (`array_address_null_test`, EDG's #175 as an error, `-Wmissing-braces`); every positive compiles with `-Wall -Wextra -Werror` | a new warning family with no existing rule: **the advisor** (reject like the compilers, with a pin, is the default) |
 
 **S47 (hand-written Viper in the shapes of section 7; fixtures `tests/viper-smoke/memory/s47_*.vpr`; every row
@@ -531,6 +547,10 @@ constructs is the same, and `vprdiff` shows it after every part.
      never read from the aggregate), each with an `expr` checked in the prologue as 0041 item 5 checks a scalar
      global's. No designators (M8). `int *gp = g;` is the address of element 0 if P82 (a) can tell it; `&g[k]`
      is M4.5e2's.
+   - **Escape through an element** (0041 item 3's rule, per element as 0044 item 8 has it per leaf): in C++ a
+     global whose address is the initial value of an element of an array whose values are unknown is itself
+     unknown, transitively (`static int h; int *tab[2] = {&h, 0};` with `tab` of external linkage: another
+     unit's initializer may write `*tab[0]` before `main`).
    - **A `static` local array** is a global whose name its function sees (0041 item 12), with the implicit
      `owns` atom of item 7's array form in its function's and its callers' contracts.
    - **A structure global** with an array member: its row gains the array leaf's lines; its facts the length.
@@ -588,8 +608,11 @@ constructs is the same, and `vprdiff` shows it after every part.
       rejected as a by-value parameter, result, argument or literal value (`unsupported_type`, "… more than 64
       array elements passed by value (array values: M4.5f3)"). A copy has no limit.
 14. **Computed array types** (amends 0024 item 6 for arrays of scalars).
-    - A typedef or alias of an array type is accepted when the type is item 2's, with its bound checked as
-      written at the typedef; an array declared through a typedef, `typeof` or `decltype` is the array its type
+    - A typedef or alias of an array type **declared in a verified file** is accepted when the type is item
+      2's, with its bound checked as written at the typedef; **one declared anywhere else** (a system header's
+      `jmp_buf`, `va_list` where it is an array) has no bound this unit checks as written, and an object, a
+      member or a type operand that reaches an array type through it stays rejected (`unsupported_type`,
+      pinned); an array declared through a typedef, `typeof` or `decltype` is the array its type
       names, and its bound was checked where it was written (the typedef, the named array, or the `typeof`'s own
       type operand).
     - As the type operand of `sizeof` and `_Alignof`, and as the type of the operand of `sizeof` when that
@@ -640,7 +663,7 @@ survey; **audit round 3 gives a verdict per row**).
 
 **Staging pins:** R2's pins. After Commit 2 array members are still rejected (`reject_struct_array_member.c` and
 R2's member pins stand until Part C), and a structure with an array member is still rejected as a value and in
-a copy (R2's two value pins stand until Part E, or are re-pointed to M4.5e1e2 if Part E moves there).
+a copy (R2's two value pins stand until Part E, or are re-pointed to M4.5e1e2 if the twelve-hour rule moves it).
 
 **Order of work.**
 1. Step 0 and Step 1. Then, in parallel: il-analyst-1 on P82 and S47; edg-backend on Part A; the test-mutator
@@ -657,8 +680,8 @@ a copy (R2's two value pins stand until Part E, or are re-pointed to M4.5e1e2 if
    snapshot of A, B and D. **Commit 2. Split point 1.**
 5. **Part C:** il-analyst-3 on the lowering (it may start from the audit snapshot while round 2 runs);
    edg-backend on the encoder half. Audit round 3 on the snapshot. **Commit 3. Split point 2.**
-6. **Part E,** if split point 2 lets it run: il-analyst-3, then edg-backend's half. Audit round 4 on the
-   snapshot, with the pages. **Commit 4.**
+6. **Part E,** unless split point 2's twelve-hour rule moves it: il-analyst-3 and edg-backend, the copy first,
+   then by value. Audit round 4 on the snapshot, with the pages. **Commit 4.**
 7. The doc examples (test-mutator); the user pages (orchestrator, drafted during the waits of steps 4–6);
    `internal/encoding.md` and the developer guide (edg-backend); the fixes of the last audit in one batch; the
    preflight; the box check; record 0063 accepted; status, handoff, `plan.md`'s Done row. **A session that ends
@@ -672,8 +695,10 @@ a copy (R2's two value pins stand until Part E, or are re-pointed to M4.5e1e2 if
 - **The joined proof**, once both halves have reported: edg-backend ships the joined tree to the `work` lane,
   builds, runs `scripts/regen_vpr.py` into a directory of its own and `scripts/vprdiff.py` against the baseline
   (**no existing program's `.vpr` or `.map` differs**) and against the previous part's regeneration (the list of
-  this session's tests whose Viper changed); then, with builds held, the test-mutator runs **the part's new
-  tests and that list, once**, timed. A failure goes through the orchestrator to the half that owns the failing
+  this session's tests whose Viper changed), compares the VIR self-test's output with the baseline's, and runs
+  `rejections.py --base`; where the lint changed, the test-mutator runs it over both outputs with its self-test
+  (section 3 rule 1). Then, with builds held, the test-mutator runs **the part's new tests and that list,
+  once**, timed. A failure goes through the orchestrator to the half that owns the failing
   file; the joined proof is repeated once, after the last fix, for what that fix changed.
 - The audit snapshot is the tree the joined proof passed on.
 
@@ -690,7 +715,9 @@ a copy (R2's two value pins stand until Part E, or are re-pointed to M4.5e1e2 if
   written; a type operand whose inner array is skipped); every row of section 1's table has a rejection.
 - **Round 2, Parts A, B and D:** Part A's neutrality; a global array read, written or framed at a slot other
   than 0 without a row; `inv_place_disjunct` for a scalar global unchanged; an array global the function does
-  not hold used in a loop; `program_start` against item 9 (and the lint's pin of it); a `static` local array's
+  not hold used in a loop; `program_start` against item 9 (and the lint's pin of it); **the escape rule for a
+  pointer element** (a global reached through an array of unknown values and still taken as known); a `static`
+  local array's
   implicit atom in a caller; the Sequencer's keys (two elements treated as one object, or one as two); a
   `const` array reaching the array rule; computed types (a wrapped bound accepted; `sizeof` of an operand that
   is not a named array); an array literal read before it is written or after its block.
@@ -708,25 +735,32 @@ a copy (R2's two value pins stand until Part E, or are re-pointed to M4.5e1e2 if
 - **Blocking fixes** are re-audited by the next round, or by a short read of the fix's diff when it is the last
   round's. Should-fix items not taken go to handoff §3.
 
-**Pre-agreed cuts, in this order** (each is cut by its spike's table, by an audit finding, or at a split point
-with the advisor; each leaves its pin, re-pointed to M4.5e1e2, and the pages say what landed): (1) Part E's
-by-value half (the copy stays); (2) Part E whole; (3) a bound that names a local constant (M8); (4) array
-compound literals; (5) an array member of a nested structure; (6) structure globals and `static` structure
-locals with an array member; (7) a named global array as an argument of `cerastes_forall` or of a `pure`
-function. **Not cut without the owner:** global and `static` arrays of scalars with their contracts, calls and
-loops; array members in structure locals and through pointers with `owns(*p)`, `reads(*p)` and `owns(p->a)`;
-typedefs and `sizeof` of array types.
+**Pre-agreed cuts** (each leaves its pin, re-pointed to M4.5e1e2, and the pages say what landed).
+- **Cuts 3–7, in this order, each by its spike's table, by an audit finding, or at a split point with the
+  advisor to make room for Part E:** (3) a bound that names a local constant (M8); (4) array compound literals;
+  (5) an array member of a nested structure; (6) structure globals and `static` structure locals with an array
+  member; (7) a named global array as an argument of `cerastes_forall` or of a `pure` function.
+- **Cuts 1 and 2 are Part E's, and only the twelve-hour rule of split point 2 takes them** (question 300): (1)
+  Part E's by-value half, the copy staying; (2) Part E whole.
+- **Not cut without the owner:** global and `static` arrays of scalars with their contracts, calls and loops;
+  array members in structure locals and through pointers with `owns(*p)`, `reads(*p)` and `owns(p->a)`; typedefs
+  and `sizeof` of array types.
 
 **Split points.** At Commit 2 and Commit 3 the orchestrator reports `git diff --numstat <base> -- src/ include/`
 without the self-test cases against section 1's sizes, the hours used against the twelve-hour cap (question 77)
 and what is still owed, and takes the decision to the advisor (checkpoint 3).
-- **Split point 1 (after Commit 2).** Part C runs unless more than 7 hours are used: then the session closes
-  there and Part C opens M4.5e1e2's first session from this plan, with no second planning.
-- **Split point 2 (after Commit 3).** **Part E runs only if Parts A–D are under 3,300 lines and under 7.5 hours
-  are used.** Otherwise the session closes and Part E is the first part of M4.5e1e2 (cut 2; question 291 holds:
-  it is in M4.5e1e). This needs no question to the owner.
-- **The owner is asked** only if the remaining work would pass the twelve-hour cap, or if the orchestrator and
-  the advisor judge that its context will not carry what is left of a part already begun.
+- **Split point 1 (after Commit 2).** Part C runs unless the work it brings (Part C, audit round 3, the fixes,
+  the preflight, the box check and the close-out) would pass the twelve-hour cap: then the session closes at
+  Commit 2, and Parts C and E run from this plan in a session of their own, with no second planning.
+- **Split point 2 (after Commit 3; question 300).** **Part E runs unless the remaining work would pass the
+  twelve-hour cap.** The orchestrator puts the hours used beside what is owed (Part E's build, its size from
+  section 1 against the rate of Parts B and C; audit round 4; the fixes; the preflight; the 50-minute box check;
+  the close-out) and takes the sum to the advisor. If it fits, Part E runs; the copy is built first, so
+  that cut 1 (the by-value half) can still be taken if the cap comes near. If it does not fit, the session
+  closes at Commit 3 and Part E is the first part of M4.5e1e2 (cut 2; it stays in M4.5e1e). Either way the
+  decision and its numbers go into the status entry; the owner is not asked.
+- **The owner is asked** only if a part already begun would pass the twelve-hour cap, or if the orchestrator and
+  the advisor judge that its context will not carry what is left of it.
 
 ## 9. Tests (`tests/memory/`, scalar-only ones in `tests/scalar/`, negatives in the area's `negative/`; `.c` in `c23, c++20`; each positive has a twin failing for one reason at one line)
 
@@ -745,7 +779,8 @@ corrections, each listed in status).
   that fills a global array (twins: `invariant-preserved`; the entry row after a callee kept it). `g` passed
   to `owns_range(p, n)` and `reads_range(p, n)` (twin: `n` past the array, `permission` or the shape row as e1b
   has it). A `static` local array with its implicit atom through a caller (twin). `sizeof(g) / sizeof(g[0])`.
-  Element types: `bool`, an enumeration, a pointer element pointing at another global. Sequencing: `g[0] =
+  Element types: `bool`, an enumeration, a pointer element pointing at another global (and, in a `.cpp`, the
+  escape twin: `main` relies on the value of a global whose address an external array of pointers holds: `check`). Sequencing: `g[0] =
   g[1]++` verifies; `g[i] = g[j]++` is `unsequenced`. A named global array in a `check` with `cerastes_forall`
   and with a `pure` application (twin each). Pins: section 1's rows for globals (a `const` table naming M4.6,
   `owns_range(g, n)`, `&g[2]` as an initializer, a list of 1,001 elements, a designator, `if (g)`, a constant
@@ -757,7 +792,7 @@ corrections, each listed in status).
   false static assertion); a wrapped bound in a type operand (`overflow`, at the bound). A bound naming a local
   constant (unless cut 3). An array literal's decay in an initializer, as an argument and subscripted (twins: an
   index outside; a read through the pointer after the literal's block, `lifetime`). Pins for item 14's "still
-  rejected" list and item 12's rejections.
+  rejected" list (a system header's array typedef among them) and item 12's rejections.
 - **Part C [50].** `struct_array_*`. A structure local with an array member: element writes and reads beside
   the other member (twin: an index outside; an unwritten element, `uninitialized`). Initializers: a nested list,
   a designated member with a list, a partial list with the zero fill, `{0}`, `{}`, non-constant elements (twin:
@@ -869,7 +904,7 @@ answer; the agent goes on with what the question does not block.
   verified, a trusted contract the auditor does not accept); a protected spike row failing in every form; the
   twelve-hour cap; anything the advisor says is the owner's.
 - **Each answer the advisor settles is logged** in `internal/handoff.md` §8 under "Settled with the advisor in
-  M4.5e1e1, for the owner's review": numbered from 300, the soundness statement first (fail closed or not), the
+  M4.5e1e1, for the owner's review": numbered from 301, the soundness statement first (fail closed or not), the
   answer taken, the alternative. The status entry lists them.
 - **While the owner is away,** a question that is the owner's waits; the session goes on with everything it does
   not block. The overnight rule (build the fail-closed recommendation and log it) applies only if the owner
@@ -933,8 +968,8 @@ failure of a joined proof on the same cause.
   arrays: `int m[2][3]`, `m[i][j]`, `m[i]` as a value, `int a[][3]` parameters, `sizeof(int[2][3])`; rows are
   `member(loc(b, i), 0)` (0028 item 16), so a matrix's permission has two bound variables. `cerastes_forall`
   over `p[i].x`, over a member's array and over a global array in a contract.
-- **Handed over by e1e1 if cut or moved:** Part E (structure values with array members: question 291 keeps it
-  in M4.5e1e); cuts 3–7; heap storage of a structure with an array member (question 292); a structure with an
+- **Handed over by e1e1 if cut or moved:** Part E, or its by-value half (only by question 300's twelve-hour
+  rule; question 291 keeps it in M4.5e1e, as e1e2's first part); cuts 3–7; heap storage of a structure with an array member (question 292); a structure with an
   array member beside an owning or marked member, and markers on pointers to such structures (questions 293,
   294).
 - **The two unknowns** S47 (x) records: the member-tail receiver in the encoder's shapes with e1b's loop
@@ -970,6 +1005,8 @@ failure of a joined proof on the same cause.
   - **291** A structure with an array member is copied and passed by value in M4.5e1e: "Copy and by-value now"
     (the recommendation was the copy as a last part and first cut, by-value in M4.5f3). Built as item 13 and
     Part E.
+  - **300** When Part E runs: "Unless it passes 12 hours" (the recommendation; the alternatives were only in a
+    short session, and a stop to ask at split point 2). Section 8's split point 2.
 - **Defaults this plan builds on, for the owner's review** (each fail closed: a rejection with a diagnostic and
   a pin, never a wrong proof; answer in `internal/handoff.md` §8 before the session, or leave them):
   - **292** Heap storage of a structure with an array member (`malloc(sizeof(struct S))`) is rejected in e1e1
@@ -990,4 +1027,4 @@ failure of a joined proof on the same cause.
   - **299** Question 285's answer is the standing rule for a test that is slow on the box because of what it
     must refute: `tests/long/` with a short default-tier twin, settled with the advisor at its part.
 - **Open questions: none.** A question that arises in the session goes to the advisor first (section 12); the
-  session's questions start at 300.
+  session's questions start at 301.
