@@ -112,7 +112,7 @@ cmd_snap() {
     return
   fi
   idx="$(mktemp -u "${TMPDIR:-/tmp}/box_lane_index.XXXXXX")"
-  tree="$(GIT_INDEX_FILE="$idx" bash -c 'git read-tree "$1" && shift && git add -A -- "${@:-.}" && git write-tree' _ "$base" "${paths[@]}")"
+  tree="$(GIT_INDEX_FILE="$idx" bash -c 'git read-tree "$1" && shift && git add -A -- "${@:-.}" && git write-tree' _ "$base" ${paths[@]+"${paths[@]}"})"
   rm -f "$idx"
   commit="$(git commit-tree "$tree" -p "$base" -m "snapshot $name (not a session commit)")"
   git update-ref "refs/tmp/$name" "$commit"
@@ -200,6 +200,24 @@ self_test() {
   check snap "$want" snap s1
   want='+ GIT_INDEX_FILE=<tmp> git read-tree abc; git add -A -- a b; git write-tree; git commit-tree -p abc; git update-ref refs/tmp/s2'
   check snap-paths "$want" snap s2 abc -- a b
+  # the real snap, with and without paths, in a scratch repository (an empty paths array must not trip `set -u`)
+  local scratch
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/box_lane_selftest.XXXXXX")"
+  (
+    cd "$scratch"
+    git init -q .
+    echo x > f
+    git add f
+    git -c user.name=t -c user.email=t@t commit -q -m init
+    echo y > g
+    [[ "$(bash "$self" snap t1)" == "refs/tmp/t1" ]] && [[ "$(bash "$self" snap t2 HEAD -- g)" == "refs/tmp/t2" ]] &&
+      [[ "$(git ls-tree -r --name-only refs/tmp/t1 | tr '\n' ' ')" == "f g " ]] &&
+      [[ "$(git ls-tree -r --name-only refs/tmp/t2 | tr '\n' ' ')" == "f g " ]]
+  ) || {
+    printf 'box_lane.sh --self-test: a real snap (no paths / paths) failed\n' >&2
+    fail=1
+  }
+  rm -rf "$scratch"
   out="$(CERASTES_BOX=b@h bash "$self" --dry-run build 'Bad Lane' 2>&1 || true)"
   want="box_lane.sh: lane name must be lower-case letters and digits: 'Bad Lane'"
   if [[ "$out" != "$want" ]]; then

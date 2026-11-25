@@ -1240,9 +1240,12 @@ The constructs that are rejected in this version are:
   from itself (`int x = x;`), `static const` and `static constexpr` locals,
   `thread_local` and `extern` locals and globals, `volatile` globals, globals
   defined in another file (`extern` with no definition here), arrays other than
-  the local arrays of xref:memory.adoc#arrays[Arrays] and the parameters written as
-  arrays of xref:memory.adoc#array-parameters[Array parameters], and designators in
-  their initializers (`{[2] = 5}`), classes
+  those xref:memory.adoc#arrays[Arrays] describes (arrays of scalars as locals,
+  parameters, globals, `static` locals, structure members and compound literals in
+  C: arrays of structures and arrays of arrays are not supported yet), a global
+  array declared without a bound (`int a[];`), designators in
+  array initializers (`{[2] = 5}`), an unused array typedef in a function (both
+  compilers warn about it), classes
   other than the C structures xref:memory.adoc#structures[Structures] describes
   (`const` structure parameters and globals among them), unions,
   an enumeration declared in a function, a class or a template, or with a
@@ -1266,16 +1269,21 @@ The constructs that are rejected in this version are:
   pointer conversions other than adding `const` to the object pointed to; its
   xref:memory.adoc#not-yet[list] names the rest, such as `+owns(*r.q)+` of a
   returned structure),
-  references, arrays other than local arrays and array parameters, floating point, `volatile`, `_BitInt`,
-  vector types, enumerations declared in system headers. Array types, `_BitInt`,
-  vector types and class templates with a constant argument
-  (`std::array<char, 4>`) are rejected also as the operand of `sizeof`,
-  `_Alignof`, `typeof` or `decltype` (`sizeof(int[3])`, `sizeof("abc")`): the
-  compiler computes their size from a constant, which may have wrapped
-  (`sizeof(char[65536u * 65536u + 1])` is 1). So is a typedef of an array type.
-  `sizeof(a)` of a local array declared with its bound
-  (xref:memory.adoc#arrays[Arrays]) are accepted: its bound is checked as
-  written where the array is declared.
+  references, arrays other than those xref:memory.adoc#arrays[Arrays] describes,
+  floating point, `volatile`, `_BitInt`, vector types, enumerations declared in
+  system headers. An array type of scalars is accepted wherever a constant fixes
+  its size — a typedef or alias of one declared in your files (`typedef int
+  vec3[3];`), `typeof` and `decltype` of an array, and the operand of `sizeof`
+  and `_Alignof` (`sizeof(int[3])`, `sizeof(vec3)`, `sizeof(a)` of a named
+  array) — because each bound is checked as written where it is written: the
+  compiler computes the size from a constant, which may have wrapped, so
+  `sizeof(char[65536u * 65536u + 1])` (which a compiler makes 1) is reported as
+  xref:error-messages.adoc#_overflow[`overflow`] at the bound. An array type
+  reached through a typedef of a system header (`jmp_buf`) is rejected, since its
+  bound is not checked here; so are arrays of arrays and of structures in a type,
+  `_BitInt`, vector types and class templates with a constant argument
+  (`std::array<char, 4>`), as the operand of `sizeof`, `_Alignof`, `typeof` or
+  `decltype` too, and `sizeof("abc")`.
 * *Expressions:* the bitwise shapes the compilers warn about
   (xref:integer-semantics.adoc#bitwise[Bitwise operators]), a character literal
   with more than one character or one that does not fit its type (`'ab'`,

@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_type @ L9
 // mode: c23, c++20
 // twin: tests/scalar/sizeof_value.c
-// Pins: 0024 item 6: nested arrays
+// Pins: 0024 item 6: nested arrays (lifted by M4.5e1e2)
 #include <cerastes.h>
 
 int grid(void)

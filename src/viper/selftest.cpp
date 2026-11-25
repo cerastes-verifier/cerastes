@@ -1847,6 +1847,7 @@ int main(int argc, char** argv)
     define_pure_function_rejections();
     define_arrays_in_storage_rejections();
     define_array_globals();
+    define_member_arrays();
     define_array_literals();
     int bad {0};
     for (const Case& c : lowering_cases())

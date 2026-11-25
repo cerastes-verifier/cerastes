@@ -93,11 +93,11 @@ void define_arrays_rejected_until_part_b()
            f->body = k.blk({k.es(k.deref(k.pv(f, 0)))});
            k.done(f);
        });
-    rc("arr_rej_array_struct_member", "is not a bool, an integer, a pointer or a struct",
+    rc("arr_rej_array_struct_member_zero_length", "of no elements",
        [=](Kit& k)
        {
-           // struct S { int a[3]; };
-           k.strukt("S", {{"a", A3(k)}});
+           // struct S { int a[0]; }; (an array member is accepted from M4.5e1e1 part C: one dimension of at least one element)
+           k.strukt("S", {{"a", k.prog.array_of(k.i32, 0U)}});
        });
     rc("arr_rej_array_global_of_structs", "decision 0059 items 1 and 2",
        [=](Kit& k)

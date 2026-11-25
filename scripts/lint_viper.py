@@ -1156,23 +1156,24 @@ def slot_text(g: str, chain: tuple[int, ...]) -> str:
     return out
 
 
-def struct_facts_atoms(g: str, leaves: list[tuple[tuple[int, ...], str, str | None]]) -> list[str]:
+def struct_facts_atoms(g: str, leaves: list[tuple[tuple[int, ...], str, str | None]], arrays: dict[tuple[int, ...], int] | None = None) -> list[str]:
     """The member lengths `len(member(X, k)) == 1` of every member block of the row's struct (every prefix of a leaf chain) and its slot facts
     `X != Y` (Y a nested slot, X the root or a nested slot whose chain Y's chain strictly extends), normalized (decision 0044 item 8)."""
-    blocks = {c[:i] for c, _s, _t in leaves for i in range(1, len(c) + 1)}
-    slots = {c[:i] for c, _s, _t in leaves for i in range(1, len(c))}
-    atoms = [f"len(member({slot_text(g, b[:-1])},{b[-1]}))==1" for b in sorted(blocks)]
+    chains = [c for c, _s, _t in leaves] + list(arrays or {})
+    blocks = {c[:i] for c in chains for i in range(1, len(c) + 1)}
+    slots = {c[:i] for c in chains for i in range(1, len(c))}
+    atoms = [f"len(member({slot_text(g, b[:-1])},{b[-1]}))=={(arrays or {}).get(b, 1)}" for b in sorted(blocks)]
     atoms += [f"{slot_text(g, a)}!={slot_text(g, b)}" for b in sorted(slots) for a in sorted({()} | slots) if len(b) > len(a) and b[:len(a)] == a]
     return atoms
 
 
 def global_facts_atoms_of(names: list[str], structs: dict[str, list[tuple[tuple[int, ...], str, str | None]]],
-                          lens: dict[str, int] | None = None) -> list[str]:
+                          lens: dict[str, int] | None = None, sarrays: dict[str, dict[tuple[int, ...], int]] | None = None) -> list[str]:
     """The facts of the unit (sorted atoms): each global's scalar facts (`len(GB_g()) == N` for an array global of `lens`, decision 0063 item 15:
     the same N in the three places the facts are pinned), and each struct global's member lengths and slot facts."""
     atoms = global_facts_atoms(names, lens)
     for g, leaves in structs.items():
-        atoms += struct_facts_atoms(g, leaves)
+        atoms += struct_facts_atoms(g, leaves, (sarrays or {}).get(g))
     return sorted(atoms)
 
 
@@ -1208,17 +1209,26 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
     q0 = parse_block_row(clauses[i][2])
     m0 = GB_TERM_RE.match(q0["b"]) if q0 else None
     g = m0.group(1) if m0 else ""
+    key: tuple[int, ...] | None = None  # a structure global's array leaf: the member key; the group has no liveness row (the cell row has it)
+    if q0 is not None and m0 is None:
+        for cand in gbs:
+            k0 = parse_struct_member(q0["b"], f"loc({cand}(),0)")
+            if k0 is not None:
+                g, key = cand, k0
+                break
 
     def fail(ln: int, why: str, at: int):
         problems.append((ln, f"the row group of an array global in `program_start` (decision 0063 item 9): {why}"))
         j = at
+        if key is not None:
+            return end, None, problems  # one report: the rest of the rows are not read
         while j < end and norm_viper(clauses[j][2]) != f"acc(lvloc({g}()).lv)":
             j += 1
         return min(j + 1, end), None, problems
 
-    if q0 is None or m0 is None or g not in gbs:
+    if q0 is None or (m0 is None and key is None) or g not in gbs:
         return fail(first_line, "the first row is not the value permission `forall k: Int :: { loc(GB_g(), k) } 0 <= k && k < N ==> acc(loc(GB_g(), k).v_t)` "
-                                "of a declared `GB_g`", i + 1)
+                                "of a declared `GB_g` (or of an array member `member(loc(GB_g(), 0), k)` of a structure global)", i + 1)
     n = int(q0["hi"])
     if q0["lo"] != "0" or n < 1:
         return fail(first_line, f"the range is `0 <= k && k < N` with a literal N >= 1, found `{q0['lo']} <= k && k < {q0['hi']}`", i + 1)
@@ -1242,12 +1252,16 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
     c0 = lambda idx: f"loc({b},{idx})"  # noqa: E731
     while j < end:
         ln, text = clauses[j][1], norm_viper(clauses[j][2])
-        if text == f"acc(lvloc({g}()).lv)":
+        if text == f"acc(lvloc({g}()).lv)" and key is None:
             break
         if zero_rest or unknown:
+            if key is not None:
+                break  # the next group of the structure global starts here
             return fail(ln, "a row after the quantifier of the values (the group ends with `acc(lvloc(GB_g()).lv)`)", j + 1)
         q = parse_block_row(clauses[j][2])
         if q is not None:
+            if key is not None and q["b"] != b:
+                break  # the next array member's group
             if q["b"] != b or q["hi"] != str(n):
                 return fail(ln, f"the quantifier of the values is over `{{ loc({b}, k) }}` up to `k < {n}`", j + 1)
             zero = zero_literal(fields, t)
@@ -1267,6 +1281,8 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
             j += 1
             continue
         em = re.fullmatch(rf"loc\({re.escape(b)},(?P<i>[0-9]+)\)\.v_{re.escape(t)}==(?P<v>.+)", text)
+        if em is None and key is not None:
+            break  # a structure global's group ends where the next row is no value of it
         if em is None:
             return fail(ln, f"`{text}` is not a value conjunct `loc({b}, i).v_{t} == c` of a listed element, the quantifier of the rest or "
                             f"`acc(lvloc({g}()).lv)`", j + 1)
@@ -1281,14 +1297,14 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
         targets.append((ln, target))
         listed += 1
         j += 1
-    if j >= end:
+    if j >= end and key is None:
         return fail(clauses[min(i, end - 1)][1], f"the group has no final `acc(lvloc({g}()).lv)`", end)
     if listed < n and not zero_rest and not unknown and zero_literal(fields, t) is not None and fields.get(t) != "Bool":
         return fail(clauses[j][1], "no zero rest and no range of an unknown value: the elements from "
                                    f"{listed} on have no value row", j + 1)
     if listed < n and not zero_rest and not unknown and fields.get(t) == "Bool" and listed != 0:
         return fail(clauses[j][1], f"no zero rest for the elements from {listed} on", j + 1)
-    return j + 1, (g, n, t, targets), problems
+    return (j if key is not None else j + 1), (g, n, t, targets, key), problems
 
 
 def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> tuple[bool, list[str] | None]:
@@ -1333,6 +1349,8 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
         rows: dict[str, tuple[int, str, str | None]] = {}  # global -> (line, field suffix, target of a `loc(GB_h(), 0)` value)
         srows: dict[str, tuple[int, list[tuple[tuple[int, ...], str, str | None]]]] = {}  # struct global -> (line, leaves)
         arows: dict[str, tuple[int, str, int, list[tuple[int, str | None]]]] = {}  # array global -> (line, field suffix, N, [(line, target)])
+        # a struct global's array leaves (decision 0063 item 9): global -> {member key: (line, field suffix, N, [(line, target)])}
+        sarrs: dict[str, dict[tuple[int, ...], tuple[int, str, int, list[tuple[int, str | None]]]]] = {}
         row_problems: list[tuple[int, str]] = []
         if d.has_body or header != want_head:
             problem = f"it must be a bodyless `{want_head}`"
@@ -1351,8 +1369,17 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                     # an array global's row group (decision 0063 items 9 and 15): several rows, one global
                     at, group, why = array_global_group(clauses, at - 1, stop, fields, gbs, counts)
                     row_problems.extend(why)
-                    if group is not None:
-                        ag, an, asuffix, atargets = group
+                    if group is not None and group[4] is not None:
+                        ag, an, asuffix, atargets, akey = group
+                        if ag not in srows:
+                            row_problems.append((ln, f"the array member {akey} of the structure global `{ag}` has its row group before the structure's cell row, or the "
+                                                     "structure has no cell leaf (the cell row ends with `acc(lvloc(GB_g()).lv)`; decision 0063 item 9)"))
+                        elif akey in sarrs.get(ag, {}):
+                            row_problems.append((ln, f"a second row group for the array member {akey} of `{ag}` (two full permissions would make `main` vacuous)"))
+                        else:
+                            sarrs.setdefault(ag, {})[akey] = (ln, asuffix, an, atargets)
+                    elif group is not None:
+                        ag, an, asuffix, atargets, _akey = group
                         if ag in rows or ag in srows or ag in arows:
                             row_problems.append((ln, f"a second `program_start` row for `{ag}` (two full permissions would make `main` vacuous)"))
                         else:
@@ -1370,6 +1397,17 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                         row_problems.append((ln, f"a second `program_start` row for `{g}` (two full permissions would make `main` vacuous)"))
                     else:
                         srows[g] = (ln, leaves)
+                    continue
+                lone = re.fullmatch(r"acc\(lvloc\((GB_[\w$']+)\(\)\)\.lv\)", row)
+                if lone:
+                    # a structure global with no cell leaf (decision 0063 item 9): its cell row is the liveness cell alone, then the array groups
+                    lg = lone.group(1)
+                    if lg not in gbs:
+                        row_problems.append((ln, f"a `program_start` liveness row names `{lg}`, which is not a declared `GB_` global"))
+                    elif lg in rows or lg in srows or lg in arows:
+                        row_problems.append((ln, f"a second `program_start` row for `{lg}` (two full permissions would make `main` vacuous)"))
+                    else:
+                        srows[lg] = (ln, [])
                     continue
                 m = re.match(r"acc\(loc\((?P<g>GB_[\w$']+)\(\),0\)\.v_(?P<s>[\w$']+)\)&&acc\(loc\((?P=g)\(\),0\)\.d_(?P=s)\)&&"
                              r"loc\((?P=g)\(\),0\)\.d_(?P=s)&&(?P<rest>.*)$", row)
@@ -1390,10 +1428,15 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                     row_problems.append((ln, f"a second `program_start` row for `{g}` (two full permissions would make `main` vacuous)"))
                     continue
                 rows[g] = (ln, suffix, target)
+            for g, (lln, lleaves) in srows.items():
+                if not lleaves and not sarrs.get(g):
+                    row_problems.append((lln, f"the liveness row of `{g}` stands alone, and no array member of it has a row group: a structure global with no cell leaf "
+                                              "is its liveness cell and the groups of its array members (decision 0063 item 9)"))
             # the facts follow the rows: with a row that is wrong or missing the expected facts are unknown, and the row is the problem
             missing = [g for g in gbs if g not in rows and g not in srows and g not in arows]
             facts_atoms = None if row_problems or missing else global_facts_atoms_of(
-                list(gbs), {g: lv for g, (_l, lv) in srows.items()}, {g: n for g, (_l, _s, n, _t) in arows.items()})
+                list(gbs), {g: lv for g, (_l, lv) in srows.items()}, {g: n for g, (_l, _s, n, _t) in arows.items()},
+                {g: {k: v[2] for k, v in arrs.items()} for g, arrs in sarrs.items()})
             if facts_atoms is not None and (len(clauses) < 2 or sorted(norm_viper(clauses[0][2]).split("&&")) != facts_atoms):
                 problem = ("its first `ensures` row must be the global facts: `len(GB_x()) == 1 && lvloc(GB_x()) == loc(GB_x(), -2)` "
                            "for each declared `GB_x` (`len(GB_x()) == N` for an array global of N elements, decision 0063 item 15), each once, and "
@@ -1409,6 +1452,7 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
         addrs = [(g, ln, suffix, target) for g, (ln, suffix, target) in rows.items() if target is not None]
         addrs += [(g, ln, suffix, target) for g, (ln, leaves) in srows.items() for _c, suffix, target in leaves if target is not None]
         addrs += [(g, eln, suffix, target) for g, (_l, suffix, _n, elems) in arows.items() for eln, target in elems if target is not None]
+        addrs += [(g, eln, v[1], target) for g, arrs in sarrs.items() for v in arrs.values() for eln, target in v[3] if target is not None]
         for g, ln, suffix, target in addrs:
             pointee = suffix[len("ptr_"):]
             if target in rows:
@@ -1722,7 +1766,58 @@ def _min_leaves(e: str, formals: frozenset[str]) -> list[str] | None:
     return None if left is None or right is None else left + right
 
 
-def _range_amount_inner(d: str, formals: frozenset[str] = frozenset()) -> bool:
+PERM_LEAF_FIELD_RE = re.compile(rf"^perm\((?P<cell>.+)\.(?P<f>[vd])_(?P<t>{IDENT})\)$")
+CELL_TERM_RE = re.compile(r"^loc\((?P<m>member\(.+\)),0\)$")
+
+
+def _site_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: dict[str, str] | None = None) -> bool:
+    """Decision 0063 item 8 (a `reads(*p)` or `reads(p->a)` site with array parts): the amount a structure site's call row divides is the minimum, in
+    nested conditionals, over the permissions the site holds: for each CELL leaf `F = loc(member(<chain>, k), 0)` (chain canonical, rooted at the
+    variable R) `perm(F.v_t)` and `perm(F.d_t)`, for each array part's first slot `S = loc(block_of(B), offset_of(B))` (B a variable, the part's
+    bound local) `perm(S.v_t)` and `perm(S.d_t)`, the liveness `perm(lvloc(block_of(R)).lv)` of the root, and the method's own `Perm` formals.  The
+    value and the flag of every cell and slot must both be in it (a missing one would let the amount exceed what the method holds), exactly one
+    liveness leaf, no other `perm`, local or literal.  A slot's base B must be a local the method assigns once `loc(member(<chain>, k), 0)` with the
+    chain rooted at the liveness variable R (`slots`: local -> the root of its chain), so a minimum over some other variable's slot is refused.
+    Not checked: that every cell leaf of the site is present (a missing cell leaf only lowers nothing: the amount may then exceed what the cell
+    holds, which the call's own `exhale` reports as a false alarm, never a proof).
+    A plain scalar cell site (audit round 3 S2: a call with array parts binds every cell site's amount to a `Perm` local): the cell IS the
+    liveness variable R, so the leaves are `perm(R.v_t)` and `perm(R.d_t)` (value and flag of one type, both required) and the liveness
+    `perm(lvloc(block_of(R)).lv)` of the same R; a cell that is another variable than the liveness one is refused as before."""
+    leaves = _min_leaves(d, formals)
+    if leaves is None:
+        return False
+    live = [m.group(1) for l in leaves if (m := RANGE_LIVENESS_RE.match(l))]
+    if len(set(live)) != 1:
+        return False
+    root = live[0]
+    held: dict[tuple[str, str], set[str]] = {}  # (cell kind and text, suffix) -> {v, d}
+    for leaf in leaves:
+        if leaf in formals or RANGE_LIVENESS_RE.match(leaf):
+            continue
+        m = PERM_LEAF_FIELD_RE.match(leaf)
+        if m is None:
+            return False
+        cell = m.group("cell")
+        sm = re.fullmatch(rf"loc\(block_of\(({IDENT})\),offset_of\(\1\)\)", cell)
+        if cell == root:
+            kind = "root"
+        elif sm:
+            if (slots or {}).get(sm.group(1)) != root:
+                return False
+            kind = "slot"
+        elif (cm := CELL_TERM_RE.match(cell)) is not None and parse_struct_member(cm.group("m"), root) is not None:
+            kind = "cell"
+        else:
+            return False
+        held.setdefault((f"{kind}:{cell}", m.group("t")), set()).add(m.group("f"))
+    if any(key.startswith("root:") for key, _ in held):
+        # a plain scalar cell site is the root cell alone (one type); a structure site never holds a cell that is its root
+        if len(held) != 1:
+            return False
+    return all(fs == {"v", "d"} for fs in held.values())
+
+
+def _range_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: dict[str, str] | None = None) -> bool:
     """The amount a range atom's call row divides (decision 0060 item 6, S44 (c), audit round 2 S5): the liveness
     `perm(lvloc(block_of(B)).lv)` of a variable B (an `owns_range`), or, for a `reads_range`, `n > 0 ? min(perm(F.v_t), perm(F.d_t),
     perm(L), a_1, ...) : perm(L)` over the first slot `F = loc(block_of(B), offset_of(B))`, the minimum written as nested conditionals
@@ -1734,6 +1829,8 @@ def _range_amount_inner(d: str, formals: frozenset[str] = frozenset()) -> bool:
     cond = _split_conditional(d)
     if cond is None:
         return False
+    if _site_amount_inner(d, formals, slots):
+        return True
     c, a, b = cond
     live = RANGE_LIVENESS_RE.match(_sq(b))
     n = re.fullmatch(r"(.+)>0", _sq(c))
@@ -1752,18 +1849,18 @@ def _range_amount_inner(d: str, formals: frozenset[str] = frozenset()) -> bool:
     return required <= set(leaves) and all(leaf in required or leaf in formals for leaf in leaves)
 
 
-def range_amount_dividend_ok(d: str, formals: frozenset[str] = frozenset()) -> bool:
+def range_amount_dividend_ok(d: str, formals: frozenset[str] = frozenset(), slots: dict[str, str] | None = None) -> bool:
     """`_range_amount_inner`, or `g ? <that> : write` for a guarded atom (`g` plain: no permission, quantifier or heap read)."""
-    if _range_amount_inner(d, formals):
+    if _range_amount_inner(d, formals, slots):
         return True
     cond = _split_conditional(d)
     if cond is None or _sq(cond[2]) != "write":
         return False
-    return (GUARD_BAD_RE.search(cond[0]) is None and _heap_free(cond[0]) and _range_amount_inner(cond[1], formals)
+    return (GUARD_BAD_RE.search(cond[0]) is None and _heap_free(cond[0]) and _range_amount_inner(cond[1], formals, slots)
             and not RANGE_LIVENESS_RE.match(_sq(cond[0])))
 
 
-def perm_value_ok(text: str, formals: frozenset[str] = frozenset()) -> bool:
+def perm_value_ok(text: str, formals: frozenset[str] = frozenset(), slots: dict[str, str] | None = None) -> bool:
     """Whether `text` is `perm(...)`, `none`, `write` or a conditional `c ? a : b` of those (parentheses anywhere), or the amount of
     a range atom's call row divided by a decimal literal of 2 or more: `perm(lvloc(block_of(B)).lv) / (N + 1)`, with the guard
     `(g ? perm(...) : write)` and, for `reads_range`, the minimum over the first slot (decision 0060 item 6: `range_amount_dividend_ok`).
@@ -1773,7 +1870,7 @@ def perm_value_ok(text: str, formals: frozenset[str] = frozenset()) -> bool:
         return True
     div = _perm_divisor(text)
     if div is not None:
-        return div[1] >= 2 and range_amount_dividend_ok(div[0], formals)
+        return div[1] >= 2 and range_amount_dividend_ok(div[0], formals, slots)
     m = PERM_CALL_RE.match(text)
     if m:
         depth = 0
@@ -1810,7 +1907,7 @@ def perm_value_ok(text: str, formals: frozenset[str] = frozenset()) -> bool:
             nested -= 1
     if colon < 0:
         return False
-    return perm_value_ok(text[q + 1:colon], formals) and perm_value_ok(text[colon + 1:], formals)
+    return perm_value_ok(text[q + 1:colon], formals, slots) and perm_value_ok(text[colon + 1:], formals, slots)
 
 
 def while_loops(src: Source, d: Decl):
@@ -2026,6 +2123,26 @@ def perm_call_target_ok(src: Source, by_name: dict[str, Decl], code: str, start:
     return typ == "Perm" and perm_result_has_row(src, callee, o)
 
 
+def member_bound_slots(src: Source, d: Decl) -> dict[str, str]:
+    """The locals of method `d` that the body assigns exactly once `loc(member(<chain>, k), 0)` (a member's bound local, decision 0063 item 15), as
+    {local: the variable the canonical chain is rooted at}."""
+    assigns: dict[str, list[str]] = {}
+    for n in range(d.line + 1, d.end_line + 1):
+        line = src.code[n - 1]
+        if (m := LOCAL_ASSIGN_RE.match(line)):
+            for t in (x.strip() for x in m.group("lhs").split(",")):
+                assigns.setdefault(t, []).append(norm_viper(m.group("rhs")) if "," not in m.group("lhs") else "<multi-target>")
+        elif (m := LOCAL_VAR_INIT_RE.match(line)):
+            assigns.setdefault(m.group("x"), []).append(norm_viper(m.group("rhs")))
+    out: dict[str, str] = {}
+    for x, rhss in assigns.items():
+        bm = BOUND_RHS_RE.match(rhss[0]) if len(rhss) == 1 else None
+        rm = re.match(rf"^(?:member\(loc\()*member\(({IDENT}),", bm.group("b")) if bm and bm.group("j") == "0" else None
+        if rm and parse_struct_member(bm.group("b"), rm.group(1)) is not None:
+            out[x] = rm.group(1)
+    return out
+
+
 def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
     """Decision 0038 item 9: the amounts of a loop's invariant are `Perm` locals that snapshot what the method holds.  A
     local is assigned only `perm(...)`, `none`, `write` or a conditional of those (an assignment of anything else, `wildcard`
@@ -2038,11 +2155,12 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
             continue
         names = perm_local_names(src, d)
         formals = frozenset(m.group("name") for f in method_formals(src, d) if (m := PERM_FORMAL_RE.match(f)))
+        slots = member_bound_slots(src, d)
         for n in range(d.body_line, d.end_line + 1):
             code = src.code[n - 1]
             if (m := PERM_LOCAL_RE.search(code)) and ":=" in m.group("rest"):
                 rhs = _statement_rhs(m.group("rest"), m.group("rest").index(":=") + 2)
-                if not perm_value_ok(rhs, formals) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
+                if not perm_value_ok(rhs, formals, slots) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
                     add(n, f"`Perm` local `{m.group('names')}` is initialized with `{rhs}`: a snapshot is `perm(...)`, `none`, "
                            "`write` or a conditional of those (decision 0038 item 9)")
             for name in sorted(names):
@@ -2050,7 +2168,7 @@ def lint_perm_locals(src: Source, decls: list[Decl], add: Callable[[int, str], N
                 # 0044 item 13: a multi-target call is one assignment of every target; the first target must be seen too)
                 for a in re.finditer(r"(?<![\w$'.])" + re.escape(name) + r"\s*(?=(?:,\s*[A-Za-z_$][\w$']*\s*)*:=)", code):
                     rhs = _statement_rhs(code, code.index(":=", a.end()) + 2)
-                    if not perm_value_ok(rhs, formals) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
+                    if not perm_value_ok(rhs, formals, slots) and not WILDCARD_RE.search(rhs):  # wildcard: reported by its own rule
                         if perm_call_target_ok(src, by_name, code, a.start(), a.end(), rhs):
                             continue
                         add(n, f"`Perm` local `{name}` is assigned `{rhs}`: a snapshot is `perm(...)`, `none`, `write` or a "
@@ -3831,7 +3949,9 @@ def method_len_facts(src: Source, d: Decl) -> dict[str, set[int]]:
     out: dict[str, set[int]] = {}
     for kw, _ln, text in clause_texts(src, d):
         if kw in ("requires", "ensures"):
-            for b, n in re.findall(r"len\((.+?)\)==([0-9]+)", norm_viper(text)):
+            # the block term is balanced (a nested chain has parentheses; a guard `offset_of(p) < len(block_of(p)) ==> len(member(p, 0)) == 4` has an
+            # earlier `len(` that is no count)
+            for b, n in re.findall(r"len\(((?:[^()]|\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))+)\)==([0-9]+)", norm_viper(text)):
                 out.setdefault(b, set()).add(int(n))
     return out
 
@@ -3842,13 +3962,27 @@ BOUND_RHS_RE = re.compile(r"^loc\((?P<b>.+),(?P<j>-?[0-9]+)\)$")
 ALLOC_CALL_RE = re.compile(r"^(?P<name>alloc_struct_[0-9]+_[\w$']+)\(\)$")
 
 
-def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays: dict[str, int]) -> dict[str, tuple[set[int], str]]:
+def member_array_counts(counts: dict[str, dict[tuple[int, ...], int]]) -> dict[tuple[int, ...], set[int]]:
+    """Every array member of every structure allocation `alloc_struct_<n>_<tag>`, by member key: key -> {N} (decision 0063 item 15: a member's bound
+    local has the literal count of the member at that path and index in ANY allocation of a structure that has an array member there; lowering emits
+    the allocation for every such structure, called or not, so the count always has its pinned source)."""
+    out: dict[tuple[int, ...], set[int]] = {}
+    for per in counts.values():
+        for key, n in per.items():
+            out.setdefault(key, set()).add(n)
+    return out
+
+
+def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays: dict[str, int],
+                 counts: dict[str, dict[tuple[int, ...], int]] | None = None) -> dict[str, tuple[set[int], str]]:
     """Decision 0063 item 15's bound local: the `Ref` locals of method `d` that some statement of its body assigns `loc(B, j)` with B a block term
     (`GB_<g>()` or `member(<chain>, k)`), as {local: (the counts the block's length fact states, why it is no bound local of the grammar or "")}.  A
     bound local is e1a's array local whose rows are `block_of(t)` over `0 <= k < N`: it is assigned exactly `loc(B, 0)` (every assignment the same text)
-    with B in the block grammar, an array global of the unit or a member of a chain rooted at a formal, a result or a local assigned an
-    `alloc_struct_*` call, and N is the count of B's `len(B) == N` fact (`program_start`'s facts, the method's own clauses, or the allocation's
-    `ensures` for a local it assigned). """
+    with B in the block grammar, and N is, for `GB_g()`, the count of the global's row group in `program_start`, and for `member(<chain>, k)` the literal
+    count of the member at that path and index in an `alloc_struct_*` of the unit (`member_array_counts`).  The chain is rooted at a Viper VARIABLE only
+    (never an expression): a formal, a result, a local assigned an `alloc_struct_*` call, or any other local that the body assigns exactly once (a
+    call-row temporary bound from the argument first, a pointer a call returned, a load for 0045's places), and `loc(GB_<g>(), 0)` of a declared
+    global."""
     assigns: dict[str, list[str]] = {}
     for n in range(d.line + 1, d.end_line + 1):
         line = src.code[n - 1]
@@ -3861,17 +3995,30 @@ def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays:
         elif (m := LOCAL_VAR_INIT_RE.match(line)):
             assigns.setdefault(m.group("x"), []).append(norm_viper(m.group("rhs")))
     by_name = {e.name: e for e in decls if e.kind == "method"}
-    lens = {b: set(ns) for b, ns in method_len_facts(src, d).items()}
-    roots = {*_formal_names(src, d), *(n for n, _t in method_results(src, d))}
-    for x, rhss in assigns.items():
-        am = ALLOC_CALL_RE.match(rhss[0]) if len(rhss) == 1 else None  # a root has ONE assignment: the call
-        if am and am.group("name") in by_name:
-            roots.add(x)
-            for b, ns in method_len_facts(src, by_name[am.group("name")]).items():
-                lens.setdefault(re.sub(r"(?<![\w$'])r(?![\w$'])", x, b), set()).update(ns)
+    formals = {*_formal_names(src, d), *(n for n, _t in method_results(src, d))}
+    member_counts = member_array_counts(counts if counts is not None else struct_array_counts(src, decls))
+
+    roots = set(formals)
+    single = {x: rhss[0] for x, rhss in assigns.items() if len(rhss) == 1}
+    for x, rhs in single.items():
+        am = ALLOC_CALL_RE.match(rhs)
+        if (am and am.group("name") in by_name) or not rhs.startswith("loc("):
+            roots.add(x)  # a structure local from an allocation; a temporary bound from the argument, a call's result, a load
+    pending = {x: BOUND_RHS_RE.match(rhs) for x, rhs in single.items() if x not in roots and rhs.startswith("loc(")}
+    changed = True
+    while changed:
+        changed = False
+        for x, m in pending.items():
+            if x in roots or m is None:
+                continue
+            bt = block_term(m.group("b"), gbs, roots)
+            # a pointer to a slot that is no array (`&s.t`, the address of a scalar or structure global) is a root for chains
+            if bt is not None and (bt[1] not in arrays if bt[0] == "gb" else bt[2] not in member_counts):
+                roots.add(x)
+                changed = True
     out: dict[str, tuple[set[int], str]] = {}
     for x, rhss in assigns.items():
-        if x in roots or not any(r.startswith("loc(") for r in rhss):
+        if x in formals or not any(r.startswith("loc(") for r in rhss):
             continue
         ms = [BOUND_RHS_RE.match(r) for r in rhss]
         if any(m is None for m in ms) or len(set(rhss)) != 1:
@@ -3879,21 +4026,23 @@ def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays:
             continue
         m = ms[0]
         b = m.group("b")
-        bt = block_term(b, gbs, roots)
+        bt = block_term(b, gbs, roots - {x})
         if m.group("j") != "0":
             out[x] = (set(), f"the local `{x}` is bound to slot {m.group('j')} of `{b}`, not the first slot of an array")
         elif bt is None:
             out[x] = (set(), f"the local `{x}` is bound to `loc({b}, 0)`, whose block is neither `GB_g()` of a declared array global nor `member(<chain>, k)` over "
-                             "the canonical chain rooted at a formal, a result or a local from an `alloc_struct_*` call (decision 0043 item 13)")
+                             "the canonical chain rooted at a Viper variable (a formal, a result, a structure local from an `alloc_struct_*` call or a "
+                             "temporary assigned once; decision 0043 item 13)")
         elif bt[0] == "gb":
             if bt[1] in arrays:
                 out[x] = ({arrays[bt[1]]}, "")
             else:
                 out[x] = (set(), f"`{bt[1]}` is not an array global (no row group of it in `program_start`)")
-        elif lens.get(b):
-            out[x] = (lens[b], "")
+        elif member_counts.get(bt[2]):
+            out[x] = (member_counts[bt[2]], "")
         else:
-            out[x] = (set(), f"no `len({b}) == N` fact states the count of the block the local `{x}` is bound to")
+            out[x] = (set(), f"no `alloc_struct_*` of the unit has an array member at {bt[2]} (`len({b}) == N`): the count of a member's rows is the literal "
+                             "the allocation of its structure states (decision 0063 item 15)")
     return out
 
 
@@ -5072,6 +5221,7 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
             skip.update(range(d.line, d.end_line + 1))  # trusted rows with their own rules (`array_global_group`, `struct_allocation_problem`)
     gb_names = {m.group("name") for l in src.code if (m := GB_DECL_RE.match(l))}
     array_counts = array_global_counts(src, decls)
+    struct_counts = struct_array_counts(src, decls)
     block_ctx: dict[int, tuple[set[str], dict[str, set[int]]]] = {}
     bound_ctx: dict[int, dict[str, tuple[set[int], str]]] = {}
     labels_before: dict[int, set[str]] = {}
@@ -5153,7 +5303,7 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
             # decision 0060 item 16: a range atom's quantifiers in a method's clauses and its pure rows
             md0 = method_of[lineno]
             if md0.line not in bound_ctx:
-                bound_ctx[md0.line] = bound_locals(src, md0, decls, gb_names, array_counts)
+                bound_ctx[md0.line] = bound_locals(src, md0, decls, gb_names, array_counts, struct_counts)
             why = range_atom_row_problem(kind, guard, q, perm_formals(lineno), bound_ctx[md0.line].get) or ""
             ok = not why
         elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \

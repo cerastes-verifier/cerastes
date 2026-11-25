@@ -401,6 +401,7 @@ private:
     void struct_type(const StructType& st)
     {
         const std::string name {"the struct '" + st.c_name + "'"};
+        array_with_marked(st);
         const auto& ss {prog_.structs()};
         if (st.id < 0 || static_cast<size_t>(st.id) >= ss.size() || &ss[static_cast<size_t>(st.id)] != &st)
         {
@@ -453,11 +454,11 @@ private:
             }
             else if (m.type.is_array())
             {
-                // decision 0063 item 4 (M4.5e1e1 part A): an array member is representable and refused until part C builds its layout
-                err(m.loc,
-                    "the member '" + m.name + "' of " + name +
-                        " is not a bool, an integer, a pointer or a struct (decision 0043 item 2); an array member (" +
-                        m.type.str() + ") is decision 0063 item 3's, which M4.5e1e1 part C lifts");
+                // decision 0063 items 2 and 3 (M4.5e1e1 part C): an array member is one dimension of at least one element of a scalar (the block `member(X, k)` of that length)
+                if (!array_local_type(m.type))
+                {
+                    err(m.loc, "the member '" + m.name + "' of " + name + " is " + array_reason(m.type));
+                }
             }
             else if (!scalar_type(m.type))
             {
@@ -487,6 +488,17 @@ private:
                 err(m.loc, "the `ref_to_uninit` member '" + m.name + "' of " + name +
                                " is not a pointer to an object (decision 0058 item 4)");
             }
+        }
+    }
+
+    // Decision 0063 item 1 (question 293): a struct with both an array member and an `owning` or `ref_to_uninit` member, at any depth of its nest, is M4.5e1e2's
+    void array_with_marked(const StructType& st)
+    {
+        if (struct_has_array(st) && struct_has_marked(st))
+        {
+            err(st.loc,
+                "the struct '" + st.c_name +
+                    "' has an array member and an `owning` or `ref_to_uninit` member (decision 0063 item 1, question 293: M4.5e1e2)");
         }
     }
 
@@ -633,6 +645,44 @@ private:
         for (size_t k {0U}; k < leaves.size(); ++k)
         {
             const GlobalLeaf& l {g.leaves[k]};
+            if (leaves[k].array)
+            {
+                // decision 0063 item 9 (part C): an array leaf of a struct global has the listed prefix `elems` (at most N entries, each a scalar initial value of the element type) and
+                // a `rest` that is zero or unknown; the leaf's own kind mirrors the rest (Unknown iff the rest is unknown)
+                const std::string ln {"the member '" + leaves[k].text + "' of the global '" + g.c_name + "'"};
+                if (!array_local_type(leaves[k].type))
+                {
+                    err(g.loc, ln + " is " + array_reason(leaves[k].type));
+                    continue;
+                }
+                if (l.elems.size() > static_cast<size_t>(leaves[k].count))
+                {
+                    err(g.loc, ln + " lists " + std::to_string(l.elems.size()) + " initial values for its " +
+                                   std::to_string(leaves[k].count) + " elements (decision 0063 item 9)");
+                    continue;
+                }
+                if ((l.kind == GlobalInit::Unknown) != (l.rest == ArrayRest::Unknown) || l.init != nullptr ||
+                    l.target != nullptr)
+                {
+                    err(g.loc, ln + " has an array leaf whose kind does not mirror its rest (decision 0063 item 9)");
+                }
+                for (size_t i {0U}; i < l.elems.size(); ++i)
+                {
+                    const GlobalLeaf& el {l.elems[i]};
+                    const std::string en {"the element " + std::to_string(i) + " of " + ln};
+                    if (!el.elems.empty() || el.rest != ArrayRest::Zero)
+                    {
+                        err(g.loc, en + " carries array initial values (an array of arrays is M4.5e1e2's)");
+                    }
+                    if ((el.kind == GlobalInit::Unknown) != (l.rest == ArrayRest::Unknown))
+                    {
+                        err(g.loc, en + " is known or unknown against the rest of its array (decision 0063 item 9)");
+                    }
+                    global_value(en, el.loc.known() ? el.loc : g.loc, leaves[k].element, el.kind, el.init, el.value,
+                                 el.target);
+                }
+                continue;
+            }
             if (!l.elems.empty() || l.rest != ArrayRest::Zero)
             {
                 err(g.loc, "the member '" + leaves[k].text + "' of the global '" + g.c_name +
@@ -880,6 +930,12 @@ private:
             {
                 err(f.loc, "the return type of '" + f.c_name + "' is a struct that is not in the program");
             }
+            else if (struct_has_array(*f.ret.struct_type))
+            {
+                err(f.loc,
+                    "the return type of '" + f.c_name +
+                        "' is a struct with an array member (decision 0063 item 13: by value is M4.5e1e1 part E)");
+            }
         }
         else if (!(f.ret.is_void() || value_type(f.ret)))
         {
@@ -902,6 +958,12 @@ private:
                 {
                     err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
                                              "' is a struct that is not in the program");
+                }
+                else if (struct_has_array(*f.params[k].type.struct_type))
+                {
+                    err(f.params[k].loc,
+                        "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
+                            "' is a struct with an array member (decision 0063 item 13: by value is M4.5e1e1 part E)");
                 }
                 else if (!f.param_var(static_cast<int>(k))->address_taken)
                 {
@@ -1738,6 +1800,14 @@ private:
             if (!pr.type.is_ptr())
             {
                 err(pr.loc, who + " is marked `ref_to_uninit` or `must_init` but is not a pointer");
+                continue;
+            }
+            if (pr.type.pointee != nullptr && pr.type.pointee->is_struct() && pr.type.pointee->struct_type != nullptr &&
+                struct_has_array(*pr.type.pointee->struct_type))
+            {
+                err(pr.loc,
+                    who +
+                        " is marked `ref_to_uninit` or `must_init` and points to a struct with an array member (decision 0063 item 1, question 294: M4.5e1e2)");
                 continue;
             }
             if (pr.init == InitMarker::MustInit && f.noreturn)
@@ -3144,9 +3214,18 @@ private:
                 break;
             // decision 0063 item 4 (M4.5e1e1 part A): built by the Builder, accepted by no check yet (the zero fill of an array member: part C; the copy: part E)
             case Stmt::Kind::ArrayZero:
-                err(s.loc,
-                    "an array zero-fill statement (decision 0063 items 4 and 6: arrays in structures and static storage, M4.5e1e1 part C)");
+            {
+                // decision 0063 items 4 and 6 (part C): C's zero fill of the array member at `addr` (the address of an array member of a structure local or object; code only)
+                if (s.addr == nullptr || !member_array_base(s.addr))
+                {
+                    err(s.loc,
+                        "an array zero-fill of something other than the address of an array member (decision 0063 item 6)");
+                    break;
+                }
+                array_addr_ok_.insert(s.addr);
+                expr(*s.addr, Ctx::Body, false);
                 break;
+            }
             case Stmt::Kind::ArrayCopy:
                 err(s.loc,
                     "an array copy statement (decision 0063 items 4 and 13: structure values with array members, M4.5e1e1 part E)");
@@ -3554,8 +3633,9 @@ private:
                     // In a contract the place is `*p`, `*result`, `g` or, decision 0043 item 9, a member of one of them (`p->x`, `r->t.y`) or, decision 0045 item 2,
                     // any of those reached through loads and pointer leaves (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`): the root under MemberAddr, Deref and Field nodes.
                     // record 0060 item 5: the element `p[e]` of a pointer parameter (its ElemAddr is checked where it stands) is rooted at that parameter
-                    const Expr* root {e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr ? e.a->a
-                                                                                             : place_root(e.a)};
+                    const Expr* root {e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr
+                                          ? (member_array_base(e.a->a) ? place_root(e.a->a) : e.a->a)
+                                          : place_root(e.a)};
                     if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal &&
                         root->kind != Expr::Kind::GlobalAddr && root->kind != Expr::Kind::ForallArg &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
@@ -3576,6 +3656,7 @@ private:
                 }
                 break;
             case Expr::Kind::Atom:
+            {
                 // Record 0060 item 3: a range atom stands in a function's `requires` and `ensures` and nowhere else (a loop invariant is M4.5e2's, question 237).
                 if (is_range_atom(e.atom) && ctx != Ctx::Requires && ctx != Ctx::Ensures)
                 {
@@ -3655,11 +3736,30 @@ private:
                         err(e.loc,
                             "an `owns_block` atom of something that is not a pointer to a bool, an integer, a struct or a pointer");
                     }
+                    else if (e.a->type.pointee != nullptr && e.a->type.pointee->is_struct() &&
+                             e.a->type.pointee->struct_type != nullptr &&
+                             struct_has_array(*e.a->type.pointee->struct_type))
+                    {
+                        err(e.loc,
+                            "an `owns_block` atom of a pointer to a struct with an array member (decision 0063 item 1, question 292: heap storage of such a struct is M4.5e1e2's)");
+                    }
                     break;
                 }
                 if (e.a != nullptr && !in_invariant_)
                 {
                     mark_contract_place(e.a); // `owns(g)` / `reads(g)` / `owns(p->x)` of a contract
+                }
+                // decision 0063 item 7 (part C): `owns(p->a)` / `reads(p->a)` of a whole array member: the atom's place is the address of the member, a pointer to an array type
+                const bool member_array_atom {member_array_base(e.a)};
+                if (member_array_atom)
+                {
+                    if (in_invariant_ || (e.atom != AtomKind::Owns && e.atom != AtomKind::Reads))
+                    {
+                        err(e.loc,
+                            "a permission atom on an array member in a loop invariant, or a `live` of one (decision 0063 item 7: a written atom on a structure place with an array member is M4.5e1e2's)");
+                        break;
+                    }
+                    array_addr_ok_.insert(e.a);
                 }
                 if (!sub(e.a))
                 {
@@ -3706,10 +3806,15 @@ private:
                                 : "a permission atom of something other than a pointer parameter or a global, or a member of one, or a place reached from one through loads "
                                   "(decisions 0037 item 5, 0041 item 7, 0043 item 9, 0045 item 2)");
                     }
-                    else if (!accepted_pointer(e.a->type))
+                    else if (!accepted_pointer(e.a->type) && !member_array_atom)
                     {
                         err(e.loc,
                             "a permission atom of something that is not a pointer to a bool, an integer, a struct or a pointer");
+                    }
+                    else if (member_array_atom && stepped)
+                    {
+                        err(e.loc,
+                            "a permission atom on an array member of a place reached through a heap read (decision 0063 item 7, question 306: M4.5e1e2)");
                     }
                     else if (member && e.atom == AtomKind::Live)
                     {
@@ -3729,6 +3834,7 @@ private:
                     }
                 }
                 break;
+            }
             case Expr::Kind::MemberAddr:
             {
                 // Decision 0043 item 5: `&a->m` of a pointer `a` to a struct and a member index of it; the node is a place or a value by its context
@@ -3884,11 +3990,16 @@ private:
             {
                 // Decision 0063 item 4: the address of an array member is the base of an element in the Builder and refused here until part C accepts it, whatever the
                 // position; the address of a global or `static` array (part B) is a named base, as an array local's is.
-                if (e.a != nullptr && e.a->kind == Expr::Kind::MemberAddr && e.a->type.is_ptr() &&
-                    e.a->type.pointee != nullptr && e.a->type.pointee->is_array())
+                // Part C: the address of an array member (`MemberAddr` of a pointer to an array type) is the named base of an element too (`s.a[i]`, `p->a[i]`, `t.s.a[i]`): its block is
+                // its structure's, so it is no pointer value but the place of the array.
+                const bool member_base {member_array_base(e.a)};
+                if (member_base)
                 {
-                    err(e.loc, "an element of an array member (decision 0063: M4.5e1e1 part C)");
-                    break;
+                    array_addr_ok_.insert(e.a);
+                    if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
+                    {
+                        mark_contract_place(e.a);
+                    }
                 }
                 // Decision 0059 item 4: the address of element `b` of the array local whose address is `a`; a pointer base is part D's.
                 // Record 0060 item 5: in a contract the element is a READ (`p[e]`, the operand of a Deref) of a pointer parameter, with an index that reads no memory;
@@ -3902,7 +4013,7 @@ private:
                         break;
                     }
                     if (e.a == nullptr || e.b == nullptr ||
-                        (e.a->kind != Expr::Kind::Formal && !global_array_base(e.a) &&
+                        (e.a->kind != Expr::Kind::Formal && !global_array_base(e.a) && !member_base &&
                          !(cur_forall_ != nullptr && e.a->kind == Expr::Kind::ForallArg)))
                     {
                         err(e.loc,
@@ -3915,6 +4026,27 @@ private:
                                        "' in a contract (its name is not in scope there, decision 0041 item 12)");
                         break;
                     }
+                    if (member_base)
+                    {
+                        // the member chain of the element read in a contract is pure members over a parameter, the result (an `ensures`) or a global: a heap read on the way (`p->q->a[i]`) is
+                        // question 306's (M4.5e1e2), and the `static` local of another function has no name here
+                        const Expr* root {member_chain_root(e.a)};
+                        if (root == nullptr ||
+                            !(root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::GlobalAddr ||
+                              (ctx == Ctx::Ensures && root->kind == Expr::Kind::Result)))
+                        {
+                            err(e.loc,
+                                "an element read in a contract of an array member whose structure is not a pointer parameter, a global or, in an `ensures`, the result, reached by members alone (decision 0063 item 7: through a heap read, question 306, M4.5e1e2)");
+                            break;
+                        }
+                        if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr &&
+                            root->global->owner != nullptr)
+                        {
+                            err(e.loc, "a read of the `static` local '" + root->global->c_name +
+                                           "' in a contract (its name is not in scope there, decision 0041 item 12)");
+                            break;
+                        }
+                    }
                     if (reads_heap(*e.b))
                     {
                         err(e.b->loc, "an element read in a contract whose index reads memory (record 0060 item 5)");
@@ -3923,7 +4055,7 @@ private:
                 }
                 const bool array_base {(e.a != nullptr && e.a->kind == Expr::Kind::AddrOf && e.a->var != nullptr &&
                                         e.a->var->type.is_array()) ||
-                                       global_array_base(e.a)};
+                                       global_array_base(e.a) || member_base};
                 if (array_base)
                 {
                     array_addr_ok_.insert(e.a);
@@ -3991,6 +4123,13 @@ private:
         if (e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0U)
         {
             err(e.loc, "an expression of the struct type " + e.type.str() + ", which is not in the program");
+            return;
+        }
+        if (struct_has_array(*e.type.struct_type))
+        {
+            err(e.loc,
+                "a struct value of " + e.type.str() +
+                    ", which has an array member (decision 0063 item 13: copies and by-value structures with an array member are M4.5e1e1 part E)");
             return;
         }
         if (struct_pos_.count(&e) == 0U)
@@ -4106,6 +4245,48 @@ private:
         }
     }
 
+    // The address of an array member (decision 0063 items 4 and 5): a `MemberAddr` whose type is a pointer to an array type.
+    static bool member_array_base(const Expr* a)
+    {
+        return a != nullptr && a->kind == Expr::Kind::MemberAddr && a->type.is_ptr() && a->type.pointee != nullptr &&
+               a->type.pointee->is_array();
+    }
+    // The root of a chain of `MemberAddr` nodes and nothing else (no load, no pointer leaf), or null when the chain meets another node first.
+    static const Expr* member_chain_root(const Expr* a)
+    {
+        while (a != nullptr && a->kind == Expr::Kind::MemberAddr)
+        {
+            a = a->a;
+        }
+        return a;
+    }
+    // Whether a struct type has an array member anywhere in its nest (decision 0063 item 4): a struct VALUE of one is part E's.
+    static bool struct_has_array(const StructType& st, int depth = 0)
+    {
+        for (const StructMember& m : st.members)
+        {
+            if (m.type.is_array() || (depth < 64 && m.type.is_struct() && m.type.struct_type != nullptr &&
+                                      struct_has_array(*m.type.struct_type, depth + 1)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // Whether a struct type has an `owning` or `ref_to_uninit` member anywhere in its nest (decision 0063 item 1, question 293: with an array member it is M4.5e1e2's)
+    static bool struct_has_marked(const StructType& st, int depth = 0)
+    {
+        for (const StructMember& m : st.members)
+        {
+            if (m.owning || m.ref_to_uninit ||
+                (depth < 64 && m.type.is_struct() && m.type.struct_type != nullptr &&
+                 struct_has_marked(*m.type.struct_type, depth + 1)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
     // The address of a global or `static` array (decision 0063 item 5): the named base of an element, `GlobalAddr` of a global of an array type.
     static bool global_array_base(const Expr* a)
     {
@@ -5301,8 +5482,10 @@ private:
                 // decision 0063 item 11: the element of a global or `static` array by name is its own object (`g[0]` and `g[1]` differ), keyed by the global's key
                 const bool global_base {base != nullptr && base->kind == Expr::Kind::GlobalAddr &&
                                         base->global != nullptr};
+                // decision 0063 item 11 (part C): the element of an array member is its own object, keyed by the member object (the structure's base object and the member path)
+                const bool member_base {base != nullptr && base->kind == Expr::Kind::MemberAddr};
                 if (base == nullptr || index == nullptr ||
-                    (!global_base && (base->kind != Expr::Kind::AddrOf || base->var == nullptr)))
+                    (!global_base && !member_base && (base->kind != Expr::Kind::AddrOf || base->var == nullptr)))
                 {
                     return false;
                 }
@@ -5319,6 +5502,19 @@ private:
                 else
                 {
                     return false;
+                }
+                if (member_base)
+                {
+                    std::vector<int> mpath;
+                    const Expr* root {member_root(base, &mpath)};
+                    int obj {0};
+                    if (mpath.empty() || !object_of_root(root, &obj))
+                    {
+                        return false;
+                    }
+                    mpath.insert(mpath.end(), path.begin(), path.end());
+                    *key = member_key(obj, mpath, place_text(*x));
+                    return true;
                 }
                 *key =
                     member_key(global_base ? kGlobalKeyBase + base->global->id : base->var->id, path, place_text(*x));

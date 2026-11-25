@@ -12,7 +12,12 @@
   advisor's rulings 305–307; and by audit round 2 (a fresh Opus auditor, on Parts A, B and D at `2aa4903`: one
   blocking item, B1, a write inside a compound literal used as an object, unsound since M4.5c2a, item 12, question
   308; should-fix S1–S2 tests, S3 a file-scope typedef whose bound names a constant, item 14, S4 a page; notes N1, N2,
-  N5 taken in items 4, 7 and 10; `build/m4.5e1e1/auditor-report-2.md`). Owner decisions:
+  N5 taken in items 4, 7 and 10; `build/m4.5e1e1/auditor-report-2.md`; its re-reads found B1' (a writing literal as a
+  whole element of a braced list) and closed it, `auditor-report-2b.md`, `-2c.md`); and by audit round 3 (a fresh
+  Opus auditor, on Part C at `77d557b`: no blocking item; should-fix S1 a structure global's array leaf without
+  liveness in `main`'s loops, S2 a call row's amount under a quantifier, S3 the lint's guarded length fact, S4 an
+  abnormal end in a heap unit, all taken; notes N1, N4, N9 listed false alarms, items 7 and 10; N5–N7 items 4 and 6;
+  `build/m4.5e1e1/auditor-report-3.md`). Owner decisions:
   - At M4.5e1e's planning (2026-11-25): **290** M4.5e1e is two sessions, "scalars, then structures" (this record's
     arrays of scalars; M4.5e1e2's arrays of structures and of arrays); **291** a structure with an array member is
     copied and passed and returned by value in M4.5e1e ("Copy and by-value now"; item 13, the plan's Part E);
@@ -261,6 +266,11 @@ construct rejected before this record; where an existing function is touched (`i
    - **Amounts** (0037 item 6, 0060 item 6): a `reads` atom's amount at a call is the minimum over its cell leaves
      and, for each array leaf, the leaf's first slot (0060 item 6's rule, with its listed limit for an uneven
      holding: question 238, M4.5e1f).
+   - **Listed false alarms** (audit round 3): `f__wf` does not tie a member element's pre- and post-state ghosts
+     (N1: `reads(p->a)` with `requires -1000 < p->a[0] < 1000` and `ensures r == p->a[0] + p->a[0]` reports `overflow`;
+     only weaker, since ghosts are keyed with the state); an implicit `owns(s)` of a `static` structure local never
+     covers a partnerless atom through its array leaf (N4: `int *get(void)` with `ensures(r, owns(*r))` returning
+     `&c.a[1]` reports at the return).
    - **Rejected** (`unsupported_annotation`): 0043 item 9's overlapping atoms on one root, now also `owns(*p) &&
      owns(p->a)`; a marker on a pointer to a structure with an array member (question 294); a written atom in a loop
      invariant on such a structure place.
@@ -324,6 +334,9 @@ construct rejected before this record; where an existing function is touched (`i
       the interval test, and `inv_place_disjunct` is unchanged.
     - Invariant and measure reads of `g[e]`, `s.a[e]` and `p->a[e]` are framed by these places, with 0059 item 8's
       `out-of-bounds` and `uninitialized` obligations.
+    - **Listed false alarm** (audit round 3, N9; 0043 item 11's rule, by design): a store to an array member of one
+      structure local in a loop reaches every array place of the element's field, so a loop that writes `t.a[2]`
+      cannot keep `s.a`'s values; a `check` after it relying on them fails.
 
 11. **Sequencing** (0039 item 3, 0059 item 9). Object keys gain the element of a global array and of an array member
     (`g[0]` and `g[1]` are different objects; a global array is no longer one object). Two unsequenced accesses to
