@@ -34,7 +34,7 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
   audit reads in one day each found a form the rule then in force missed.** `main` has all of them until the
   branch is merged. The complete rule is the owner's (§8, question 326).
 - **M4.5e1e2's first session** (2026-11-25; record 0064, accepted for the items built) is on the branch
-  `m4.5e1e2-arrays-of-structures` (worktree `.claude/worktrees/m4.5e1e2`), branched from local `main` = `f07d80a`:
+  `m4.5e1e2-arrays-of-structures` (worktree `.claude/worktrees/m4.5e1e2`), branched from `main` = `f07d80a` (which `origin/main` also holds since the owner's push during the session):
   Commit 1 `571fe59` (the record, the spike), Commit 2 `b9e1ab9` (Parts A and B, the `restrict` rule, the pages),
   `aebf158` (one self-test case corrected after the first run of the full check) and
   the closing commit. It landed **Part A** (leaf paths, the traps closed) and **Part B** (automatic local arrays of
@@ -56,9 +56,9 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
 ## 2. Owner steps
 
 1. **Merge the branch; it does not wait for question 326.** On `restrict` the branch is strictly safer than `main`:
-   it rejects every unsound form found but one, and `main` accepts them all. `git merge
-   m4.5e1e2-arrays-of-structures` into local `main` (never reset or rebase), bring `main` and `origin/main` together,
-   and push. Then decide 326 (§8). The full check was run on the box and is green at `aebf158` (the status entry
+   it rejects every unsound form found but one, and `main` accepts them all. Local `main` and
+   `origin/main` are both at `f07d80a`, the branch's base, so `git merge --ff-only m4.5e1e2-arrays-of-structures` on
+   `main` and a push are all it takes (never reset or rebase). Then decide 326 (§8). The full check was run on the box and is green at `aebf158` (the status entry
    has both runs).
 2. **Answer or leave §8's open questions:** 320 (needed before Part E's array-of-rows parameters), 322's second
    half, 325, 326. Review the advisor's rulings 321–324, 327 and 328 and the orchestrator's settlements listed in

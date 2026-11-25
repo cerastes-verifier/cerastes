@@ -34,7 +34,9 @@ Plan: `.claude/plans/m4-5e1e2-arrays-of-structures.md` (one plan for what it exp
 without re-planning, from its section 5). Record 0064 (accepted for the items built: 2–6 and 10–12 for local
 arrays of structures in code, 16, 17's first rules, 19; the others "decided, built by the continuation"). Read
 `internal/handoff.md` next: §1, §2, §8.
-**Branched from local `main` = `f07d80a`** (`origin/main` = `76fc7b1` is its ancestor and does not hold the plan).
+**Branched from local `main` = `f07d80a`** (at the session's start `origin/main` was `76fc7b1`, its ancestor, without
+the plan; by the session's end `origin/main` is `f07d80a` too: the owner pushed `main` meanwhile, so the branch is a
+fast-forward of both).
 Session from 2026-11-25 13:57 UTC to about 23:50 UTC (9 h 50). The owner gave no overnight rule; every question went to
 the Fable advisor first; four are open for the owner (320, 322's scalar forms, 325, 326).
 
