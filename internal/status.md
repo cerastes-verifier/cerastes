@@ -15,17 +15,17 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
 `git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, M4.5e1a's `git show 685034b:internal/status.md`, M4.5e1b's `git show 7964d33:internal/status.md`, M4.5e1c's `git show c65f618:internal/status.md`, and M4.5e1d's `git show 4e28487:internal/status.md`.
 
-## M4.5e1e1 — Arrays of scalars in structures and static storage (2026-11-25): done; on the branch, local only; the full check.sh not run (owner)
+## M4.5e1e1 — Arrays of scalars in structures and static storage (2026-11-25): done; on `main` (PR #37); the full check run by the owner after the session, green
 
 Plan: `.claude/plans/m4-5e1e1-arrays-of-scalars.md` (written at M4.5e1e's planning; executed without re-planning,
 from its section 5). Record 0063 (amends 0012, 0024, 0028, 0041, 0043, 0044, 0059, 0060, 0061, 0062). Read
-`internal/handoff.md` next: §1, §2, §3 "From M4.5e1e1", §8 (questions 301–308 settled with the advisor, 304 open).
+`internal/handoff.md` next: §1, §2, §3 "From M4.5e1e1", §8 (questions 301–309 settled with the advisor; 304 answered by the owner afterwards).
 **Branched from local `main` = `4e28487`** (the planning's commits were not on `origin`: the owner had not pushed).
 Session from 2026-11-25 03:04 UTC to about 10:45 UTC (commits at 04:05, 08:03, 09:12, 10:39 and the closing one); the owner went to bed at about 03:24 UTC giving the overnight rule ("if you have any
 questions you may auto accept the recommended answer after your normal routine. Just document the decisions made in
 the handoff documents"); every question went to the Fable advisor first and none had to be decided by that rule.
 
-**Done** (commits on `m4.5e1e1-arrays-of-scalars`, local only):
+**Done** (commits on `m4.5e1e1-arrays-of-scalars`; on `main` since PR #37):
 - **Commit 1** `d9a51fc`: record 0063's draft revised by P82 and S47 (every row of both tables on its first branch; cuts
   3, 4 and 5 not needed), the chapter `## M4.5e1e1` of `internal/il-inventory.md`, 44 S47 fixtures (46 with audit
   round 1's two copy-implementation fixtures, question 307), nine staging pins, R4's lint defect fixed (a global beside
@@ -57,7 +57,7 @@ as 0043 item 11's rule, restoring the `for`-step literal pin, and the array lite
 block-scope array typedef stays rejected; Flips A → C for `reject_typedef_array_block.c`), 303 (C++ `{0}` over an
 array member rejected), 305 (Part D over its test cap), 306 (heap-read contract places with an array member rejected,
 M4.5e1e2), 307 (the copy's implementation fixtures), 308 (B1/B1'), 309 (the by-value limit 7, not 64: 64 timed out
-at 600 s); **304 open for the owner** (C++ `{0}` over a
+at 600 s); **304 left open for the owner, who answered it after the session** ("After the session", below; C++ `{0}` over a
 nested-structure member, accepted since M4.5c1 although clang++ warns at `-Wall`).
 
 **Deviations from the plan, for confirmation:**
@@ -126,16 +126,27 @@ M4.8 and M8.
 - `src/` and `include/` against `4e28487`, measured: +4,944 −439 without the self-test cases (+7,596 −445 with them); the plan
   estimated 2,340–4,475 for Parts A–D and 600–1,050 more for Part E.
 
-**First step for the next session:** the owner runs `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` on the box
-(handoff §2), reviews handoff §8's questions 301–309 (304 open) and the deviations above, fast-forwards `main` to
-`m4.5e1e1-arrays-of-scalars` and pushes. Then **M4.5e1e2**'s short planning (`.claude/plans/m4-5e1e1-arrays-of-scalars.md`
-section 14 and handoff §3 "From M4.5e1e1"), or M4.5e1f / M4.5e2.
+**After the session** (2026-11-25): the branch went to `origin/main` through PR #37 (`76fc7b1`); local `main` holds
+its own merge of it (`e1b7e7c`) and the agents commit (`45d26bc`: the soundness-auditor is Fable at `xhigh`, and
+`.claude/agents/orchestrator.md` is the Fable orchestrator of an execution session). **The owner ran the full check on
+M4.5e1e1: green** (question 311). The owner answered question 304 inline ("Follow the rejection like the compiler
+warning."). M4.5e1e2's planning followed, at a session that only planned: one complete plan,
+`.claude/plans/m4-5e1e2-arrays-of-structures.md` (record 0064, P83, S48, six parts, each agent's briefing), sized at
+4,700–8,450 `src/` lines; the owner chose the 12-hour rule for it (question 310: the parts not begun run from the same
+plan in a second session) and put question 304's rejection in it (question 312). The planning's surveys found six
+places where lowering or the checker would treat an array of structures or of arrays wrongly without an error, each
+masked today only by a refusal upstream; the plan's Part A closes them before any gate is lifted.
+
+**First step for the next session:** the owner brings `main` and `origin/main` together (a merge, never a reset) and
+pushes, and reviews handoff §8's defaults 313–319 and the advisor's rulings 301–309 (handoff §2). Then **M4.5e1e2**:
+`claude --agent orchestrator --effort high`, first message `M4.5e1e2
+(.claude/plans/m4-5e1e2-arrays-of-structures.md)`; it starts at the plan's section 5. M4.5e1f or M4.5e2 may run first.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
-| M4.5e1e1 Arrays of scalars in structures and static storage | 2026-11-25 | `m4.5e1e1-arrays-of-scalars` (local) | 0063 (0012, 0024, 0028, 0041, 0043, 0044, 0059, 0060, 0061, 0062 amended) | global and `static` arrays, array members, array typedefs and `sizeof`, C array literals, structure copies and by-value passing up to 7 array elements; a compound-literal sequencing hole open since M4.5c2a closed; questions 301–309, no cut; the full check left to the owner |
+| M4.5e1e1 Arrays of scalars in structures and static storage | 2026-11-25 | `m4.5e1e1-arrays-of-scalars`, PR #37 `76fc7b1` | 0063 (0012, 0024, 0028, 0041, 0043, 0044, 0059, 0060, 0061, 0062 amended) | global and `static` arrays, array members, array typedefs and `sizeof`, C array literals, structure copies and by-value passing up to 7 array elements; a compound-literal sequencing hole open since M4.5c2a closed; questions 301–309, no cut; the full check run by the owner after the session (green) |
 | M4.5e1d Pure functions and the exact sum | 2026-11-24/25 | `m4.5e1d-pure-functions`, `68384d1` (fast-forward) | 0062 (0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061 amended) | a `pure` function that is called or has a contract as a Viper function with its definition check; self-recursion with `decreases`; applications in checks, contracts, calls and loop invariants; the exact sum verifies; testing moved to the x86-64 box; Silicon's prover cap; questions 273–286, no cut |
 | M4.5e1c Quantifiers | 2026-11-23/24 | `m4.5e1c-quantifiers` | 0061 (0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060 amended) | `cerastes_forall` with an inlined `pure` body in contracts, loop invariants and checks; `f__wf` variant M; the fill loop, max, the carrays port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260); questions 253–263 (256–263 built overnight, for review) |
 | M4.5e1b Ranges in contracts | 2026-11-11/12 | `m4.5e1b-ranges-in-contracts` | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range`/`reads_range` in contracts, element reads in contracts, calls and returns over ranges, loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (two new tags), the carrays port; questions 238–246 |

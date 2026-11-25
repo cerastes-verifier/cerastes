@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start. The last was M4.5e1e's planning (2026-11-25); M4.5d2b2b's (2026-11-09) cut the Done table to
+each session's start. The last was M4.5e1e2's planning (2026-11-25); M4.5d2b2b's (2026-11-09) cut the Done table to
 one line per row, and the rows as they were are `git show 2430529:plan.md`. The plans of the finished milestones,
 the superseded text and the appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
@@ -190,22 +190,22 @@ designed it (records 0028 memory model, 0029 ownership annotations and C spec fu
 `internal/handoff.md` §4.2 has each remaining session's plan and the VeriFast ports it takes. The owner split it
 session by session, as each planning's survey measured the work (b1c, c, c2, d2, d2b, d2b2, d2b2c:
 `internal/status.md`'s history, and `git show 2430529:plan.md` for the wording). M4.5e1 (planned 2026-11-11; plan
-`.claude/plans/m4-5e1-arrays.md`) is seven sub-sessions, each a session of its own; e1a, e1b, e1c and e1d are
+`.claude/plans/m4-5e1-arrays.md`) is seven sub-sessions, each a session of its own; e1a, e1b, e1c, e1d and e1e1 are
 done (the Done table; the account of their plannings that stood here is `git show 9ab9a1e:plan.md`). What their
 plannings decided that still steers the sessions below: atoms on one element, range atoms written in loop
 invariants and `cerastes_old` in loop invariants are M4.5e2's (questions 236, 237, 260); question 238 is a false
 alarm, not unsoundness, and is fixed in e1f with question 242's row order (S45 (r): Silicon takes the form).
-**M4.5e1e is two sessions** (owner, 2026-11-25, question 290: its planning's surveys put it at 3,800–7,200 `src/`
-lines, and e1d landed 3,654 in 11.5 hours): e1e1 is planned in full
-(`.claude/plans/m4-5e1e1-arrays-of-scalars.md`), and e1e2 plans briefly after it (that plan's section 14). A
-structure with an array member is copied and passed by value in M4.5e1e (question 291): e1e1's last part, which
-runs unless it would pass the twelve-hour cap (question 300) and is e1e2's first part otherwise.
+**M4.5e1e was cut in two** (owner, 2026-11-25, question 290): e1e1 is done (the Done table), and **e1e2 is planned
+in full** (`.claude/plans/m4-5e1e2-arrays-of-structures.md`, 2026-11-25; record 0064). Its planning sized it at
+4,700–8,450 `src/` lines in six parts (e1e1 landed 4,944), so it runs under **the 12-hour rule** (owner, question
+310): at each commit the next part starts unless the remaining work would pass twelve hours, and the parts not
+begun run from the same plan in a second session, with no second planning. Nothing is cut to hold a session short.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5e1e2 Arrays of structures and arrays of arrays** | arrays of structs (`p[i].x`, ranges over structures), 2-D arrays and `int a[][3]`, `forall` over them; what e1e1 left (heap storage of a structure with an array member, owning or marked members and markers beside one, heap-read contract places, partnerless atoms, members and contract-position global arrays under a binder: questions 292–294, 306; `.claude/plans/m4-5e1e1-arrays-of-scalars.md` section 14 and handoff §3) | M4.5e1e1 |
+| **M4.5e1e2 Arrays of structures and arrays of arrays** (planned in full; two sessions likely) | in the plan's order: arrays of structures in code (`v[i].x`, `p[i].x`, element copies, loops) and question 304's C++ `{0}` rejection; ranges over structures in contracts, global arrays and members of structures; what e1e1 left for a structure with an array member (heap storage, an `owning` or marked member beside one, markers, heap-read contract places, partnerless and written atoms: questions 292–294, 306); arrays of arrays (`int m[2][3]`, array-of-rows parameters `int a[][3]`, `v[i].a[j]`); `forall` and `pure` applications over structure members, member arrays and contract-position global arrays; the tutorial section "Arrays in aggregates" (`.claude/plans/m4-5e1e2-arrays-of-structures.md`) | M4.5e1e1 |
 | **M4.5e1f Range call rows** | the minimum read amount over a range at a call (question 238: a false alarm today, fail closed; the fix is the encoder's first tagged `inhale`, which e1c's spike S45 (r) showed the pinned Silicon takes) and `owns_range`'s row order D (question 242); one set of Viper flips over e1b's range calls; a short session, any time after e1c | M4.5e1c (its spike) |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))` (for a structure `T`: after M4.5e1e2), `realloc` (from M4.5d2a, question 120); relational comparisons and `p - q` under `pointer-comparison`; `owning(n)` beyond parameters; atoms on one element (`owns(p[i])`), range atoms written in loop invariants (questions 236, 237) and ranges on part of a global array or of an array member; from M4.5e1d: the `must_init` filler whose invariant applies a function over the range still being filled (question 287: exit 3 today, fail closed); from M4.5e1c (record 0061): `cerastes_old` in loop invariants (cut 1, question 260, its Part D), the `forall` index and base forms, memory-reading arguments, the multi-class false alarm (question 253), question 255's multi-class guard that reads memory and arithmetic over two classes, question 259's narrowings and question 261's arithmetic over a non-first class's read in loops and checks | M4.5e1a, M4.5e1b, M4.5d2a |
 | **M4.5f1 Predicates** | predicate bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates, pure functions over predicates | M4.5c2b, M4.5d2b2b, M4.5e1d |
