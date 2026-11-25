@@ -1027,7 +1027,7 @@ void define_array_of_structures_loops()
            k.fail("invariant-preserved", sum(k, true));
        });
     // int f(int n) requires(0 <= n <= 3) ensures(r == n) { struct Q v[3] = {...}; int i = 0;
-    //   while (i < n) inv(0 <= i <= n) dec(n - i) { v[i].x = i; [v[i].y = 5;] i = i + 1; } check(v[1].y == 4 && v[2].y == 6); return i; }
+    //   while (i < n) inv(0 <= i <= n) dec(n - i) { v[i].x = i; [v[i].y = 5;] i = i + 1; } check(v[1].y == 4 && v[2].y == 6 [with the write: check(v[2].y == 6) alone]); return i; }
     const auto fill = [=](Kit& k, bool write_y) -> SrcLoc
     {
         StructType* Q {mk_q(k)};
@@ -1047,8 +1047,10 @@ void define_array_of_structures_loops()
         body.push_back(k.asg(i, k.add(k.v(i), N(k, "1"))));
         const Clause c1 {k.cl(k.land(k.ge_c(k.v(i), k.i32, "0"), k.le(k.v(i), k.pv(f, 0))))};
         top.push_back(k.whl(k.lt(k.v(i), k.pv(f, 0)), {c1}, {k.cl(k.sub(k.pv(f, 0), k.v(i)))}, k.blkc(body)));
-        const Stmt* c {
-            k.chk(k.land(k.eq(read(k, v, N(k, "1"), 1), L(k, "4")), k.eq(read(k, v, N(k, "2"), 1), L(k, "6"))))};
+        // the failing variant checks one fact (v[2].y == 6): the conjunction would give two failing rows at one line, and scripts/run_tests.py counts errors exactly
+        const Stmt* c {k.chk(
+            write_y ? k.eq(read(k, v, N(k, "2"), 1), L(k, "6"))
+                    : k.land(k.eq(read(k, v, N(k, "1"), 1), L(k, "4")), k.eq(read(k, v, N(k, "2"), 1), L(k, "6"))))};
         top.push_back(c);
         top.push_back(k.ret(k.v(i)));
         f->body = k.blkc(top);
