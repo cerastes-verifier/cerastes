@@ -106,6 +106,15 @@ carries the source position it came from, so an obligation can be reported at th
   structure that has one instead of treating the array as a cell. When you add a walk over the members of a structure,
   choose the object view or the value view.
 
+* An array whose element is a structure (decision
+  {gh}/internal/decisions/0064-arrays-of-structures-and-arrays-of-arrays.md[0064]) has no cell for an element: a leaf
+  of the object is a _leaf path_ (`object_leaf_paths`), the member and index steps from the object to one scalar, and
+  the object view marks a member that is an array of aggregates (`aggregate_element`) so that no walk reads it as a
+  cell. The encoder reads such an array only where each of its rules has a lowering and a test (an automatic local
+  array, in code); every other array of structures is rejected at its declaration with a diagnostic that names the
+  milestone that lifts it, and `check_program` refuses it a second time as a backstop. Where you lift a rejection,
+  remove the guard of the walks it protects and keep their self-test cases as positive ones.
+
 `encode.cpp` and `lower.cpp` hold all the C and pass:[C++] meaning; the emitter decides nothing.
 
 == Viper text and the position map

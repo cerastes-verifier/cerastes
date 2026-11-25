@@ -6635,6 +6635,425 @@ class ArrayQuantifierTests(unittest.TestCase):
         self.assertTrue(any("no earlier `label lh_0`" in p for p in self.probs(lines)))
 
 
+class AggregateArrayAllocationTests(unittest.TestCase):
+    """Decision 0064 items 3, 6 and 17: `alloc_arr_<E>` and `zero_arr_<E>` of an array whose element is a structure are trusted, so they are pinned by
+    their clause sets, read from the clauses themselves (the layout is not in the name): one quantifier of length facts with the slot of element `k`
+    as its trigger, then per leaf of the element three (the allocation) or six (the zero fill) quantified rows with the leaf receiver as trigger, each
+    (receiver, field) once.  Each mutant breaks one thing and must be refused with its own reason; the two dangerous ones are a permission the zero
+    fill gives and never took, and a leaf the length facts do not state."""
+
+    SLOT = "loc(block_of(r), k)"
+    ROOT = "((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"
+    LIVE = "(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"
+    ZERO_ROOT = "((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"
+
+    def recv(self, chain):
+        x = self.SLOT
+        for j in chain:
+            x = f"loc(member({x}, {j}), 0)"
+        return x
+
+    def member(self, chain):
+        return f"member({self.recv(chain[:-1])}, {chain[-1]})"
+
+    @staticmethod
+    def q(trigger, body, hi="n", lo="0", k="k"):
+        return f"forall {k}: Int :: {{ {trigger} }} (({lo} <= {k}) && ({k} < {hi})) ==> {body}"
+
+    def lens(self, members, facts=()):
+        parts = [f"(len({self.member(m)}) == 1)" for m in members] + [f"({a} != {b})" for a, b in facts]
+        return self.q(self.SLOT, " && ".join(parts))
+
+    def leaf_rows(self, chain, t="int"):
+        r = self.recv(chain)
+        return [("ensures", self.q(r, f"acc({r}.v_{t})")), ("ensures", self.q(r, f"acc({r}.d_{t})")), ("ensures", self.q(r, f"(!{r}.d_{t})"))]
+
+    def alloc(self, leaves=((0,), (1,)), members=None, facts=(), t="int"):
+        members = members if members is not None else [c for c in leaves]
+        out = [("requires", "1 <= n"), ("ensures", self.ROOT), ("ensures", self.lens(members, facts))]
+        for c in leaves:
+            out += self.leaf_rows(c, t)
+        return out + [("ensures", self.LIVE)]
+
+    def zero(self, leaves=((0,), (1,)), t="int", zero="0"):
+        out = [("requires", self.ZERO_ROOT)]
+        for c in leaves:
+            r = self.recv(c)
+            out += [("requires", self.q(r, f"acc({r}.v_{t})")), ("requires", self.q(r, f"acc({r}.d_{t})")),
+                    ("ensures", self.q(r, f"acc({r}.v_{t})")), ("ensures", self.q(r, f"acc({r}.d_{t})")),
+                    ("ensures", self.q(r, f"({r}.v_{t} == {zero})")), ("ensures", self.q(r, f"{r}.d_{t}"))]
+        return out
+
+    def method(self, name, clauses, header=None, tail="  decreases _", fields=(("int", "Int"),), declare=True):
+        head = header or (f"method {name}(n: Int) returns (r: Ref)" if name.startswith("alloc_arr_") else f"method {name}(r: Ref, n: Int)")
+        body = [Check(f"  {kw} {text}", WF if kw == "requires" else P, "internal") for kw, text in clauses]
+        decls = [x for t, ty in fields for x in (f"field v_{t}: {ty}", f"field d_{t}: Bool")] + ["field lv: Bool"] if declare else []
+        return [*decls, "// cerastes:trusted-contract array allocation", head, *body, tail]
+
+    def probs(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0064 items 3 and 6" in p]
+
+    def refused(self, lines, reason):
+        probs = self.probs(lines)
+        self.assertTrue(any(reason in p for p in probs), (reason, probs))
+
+    def clean(self, lines):
+        self.assertEqual(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    NESTED = dict(leaves=((0, 0), (1,)), members=[(0,), (0, 0), (1,)])
+
+    def nested(self, **kw):
+        a, b = self.recv(()), self.recv((0,))
+        return self.alloc(facts=[(a, b)], **self.NESTED, **kw)
+
+    def test_the_allocation_is_clean_for_each_shape_of_element(self):
+        self.clean(self.method("alloc_arr_P", self.alloc()))
+        self.clean(self.method("alloc_arr_P", self.alloc(leaves=((0,),))))
+        self.clean(self.method("alloc_arr_P", self.alloc(leaves=((0,), (1,), (2,), (3,)))))
+        # a structure member that is itself a structure: its own member blocks and the slot fact of decision 0043 item 4
+        self.clean(self.method("alloc_arr_P", self.nested()))
+        for t, ty in (("bool", "Bool"), ("ptr_int", "Ref")):
+            self.clean(self.method("alloc_arr_P", self.alloc(t=t), fields=((t, ty),)))
+
+    def test_the_order_of_the_clauses_is_not_part_of_the_contract(self):
+        clauses = self.alloc()
+        self.clean(self.method("alloc_arr_P", list(reversed(clauses))))
+
+    def test_the_zero_fill_is_clean_and_agrees_with_its_allocation(self):
+        both = self.method("alloc_arr_P", self.alloc()) + self.method("zero_arr_P", self.zero(), declare=False)
+        self.clean(both)
+        self.clean(self.method("zero_arr_P", self.zero()))
+        self.clean(self.method("alloc_arr_P", self.nested()) + self.method("zero_arr_P", self.zero(leaves=((0, 0), (1,))), declare=False))
+        for t, ty, zero in (("bool", "Bool", "false"), ("ptr_int", "Ref", "null")):
+            self.clean(self.method("zero_arr_P", self.zero(t=t, zero=zero), fields=((t, ty),)))
+
+    def test_every_clause_of_the_allocation_is_needed(self):
+        base = self.alloc()
+        reasons = {0: "a clause is missing", 1: "a clause is missing", 2: "a clause is missing", len(base) - 1: "a clause is missing"}
+        for i, (kw, text) in enumerate(base):
+            with self.subTest(dropped=i):
+                self.refused(self.method("alloc_arr_P", base[:i] + base[i + 1:]), reasons.get(i, "lacks its"))
+
+    def test_a_clause_given_twice_is_refused(self):
+        base = self.alloc()
+        for i, reason in ((0, "twice"), (1, "twice"), (2, "twice"), (3, "twice"), (4, "twice"), (5, "twice"), (len(base) - 1, "twice")):
+            with self.subTest(clause=i):
+                self.refused(self.method("alloc_arr_P", base + [base[i]]), reason)
+
+    def test_the_leaves_are_the_leaves_the_length_facts_state(self):
+        # a leaf with permissions and no member block (a permission to a cell the facts never give a block): the dangerous direction
+        self.refused(self.method("alloc_arr_P", self.alloc(leaves=((0,), (1,)), members=[(0,)])), "are not the leaves")
+        # a member block the facts state and no permission for it
+        self.refused(self.method("alloc_arr_P", self.alloc(leaves=((0,),), members=[(0,), (1,)])), "are not the leaves")
+        # a nested structure's member without its slot fact, and the slot fact alone
+        a, b = self.recv(()), self.recv((0,))
+        self.refused(self.method("alloc_arr_P", self.alloc(**self.NESTED)), "the length facts")
+        self.refused(self.method("alloc_arr_P", self.alloc(facts=[(a, b)])), "the length facts")
+
+    def test_the_length_facts_state_one_slot_each_and_nothing_else(self):
+        for label, lens in (("a count of 4 (an array member: Part E)", self.q(self.SLOT, f"(len({self.member((0,))}) == 4) && (len({self.member((1,))}) == 1)")),
+                            ("a count of 0", self.q(self.SLOT, f"(len({self.member((0,))}) == 0) && (len({self.member((1,))}) == 1)")),
+                            ("a member twice", self.q(self.SLOT, f"(len({self.member((0,))}) == 1) && (len({self.member((0,))}) == 1) && (len({self.member((1,))}) == 1)")),
+                            ("an extra fact", self.q(self.SLOT, f"(len({self.member((0,))}) == 1) && (len({self.member((1,))}) == 1) && (n > 5)")),
+                            ("a member of another block", self.q(self.SLOT, f"(len({self.member((0,))}) == 1) && (len(member(loc(block_of(s), k), 1)) == 1)"))):
+            with self.subTest(mutant=label):
+                clauses = self.alloc()
+                clauses[2] = ("ensures", lens)
+                self.refused(self.method("alloc_arr_P", clauses), "the length facts")
+
+    def test_the_length_facts_stand_in_an_ensures_over_the_slot_only(self):
+        clauses = self.alloc()
+        self.refused(self.method("alloc_arr_P", clauses[:2] + [("requires", clauses[2][1])] + clauses[3:]),
+                     "is not `1 <= n`")  # a `requires` of the allocation is only `1 <= n`
+        # the facts over a range other than the leaves' (the same range in every clause)
+        wide = self.alloc()
+        wide[2] = ("ensures", self.q(self.SLOT, wide[2][1].split("==> ")[1], hi="n + 1"))
+        self.refused(self.method("alloc_arr_P", wide), "is not one of the clauses")
+
+    def test_a_quantified_clause_has_the_range_and_the_binder_of_the_record(self):
+        base = self.alloc()
+        r = self.recv((0,))
+        for label, text, reason in (
+                ("k <= n", self.q(r, f"acc({r}.v_int)").replace("(k < n)", "(k <= n)"), "is not one of the clauses"),
+                ("-1 <= k", self.q(r, f"acc({r}.v_int)").replace("(0 <= k)", "(-1 <= k)"), "is not one of the clauses"),
+                ("a literal count", self.q(r, f"acc({r}.v_int)", hi="3"), "over `0 <= k && k < n`"),
+                ("a binder j", self.q(r, f"acc({r}.v_int)", k="j").replace("loc(block_of(r), k)", "loc(block_of(r), j)"), "binder `k`"),
+                ("a start at 1", self.q(r, f"acc({r}.v_int)", lo="1"), "over `0 <= k && k < n`"),
+                ("no trigger", self.q(r, f"acc({r}.v_int)").replace(f"{{ {r} }} ", ""), "is not one of the clauses"),
+                ("a second binder", self.q(r, f"acc({r}.v_int)").replace("forall k: Int ::", "forall k: Int, j: Int ::"), "is not one of the clauses")):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base[:3] + [("ensures", text)] + base[4:]), reason)
+
+    def test_the_trigger_the_receiver_and_the_cell_are_one_term(self):
+        base = self.alloc()
+        r0, r1 = self.recv((0,)), self.recv((1,))
+        for label, text, reason in (
+                ("an acc of another leaf than the trigger", self.q(r0, f"acc({r1}.v_int)"), "the consequent is not one of the leaf's rows"),
+                ("an acc of the slot's own cell", self.q(r0, "acc(loc(block_of(r), k).v_int)"), "the consequent is not one of the leaf's rows"),
+                ("a trigger rooted at another variable", self.q(r0.replace("block_of(r)", "block_of(s)"), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a trigger with arithmetic", self.q(r0.replace("k)", "k + 1)"), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a trigger with a variable member index", self.q(r0.replace("), 0), 0)", "), j), 0)"), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a trigger that skips the cell step", self.q(self.member((0,)), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a flag that is not negated", self.q(r0, f"{r0}.d_int"), "the consequent is not one of the leaf's rows"),
+                ("a value row", self.q(r0, f"({r0}.v_int == 0)"), "the consequent is not one of the leaf's rows"),
+                ("a fraction", self.q(r0, f"acc({r0}.v_int, 1 / 2)"), "the consequent is not one of the leaf's rows")):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base[:3] + [("ensures", text)] + base[4:]), reason)
+
+    def test_a_leaf_row_in_the_requires_of_an_allocation_is_refused(self):
+        r0 = self.recv((0,))
+        self.refused(self.method("alloc_arr_P", self.alloc() + [("requires", self.q(r0, f"acc({r0}.v_int)"))]), "is not `1 <= n`")
+
+    def test_each_leaf_has_one_field_suffix_and_it_is_declared(self):
+        base = self.alloc()
+        r0 = self.recv((0,))
+        mixed = base[:4] + [("ensures", self.q(r0, f"acc({r0}.d_long)"))] + base[5:]
+        self.refused(self.method("alloc_arr_P", mixed, fields=(("int", "Int"), ("long", "Int"))), "more than one field suffix")
+        self.refused(self.method("alloc_arr_P", self.alloc(t="long"), fields=(("int", "Int"),)), "is not declared")
+        self.clean(self.method("alloc_arr_P", self.alloc(t="long"), fields=(("long", "Int"),)))
+
+    def test_extra_contract_is_refused(self):
+        base = self.alloc()
+        for label, extra in (("ensures false", ("ensures", "false")), ("an ensures fact", ("ensures", "len(block_of(r)) == 1")),
+                             ("a bigger requires", ("requires", "n < 100")), ("an old", ("ensures", "n == old(n)"))):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base + [extra]), "is not")
+
+    def test_the_wrapper_is_pinned(self):
+        base = self.alloc()
+        for label, kw, reason in (("a body", {"tail": "  decreases _\n{\n}"}, "has a body"),
+                                  ("no decreases _", {"tail": "  decreases"}, "does not end with `decreases _`"),
+                                  ("a wider header", {"header": "method alloc_arr_P(n: Int, m: Int) returns (r: Ref)"}, "its header is not"),
+                                  ("no result", {"header": "method alloc_arr_P(n: Int)"}, "its header is not"),
+                                  ("an Int result", {"header": "method alloc_arr_P(n: Int) returns (r: Int)"}, "its header is not")):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base, **kw), reason)
+        lines = self.method("alloc_arr_P", base)
+        lines.insert(len(lines) - 1, "  assert true")
+        self.refused(lines, "not a `requires` or `ensures` clause")
+
+    def test_a_clause_without_a_member_is_the_scalar_rules(self):
+        # no `member(` in any clause: the scalar rule judges it (and refuses a name whose fields are not declared, decision 0059 item 3)
+        scalar = [c for c in ArrayAllocationTests().alloc_clauses("int")]
+        lines = self.method("alloc_arr_P", scalar)
+        probs = [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0059 item 3" in p]
+        self.assertTrue(any("is not declared" in p for p in probs), probs)
+        self.assertEqual([p for p in probs if "decision 0064" in p], [])
+
+    def test_every_clause_of_the_zero_fill_is_needed(self):
+        base = self.zero(leaves=((0,),))
+        reasons = {0: "the `requires` of the root facts is missing"}
+        for i in range(len(base)):
+            with self.subTest(dropped=i):
+                self.refused(self.method("zero_arr_P", base[:i] + base[i + 1:]), reasons.get(i, "lacks its"))
+
+    def test_the_zero_fill_cannot_give_a_permission_it_did_not_take(self):
+        base = self.zero(leaves=((0,),))
+        r1 = self.recv((1,))
+        # an `ensures acc` of a second leaf with no `requires acc`: it would conjure the permission
+        self.refused(self.method("zero_arr_P", base + [("ensures", self.q(r1, f"acc({r1}.v_int)"))]), "lacks its")
+        # the same with every row of the second leaf in the ensures only
+        more = base + [("ensures", self.q(r1, f"acc({r1}.v_int)")), ("ensures", self.q(r1, f"acc({r1}.d_int)")),
+                       ("ensures", self.q(r1, f"({r1}.v_int == 0)")), ("ensures", self.q(r1, f"{r1}.d_int"))]
+        self.refused(self.method("zero_arr_P", more), "lacks its `requires acc_v`")
+
+    def test_the_zero_literal_follows_the_fields_type(self):
+        for t, ty, zero, wrong in (("int", "Int", "0", "1"), ("bool", "Bool", "false", "true"), ("ptr_int", "Ref", "null", "r")):
+            with self.subTest(t=t):
+                self.refused(self.method("zero_arr_P", self.zero(t=t, zero=wrong), fields=((t, ty),)), "the zero literal")
+        self.refused(self.method("zero_arr_P", self.zero(t="bool", zero="0"), fields=(("bool", "Bool"),)), "the zero literal")
+
+    def test_a_zero_fill_states_the_leaves_of_its_allocation(self):
+        alloc = self.method("alloc_arr_P", self.alloc(leaves=((0,), (1,))))
+        for leaves in (((0,),), ((0,), (1,), (2,)), ((0,), (2,))):
+            with self.subTest(leaves=leaves):
+                probs = [p for p in lv.lint_vpr(*build(alloc + self.method("zero_arr_P", self.zero(leaves=leaves), declare=False)), "t.vpr", "t.vpr.map")
+                         if "not the leaves of" in p]
+                self.assertTrue(any("not the leaves of `alloc_arr_P`" in p for p in probs), probs)
+
+    def test_the_zero_fill_has_its_own_header_and_no_length_facts(self):
+        base = self.zero()
+        self.refused(self.method("zero_arr_P", base, header="method zero_arr_P(r: Ref, n: Int) returns (s: Ref)"), "its header is not")
+        self.refused(self.method("zero_arr_P", base, header="method zero_arr_P(n: Int, r: Ref)"), "its header is not")
+        self.refused(self.method("zero_arr_P", base + [("ensures", self.lens([(0,), (1,)]))]), "the length facts stand in the `ensures` of an allocation only")
+
+
+class LeafRowTests(unittest.TestCase):
+    """Decision 0064 item 17: the rows of a local array of structures in code.  A row over a LEAF has the receiver `loc(member(<chain>, j), 0)` of the
+    canonical chain rooted at the slot `loc(block_of(X), k)` of element `k` (X a variable) for its trigger and for the cell of its `acc`; it is a marked
+    `assert` row (with its expected reason), a range `exhale` or one of item 8's loop conjuncts, and nowhere else (a contract's atom rows and the pure
+    rows of a call are the part that lifts a range atom over structures).  The older rows keep their rules."""
+
+    SLOT = "loc(block_of(v_a), k)"
+
+    def recv(self, chain=(0,), block="block_of(v_a)", k="k"):
+        x = f"loc({block}, {k})"
+        for j in chain:
+            x = f"loc(member({x}, {j}), 0)"
+        return x
+
+    def quant(self, body, chain=(0,), trigger=None, lo="0", hi="3", k="k", block="block_of(v_a)", binders=None):
+        return (f"forall {binders or f'{k}: Int'} :: {{ {trigger or self.recv(chain, block, k)} }} (({lo} <= {k}) && ({k} < {hi})) ==> {body}")
+
+    def acc(self, f="v_int", chain=(0,), amount="", block="block_of(v_a)"):
+        return f"acc({self.recv(chain, block)}.{f}{amount})"
+
+    def method(self, body):
+        return ["method m__1()", "  decreases", "{", "  var v_a: Ref", *body, "}"]
+
+    def row(self, text=None, ident=MARKED, kind="assert"):
+        return Check(f"  {kind} {text or self.quant(self.acc())}", ident, "permission")
+
+    def probs(self, lines, keep=R0059):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if keep in p]
+
+    def refused(self, lines, reason=None):
+        probs = self.probs(lines)
+        self.assertTrue(probs and (reason is None or any(reason in p for p in probs)), (reason, probs))
+
+    def test_marked_rows_and_the_range_exhale_over_leaves_are_clean(self):
+        rows = [self.row(self.quant(self.acc(f, c), c)) for c in ((0,), (1,), (0, 1)) for f in ("v_int", "d_int")]
+        exhales = [f"  exhale {self.quant(self.acc(f, c), c)}" for c in ((0,), (1,)) for f in ("v_int", "d_int")]
+        lines = self.method([*rows, Check("  assert !(perm(lvloc(block_of(v_a)).lv) != write)", A, "lifetime"), *exhales, "  exhale acc(lvloc(block_of(v_a)).lv)"])
+        self.assertEqual(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    def test_a_row_may_carry_an_amount_and_a_heap_free_range(self):
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(amount=", write")))])), [])
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(), lo="offset_of(t4)", hi="offset_of(t4) + t5"))])), [])
+        for label, kw in (("a heap read in the low bound", {"lo": "loc(t4, 0).v_int"}), ("perm in the high bound", {"hi": "perm(x.v_int)"})):
+            with self.subTest(mutant=label):
+                self.refused(self.method([self.row(self.quant(self.acc(), **kw))]), "not a marked range row")
+        for amount in (", perm(x.v_int)", ", loc(v_a, 0).v_int"):
+            with self.subTest(amount=amount):
+                self.refused(self.method([self.row(self.quant(self.acc(amount=amount)))]), "not a marked range row")
+
+    def test_a_marked_entry_on_a_leaf_row_is_needed_and_enough(self):
+        probs = self.probs(self.method([self.row(ident="assert.failed")]))
+        self.assertTrue(any("has no expected reason" in p for p in probs), probs)
+        self.assertEqual(self.probs(self.method([self.row()])), [])
+
+    def test_a_marked_entry_on_a_leaf_row_that_is_no_acc_is_a_problem(self):
+        flag = self.quant(self.recv() + ".d_int")
+        probs = self.probs(self.method([Check(f"  assert {flag}", MARKED, "permission")]))
+        self.assertTrue(any("carries the expected reason" in p for p in probs), probs)
+
+    def test_the_receiver_is_the_canonical_chain_rooted_at_the_slot(self):
+        r0 = self.recv()
+        for label, text in (
+                ("a cell of another leaf under the trigger", self.quant(self.acc("v_int", (1,)), trigger=r0)),
+                ("the slot as trigger and a leaf cell", self.quant(self.acc(), trigger=self.SLOT)),
+                ("a trigger that stops at the member block", self.quant(self.acc(), trigger=f"member({self.SLOT}, 0)")),
+                ("a variable member index", self.quant(self.acc()).replace("loc(member(loc(block_of(v_a), k), 0), 0)", "loc(member(loc(block_of(v_a), k), j), 0)")),
+                ("an offset in the slot", self.quant(self.acc()).replace("k), 0), 0)", "k + 1), 0), 0)")),
+                ("a block that is not a variable", self.quant(self.acc(block="block_of(f(v_a))"), block="block_of(f(v_a))")),
+                ("two roots", self.quant(self.acc()).replace("loc(member(loc(block_of(v_a), k), 0), 0).", "loc(member(loc(block_of(v_b), k), 0), 0).")),
+                ("a second binder", self.quant(self.acc(), binders="k: Int, j: Int")),
+                ("no trigger", self.quant(self.acc()).replace(f"{{ {r0} }} ", "")),
+                ("a trigger of another term", self.quant(self.acc(), trigger=f"offset_of({r0})"))):
+            with self.subTest(mutant=label):
+                self.refused(self.method([self.row(text)]))
+                self.refused(self.method([f"  exhale {text}"]))
+
+    def test_a_leaf_row_has_exactly_the_shape_of_a_marked_row(self):
+        two = self.quant(self.acc() + " && " + self.acc("d_int"))
+        not_acc = self.quant(self.recv() + ".d_int")
+        reversed_range = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "((k < 3) && (0 <= k))")
+        one_conjunct = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "(k < 3)")
+        extra = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "(((0 <= k) && (k < 3)) && true)")
+        guarded = f"(x > 0) ==> {self.quant(self.acc())}"
+        for label, text in (("two fields", two), ("not an acc", not_acc), ("range reversed", reversed_range), ("one range conjunct", one_conjunct),
+                            ("an extra antecedent", extra), ("a guard", guarded)):
+            with self.subTest(mutant=label):
+                self.refused(self.method([self.row(text)]))
+
+    def test_the_range_exhale_has_the_shape_too(self):
+        for label, text in (("two fields", self.quant(self.acc() + " && " + self.acc("d_int"))),
+                            ("an amount", self.quant(self.acc(amount=", write"))),
+                            ("a flag", self.quant(self.recv() + ".d_int"))):
+            with self.subTest(mutant=label):
+                self.refused(self.method([f"  exhale {text}"]))
+
+    def test_a_leaf_row_stands_nowhere_else(self):
+        q = self.quant(self.acc())
+        cases = {
+            "a requires": ["method m__2(v_a: Ref)", Check(f"  requires {q}", WF, "internal"), "  decreases", "{", "}"],
+            "an ensures": ["method m__2(v_a: Ref)", Check(f"  ensures {q}", P, "postcondition"), "  decreases", "{", "}"],
+            "a pure assert": self.method([Check(f"  assert {self.quant(self.recv() + '.d_int')}", A, "check")]),
+            "an assert in a conjunction": self.method([Check(f"  assert true && ({q})", A, "check")]),
+            "an inhale": self.method([f"  inhale {q} // cerastes:inhale-ok test"]),
+            "a Bool variable": self.method([f"  var b: Bool := {q}"]),
+        }
+        for label, lines in cases.items():
+            with self.subTest(case=label):
+                self.refused(lines, "`forall` outside the shapes")
+        # the contract's and the pure rows say whose they are
+        self.refused(cases["a requires"], "a row over a leaf of an array of structures")
+        self.refused(cases["a pure assert"], "a row over a leaf of an array of structures")
+
+    # --- item 8's loop conjuncts over a leaf
+    def conjuncts(self, chain=(0,)):
+        cell = self.recv(chain)
+        rng = "((0 <= k) && (k < 3))"
+        return {
+            "acc": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> acc({cell}.v_int)",
+            "acc flag": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> acc({cell}.d_int)",
+            "flags": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && old[lh_0]({cell}.d_int)) ==> {cell}.d_int",
+            "range": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && {cell}.d_int) ==> "
+                     f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))",
+            "values": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> ({cell}.v_int == old[lh_0]({cell}.v_int))",
+        }
+
+    def loop_lines(self, *invariants, label=True):
+        lines = ["method m__1()", "  decreases", "{", "  var v_a: Ref"]
+        if label:
+            lines.append("  label lh_0")
+        lines += ["  while (true)", *[Check(i, INV, "internal") for i in invariants], "  {", "  }", "}"]
+        return lines
+
+    def test_the_loop_conjuncts_over_a_leaf_are_clean(self):
+        for chain in ((0,), (1,), (0, 1)):
+            for name, inv in self.conjuncts(chain).items():
+                with self.subTest(chain=chain, conjunct=name):
+                    self.assertEqual(self.probs(self.loop_lines(inv)), [])
+        self.assertEqual(self.probs(self.loop_lines(*self.conjuncts().values()), keep=""), [p for p in self.probs(self.loop_lines(*self.conjuncts().values()), keep="`while` loop without")])
+
+    def test_a_loop_conjunct_over_a_leaf_must_keep_its_shape(self):
+        c = self.conjuncts()
+        cell, other = self.recv(), self.recv((1,))
+        mutants = {
+            "acc with an amount": c["acc"].replace(".v_int)", ".v_int, kl)"),
+            "acc of another leaf than the trigger": c["acc"].replace(f"acc({cell}.v_int)", f"acc({other}.v_int)"),
+            "flags of another leaf": c["flags"].replace(f"old[lh_0]({cell}.d_int)", f"old[lh_0]({other}.d_int)"),
+            "flags with another consequent": c["flags"].replace(f"==> {cell}.d_int", f"==> {other}.d_int"),
+            "range of another leaf": c["range"].replace(f"{cell}.v_int", f"{other}.v_int"),
+            "range with a non-literal bound": c["range"].replace("2147483647", "n"),
+            "values of another leaf": c["values"].replace(f"old[lh_0]({cell}.v_int)", f"old[lh_0]({other}.v_int)"),
+            "values against the current state": c["values"].replace(f"old[lh_0]({cell}.v_int)", f"{cell}.v_int"),
+            "an implication to anything": f"    invariant forall k: Int :: {{ {cell} }} ((0 <= k) && (k < 3)) ==> {cell}.v_int > 0",
+            "the slot as trigger": c["acc"].replace(f"{{ {cell} }}", f"{{ {self.SLOT} }}"),
+        }
+        for label, inv in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.loop_lines(inv)), label)
+
+    def test_old_label_over_a_leaf_stands_only_in_two_conjuncts(self):
+        c = self.conjuncts()
+        for name in ("acc", "range"):
+            inv = c[name] + " && old[lh_0](true)"
+            with self.subTest(conjunct=name):
+                self.assertTrue(any("`old[label]` outside" in p for p in self.probs(self.loop_lines(inv))))
+        probs = self.probs(self.loop_lines(c["flags"], label=False))
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in probs), probs)
+
+    def test_the_older_rows_keep_their_rules(self):
+        # the scalar element's marked row and loop conjunct are the old shapes, with the old receiver
+        old = f"forall k: Int :: {{ loc(block_of(v_a), k) }} ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int)"
+        self.assertEqual(self.probs(self.method([self.row(old)])), [])
+        # twin: a scalar row whose cell is a leaf cell is neither
+        mixed = f"forall k: Int :: {{ loc(block_of(v_a), k) }} ((0 <= k) && (k < 3)) ==> {self.acc()}"
+        self.refused(self.method([self.row(mixed)]))
+
+
 class QuantifiedLoopHeaderTests(unittest.TestCase):
     """A loop over an array has quantified invariants whose trigger sets `{ loc(b, k) }` stand in the loop header: the rule that every
     `while` has a `decreases` clause (decision 0013 item 5) must not take a trigger's `{` for the body's (it did, as a false positive

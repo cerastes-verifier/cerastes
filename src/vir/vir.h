@@ -240,6 +240,11 @@ struct StructLeaf
     unsigned long long count {0U};
     // struct_value_leaves only: the index of this element in the array member at `path` (`text` is `member[elem]`); -1 for every other leaf
     int elem {-1};
+    // Decision 0064 item 4 (M4.5e1e2 part A): the member is an array whose ELEMENT is a structure or an array.  None of the three views above has a leaf for it: struct_leaves and
+    // struct_object_leaves return it as the one leaf of the array's type (the object view with `array` true and `element` the aggregate), struct_value_leaves as one leaf of the array's
+    // type (no expansion).  Every consumer of the three views reports an internal error on such a leaf (lowering's guarded `object_leaves`, `value_leaves` and `leaves_of`) until its
+    // part gives the site `object_leaf_paths`.
+    bool aggregate_element {false};
 };
 // The leaves of `s` in declaration order, depth first (a nested struct's leaves in place).  `text` is `root_text` followed by `.name` for each
 // member on the way (`->name` for the first when `arrow`): struct_leaves(s, "t", false) gives "t.x", "t.u.y", struct_leaves(s, "p", true) "p->x", "p->u.y".
@@ -253,6 +258,43 @@ std::vector<StructLeaf> struct_object_leaves(const StructType& s, const std::str
 // THE VALUE VIEW (decision 0063 items 4 and 13): a struct VALUE is the tuple of these leaves; an array member contributes one leaf per element, in index
 // order (`elem` 0, 1, ...; `type` the element type; `text` `s.a[0]`, `s.a[1]`).  The view of by-value parameters, results, aggregates and copies.
 std::vector<StructLeaf> struct_value_leaves(const StructType& s, const std::string& root_text = "", bool arrow = false);
+// Decision 0064 item 4 (M4.5e1e2 part A): THE LEAF PATHS of an object type, the general view the three above are special cases of.  A leaf is reached by STEPS: a member `k` of a
+// structure, or an index into an array of `count` elements.  An array of structures or arrays is described by its element's paths with the index step before them, ONE PATH PER LEAF
+// whatever its counts (the path stands for `product of its index counts` cells).  `type` is the leaf's cell type (a Bool, an Int or a Ptr, never an aggregate).  For a type that decision 0063
+// accepted this is struct_object_leaves' list: a cell has member steps only, an array leaf member steps and then one index step, and `text` is the same spelling (the trailing index step
+// is not written; an index step that is followed by more steps is written `[]`: `v[].a`).  No path is deeper than the depth the checker allows (64 nested structures at most).
+struct LeafStep
+{
+    enum class Kind
+    {
+        Member,
+        Index
+    };
+    Kind kind {Kind::Member};
+    int member {0};                // Member: the index of the member
+    unsigned long long count {0U}; // Index: the number of elements
+    bool operator==(const LeafStep& o) const
+    {
+        return kind == o.kind && member == o.member && count == o.count;
+    }
+};
+struct LeafPath
+{
+    std::vector<LeafStep> steps;
+    Type type;
+    std::string text;
+    bool owning {false};
+    bool ref_to_uninit {false};
+    // the number of cells the path stands for: the product of its index counts (1 for a cell)
+    unsigned long long cells() const;
+    // the number of index steps
+    size_t indexes() const;
+    // the member indices of its Member steps, in order (struct_object_leaves' `path` for a type that decision 0063 accepted)
+    std::vector<int> members() const;
+};
+// The leaf paths of `t` in declaration order, depth first: a structure's (its members' in place), an array's (its element's, behind one index step), any other type's (one path, no steps).
+// `root_text` and `arrow` as struct_leaves.
+std::vector<LeafPath> object_leaf_paths(const Type& t, const std::string& root_text = "", bool arrow = false);
 // The most array elements a struct VALUE may hold when it is passed or returned by value (decision 0063 item 13, question 309): every element is a Viper formal or result and a write of the
 // entry copy, and Silicon's time grows steeply with the count (the worst shape, a structure in and out by value with a caller that fills and stores it: 6 elements 19 s, 7 elements 25 s, 8
 // elements 35 s, 12 elements 129 s, 16 elements past 120 s).  The one constant: check_program's backstop and the encoder's rejection both read it.  A copy between objects has no limit.
@@ -1148,6 +1190,22 @@ int requires_atom_count(const Function& f);
 // same kind) backs `restrict` like the `Owns`, and a range atom of another parameter covers it like an `Owns` or `Reads` atom does.  The atoms must already be numbered.  When it is false,
 // `*offender` (if given) is the other parameter that has no atom, or -1 when `param`'s own `owns` is the missing part.
 bool restrict_backed(const Function& f, int param, int* offender = nullptr);
+// Decision 0064 item 19, the pair rule (audit round 2, blocking 2; amends 0037 item 2, 0043 item 10 and 0060 item 14): `restrict_backed` is also false, with `*offender` the OTHER parameter, when
+// `param`'s backing atom and the covering atom of another pointer parameter that reaches its pointee are not a pair: both surely non-empty (a cell or structure atom, or a range atom whose count is an
+// integer constant of at least 1 or has `n > 0`, `0 < n`, `n >= 1` or `1 <= n` as a top-level conjunct of the `requires`, matched by `same_pure_expr`), or both range atoms with structurally equal
+// counts.  This is that rejection's reason in source terms (with the counts' spellings), "" when `restrict_backed` has no objection of this kind.
+std::string restrict_pair_reason(const Function& f, int param);
+// Decision 0064 item 19 (question 326; audit round 1, blocking 1): what the BODY of a function with a `restrict` parameter can reach.  "" when the item has no objection (and
+// at once for a function without a `restrict` parameter or without a body), otherwise the reason, in source terms, for the first offending construct of the first `restrict`
+// parameter that has one, ending with "(decision 0064 item 19)": (i) the body (statements, expressions, loop invariants, measures and checks) names or takes the address of a
+// global or `static` local that reaches the parameter's pointee field; (ii) it calls a function whose `requires` or `ensures` (written atoms and the implicit atoms of `static`
+// locals alike) has an atom rooted at such a global; (iii) it calls a function whose result is a pointer, or an aggregate with a pointer leaf, that reaches the field, or one of whose
+// parameters points to an object that holds such a pointer; (iv) it passes to ANY function, with or without a body, by a call or an application, an argument that is a pointer reaching the field
+// or a structure value with such a pointer leaf (audit round 2, blocking 1 and issue 3).  Exempt from (i) and (ii) only: a global the function's own contract holds WHOLE and UNGUARDED by `owns` or
+// `reads` (a top-level conjunct of the `requires`, the implicit atom of a `static` local included; of a global array, the whole-array atom) PROVIDED it pairs with the parameter's backing atom (the pair rule
+// above: both surely non-empty, or ranges of equal counts); a partial atom, a guarded one, or one that does not pair exempts nothing.  "Holds" and "reaches"
+// are the predicate of restrict_backed's walker over leaf paths.  check_program calls it as the backstop; the encoder calls it once the body is encoded.
+std::string restrict_body_reason(const Program& program, const Function& fn);
 // Why `restrict` on pointer parameter `param` is refused whatever its contract owns (decision 0043 item 10, audit B2): empty when nothing is in the way.
 // The pointee of `param` is a struct (M8), or another pointer parameter's object or a global that an atom of the contract names can hold a pointer to the same
 // type (`int **`, a struct with an `int *` leaf or struct-pointer leaves that reach one, an `int *` global): a pointer loaded from there is not based on

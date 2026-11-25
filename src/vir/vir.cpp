@@ -3,6 +3,7 @@
 #include "vir.h"
 #include <algorithm>
 #include <cctype>
+#include <map>
 
 namespace cerastes::vir {
 
@@ -65,6 +66,21 @@ void collect_leaves(const StructType& s, std::vector<int>& path, const std::stri
         if (m.type.is_struct() && m.type.struct_type != nullptr)
         {
             collect_leaves(*m.type.struct_type, path, t, false, out, depth + 1, view);
+        }
+        else if (m.type.is_array() && m.type.element != nullptr &&
+                 (m.type.element->is_struct() || m.type.element->is_array()))
+        {
+            // decision 0064 item 4: an array of structures or of arrays has no leaf in any of the three views (object_leaf_paths has them): one flagged leaf, of the array's type, that every
+            // consumer reports (the object view keeps `array` and `element` so that a consumer that ignores the flag still sees an aggregate element, never a cell)
+            StructLeaf l {make_leaf(path, m.type, std::move(t), m)};
+            l.aggregate_element = true;
+            if (view == LeafView::Object)
+            {
+                l.array = true;
+                l.count = m.type.count;
+                l.element = *m.type.element;
+            }
+            out.push_back(std::move(l));
         }
         else if (m.type.is_array() && view == LeafView::Object)
         {
@@ -143,6 +159,92 @@ std::vector<StructLeaf> struct_object_leaves(const StructType& s, const std::str
 std::vector<StructLeaf> struct_value_leaves(const StructType& s, const std::string& root_text, bool arrow)
 {
     return leaves_in_view(s, root_text, arrow, LeafView::Value);
+}
+
+unsigned long long LeafPath::cells() const
+{
+    unsigned long long n {1U};
+    for (const LeafStep& st : steps)
+    {
+        if (st.kind == LeafStep::Kind::Index)
+        {
+            n *= st.count;
+        }
+    }
+    return n;
+}
+
+size_t LeafPath::indexes() const
+{
+    size_t n {0U};
+    for (const LeafStep& st : steps)
+    {
+        n += st.kind == LeafStep::Kind::Index ? 1U : 0U;
+    }
+    return n;
+}
+
+std::vector<int> LeafPath::members() const
+{
+    std::vector<int> out;
+    for (const LeafStep& st : steps)
+    {
+        if (st.kind == LeafStep::Kind::Member)
+        {
+            out.push_back(st.member);
+        }
+    }
+    return out;
+}
+
+namespace {
+// The leaf paths below `t` (decision 0064 item 4): `steps` and `text` are the way to `t`.  `pending_index` is an index step's spelling `[]` that a following step writes (the trailing index
+// step is not spelled, as struct_object_leaves does not spell it).  `owning` and `ref_to_uninit` are the flags of the member that holds `t`.
+void collect_paths(const Type& t, std::vector<LeafStep>& steps, const std::string& text, bool first_arrow, bool owning,
+                   bool ref_to_uninit, bool pending_index, std::vector<LeafPath>& out, int depth)
+{
+    if (depth > 64)
+    {
+        return; // a by-value cycle is a check_program error
+    }
+    const std::string spelled {text + (pending_index ? "[]" : "")};
+    if (t.is_struct() && t.struct_type != nullptr)
+    {
+        const StructType& s {*t.struct_type};
+        for (size_t k {0U}; k < s.members.size(); ++k)
+        {
+            const StructMember& m {s.members[k]};
+            const std::string name {m.name.empty() ? "<" + std::to_string(k) + ">" : m.name};
+            const std::string next {spelled.empty() ? name : spelled + (first_arrow ? "->" : ".") + name};
+            steps.push_back(LeafStep {LeafStep::Kind::Member, static_cast<int>(k), 0U});
+            collect_paths(m.type, steps, next, false, m.owning, m.ref_to_uninit, false, out, depth + 1);
+            steps.pop_back();
+        }
+        return;
+    }
+    if (t.is_array() && t.element != nullptr)
+    {
+        steps.push_back(LeafStep {LeafStep::Kind::Index, 0, t.count});
+        collect_paths(*t.element, steps, spelled, first_arrow, owning, ref_to_uninit, true, out, depth + 1);
+        steps.pop_back();
+        return;
+    }
+    LeafPath p;
+    p.steps = steps;
+    p.type = t;
+    p.text = text;
+    p.owning = owning;
+    p.ref_to_uninit = ref_to_uninit;
+    out.push_back(std::move(p));
+}
+} // namespace
+
+std::vector<LeafPath> object_leaf_paths(const Type& t, const std::string& root_text, bool arrow)
+{
+    std::vector<LeafPath> out;
+    std::vector<LeafStep> steps;
+    collect_paths(t, steps, root_text, arrow, false, false, false, out, 0);
+    return out;
 }
 
 std::vector<std::vector<int>> struct_slots_of(const StructType& a, const StructType& b)
@@ -822,6 +924,7 @@ const Expr* Builder::deref(const Expr* addr, SrcLoc loc)
 }
 
 namespace {
+std::string elem_place(const Expr& ea);
 // The place spelling of a MemberAddr (decision 0043 item 14): `p->x` for a pointer operand, `s.x` for the address of a struct local, `s.t.x` for a
 // nested member, `g.x` for a global.  Empty when the operand has no spelling.
 std::string member_place(const Expr& ma)
@@ -846,6 +949,12 @@ std::string member_place(const Expr& ma)
     if (op->kind == Expr::Kind::MemberAddr)
     {
         const std::string base {member_place(*op)};
+        return base.empty() ? std::string() : base + "." + name;
+    }
+    if (op->kind == Expr::Kind::ElemAddr)
+    {
+        // decision 0064 item 4: an element that is a structure: `v[i].x`, `p[i].x`, `m[i][j].x` (never `(&p[i])->x`)
+        const std::string base {elem_place(*op)};
         return base.empty() ? std::string() : base + "." + name;
     }
     if (op->kind == Expr::Kind::AddrOf && op->var != nullptr)
@@ -903,6 +1012,12 @@ std::string elem_place(const Expr& ea)
     else if (base->kind == Expr::Kind::MemberAddr)
     {
         root = member_place(*base);
+    }
+    else if (base->kind == Expr::Kind::ElemAddr && base->type.is_ptr() && base->type.pointee != nullptr &&
+             base->type.pointee->is_array())
+    {
+        // decision 0064 item 4: the row of an array of arrays: `m[i][j]`, `v[i].a[j]` through the member (a base that is an element of an array typed pointer to an array)
+        root = elem_place(*base);
     }
     else if (!base->c_text.empty())
     {
@@ -1860,16 +1975,22 @@ bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const Struc
         base = base->pointee;
         ++steps;
     }
+    if (base->is_array() && base->element != nullptr)
+    {
+        // decision 0064 item 4 (trap 4): an array holds objects of its element type, whatever that is (a row, a structure)
+        return may_hold_pointer_to(*base->element, target, seen);
+    }
     if (base->is_struct() && base->struct_type != nullptr)
     {
-        // decision 0063 item 4: the object view, and an array leaf holds cells of its element type (`int *` can point at `s->a[i]`)
-        const std::vector<StructLeaf> leaves {struct_object_leaves(*base->struct_type)};
+        // decision 0064 item 4: the leaf paths (decision 0063 item 4's object view for what 0063 accepted): an array leaf holds cells of its element type (`int *` can point at
+        // `s->a[i]`), and an element structure's or row's leaves are leaves of the object like any other
+        const std::vector<LeafPath> leaves {object_leaf_paths(*base)};
         // A pointer to a struct that has a cell of the target's field (any depth of nesting): a pointer loaded from the object reaches that cell (audit S1).
         if (steps > 0)
         {
-            for (const StructLeaf& l : leaves)
+            for (const LeafPath& l : leaves)
             {
-                if ((l.array ? l.element : l.type) == target)
+                if (l.type == target)
                 {
                     return true;
                 }
@@ -1877,9 +1998,9 @@ bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const Struc
         }
         if (seen.insert(base->struct_type).second)
         {
-            for (const StructLeaf& l : leaves)
+            for (const LeafPath& l : leaves)
             {
-                if (may_hold_pointer_to(l.array ? l.element : l.type, target, seen))
+                if (may_hold_pointer_to(l.type, target, seen))
                 {
                     return true;
                 }
@@ -1887,6 +2008,297 @@ bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const Struc
         }
     }
     return false;
+}
+
+// THE predicate "an object of type `held` HOLDS the field `field`" (decision 0064 items 4 and 19): one of its leaf paths is a cell of that type, whatever steps (members, index
+// steps into an array of scalars, of structures or of rows) lead to it.  restrict_backed's `reaches` walker over the other parameters and restrict_body_reason's walk over
+// globals both ask it, so a new shape of aggregate (Part C's `g[i].x`) is read in one place.
+bool holds_cell(const Type& held, const Type& field)
+{
+    if (held.is_struct() && held.struct_type == nullptr)
+    {
+        return false;
+    }
+    for (const LeafPath& l : object_leaf_paths(held))
+    {
+        if (l.type == field)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+// An object of type `t` REACHES `field`: it holds the field, or holds a pointer from which a pointer to a cell of that field can be formed, at any depth.
+bool reaches_cell(const Type& t, const Type& field)
+{
+    if (holds_cell(t, field))
+    {
+        return true;
+    }
+    std::set<const StructType*> seen;
+    return may_hold_pointer_to(t, field, seen);
+}
+// A VALUE of type `t` (a function's result, what an out-parameter's pointee holds) can hand a pointer that reaches `field`: a pointer to an object that reaches it, or an
+// aggregate with such a pointer leaf.
+bool value_hands_pointer(const Type& t, const Type& field)
+{
+    if (t.is_ptr() && t.pointee != nullptr)
+    {
+        return reaches_cell(*t.pointee, field);
+    }
+    if ((t.is_struct() && t.struct_type != nullptr) || t.is_array())
+    {
+        for (const LeafPath& l : object_leaf_paths(t))
+        {
+            if (l.type.is_ptr() && l.type.pointee != nullptr && reaches_cell(*l.type.pointee, field))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// ---- the pair rule of decision 0064 item 19 (audit round 2, blocking 2): an atom excludes only what it is sure to hold ----
+// One atom of a contract as the pair rule sees it: `nonempty` when it surely holds a cell (a cell or structure atom; a range atom whose count is an integer constant of at least 1, or for which a
+// top-level conjunct of the `requires` says the count is positive), `count` the count of a range atom (null for any other atom).  An `owns_block` and a `live` are not surely non-empty (undecided
+// by the record, read as the rejecting reading).
+struct PairAtom
+{
+    const Expr* atom {nullptr};
+    bool nonempty {false};
+    const Expr* count {nullptr};
+};
+
+const Expr* peel_conversions(const Expr* e)
+{
+    while (e != nullptr && e->kind == Expr::Kind::Convert)
+    {
+        e = e->a;
+    }
+    return e;
+}
+// An integer constant of this exact decimal value (`"0"` or `"1"`), under any conversions the front end wrote around the literal.
+bool is_int_literal(const Expr* e, const char* value)
+{
+    e = peel_conversions(e);
+    return e != nullptr && e->kind == Expr::Kind::Const && e->type.is_int() && e->value == value;
+}
+// The conjuncts of a clause: through `&&` (and C's `to_bool`/`bool_to_int` wrapping), never into a `||` or a `?:`.
+void top_conjuncts(const Expr* e, std::vector<const Expr*>& out)
+{
+    while (e != nullptr && (e->kind == Expr::Kind::ToBool || e->kind == Expr::Kind::BoolToInt))
+    {
+        e = e->a;
+    }
+    if (e == nullptr)
+    {
+        return;
+    }
+    if (e->kind == Expr::Kind::Binary && e->bop == BinaryOp::LAnd)
+    {
+        top_conjuncts(e->a, out);
+        top_conjuncts(e->b, out);
+        return;
+    }
+    out.push_back(e);
+}
+// `n > 0`, `0 < n`, `n >= 1` or `1 <= n` with `n` the count expression itself (record 0060 item 3's structural equality: no look through a conversion of `n`).
+bool states_positive(const Expr& c, const Expr& count)
+{
+    if (c.kind != Expr::Kind::Binary || c.a == nullptr || c.b == nullptr)
+    {
+        return false;
+    }
+    switch (c.bop)
+    {
+        case BinaryOp::Gt:
+            return same_pure_expr(*c.a, count) && is_int_literal(c.b, "0");
+        case BinaryOp::Lt:
+            return is_int_literal(c.a, "0") && same_pure_expr(*c.b, count);
+        case BinaryOp::Ge:
+            return same_pure_expr(*c.a, count) && is_int_literal(c.b, "1");
+        case BinaryOp::Le:
+            return is_int_literal(c.a, "1") && same_pure_expr(*c.b, count);
+        default:
+            return false;
+    }
+}
+bool surely_positive(const Function& f, const Expr& count)
+{
+    if (count.kind == Expr::Kind::Const)
+    {
+        const std::string& v {count.value};
+        return count.type.is_int() && !v.empty() && v.find_first_not_of("0123456789") == std::string::npos &&
+               v.find_first_not_of('0') != std::string::npos;
+    }
+    std::vector<const Expr*> conjuncts;
+    for (const Clause& c : f.requires_)
+    {
+        top_conjuncts(c.expr, conjuncts);
+    }
+    for (const Expr* c : conjuncts)
+    {
+        if (states_positive(*c, count))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+PairAtom pair_atom_of(const Function& f, const Expr& atom)
+{
+    PairAtom a;
+    a.atom = &atom;
+    if (is_range_atom(atom.atom))
+    {
+        a.count = atom.b;
+        a.nonempty = atom.b != nullptr && surely_positive(f, *atom.b);
+    }
+    else
+    {
+        a.nonempty = atom.atom == AtomKind::Owns || atom.atom == AtomKind::Reads;
+    }
+    return a;
+}
+// Both are surely non-empty, or both are range atoms with structurally equal counts (empty together: then neither gives an access).
+bool pair_ok(const PairAtom& a, const PairAtom& b)
+{
+    return (a.nonempty && b.nonempty) ||
+           (a.count != nullptr && b.count != nullptr && same_pure_expr(*a.count, *b.count));
+}
+bool pair_any(const std::vector<PairAtom>& as, const std::vector<PairAtom>& bs)
+{
+    for (const PairAtom& a : as)
+    {
+        for (const PairAtom& b : bs)
+        {
+            if (pair_ok(a, b))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+std::string atom_spelling(const PairAtom& a, const char* otherwise)
+{
+    return a.atom != nullptr && !a.atom->c_text.empty() ? "`" + a.atom->c_text + "`" : std::string(otherwise);
+}
+// Why `a` cannot stand in a pair (it may be empty), with the count's spelling; "" when it is surely non-empty.
+std::string empty_note(const PairAtom& a)
+{
+    if (a.nonempty)
+    {
+        return "";
+    }
+    if (a.count != nullptr)
+    {
+        const std::string n {a.count->c_text.empty() ? "its count" : "`" + a.count->c_text + "`"};
+        const std::string stated {a.count->c_text.empty() ? "`n > 0`" : "`" + a.count->c_text + " > 0`"};
+        return atom_spelling(a, "a range") + " may be empty (" + n +
+               " is neither an integer constant of at least 1 nor stated positive by a top-level conjunct " + stated +
+               " of the `requires`)";
+    }
+    return atom_spelling(a, "an atom") +
+           " is not a cell or structure atom (an `owns_block` is not read as surely non-empty)";
+}
+// Explains why no atom of `as` pairs with any atom of `bs`.
+std::string pair_failure_text(const std::vector<PairAtom>& as, const std::vector<PairAtom>& bs)
+{
+    const PairAtom& a {as.front()};
+    const PairAtom& b {bs.front()};
+    std::string why;
+    for (const PairAtom* x : {&a, &b})
+    {
+        const std::string n {empty_note(*x)};
+        if (!n.empty())
+        {
+            why += (why.empty() ? "" : "; ") + n;
+        }
+    }
+    if (a.count != nullptr && b.count != nullptr)
+    {
+        why += std::string(why.empty() ? "" : "; ") + "the counts `" + a.count->c_text + "` and `" + b.count->c_text +
+               "` are not structurally equal";
+    }
+    return why +
+           ": a range that may be empty excludes nothing, so an access through the other pointer could use the one permission there is";
+}
+
+bool null_or_none_guard(const AtomSite& s, int q)
+{
+    return atom_guard_shape(s, q) != GuardShape::Other;
+}
+// The `owns_block` atom of pointer parameter `q` in the `requires` or the `ensures`, or null.
+const Expr* block_site_of(const std::vector<AtomSite>& blocks, int q, bool in_ensures)
+{
+    for (const AtomSite& b : blocks)
+    {
+        if (b.in_ensures == in_ensures && null_or_none_guard(b, q) && atom_place(*b.atom) == PlaceKey {q, {}, {}})
+        {
+            return b.atom;
+        }
+    }
+    return nullptr;
+}
+// What backs `restrict` on `param` (the old `own`, as atoms): its `owns_block` in the `requires` and the `ensures`, and each `owns` or `owns_range` of it (unguarded or after `param == NULL ||`) in
+// the `requires` with its partner in the `ensures`.  Empty when nothing backs it.
+std::vector<PairAtom> restrict_backing(const Function& f, int param, const std::vector<AtomSite>& sites,
+                                       const std::vector<AtomSite>& blocks)
+{
+    std::vector<PairAtom> out;
+    if (const Expr* b {block_site_of(blocks, param, false)};
+        b != nullptr && block_site_of(blocks, param, true) != nullptr)
+    {
+        PairAtom a;
+        a.atom = b; // an `owns_block` is read as not surely non-empty (undecided by the record: the rejecting reading)
+        out.push_back(a);
+    }
+    for (const AtomSite& r : sites)
+    {
+        // record 0060 item 14: an `owns_range(p, n)` backs `restrict` as `owns(*p)` does (unguarded, or after `p == NULL ||`), its `ensures` partner of the same kind
+        if (r.in_ensures || (r.atom->atom != AtomKind::Owns && r.atom->atom != AtomKind::OwnsRange) ||
+            r.atom->a == nullptr || r.atom->a->kind != Expr::Kind::Formal || r.atom->a->index != param ||
+            !null_or_none_guard(r, param))
+        {
+            continue;
+        }
+        for (const AtomSite& e : sites)
+        {
+            if (e.in_ensures && e.atom->atom == r.atom->atom && e.atom->amount == r.atom->amount &&
+                null_or_none_guard(e, param))
+            {
+                out.push_back(pair_atom_of(f, *r.atom));
+                break;
+            }
+        }
+    }
+    return out;
+}
+// What covers another pointer parameter `q` (an atom of its own in the `requires`: `owns_block`, `owns`, `reads`, `owns_range`, `reads_range`, unguarded or after `q == NULL ||`).
+std::vector<PairAtom> restrict_covering(const Function& f, int q, const std::vector<AtomSite>& sites,
+                                        const std::vector<AtomSite>& blocks)
+{
+    std::vector<PairAtom> out;
+    if (const Expr* b {block_site_of(blocks, q, false)}; b != nullptr)
+    {
+        PairAtom a;
+        a.atom = b;
+        out.push_back(a);
+    }
+    for (const AtomSite& r : sites)
+    {
+        if (!r.in_ensures &&
+            (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads || r.atom->atom == AtomKind::OwnsRange ||
+             r.atom->atom == AtomKind::ReadsRange) &&
+            r.atom->a != nullptr && r.atom->a->kind == Expr::Kind::Formal && r.atom->a->index == q &&
+            null_or_none_guard(r, q))
+        {
+            out.push_back(pair_atom_of(f, *r.atom));
+        }
+    }
+    return out;
 }
 } // namespace
 
@@ -2006,13 +2418,63 @@ std::string restrict_hazard(const Function& f, int param)
     return "";
 }
 
+namespace {
+// The pair rule between `param`'s backing atoms and the covering atoms of the other pointer parameters that reach its pointee (decision 0064 item 19).  False when `q` has no covering atom
+// at all, or none that pairs with a backing atom of `param`; `*offender` is then that other parameter and `*why` the pair rule's reason (empty when `q` has no covering atom at all).
+bool restrict_pairs(const Function& f, int param, int* offender, std::string* why)
+{
+    const std::vector<AtomSite> sites {contract_atoms(f)};
+    const std::vector<AtomSite> blocks {contract_block_atoms(f)};
+    const std::vector<PairAtom> backing {restrict_backing(f, param, sites, blocks)};
+    const Type& mine {f.params[static_cast<size_t>(param)].type};
+    // A pointer parameter of another pointee type may still reach `param`'s cell when its pointee is a struct with a leaf of `param`'s pointee type
+    // (`int *q` can point at `s->x`), so such a parameter needs its own atom like a same-typed one (the "field" rule of item 10).  **By leaf path**
+    // (decision 0064 item 4, audit round 1 issue 2): a leaf inside an array of structures or of arrays (a member `struct T v[2]`, a matrix member, a
+    // parameter that points to a row) is reached through its index steps, never read as one leaf of the aggregate's own type, which would never
+    // equal `param`'s pointee and let item 10 stop asking for the other parameter's atom (the unsound direction).
+    auto reaches = [&](const Type& qt)
+    {
+        if (qt == mine)
+        {
+            return true;
+        }
+        if (!qt.is_ptr() || qt.pointee == nullptr || !mine.is_ptr() || mine.pointee == nullptr)
+        {
+            return false;
+        }
+        return holds_cell(*qt.pointee, *mine.pointee);
+    };
+    for (size_t q {0U}; q < f.params.size(); ++q)
+    {
+        if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || !reaches(f.params[q].type))
+        {
+            continue;
+        }
+        const std::vector<PairAtom> covering {restrict_covering(f, static_cast<int>(q), sites, blocks)};
+        if (!covering.empty() && !backing.empty() && pair_any(backing, covering))
+        {
+            continue;
+        }
+        if (offender != nullptr)
+        {
+            *offender = static_cast<int>(q);
+        }
+        // no covering atom at all is the old rejection (its own text, "" here); an atom that does not pair is the pair rule's
+        if (why != nullptr && !covering.empty())
+        {
+            const std::string qn {f.params[q].name.empty() ? "arg" + std::to_string(q + 1U) : f.params[q].name};
+            const Param& pp {f.params[static_cast<size_t>(param)]};
+            *why = "the backing atom of `" + (pp.name.empty() ? "arg" + std::to_string(param + 1) : pp.name) +
+                   "` and the atom of `" + qn + "`: " + pair_failure_text(backing, covering);
+        }
+        return false;
+    }
+    return true;
+}
+} // namespace
+
 bool restrict_backed(const Function& f, int param, int* offender)
 {
-    // The site's guard is none, or exactly `q == NULL` being false.
-    auto null_guard = [&](const AtomSite& s, int q)
-    {
-        return atom_guard_shape(s, q) != GuardShape::Other;
-    };
     if (offender != nullptr)
     {
         *offender = -1;
@@ -2025,96 +2487,257 @@ bool restrict_backed(const Function& f, int param, int* offender)
     // Decision 0052 item 6 (d): an `owns_block` of the parameter, in the `requires` and in the `ensures` (a borrow),
     // gives everything `owns(*p)` does.
     const std::vector<AtomSite> blocks {contract_block_atoms(f)};
-    auto block_of = [&](int q, bool in_ensures)
-    {
-        for (const AtomSite& b : blocks)
-        {
-            if (b.in_ensures == in_ensures && null_guard(b, q) && atom_place(*b.atom) == PlaceKey {q, {}, {}})
-            {
-                return true;
-            }
-        }
-        return false;
-    };
-    bool own {block_of(param, false) && block_of(param, true)};
-    for (const AtomSite& r : sites)
-    {
-        // record 0060 item 14: an `owns_range(p, n)` backs `restrict` as `owns(*p)` does (unguarded, or after `p == NULL ||`), its `ensures` partner of the same kind
-        if (r.in_ensures || (r.atom->atom != AtomKind::Owns && r.atom->atom != AtomKind::OwnsRange) ||
-            r.atom->a == nullptr || r.atom->a->kind != Expr::Kind::Formal || r.atom->a->index != param ||
-            !null_guard(r, param))
-        {
-            continue;
-        }
-        for (const AtomSite& e : sites)
-        {
-            if (e.in_ensures && e.atom->atom == r.atom->atom && e.atom->amount == r.atom->amount &&
-                null_guard(e, param))
-            {
-                own = true;
-            }
-        }
-    }
-    if (!own)
+    if (restrict_backing(f, param, sites, blocks).empty())
     {
         return false;
     }
     const Type& mine {f.params[static_cast<size_t>(param)].type};
     // Decision 0043 item 10: `restrict` stays on scalar and pointer pointees; a struct pointee is refused (M8).
-    if (mine.is_ptr() && mine.pointee != nullptr && mine.pointee->is_struct())
+    // (Decision 0064 item 4: nor is a pointer to an array, which no parameter of a verified function has before M4.5e1e2's Part E; fail closed.)
+    if (mine.is_ptr() && mine.pointee != nullptr && (mine.pointee->is_struct() || mine.pointee->is_array()))
     {
         return false;
     }
-    // A pointer parameter of another pointee type may still reach `param`'s cell when its pointee is a struct with a leaf of `param`'s pointee type
-    // (`int *q` can point at `s->x`), so such a parameter needs its own atom like a same-typed one (the "field" rule of item 10).
-    auto reaches = [&](const Type& qt)
+    // Decision 0064 item 19, the pair rule: `param`'s backing atom and every other parameter's covering atom must be surely non-empty, or ranges with equal counts
+    return restrict_pairs(f, param, offender, nullptr);
+}
+
+std::string restrict_pair_reason(const Function& f, int param)
+{
+    int other {-1};
+    std::string why;
+    if (!restrict_hazard(f, param).empty() ||
+        restrict_backing(f, param, contract_atoms(f), contract_block_atoms(f)).empty())
     {
-        if (qt == mine)
+        return "";
+    }
+    if (restrict_pairs(f, param, &other, &why) || why.empty())
+    {
+        return "";
+    }
+    const Param& p {f.params[static_cast<size_t>(param)]};
+    return "`restrict` on parameter `" + (p.name.empty() ? "arg" + std::to_string(param + 1) : p.name) + "` of `" +
+           f.c_name + "`: " + why + " (decision 0064 item 19, the pair rule)";
+}
+
+namespace {
+// What the body of a function with a `restrict` parameter can reach (decision 0064 item 19).  `field` is the cell type of the parameter's pointee.
+struct RestrictScan
+{
+    const Function& fn;
+    const Type& field;
+    std::string param;
+    std::set<int>
+        held; // the globals the function's own contract holds whole and unguarded by `owns` or `reads` (a top-level conjunct of the `requires`)
+    std::map<int, std::string>
+        unpaired; // the globals whose whole atom the function's contract holds but which pair with no backing atom of `param` (decision 0064 item 19, the pair rule): each one's reason
+    std::string reason;
+
+    static std::string global_phrase(const Global& g)
+    {
+        return std::string(g.owner != nullptr ? "the `static` local `" : "the global `") + g.c_name + "`";
+    }
+    std::string head() const
+    {
+        return "`restrict` on parameter `" + param + "` of `" + fn.c_name + "`: ";
+    }
+    void fail(const std::string& what)
+    {
+        if (reason.empty())
         {
-            return true;
+            reason = head() + what + " (decision 0064 item 19)";
         }
-        if (!qt.is_ptr() || qt.pointee == nullptr || !qt.pointee->is_struct() || qt.pointee->struct_type == nullptr ||
-            !mine.is_ptr() || mine.pointee == nullptr)
+    }
+    void note_global(const Global* g, const char* how)
+    {
+        if (g == nullptr || held.count(g->id) != 0U || !reaches_cell(g->type, field))
         {
-            return false;
+            return;
         }
-        for (const StructLeaf& l : struct_object_leaves(*qt.pointee->struct_type))
+        fail(std::string("the body ") + how + " " + global_phrase(*g) + ", which can hold a `" + field.str() +
+             "` cell: `*" + param + "`'s object may be that cell, and an access through the global is not based on `" +
+             param + "`" + unpaired_note(g->id));
+    }
+    // the exemption was refused for the pair rule: say why the atom the contract holds does not exclude `*param`'s object
+    std::string unpaired_note(int id) const
+    {
+        auto it {unpaired.find(id)};
+        return it == unpaired.end() ? std::string() : "; the contract's atom on it does not exempt it: " + it->second;
+    }
+    // the atoms of `callee`'s contract (`requires` and `ensures`, the implicit atoms of `static` locals included) rooted at a global that reaches the field
+    void note_call(const Expr& call)
+    {
+        const Function* callee {call.callee};
+        if (callee == nullptr)
         {
-            if ((l.array ? l.element : l.type) == *mine.pointee)
+            note_arguments(call);
+            return;
+        }
+        std::vector<AtomSite> sites {contract_atoms(*callee)};
+        for (AtomSite& b : contract_block_atoms(*callee))
+        {
+            sites.push_back(std::move(b));
+        }
+        for (const AtomSite& site : sites)
+        {
+            if (site.atom == nullptr || site.atom->a == nullptr)
             {
-                return true;
+                continue;
+            }
+            const Expr* root {place_root(site.atom->a, nullptr)};
+            if (root == nullptr || root->kind != Expr::Kind::GlobalAddr || root->global == nullptr ||
+                held.count(root->global->id) != 0U || !reaches_cell(root->global->type, field))
+            {
+                continue;
+            }
+            fail("it calls `" + callee->c_name + "`, whose contract has an atom on " + global_phrase(*root->global) +
+                 ", which can hold a `" + field.str() + "` cell: the callee may write the object `*" + param + "` is" +
+                 unpaired_note(root->global->id));
+            return;
+        }
+        // (iii) no exemption: what the callee can hand back
+        if (value_hands_pointer(callee->ret, field))
+        {
+            fail("it calls `" + callee->c_name + "`, which returns a `" + callee->ret.str() +
+                 "` that can point to a `" + field.str() + "` cell not based on `" + param + "`");
+            return;
+        }
+        for (size_t k {0U}; k < callee->params.size(); ++k)
+        {
+            const Type& t {callee->params[k].type};
+            if (t.is_ptr() && t.pointee != nullptr && value_hands_pointer(*t.pointee, field))
+            {
+                fail("it calls `" + callee->c_name + "`, whose parameter " + std::to_string(k + 1U) + " is a `" +
+                     t.str() + "`, through which it can hand back a pointer to a `" + field.str() +
+                     "` cell not based on `" + param + "`");
+                return;
             }
         }
-        return false;
-    };
-    for (size_t q {0U}; q < f.params.size(); ++q)
+        note_arguments(call);
+    }
+    // (iv) no exemption: an argument that is a pointer reaching the field, or a structure value with such a pointer leaf, handed to ANY function (with or without a body), called or
+    // applied: a callee that holds a permission to a cell of the field could name `*param`'s object by another name (decision 0064 item 19, audit round 2, blocking 1)
+    void note_arguments(const Expr& call)
     {
-        if (static_cast<int>(q) == param || !f.params[q].type.is_ptr() || !reaches(f.params[q].type))
+        for (size_t k {0U}; k < call.args.size(); ++k)
+        {
+            const Expr* a {call.args[k]};
+            if (a == nullptr || !value_hands_pointer(a->type, field))
+            {
+                continue;
+            }
+            const std::string name {call.callee != nullptr ? call.callee->c_name : std::string("a function")};
+            fail(std::string("it ") + (call.kind == Expr::Kind::Apply ? "applies" : "calls") + " `" + name +
+                 "` with argument " + std::to_string(k + 1U) + (a->c_text.empty() ? "" : " `" + a->c_text + "`") +
+                 ", a `" + a->type.str() + "` that can point to a `" + field.str() + "` cell, perhaps `*" + param +
+                 "`'s object: a callee that holds a permission to it could name it by another name than `" + param +
+                 "`, and an access not based on `" + param + "` is undefined (C23 6.7.3.1)");
+            return;
+        }
+    }
+    void walk(const Expr* e)
+    {
+        if (e == nullptr || !reason.empty())
+        {
+            return;
+        }
+        if (e->kind == Expr::Kind::GlobalAddr)
+        {
+            note_global(e->global, "names or takes the address of");
+        }
+        // an application of a `pure` function is scanned like a call (clauses (ii) and (iii)), so that the predicate does not depend on what a `pure` function may hold
+        if (e->kind == Expr::Kind::Call || e->kind == Expr::Kind::Apply)
+        {
+            note_call(*e);
+        }
+        for (const Expr* x : {e->a, e->b, e->c})
+        {
+            walk(x);
+        }
+        for (const Expr* x : e->args)
+        {
+            walk(x);
+        }
+    }
+    void walk(const Stmt* s)
+    {
+        if (s == nullptr || !reason.empty())
+        {
+            return;
+        }
+        walk(s->expr);
+        walk(s->addr);
+        for (const Clause& c : s->invariants)
+        {
+            walk(c.expr);
+        }
+        for (const Clause& c : s->measure)
+        {
+            walk(c.expr);
+        }
+        for (const Stmt* c : {s->then_body, s->else_body, s->body, s->step})
+        {
+            walk(c);
+        }
+        for (const Stmt* c : s->stmts)
+        {
+            walk(c);
+        }
+    }
+};
+} // namespace
+
+std::string restrict_body_reason(const Program& program, const Function& fn)
+{
+    (void)program;
+    for (size_t k {0U}; k < fn.params.size(); ++k)
+    {
+        const Param& p {fn.params[k]};
+        if (!p.is_restrict || !p.type.is_ptr() || p.type.pointee == nullptr || fn.body == nullptr)
         {
             continue;
         }
-        bool covered {block_of(static_cast<int>(q), false)};
-        for (const AtomSite& r : sites)
+        RestrictScan scan {fn, *p.type.pointee, p.name.empty() ? "arg" + std::to_string(k + 1U) : p.name, {}, {}, {}};
+        // an object the function's own contract holds whole and unguarded: a written `owns(g)` or `reads(g)` as a top-level conjunct of the `requires` (of a global array: the whole-array atom, a
+        // range atom of the constant count), the implicit atom of a `static` local; not a partial atom (`owns(g.x)`: a path), a guarded one, nor one of an `ensures`.  It exempts only when it
+        // PAIRS with a backing atom of the parameter (decision 0064 item 19, the pair rule): both surely non-empty, or both range atoms with structurally equal counts.
+        const std::vector<AtomSite> sites {contract_atoms(fn)};
+        const std::vector<PairAtom> backing {
+            restrict_backing(fn, static_cast<int>(k), sites, contract_block_atoms(fn))};
+        for (const AtomSite& site : sites)
         {
-            if (!r.in_ensures &&
-                (r.atom->atom == AtomKind::Owns || r.atom->atom == AtomKind::Reads ||
-                 r.atom->atom == AtomKind::OwnsRange || r.atom->atom == AtomKind::ReadsRange) &&
-                r.atom->a != nullptr && r.atom->a->kind == Expr::Kind::Formal &&
-                r.atom->a->index == static_cast<int>(q) && null_guard(r, static_cast<int>(q)))
+            if (site.in_ensures || !site.guards.empty() || !site.path.empty() || !site.via.empty() ||
+                site.atom == nullptr || site.atom->a == nullptr ||
+                (site.atom->atom != AtomKind::Owns && site.atom->atom != AtomKind::Reads &&
+                 !is_range_atom(site.atom->atom)))
             {
-                covered = true;
+                continue;
+            }
+            std::vector<int> steps;
+            const Expr* root {place_root(site.atom->a, &steps)};
+            if (root == nullptr || root->kind != Expr::Kind::GlobalAddr || root->global == nullptr || !steps.empty())
+            {
+                continue;
+            }
+            const PairAtom held_atom {pair_atom_of(fn, *site.atom)};
+            if (pair_any(backing, {held_atom}))
+            {
+                scan.held.insert(root->global->id);
+            }
+            else if (scan.unpaired.count(root->global->id) == 0U && !backing.empty())
+            {
+                scan.unpaired[root->global->id] = "the backing atom of `" + scan.param + "` and " +
+                                                  atom_spelling(held_atom, "the global's atom") + ": " +
+                                                  pair_failure_text(backing, {held_atom});
             }
         }
-        if (!covered)
+        scan.walk(fn.body);
+        if (!scan.reason.empty())
         {
-            if (offender != nullptr)
-            {
-                *offender = static_cast<int>(q);
-            }
-            return false;
+            return scan.reason;
         }
     }
-    return true;
+    return "";
 }
 
 int requires_atom_count(const Function& f)

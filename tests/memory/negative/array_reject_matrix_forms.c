@@ -6,7 +6,7 @@
 // expect: rejected cerastes-unsupported_expression @ L40
 // mode: c23, c++20
 // twin: tests/memory/array_sum_two.c
-// Pins: M4.5e1e2 Part E retires or re-expects this staging pin (plan section 10, Flips A; R2 of Step 0): a matrix used in code (m[1][2]), a global matrix, an int a[2][3] parameter and p[i].a[j] through a pointer to structures with an array member. The rows are what the frozen base build (f07d80a) printed in both modes
+// Pins: M4.5e1e2 (continuation), Part E retires or re-expects this staging pin (plan section 10, Flips A; R2 of Step 0): a matrix used in code (m[1][2]), a global matrix, an int a[2][3] parameter and p[i].a[j] through a pointer to structures with an array member. The rows are what the frozen base build (f07d80a) printed in both modes
 // Pre-registered from the base build's R2 run, before any part of M4.5e1e2: rejected (observed, not predicted)
 #include <cerastes.h>
 #include <stddef.h>

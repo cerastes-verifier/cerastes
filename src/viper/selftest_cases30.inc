@@ -2582,13 +2582,27 @@ void define_range_markers()
        {
            vac_fail(k, restrict_range(k, true, true));
        });
-    // int rq(int *restrict p, int n, int *q, int m) requires(owns_range(p, n) && reads_range(q, m)) ensures(the same): another parameter of the pointee type has a range atom of its own
-    lc("rngm_restrict_range_other_covered", "another int * parameter covered by a reads_range of its own: accepted",
+    // int rq(int *restrict p, int n, int *q, int m) requires(owns_range(p, n) && reads_range(q, m)) ensures(the same): another parameter of the pointee type has a range atom of its own.
+    // Decision 0064 item 19, the pair rule (audit round 2, blocking 2; question 329): with counts that differ and neither stated positive the case is REFUSED: with `n > 0`, `m == 0` and `q == p`
+    // a read through `q` would use `p`'s permission.  Its sibling states both counts positive and is accepted.
+    rc("rngm_rej_restrict_range_other_covered_counts_unstated", "may be empty",
        [=](Kit& k)
        {
            Function* f {k.fn("rq", k.i32, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}, {"m", k.i32}})};
            f->params[0U].is_restrict = true;
            k.req(f, k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)));
+           k.ens(f, k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)));
+           f->body = k.blk({k.ret(N(k, "0"))});
+           k.done(f);
+       });
+    lc("rngm_restrict_range_other_covered",
+       "another int * parameter covered by a reads_range of its own, both counts stated positive (n > 0 && m > 0): accepted",
+       [=](Kit& k)
+       {
+           Function* f {k.fn("rq", k.i32, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}, {"m", k.i32}})};
+           f->params[0U].is_restrict = true;
+           k.req(f, k.land(k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)),
+                           k.land(k.gt(fx(k, f, 1), N(k, "0")), k.gt(fx(k, f, 3), N(k, "0")))));
            k.ens(f, k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)));
            f->body = k.blk({k.ret(N(k, "0"))});
            k.done(f);

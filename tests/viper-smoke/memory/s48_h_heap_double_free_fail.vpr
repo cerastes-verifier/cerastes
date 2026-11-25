@@ -1,0 +1,117 @@
+// expect: error assert:assertion.false @ L101
+// S48 (h) twin: a heap struct SA { int n; int a[4]; } (a structure with an array member): the typed view of malloc(sizeof(struct SA)) (the token, the member lengths, the cell n, the array leaf's three quantified lines in the block-term form, flags unknown), p->n and p->a[1] written and read back (the bound local of p->a), free's rows per leaf with the invalid-free token row, the leak check after the end label. A second free: the invalid-free token row of the second call fails alone (the first free took the token).
+// (hand-written spike fixture of record 0064 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+field tok: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+
+// C/C++ function `malloc`
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one struct SA (20 bytes), a structure with an array member: member lengths, the cell by plain acc lines and the array leaf by its three quantified lines, flags unknown (record 0064 item 15, decision 0047 items 2 and 8)
+method f_malloc_SA() returns (res: Ref)
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 4)))
+  ensures (!(res == null)) ==> ((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (offset_of(res) == 0) && (acc(loc(block_of(res), (-1)).tok)) && (loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2))) && (acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 4))) && (acc(loc(member(res, 0), 0).v_int)) && (acc(loc(member(res, 0), 0).d_int)) && (loc(member(res, 0), 0).d_int ==> (((-2147483648) <= loc(member(res, 0), 0).v_int) && (loc(member(res, 0), 0).v_int <= 2147483647))) && (forall k: Int :: { loc(member(res, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(res, 1), k).v_int)) && (forall k: Int :: { loc(member(res, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(res, 1), k).d_int)) && (forall k: Int :: { loc(member(res, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(res, 1), k).d_int ==> (((-2147483648) <= loc(member(res, 1), k).v_int) && (loc(member(res, 1), k).v_int <= 2147483647)))))
+  decreases _
+
+// C/C++ function `free`
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: one struct SA, the same view as malloc's
+method f_free_SA(p_ptr: Ref)
+  requires ((p_ptr == null) || (((p_ptr == loc(block_of(p_ptr), offset_of(p_ptr))) && (0 <= offset_of(p_ptr))) && (offset_of(p_ptr) <= len(block_of(p_ptr))))) && (((p_ptr != null) && (offset_of(p_ptr) < len(block_of(p_ptr)))) ==> ((len(member(p_ptr, 0)) == 1) && (len(member(p_ptr, 1)) == 4)))
+  requires (!(p_ptr == null)) ==> ((p_ptr != null) && ((p_ptr == null) || (((p_ptr == loc(block_of(p_ptr), offset_of(p_ptr))) && (0 <= offset_of(p_ptr))) && (offset_of(p_ptr) <= len(block_of(p_ptr))))) && (offset_of(p_ptr) == 0) && (acc(loc(block_of(p_ptr), (-1)).tok)) && (loc(block_of(p_ptr), (-1)).tok) && (lvloc(block_of(p_ptr)) == loc(block_of(p_ptr), (-2))) && (acc(lvloc(block_of(p_ptr)).lv)) && ((len(block_of(p_ptr)) == 1) && ((len(member(p_ptr, 0)) == 1) && (len(member(p_ptr, 1)) == 4))) && (acc(loc(member(p_ptr, 0), 0).v_int)) && (acc(loc(member(p_ptr, 0), 0).d_int)) && (loc(member(p_ptr, 0), 0).d_int ==> (((-2147483648) <= loc(member(p_ptr, 0), 0).v_int) && (loc(member(p_ptr, 0), 0).v_int <= 2147483647))) && (forall k: Int :: { loc(member(p_ptr, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p_ptr, 1), k).v_int)) && (forall k: Int :: { loc(member(p_ptr, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p_ptr, 1), k).d_int)) && (forall k: Int :: { loc(member(p_ptr, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(p_ptr, 1), k).d_int ==> (((-2147483648) <= loc(member(p_ptr, 1), k).v_int) && (loc(member(p_ptr, 1), k).v_int <= 2147483647)))))
+  decreases _
+method f_use_heap() returns (res: Int)
+{
+  var v_s: Ref
+  var v_a: Ref
+  var t0: Ref
+  var tw: Ref
+  var tr: Ref
+  var v_x: Int
+  var v_y: Int
+  var v_sum: Int
+  t0 := f_malloc_SA()
+  assert (t0 != null) ==> (perm(lvloc(block_of(t0)).lv) > none)
+  v_s := t0
+  assert (v_s != null) ==> (perm(lvloc(block_of(v_s)).lv) > none)
+  if (v_s == null) {
+    res := -1
+    goto l_end
+  }
+  assert v_s != null
+  tw := loc(member(v_s, 0), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write))
+  tw.v_int := 3
+  tw.d_int := true
+  assert v_s != null
+  v_a := loc(member(v_s, 1), 0)
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 7
+  tw.d_int := true
+  assert v_s != null
+  v_a := loc(member(v_s, 1), 0)
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  tr := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert perm(tr.v_int) > none //PERM
+  assert tr.d_int //INIT
+  v_x := tr.v_int
+  assert v_s != null
+  tr := loc(member(v_s, 0), 0)
+  assert perm(tr.v_int) > none //PERM
+  assert tr.d_int //INIT
+  v_y := tr.v_int
+  v_sum := v_x + v_y
+  assert !((v_sum < (-2147483648)) || (2147483647 < v_sum))
+  res := v_sum
+  assert (!(v_s == null)) ==> ((v_s == null) || (((v_s == loc(block_of(v_s), offset_of(v_s))) && (0 <= offset_of(v_s))) && (offset_of(v_s) <= len(block_of(v_s)))))
+  assert (!(v_s == null)) ==> (!((perm(loc(block_of(v_s), (-1)).tok) != write) || (!loc(block_of(v_s), (-1)).tok))) //TOK
+  assert (!(v_s == null)) ==> (offset_of(v_s) == 0)
+  assert (!(v_s == null)) ==> (lvloc(block_of(v_s)) == loc(block_of(v_s), (-2)))
+  assert (!(v_s == null)) ==> (perm(lvloc(block_of(v_s)).lv) == write) //LIVE
+  assert (!(v_s == null)) ==> ((len(block_of(v_s)) == 1) && ((len(member(v_s, 0)) == 1) && (len(member(v_s, 1)) == 4)))
+  assert (!(v_s == null)) ==> (!((perm(loc(member(v_s, 0), 0).v_int) != write) || (perm(loc(member(v_s, 0), 0).d_int) != write))) //MARKED
+  assert (!(v_s == null)) ==> (loc(member(v_s, 0), 0).d_int ==> (((-2147483648) <= loc(member(v_s, 0), 0).v_int) && (loc(member(v_s, 0), 0).v_int <= 2147483647)))
+  assert (!(v_s == null)) ==> (forall k: Int :: { loc(member(v_s, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(v_s, 1), k).v_int)) //MARKED
+  assert (!(v_s == null)) ==> (forall k: Int :: { loc(member(v_s, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(v_s, 1), k).d_int)) //MARKED
+  assert (!(v_s == null)) ==> (forall k: Int :: { loc(member(v_s, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(v_s, 1), k).d_int ==> (((-2147483648) <= loc(member(v_s, 1), k).v_int) && (loc(member(v_s, 1), k).v_int <= 2147483647))))
+  f_free_SA(v_s)
+  assert (!(v_s == null)) ==> ((v_s == null) || (((v_s == loc(block_of(v_s), offset_of(v_s))) && (0 <= offset_of(v_s))) && (offset_of(v_s) <= len(block_of(v_s)))))
+  assert (!(v_s == null)) ==> (!((perm(loc(block_of(v_s), (-1)).tok) != write) || (!loc(block_of(v_s), (-1)).tok))) //TOK
+  assert (!(v_s == null)) ==> (offset_of(v_s) == 0)
+  assert (!(v_s == null)) ==> (lvloc(block_of(v_s)) == loc(block_of(v_s), (-2)))
+  assert (!(v_s == null)) ==> (perm(lvloc(block_of(v_s)).lv) == write) //LIVE
+  assert (!(v_s == null)) ==> ((len(block_of(v_s)) == 1) && ((len(member(v_s, 0)) == 1) && (len(member(v_s, 1)) == 4)))
+  assert (!(v_s == null)) ==> (!((perm(loc(member(v_s, 0), 0).v_int) != write) || (perm(loc(member(v_s, 0), 0).d_int) != write))) //MARKED
+  assert (!(v_s == null)) ==> (loc(member(v_s, 0), 0).d_int ==> (((-2147483648) <= loc(member(v_s, 0), 0).v_int) && (loc(member(v_s, 0), 0).v_int <= 2147483647)))
+  assert (!(v_s == null)) ==> (forall k: Int :: { loc(member(v_s, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(v_s, 1), k).v_int)) //MARKED
+  assert (!(v_s == null)) ==> (forall k: Int :: { loc(member(v_s, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(v_s, 1), k).d_int)) //MARKED
+  assert (!(v_s == null)) ==> (forall k: Int :: { loc(member(v_s, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(v_s, 1), k).d_int ==> (((-2147483648) <= loc(member(v_s, 1), k).v_int) && (loc(member(v_s, 1), k).v_int <= 2147483647))))
+  f_free_SA(v_s)
+  goto l_end
+  assert false
+  label l_end
+  assert forperm t: Ref [t.tok] :: false //LEAK
+}
+
