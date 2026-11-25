@@ -1,12 +1,11 @@
-# Handoff after M4.5e1c (2026-11-24) and M4.5e1d's planning (2026-11-24) — M4.5e1d (pure functions, the exact sum) next
+# Handoff after M4.5e1d (2026-11-25) — M4.5e1f, M4.5e1e or M4.5e2 next
 
-The next session reads this file after `CLAUDE.md` and its plan, **`.claude/plans/m4-5e1d-pure-functions.md`**, which
-is complete: its probes and spikes have decision tables, and it assigns every task (no second planning).
-`status.md` has the formal entry of the last finished session (M4.5e1c). This file adds what a cold start would
-otherwise have to rediscover, and holds only what is live (owner, 2026-10-26).
+The next session reads this file after `CLAUDE.md` and its plan. `status.md` has the formal entry of the last finished
+session (M4.5e1d). This file adds what a cold start would otherwise have to rediscover, and holds only what is live
+(owner, 2026-10-26).
 
-**What M4.5e1d's orchestrator needs here:** §1, §2, the rules of §4, §6 and §8. Its notes from §3 moved into its
-plan's section 12; §3, §4.1, §4.3, §4.4 and §5 are other sessions'.
+**What the next session needs here:** §1, §2, its own notes in §3 (M4.5e1d's leftovers are in "From M4.5e1d"), the
+rules of §4, §6 (from M4.5e1d on, every test runs on the x86-64 box) and §8 (open questions 287–289).
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
 M4.5e1b's (both 2026-11-11), at M4.5e1c's (2026-11-23) and at M4.5e1d's (2026-11-24), each at the owner's request.
@@ -19,56 +18,60 @@ approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes m
 
 ## 1. State
 
-- **M4.5e1c** (2026-11-23/24; record 0061, accepted) is done and **merged**: local `main` = `9ab9a1e` (a merge
-  commit of `m4.5e1c-quantifiers`, whose tip is `b4eef54`) plus this planning's commit, ten and eleven commits
-  ahead of `origin/main` = `aa4a9fe`; **not pushed**. Its result is in `internal/status.md`. Its worktree
-  `.claude/worktrees/m4.5e1c` and its branch still exist (§2); `build/m4.5e1c/` in that worktree holds the four
-  audit reports, every agent's reports and state files, the baseline and the frozen binaries, and goes with it.
-  Its Part D, `cerastes_old` in loop invariants, was cut to M4.5e2 (question 260; record 0061 item 12; §3
-  "M4.5e2").
-- **M4.5e1d** (pure functions and the exact sum; record 0062) is next: `.claude/plans/m4-5e1d-pure-functions.md`
-  (approved 2026-11-24), planned in full for the ensemble, as e1b and e1c were. Its estimate is 3,350–5,000
-  `src/` lines, more than one e1c: the owner chose one session with split points all the same (questions 270,
-  271), and the first split point is expected to be reached.
-- **The box:** `CERASTES_LONG=1 scripts/check.sh` all green on `7964d33` (2026-11-24, 89 min, 15,496 tests, the long
-  tier ran; `internal/status.md` has the numbers). The box's tree `~/cerastes-s8/p-ubuntu-26.04` is detached at
-  `7964d33` and keeps `e1c-check.log`.
-- **CI:** unchanged since e1c's planning (question 176 the owner's; the `profiles=all` dispatch pending, question
-  172). The push of `main` runs the PR tier over e1c's tests for the first time.
+- **M4.5e1d** (2026-11-24/25; record 0062, accepted) is done on branch `m4.5e1d-pure-functions` (worktree
+  `.claude/worktrees/m4.5e1d`), **not merged, not pushed**; local `main` = `c65f618` (its planning commit). Its result
+  is in `internal/status.md`: a `pure` function that is called or has a contract is a Viper function with its
+  definition check, applications stand in checks, contracts, calls and loop invariants, and the exact sum verifies.
+  `build/m4.5e1d/` in that worktree holds the five audit reports, every agent's reports and state files and the
+  orchestrator's state; the audit worktree `.claude/worktrees/m4.5e1d-audit` (detached) goes with it (§2).
+- **Owner rules from this session:** every test runs on the x86-64 box, not split with the Mac (unless the Mac is
+  much faster for that run); several agents may use the box at once, each in its own lane; fewer intermediate checks
+  (§6, §8's standing answers).
+- **The box:** `CERASTES_LONG=1 scripts/check.sh` all green on `2fc6a21` (2026-11-25, 50 min, 16,000 tests, the long
+  tier ran; `internal/status.md` has the numbers). `~/cerastes-s8/p-ubuntu-26.04` is detached at `2fc6a21` and keeps
+  `e1d-check.log`; this session's lanes are `~/cerastes-e1d/` (§2 step 4).
+- **CI:** unchanged (question 176 the owner's). The push runs the PR tier over e1d's tests for the first time; the
+  harness now caps Silicon at 16 provers (question 286), which changes no outcome.
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Push** `main` (e1c's merge and this planning's commit), so that M4.5e1d branches from `origin/main`.
-2. **Remove e1c's worktree and branch:** `git worktree remove .claude/worktrees/m4.5e1c`, then `git branch -d
-   m4.5e1c-quantifiers` (the remote branch `origin/m4.5e1c-quantifiers` too, if it is no longer wanted).
-3. **Questions:** none open. 256–263 stand as built, and 264–272 were answered at M4.5e1d's planning (§8).
-4. **CI** (question 176): unchanged.
-5. **Optional.** On the box, `/tmp/e1c.bundle`.
-6. **Start M4.5e1d** with this opening prompt. It replaces `plan.md`'s general one for this session: no plan mode
-   (the plan is approved and complete), and only the records the plan rests on (reading all of
-   `internal/decisions/` would spend the context that the split points depend on):
-
-   ```
-   You are the orchestrator of M4.5e1d (pure functions and the exact sum). Do not use plan mode: the plan is
-   approved and complete. Read CLAUDE.md, .claude/plans/m4-5e1d-pure-functions.md (all of it), the M4.5e1c
-   entry of internal/status.md, internal/handoff.md §1, §2, the rules of §4, §6 and §8, and decision records
-   0061, 0060, 0013, 0021 (item 4), 0037 (item 7), 0011 (items 4, 7, 9 and 10), 0010 (item 11), 0006 (items 8
-   and 10), 0012 (item 11) and 0041 (item 12) (not the rest of internal/decisions/). Then execute the plan from
-   its section 4. Use the ensemble exactly as its section 2 assigns it: edg-backend, il-analyst and
-   test-mutator (Sonnet) and the soundness-auditor (Opus) from .claude/agents/, and the Fable advisor at the
-   plan's five checkpoints. Stop and ask me at every stop rule of the plan's sections 4, 5, 7 and 11, and for
-   any question an agent raises; do not answer a question for me.
-   ```
-7. **Or another session first** (`plan.md`'s M4.5 table): M4.5e1f (short: questions 238 and 242, from S45 (r), §3
-   "M4.5e1f"; it may run before or after e1d, whose plan holds either way) or M4.5e1e (arrays in aggregates and
-   storage; P82 and S47, then it plans again). M4.5e2 also takes cut 1 and e1c's index, base and argument forms.
-   Questions start at 273.
+1. **Review** status's deviations and §8's open questions 287–289 (each has a recommended answer).
+2. **Merge and push:** merge `m4.5e1d-pure-functions` into `main` (e1c's pattern: a merge commit), then push `main`.
+3. **Remove** the worktrees `.claude/worktrees/m4.5e1d` and `.claude/worktrees/m4.5e1d-audit`, then the branch
+   `m4.5e1d-pure-functions`; the local refs `refs/tmp/e1d-*` (snapshots) go with the worktree's repository
+   (`git update-ref -d` each, or leave them).
+4. **The box:** `~/cerastes-e1d/` (lanes `base`, `work`, `audit`, containers `cerastes-e1d-*`, image
+   `cerastes-e1d:26.04`) may be removed (`docker rm -f cerastes-e1d-base cerastes-e1d-work cerastes-e1d-audit`, `rm -rf
+   ~/cerastes-e1d`, `docker rmi cerastes-e1d:26.04`), or kept as the next session's lanes (§6).
+5. **CI** (question 176): unchanged.
+6. **Next session** (`plan.md`'s M4.5 table): M4.5e1f (short: questions 238 and 242, from S45 (r), §3 "M4.5e1f"),
+   M4.5e1e (arrays in aggregates and storage; P82 and S47, then it plans again) or M4.5e2 (pointer arithmetic, with
+   e1c's cut 1 and §3's notes from e1c and e1d). Each plans with `plan.md`'s opening prompt (plan mode). Questions
+   start at 290.
 
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
+
+**From M4.5e1d** (record 0062; its plan's section 13):
+- **M4.5e2:** applications under a quantifier's binder and a `cerastes_forall` naming a function with a contract
+  (questions 265, 266); `old` of an application; pointer-argument forms beyond a parameter, a pointer variable or a
+  local array (`&a[1]`, `p + 1`); an application over a range of pointer elements in a `check` or a loop invariant
+  (R3-S2's rejection); R4-S5 if question 287 places it there.
+- **M4.5f1:** a `cerastes_forall` inside a called `pure` body, calls in a `decreases`, the atoms a `pure` function's
+  contract refuses (`owns`, `owns_range`, `live`, conditional atoms; any atom in its `ensures`), pure functions over
+  predicates.
+- **M4.5f2:** mutual recursion between `pure` functions and cycles through contracts.
+- **M4.8:** item 8's listed limits (the definition of `g` unknown in `f__wf`, a callee known only through its
+  `ensures`, question 282's pin), question 279's two facts (fact (i) for an enumeration result, fact (ii) for a callee
+  whose `requires` holds an application), question 267's missing range fact outside `f__wf`, a marked range framing
+  no application (item 7), one site holding a callee's whole interval (item 7).
+- **M6:** a `pure` function with no body in the unit (question 269, the contract manifest).
+- **Any session:** the false facts over sums of 3–4 elements take 226–356 s of Z3 on the box against about 30 s on the
+  Mac (`tests/long/memory/negative/pure_sum_caller_write_between.c`, `pure_check_local_false_fact.c`, question 285);
+  a cheaper unfolding at a `check` would be an encoding change (record 0062 item 7).
 
 **M4.8, from M4.5e1c** (record 0061 item 1; question 249: "M4.8 must handle them"): `forall` outside a positive
 position (nested, under `!`, as an operand of `==` or arithmetic, in a `?:` condition, in an atom's guard, in a measure,
@@ -881,6 +884,16 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
 
 ## 6. Process notes
 
+- **The box from M4.5e1d on** (owner, 2026-11-24/25: all testing there, several agents at once, fewer intermediate
+  checks). Lanes: `docker commit cerastes-s8-ubuntu-26.04 cerastes-e1d:26.04` (the toolchain `ci-linux.sh` installed),
+  `cp -a ~/cerastes-s8/p-ubuntu-26.04 ~/cerastes-e1d/<lane>`, then `docker run -d --init --name cerastes-e1d-<lane> -v
+  ~/cerastes-e1d/<lane>:/work/cerastes -e CERASTES_CI_PROFILE=ubuntu-26.04 -e CERASTES_JOBS=32 cerastes-e1d:26.04 sleep
+  infinity` (`--init` reaps Silicon's zombie Z3s; without it hundreds pile up). Ship work as a commit object (a
+  temporary index: `GIT_INDEX_FILE=… git read-tree HEAD; git add -A; git write-tree; git commit-tree`, a ref under
+  `refs/tmp/`) in a bundle, fetch it in the lane, check it out detached, `scripts/bootstrap.sh --build-only`. One lane
+  per agent that builds; a neutrality baseline and its comparison on the same host (the Mac and the box differ by
+  glibc parameter names and absolute paths). `tail` there is uutils (`tail -n 3`, not `tail -3`). The box's Z3 is
+  3–6.5 times slower than the Mac's per query on a hard refutation, while its 172 threads win on suites.
 - **What keeps a session short:** fixed scope with stop rules; the owner's decisions and pre-approved expectation
   changes asked up front, each with a concrete default; the record written while the probes' results come in, audited in
   the background; three agents with disjoint files; single-file runs during the work.
@@ -1000,7 +1013,7 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-No question is open. An open question has a recommended answer and is answered inline, as before. Answered
+Questions 287–289 are open (below). An open question has a recommended answer and is answered inline, as before. Answered
 questions 1–246 are recorded in the decision records, the session plans, `internal/status.md` and the earlier
 handoffs:
 `git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
@@ -1008,7 +1021,7 @@ handoffs:
 asked: their answers are below), `git show bdf3581:internal/handoff.md` §8 has 238–246 as asked, with the
 owner's inline answers to 238–242, and `git show 9ab9a1e:internal/handoff.md` §8 has 247–263 as asked. Records
 0055–0058 hold what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3. Questions 264–272 are
-M4.5e1d's planning's, below.
+M4.5e1d's planning's and 273–289 its session's, below.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).
@@ -1104,4 +1117,28 @@ will quote them; each the recommendation except 271 and 272):
   all three in". A `cerastes_forall` in a `pure` function's contract, arguments that read memory and calls in a
   `pure` function's own contract are in e1d's scope, as its pre-agreed cuts 2, 3 and 4.
 
-**Open:** none. The next questions start at 273.
+**Answered in M4.5e1d (2026-11-24/25): 273–286.** Record 0062's header holds each with its reason; the status entry
+lists them. Each was the recommendation except **285** (two tests over 120 s on the box: "Move to tests/long/"; the
+recommendation was two-element programs). What steers a later session: 279 and 267 (M4.8, §3 "From M4.5e1d"); 286
+(the prover cap, record 0011 item 11); 285 (the long tests, §3).
+
+**Open** (each with a recommended answer; answer inline):
+
+- **287** (fail closed: exit 3, never "verified"; audit round 4's R4-S5). A loop that fills a `must_init` range while
+  its invariant also applies a pure function over the part not yet filled (`sum_to(a, n)` beside `s == sum_to(a, i)`)
+  times out on the box (exit 3 at 300 s) instead of reporting `uninitialized`. Il-analyst-3 report 8: the
+  `uninitialized` row itself fails in 11 s; the time is Silicon going on past it (every error is reported), with the
+  failed flags row assumed at the loop head; the same program with the marked `ensures` ended after 1,410 s with the
+  right errors. Fixes: stop a member after an entry `uninitialized` row (a driver retry with one error per member when
+  the first run passes a budget), or assert such a row before the loop instead of as an invariant line (changes the
+  reported rows: a design question). **Recommended: M4.5e2** (it takes range atoms in loop invariants and the loop's
+  flag rows); alternative M4.8.
+- **288** (test mechanics, no soundness question). Question 285's move left `pure_sum_caller.c` without a
+  default-tier error twin (question 207's rule), so `tests/memory/negative/pure_sum_caller_write_between_short.c`
+  (the same program over 2 elements, about 30 s) was added. **Recommended: keep it**; alternative a twin failing
+  for another reason (a count past the array, `precondition`).
+- **289** (docs, no soundness question). The tutorial's failing example `arrays_sum_offbyone.c` bounds `n <
+  INT_MAX` in its `requires` so that `i + 1` cannot overflow and its errors are only the four the text explains.
+  **Recommended: keep it**; alternative drop the bound and show the overflow error too.
+
+The next questions start at 290.

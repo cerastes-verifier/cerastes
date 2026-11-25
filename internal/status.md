@@ -13,107 +13,114 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, S6's `git show 9255b93:internal/status.md`, M4.5d2v's `git show c2bc48d:internal/status.md`, S7's `git show a660abc:internal/status.md`, M4.5d2b1's
 `git show c1b691d:internal/status.md`, S8's `git show 15bcdc6:internal/status.md`, M4.5d2b2a's
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
-`git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, M4.5e1a's `git show 685034b:internal/status.md`, and M4.5e1b's `git show 7964d33:internal/status.md`.
+`git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, M4.5e1a's `git show 685034b:internal/status.md`, M4.5e1b's `git show 7964d33:internal/status.md`, and M4.5e1c's `git show c65f618:internal/status.md`.
 
-## M4.5e1c — Quantifiers (2026-11-23/24): done, merged into local `main` (`9ab9a1e`), not pushed
+## M4.5e1d — Pure functions and the exact sum (2026-11-24/25): done on branch `m4.5e1d-pure-functions`, not merged, not pushed
 
-Plan: `.claude/plans/m4-5e1c-quantifiers.md` (approved 2026-11-23; executed without re-planning). Record 0061 (accepted;
-amends 0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060). Read `internal/handoff.md` next: §1, §2, §3 (the sessions
-this one feeds: M4.5e1f, M4.5e1d, M4.5e2, M4.8), §8 (questions 253-263; the overnight ones, 256-263, were answered "All
-stand as built" at M4.5e1d's planning, 2026-11-24). Branched
-from local `main` = `bf820fe` (`origin/main` = `aa4a9fe` plus one commit holding the owner's inline answers to
-247-252, committed at the session's start so that a fast-forward is not blocked). Session from 2026-11-23 about 22:35
-UTC to 2026-11-24 about 07:15 UTC.
+Plan: `.claude/plans/m4-5e1d-pure-functions.md` (approved 2026-11-24; executed without re-planning). Record 0062
+(accepted; amends 0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061). Read `internal/handoff.md`
+next: §1, §2, §3 "From M4.5e1d", §8 (open questions 287–289). Branched from local `main` = `c65f618` (the planning
+commit). Session from 2026-11-24 about 16:00 UTC to 2026-11-25 about 02:10 UTC; Commit 4 is `2fc6a21`.
 
-**Owner decisions in the session:** 253 (the multi-class one-term false alarm: M4.5e2), 254 (the skipped-write twin's two
-errors expected, a one-error twin added), 255 (method-qualified ghost names; four narrowings as listed limits). At
-about 02:30 UTC the owner went to bed: "for the rest of the session accept what the recommended answer on a question
-would be after following your normal question and answer generation process and then add to the handoff so I can see
-if these need relooked tomorrow". **Built that way, each in handoff §8 for review:** 256 (split point 1: continue, a
-ceiling for Part C), 257 (a trigger set per state in `f__wf`), 258 (the lint admits earlier quantified clauses in a loop
-obligation's guard), 259 (narrowings in loops and checks, M4.5e2), **260 (split point 2: cut 1, Part D's `cerastes_old`
-in loop invariants to M4.5e2)**, 261 (audit round 3's exit 3: arithmetic over a non-first class's read refused in loops
-and checks, M4.5e2), 262 (only top-level conjuncts in loops and checks, M4.8; checks split per conjunct), 263 (Part C past
-its ceiling by round 3's fixes). Each recommendation was the fail-closed option; nothing was parked.
+**Owner decisions in the session** (record 0062's header has each with its reason): 273 (H', the lint's name rule), 274
+(digits-only ids), 275 (Silicon's axiomatisation warning accepted for `pf_` functions), 276 (keep fact (iii)), 277
+(multi-error twins list every error), 278 (a `check`'s pure lines first), 279 (two unsafe facts as listed limits,
+M4.8), 280 (two rejection pins moved to a `check`), 281 (a read pure function counts as one function verified), 282
+(the definition-unknown false alarm pinned), 283 (pure lines as rows in loop invariants), 284 (an application in a
+`do … while (0)` invariant takes the `check` form), **285** (two tests over 120 s on the box moved to `tests/long/`;
+the recommendation was two-element programs), 286 (Silicon's prover count capped at 16, fixed in this session).
+Mid-session the owner moved **all testing to the x86-64 box** ("in the future do all testing on the ssh box rather
+than doing some there and some on my local machine, unless there's a huge performance difference"), allowed several
+agents on it at once, and asked for fewer intermediate checks.
 
-**Step 0.** CI recorded only (the push run of `aa4a9fe` in progress; the 2026-11-23 nightly and PR #35's run failed on the
-docs lockfile `fabcd25` fixed; earlier nightlies cancelled at 6 h). `doc/`'s lockfile one hoisted `@antora/logger`.
-Baseline: 6,029 `.vpr`/`.map`, VIR self-test 2,044 lowering and 324 rejection cases, frozen binaries (they read
-`include/` live). R1: the five pins and `static_assert_pure_body.c` as their expect lines; a marked element read in a loop
-invariant is accepted with its flag row (the plan's "both verify" could not hold for the pin's program, whose `must_init`
-row needs a quantified invariant). R2: 99 programs, every row rejected; a `pure` function with a contract verifies when no
-`forall` names it; three pins for `cerastes_old` in loop invariants. R3: `scripts/rejections.py`, 2,327 runs. M: GCC's
-`-Wtype-limits` on unsigned `0 <= i`, `-Wsign-compare`, unused parameters of `f`: tests written around them.
+**Done** (edg-backend, il-analyst-1/2/3 and test-mutator-1/2/3, Sonnet, each successor started from its
+predecessor's state file; the soundness-auditor, Opus, kept for all rounds; the advisor at the plan's checkpoints):
+- **Part A** (`ed16ecc`): VIR and lowered-program plumbing, behaviour-neutral; the driver's one accepted Silicon warning.
+- **Record, P81, S46, Commit 1** (`92294b7`, revised by audit round 1 in `9ca3a6c`): P81 (a)–(f) and S46 (a)–(k) in
+  record 0062's facts table (92 `s46_*` fixtures); the lint (H', `PF_NAME`, the `hva_` facts, the guard quantifier
+  checks, prelude acyclicity), the harness.
+- **Part B** (`e3ed705`): read pure functions as Viper functions (`pf_<name>__<id>`, form Min, the result tag), their
+  `__wf` definition checks, self-recursion with `decreases`, applications in checks and in pure bodies.
+- **Part C** (`10d23cd`): applications in an ordinary function's `requires` and `ensures`, at calls and returns.
+- **Part D** (Commit 4): applications in loop invariants (item 7's framing at entry and back edge, the obligation rows,
+  question 283's pure-line rows, the guarded value), question 284's `do … while (0)` form, **the exact sum
+  (`tests/memory/pure_sum.c`) verifies in both modes**; the application messages in the interval form `a[0..n)`;
+  Silicon's prover cap (question 286); the pages (annotations, verifying, error messages, memory, the tutorial's
+  "The exact sum" in "Arrays and quantifiers"), `internal/encoding.md` §2–§8, the developer guide.
+- **Audits** (`build/m4.5e1d/auditor-report-{1,2,3,4,4b}.md`): round 1 on the record and S46 (B1 the lint admitted
+  fact (ii) without the callee's quantified clause, B2 an application under `cerastes::old` compiles in C++; S1–S6,
+  N1, N2, N9; all taken); round 2 on A+B and round 3 on C (no blocking item; their should-fix items taken and
+  pinned); round 4 on Part D and the pages, probes on the box, also the plan's re-audit (no blocking item; R4-S1–S4
+  taken, R4-S5 a listed limit); 4b, a short read of the post-audit delta (the spelling, the cap, one self-test index).
+- **Cuts:** none taken (cuts 1–5 all stayed in). Split points: A–C at +3,351/−193 against 4,200.
 
-**Done** (edg-backend, il-analyst-1/2/3 and two test-mutators, Sonnet; the soundness-auditor, Opus; the advisor at
-checkpoints 1-5 and at Step 0; at most three Sonnet agents alive at once):
-- **P80, S45, record, Commit 1** (`cbd3386`): P80 all "Expected" except (b), whose "If not" (cut 3: `cerastes_forall` is
-  the spelling in both modes) was taken; S45 (a), (c)-(g) "Expected", (b) T2, (d) variant M, (k) and (r) recorded; two
-  outcomes outside a table asked (253, 254); an S45 addendum after advisor checkpoint 1 (two classes through `f__wf`, the
-  one-term workaround, the guarded keep fact, 17 fixtures; 116 in all); `scripts/rejections.py`; the lint of item 11.
-- **Parts A and B** (`8a8128c`): VIR `Forall`, `Bound`, `ForallArg`; the reader; contracts, calls, returns; `f__wf`
-  variant M; 103 test files.
-- **Part C** (`4689b7b`): loop invariants and checks, the per-conjunct split, the check rows; the C23 Bool fix; 47 test
-  files and the pins of 259, 261, 262; the `carrays.c` port in full; the user pages and the tutorial chapter "Arrays and
-  quantifiers"; `internal/encoding.md`; the developer guide.
-- **Part D: cut** (question 260), its design kept in record 0061 item 12 and handoff §3 (M4.5e2) with its example.
-- **Audits** (reports `build/m4.5e1c/auditor-report-{1..4}.md`): round 1 on the record and S45 (B1 a trailing
-  argument's obligations, B2 the lint admitting the unguarded keep fact and a state-crossing tie; eleven should-fix, all
-  taken); round 2 on A+B (no soundness hole; the lint refusing an atom-less formal's fact; pins); round 3 on C (no
-  soundness hole; an exit 3 on wrong programs, question 261; positions, question 262; the lint's scope of 258); round 4 on
-  Commit 3, the pages and the port, also the re-audit (no soundness hole, no blocking item; text fixes, all taken).
+**Deviations from the plan, for confirmation:**
+- Testing moved to the box mid-session (owner). Box lanes, each a copy of the `ubuntu-26.04` checkout with its own
+  container from a committed image (`cerastes-e1d:26.04`): `~/cerastes-e1d/{base,work,audit}`; the neutrality
+  baseline re-made on the box (6,217 programs; Mac and box differ only by glibc parameter names in 32 `.vpr` and
+  absolute paths in maps, platform not encoding). The Mac ran one cross-check: a self-test case's Silicon verdict.
+- Snapshots for audits and box runs as commit objects through a temporary index (`refs/tmp/e1d-*`), not commits.
+- `arrays_sum_offbyone.c` (the tutorial's failing example) bounds `n < INT_MAX` in its `requires` so that its errors
+  are only the four the text explains: an orchestrator choice, for review.
+- Question 285's move left `pure_sum_caller.c` without a default-tier error twin (question 207's rule), so
+  `tests/memory/negative/pure_sum_caller_write_between_short.c` (the same program over 2 elements) was added.
+- The application messages name the read interval as `a[0..n)` (and a decayed local array by its name), e1b's call
+  and return messages unchanged.
 
-**Deviations from the plan, for confirmation:** branched from `bf820fe` (above); the record committed in steps (the
-draft, then round 1's and each later revision) rather than once; Part B's, Part C's and the doc examples' tests
-pre-registered while the previous step was audited or built (new files only); the first test-mutator replaced by a fresh
-one from its state file after about 940k tokens (the advisor's advice), and the auditor kept for all four rounds;
-round 4 served as the plan's one re-audit (every earlier blocking item re-verified there, as in e1b); the audit worktree
-was created nested inside the session worktree (git-excluded; removed at the end); edg-backend's permission classifier
-refused one edit while builds were on hold, and the orchestrator's explicit assignment then let it through; the S45
-fixtures keep their S45-era unqualified ghost names (the lint is not run on fixtures; handoff §3).
+**Corrections of new tests after their first run** (question 160), and before it: `pure_check_parameter_unframed.c`
+(three errors at L22: the pure line first, the framing, the argument's overflow); `pure_reads_cell.c` and
+`pure_reads_cell_unwritten.c` (EDG's #550 in C++: `q` used); `pure_calls_pure_in_requires.c` and its `_outside` twin
+(item 8's listed limit: the positive gets an `ensures`, L22 → L23); before any run, from the frozen binary or an owner
+answer: `reject_pure_contract_cycle.c` (a prototype, L10 → L12), `reject_pure_body_assign.c` (front-end warning, L12
+→ L13), `reject_pure_void_result.c`, `pure_keep_fact_owns_alias.c`, `reject_pure_call_under_old.cpp`
+(`unsupported_annotation_expression`), `pure_check_local_count_past.c` (`precondition`, question 278),
+`pure_loop_application_unframed.c` (three errors, question 283), `pure_forall_and_check_unframed.c` (replacing a
+memory-free forall that 0061 rejects); the self-test case `ctd_forall_sum_noclause` (its row index named L115's entry
+row when the preserved row fails: i is 0 at entry; Silicon says "not preserved" on the box and the Mac).
 
-**Corrections of new tests after their first run** (question 160), and new test programs corrected before their first
-commit: `forall_invariant_unframed_read.c` (two errors at L19, then, after round 3's note 7 guarded the flag line by the
-framing, one `permission` at L18); `forall_one_term_sibling.c` and `forall_reject_do_while_invariant.c` (EDG's #550 on
-a local, programs rewritten); eight pins with undefined identifiers, unlisted warnings or a wrong line (the namespace
-pins list the front end's `set_but_not_used`; the function-pointer form pins `unsupported_type` and `forall_function`);
-`(void)a;` on a local array (an array used as a value in C++) in three files and one pin, and #550 in eleven negatives
-and one example; the shape-rule pin's line (L19 to L14); S45 fixtures (listed in the chapter). Question 254's rule:
-`forall_fill_local_skip.c` expects two errors.
+**Not done / limits** (handoff §3 "From M4.5e1d"): record 0062 item 8's listed limits and question 279's two facts
+(M4.8); question 267's range fact (M4.8); R4-S5 (a `must_init` filler whose invariant applies a function over the
+range still being filled: exit 3 on the box, fail closed; question 287); a marked range frames no application (item
+7); the false facts over 3–4 element sums cost 226–356 s of Z3 on the box (now in `tests/long/`); everything item 1
+and question 266 leave to M4.5e2, M4.5f1, M4.5f2 and M6.
 
-**Not done / limits** (handoff §3): Part D (cut 1); the false alarms of questions 253 and 257's alternative; questions
-255, 259, 261, 262's narrowings; audit round 4's notes (carrays.c's line map off by one since e1b; the check's marked-row
-message for a kept element); the S45 fixtures' ghost names.
+**Checks:**
+- The Mac, before the move (test-mutator-3 report 21, on the build of 2026-11-24 22:34 UTC): `run_tests.py` 15,982
+  passed, 0 failed, 10 skipped; the self-tests (`test_run_tests.py` 1,282, `test_lint_viper.py` 939, `test_mutate.py`
+  299, `test_vlibc_contracts.py` 141, `test_walker_oracle.py` 79); the vlibc checks; `mutate.py` on
+  `static_assert_pure_body.c` (no unexplained survivor); `build_docs.sh`, `check_doc_examples.py` (source and `--html`).
+- The box, on snapshot E (`324e711`; Commit 4 differs from it by one self-test index, a `silicon.h` comment, a
+  `test_run_tests.py` assertion, the long tests' `timeout:` and record text): regeneration 6,403 of 6,403; the
+  6,217 baseline programs byte-identical; no `.vpr` changed by the post-audit fixes (40 maps by the spelling only);
+  VIR self-test 2,318 lowering and 375 rejection cases, 0 problems (`VIR_CASES_MIN` 2318), through Silicon 2,317 of
+  2,318 before the index correction; lint clean (6,403 and 2,318 files); `--selftest` 195; format 90 files;
+  `rejections.py` unchanged; test-mutator-3 report 23: the session's default-tier tests 518 of 518 (native-ok 72 and
+  72), `pure_sum.c` verified, the four doc examples, the two long tests 4 of 4 (210–267 s each with the cap on a
+  quieter box, up to about 14 min under load; their `timeout:` raised from 900 to 1800 before the box check),
+  the short twin (13–22 s), `test_lint_viper.py` 939, `--check-headers` 5,946, `build_docs.sh`, `check_doc_examples.py`
+  (source and `--html`); `test_run_tests.py` 1,287 with one failure, the harness test that pinned one
+  `os.cpu_count()` (the cap adds a second; the test now pins both, its two classes rerun, 15 OK): the full pass is
+  the box check's. The Mac compiles Commit 4 (`--selftest` 195). The auditor's unbounded d12q run had no verdict after 75 min (never "verified") and was stopped.
+- `src/` and `include/` against `c65f618` (measured): +3,654/−195 without the self-test cases, +5,721/−195 with them.
+- The box: `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` **all green** on `2fc6a21` in the `ubuntu-26.04`
+  container (`~/cerastes-s8/p-ubuntu-26.04`, an incremental build over e1c's tree), 50 min (e1c's took 89: the
+  prover cap), exit 0, no rerun: 16,000 tests passed, 0 failed, 10 skipped (native-ok clang and GCC 2,988 each), the
+  long tier ran (the two new long tests in it); lint 6,403 files clean; VIR self-test 2,318 lowering and 375
+  rejection cases, 0 problems, every case through Silicon (2,318 passed); `test_run_tests.py` 1,287 OK and the other
+  self-tests; format 90 files; `--check-headers` 5,946; the doc examples (407 blocks) and the docs (27 pages) clean.
+  No older test timed out under the cap. The closing commit changes only this file, the handoff and `plan.md`,
+  which `check.sh` does not read. Log `~/cerastes-s8/p-ubuntu-26.04/e1d-check.log`.
 
-**Checks** (the Mac, on the final build, every build held):
-- The session's tests: 636 outcomes of 298 files (Parts B and C, the pins, the port, the doc examples, Flips B, R2's pins,
-  the 116 S45 fixtures), native-ok clang 82 and GCC 82; the widened run of existing tests no run had covered (front-end ok, warning, refused and error tests, the doc examples' rejected and front-end tests, the goldens, the other rejected tests: 511 files, 1,226 outcomes passed, native-ok clang 343 and GCC 343; `test_walker_oracle.py` 79; the vlibc header and contract checks), no changed outcome (Flips E).
-- regeneration on `7964d33`: 6,213 of 6,213; vprdiff 6,027 of 6,029 existing `.vpr`/`.map` identical, `carrays.c`'s two modes the only difference (Flips C); lint clean on 6,213 files; VIR self-test 2,202 lowering and 358 rejection cases, 0 problems,
-  the 2,044 baseline cases byte-identical (`VIR_CASES_MIN` 2202), every session case through Silicon; `rejections.py`:
-  nothing removed or changed against the base; `test_lint_viper.py` 843; `test_run_tests.py` 1,266, OK; `--check-headers`
-  5,713; format 89 files; `build_docs.sh` and `check_doc_examples.py` (source and `--html`).
-- `src/` and `include/` against `bf820fe` (measured): +3,514/−294 without the self-test cases (the plan's 1,500–2,200, with
-  Part D), +6,038/−294 with them; Parts A+B +2,483 at split point 1, Part C about +900 (questions 256, 263).
-- The box: `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` **all green** on `7964d33` in the `ubuntu-26.04` container
-  on the x86-64 box (a fresh bootstrap by `ci-linux.sh`), 89 min, exit 0, no rerun: 15,496 tests passed, 0 failed, 10
-  skipped (native-ok clang and GCC 2,918 each), the long tier ran; lint 6,217 files clean (the Mac's 6,213 and the four
-  Linux-only tests); VIR self-test 2,202 lowering and 358 rejection cases, 0 problems, every case through Silicon; the
-  self-tests, format, the doc examples (400 blocks) and the docs (27 pages) clean. A pre-check passed first (regeneration
-  6,217 of 6,217, lint clean, the session's 658 tests). The closing commits change only this file, the handoff and
-  `plan.md`, which `check.sh` does not read. Report `build/m4.5e1c/box-report.md`, log
-  `~/cerastes-s8/p-ubuntu-26.04/e1c-check.log`.
-
-**First step for the next session** (rewritten at M4.5e1d's planning, 2026-11-24): the owner answered the overnight
-questions ("All stand as built") and merged the branch into local `main` (`9ab9a1e`). M4.5e1d is planned in full,
-`.claude/plans/m4-5e1d-pure-functions.md` (pure functions and the exact sum, record 0062; questions 264-272
-answered there): the owner pushes `main`, removes this session's worktree and branch, and starts M4.5e1d with the
-opening prompt in handoff §2. M4.5e1f (short, planned in the umbrella plan's section 10 with S45 (r)'s result in
-handoff §3) and M4.5e1e may run before or after it.
+**First step for the next session:** the owner reviews this entry's deviations and handoff §8's questions 287–289,
+merges `m4.5e1d-pure-functions` into `main` and pushes, then removes the worktrees `.claude/worktrees/m4.5e1d` and
+`.claude/worktrees/m4.5e1d-audit` and the box lanes `~/cerastes-e1d` (handoff §2). Then M4.5e1f (short) or M4.5e1e
+(plans again), or M4.5e2.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5e1d Pure functions and the exact sum | 2026-11-24/25 | `m4.5e1d-pure-functions` | 0062 (0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061 amended) | a `pure` function that is called or has a contract as a Viper function with its definition check; self-recursion with `decreases`; applications in checks, contracts, calls and loop invariants; the exact sum verifies; testing moved to the x86-64 box; Silicon's prover cap; questions 273–286, no cut |
 | M4.5e1c Quantifiers | 2026-11-23/24 | `m4.5e1c-quantifiers` | 0061 (0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060 amended) | `cerastes_forall` with an inlined `pure` body in contracts, loop invariants and checks; `f__wf` variant M; the fill loop, max, the carrays port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260); questions 253–263 (256–263 built overnight, for review) |
 | M4.5e1b Ranges in contracts | 2026-11-11/12 | `m4.5e1b-ranges-in-contracts` | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range`/`reads_range` in contracts, element reads in contracts, calls and returns over ranges, loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (two new tags), the carrays port; questions 238–246 |
 | M4.5e1a Arrays inside one function | 2026-11-11 | `m4.5e1a-arrays-in-functions` | 0059 (0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043, 0054 amended) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers with C's zero fill, `out-of-bounds`, the marked range rows in the driver, loops carrying arrays, sequencing, `sizeof(a)`, `uninit` on arrays; #175, #1162, #138 as errors; array designators rejected (234); the `offset_of == 0` backstops (235) |
