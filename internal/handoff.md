@@ -1,90 +1,93 @@
-# Handoff after M4.5e1d, consolidated at M4.5e1e's planning (2026-11-25) — M4.5e1e1 next
+# Handoff after M4.5e1e1 (2026-11-25) — the owner's box check, then M4.5e1e2's planning
 
 The next session reads this file after `CLAUDE.md` and its plan. `status.md` has the formal entry of the last finished
-session (M4.5e1d). This file adds what a cold start would otherwise have to rediscover, and holds only what is live
+session (M4.5e1e1). This file adds what a cold start would otherwise have to rediscover, and holds only what is live
 (owner, 2026-10-26).
 
-**What the next session needs here:** §1, §2 (its opening prompt), the rules of §4 and §6, and §8 (the standing
-answers; questions 292–299 are defaults for the owner's review). M4.5e1e1's own notes are in its plan's section 13.
+**What the next session needs here:** §1, §2, §3 "From M4.5e1e1", the rules of §4 and §6, and §8 (questions 301–309
+settled with the advisor in M4.5e1e1, for the owner's review; 304 open).
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
 M4.5e1b's (both 2026-11-11), at M4.5e1c's (2026-11-23), at M4.5e1d's (2026-11-24) and at M4.5e1e's (2026-11-25),
-each at the owner's request.
-**The text before this consolidation is `git show 68384d1:internal/handoff.md`** (M4.5e1d's handoff: questions
-287–289 as asked, the notes that moved into M4.5e1e1's plan, the opening prompt of e1d); the ones before it are
-`git show 9ab9a1e:internal/handoff.md`, `git
-show bdf3581:internal/handoff.md`, `git show 825a9ee:internal/handoff.md`, `git show f57ee43:internal/handoff.md`,
-`git show 262edb3:internal/handoff.md` and `git show 2430529:internal/handoff.md`, whose header names every earlier
-version. Each note below keeps its origin in brackets, so its full wording can be found there. Session plans
-approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan's "Inputs".
+each at the owner's request. **The text before M4.5e1e1 is `git show 4e28487:internal/handoff.md`**; the ones before
+it are named there. Each note below keeps its origin in brackets. Session plans approved from M4.5b1a on are in
+`.claude/plans/`; the notes a session consumes move into its plan's "Inputs".
 
 ## 1. State
 
-- **M4.5e1d** (2026-11-24/25; record 0062, accepted) is done, **on `main` and pushed**: `main` = `origin/main` =
-  `68384d1` (a fast-forward of `m4.5e1d-pure-functions`, no merge commit) plus this planning's commit. Its result
-  is in `internal/status.md`. Its worktrees `.claude/worktrees/m4.5e1d` and `.claude/worktrees/m4.5e1d-audit` and
-  its branch still exist (§2); `build/m4.5e1d/` in that worktree holds the five audit reports, every agent's
-  reports and the orchestrator's log, and goes with it (the timeline that matters is kept in M4.5e1e1's plan,
-  section 3).
-- **M4.5e1e is two sessions** (owner, 2026-11-25, question 290): the planning's surveys put it at 3,800–7,200
-  `src/` lines, more than one session. **M4.5e1e1** (arrays of scalars in structures and static storage; record
-  0063) is next: `.claude/plans/m4-5e1e1-arrays-of-scalars.md`, planned in full for the ensemble, 2,340–4,475
-  lines for its Parts A–D and 600–1,050 more for Part E (structure values with array members: question 291),
-  which runs in e1e1 unless that would pass the twelve-hour cap (question 300): the session may take ten to
-  twelve hours. **M4.5e1e2** (arrays of structures and arrays of arrays) has
-  its scope and inputs in that plan's section 14 and plans briefly after e1e1.
-- **Two process changes from the owner (2026-11-25):** a question goes to the Fable advisor first and to the
-  owner only if it is still open (§8); a session's plan carries a test budget, and a run that is not in it is not
-  made (§6; the plan's section 3).
-- **The box:** `CERASTES_LONG=1 scripts/check.sh` all green on `2fc6a21` (2026-11-25, 50 min, 16,000 tests, the long
-  tier ran). `~/cerastes-s8/p-ubuntu-26.04` is detached at `2fc6a21` and keeps `e1d-check.log`; e1d's lanes are
-  `~/cerastes-e1d/` (§2 step 3), which e1e1's Step 0 copies if they are still there.
-- **CI:** unchanged (question 176 the owner's). The harness caps Silicon at 16 provers (question 286).
-- **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
+- **M4.5e1e1** (2026-11-25; record 0063, accepted) is done **on the branch `m4.5e1e1-arrays-of-scalars`, local only**
+  (commits 1–4 and the closing commit; status entry in `internal/status.md`). It branched from local `main` = `4e28487`
+  (M4.5e1e's planning), which the owner had not pushed. **The full `CERASTES_LONG=1 scripts/check.sh` was not run**: the
+  owner asked to skip it and the session's last runs ("I'll handle the checks and runs later and so will CI").
+  Every part's joined proof, its new tests and the final tree's lint, VIR self-test and docs were green (status
+  "Checks").
+- **M4.5e1e2** (arrays of structures and arrays of arrays) is next: a short planning from
+  `.claude/plans/m4-5e1e1-arrays-of-scalars.md` section 14 and §3 "From M4.5e1e1"; S47 (x) verified both of its
+  unknowns. M4.5e1f and M4.5e2 may run before it (e2's `malloc(n * sizeof(struct S))` waits for e1e2).
+- **Process facts from M4.5e1e1:** every question went to the Fable advisor first (§8: 301–309); the owner gave the
+  overnight rule at 03:24 UTC but no question needed it. Agents filled their contexts fast: edg-backend, il-analyst,
+  test-mutator and the auditor each ran as four successive instances, each started from its predecessor's state file
+  (a plan that assigns one agent per role should expect it). Commits 2 and 3 were composed from proved snapshots
+  (`refs/tmp/e1e1-*`) while the next part was built in the same worktree (status "Deviations").
+- **The box:** lanes `~/cerastes-e1e1/{base,il,edg,work,audit}` (containers `cerastes-e1e1-<lane>`, image
+  `cerastes-e1d:26.04`); `work` holds `j7` (= the final tree) built. `~/cerastes-s8/p-ubuntu-26.04` is still at e1d's
+  `2fc6a21`. `scripts/box_lane.sh` (committed) has the lane commands.
+- **CI:** unchanged (question 176 the owner's). **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website and **the EDG pin**
+  `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Review** questions 292–299 in §8: each is a default M4.5e1e1's plan builds on, fail closed, with its
-   alternative. An answer changes a row of the plan, not the plan; unanswered, they stand. **And the plan's
-   section 10, its Flips,** which §4.2's standing pre-approval covers once a plan lists them: about twenty
-   rejection pins retired for positives of the same programs (a global array, a `static` array, an array member,
-   an array literal, the array typedef, `typeof`, `decltype` and `sizeof` pins), **two re-expected from a
-   rejection to `error overflow`** (`reject_sizeof_array_huge.c`, `reject_contract_sizeof_array.c`: their
-   wrapping bound is now checked as written), about a dozen whose message names a new lifter, and the rest
-   unchanged. Also for review: the planner read "a fable auditor" in the request as the Fable advisor of earlier
-   sessions and kept the Opus `soundness-auditor` as the reviewer (one row of the plan's section 2 to change
-   otherwise); and R4 in the plan's Step 0, a defect of the lint found by reading (a program with a global and a
-   zero-filled local array would be refused today; no test combines them).
-2. **Push** `main` (this planning's commit), so that M4.5e1e1 branches from `origin/main`.
-3. **Remove** e1d's worktrees `.claude/worktrees/m4.5e1d` and `.claude/worktrees/m4.5e1d-audit`, then the branch
-   `m4.5e1d-pure-functions`; the local refs `refs/tmp/e1d-*` go with the worktree's repository. On the box,
-   `~/cerastes-e1d/` (lanes `base`, `work`, `audit`, containers `cerastes-e1d-*`, image `cerastes-e1d:26.04`) may
-   be removed, or left for e1e1's Step 0 to copy (§6).
-4. **CI** (question 176): unchanged.
-5. **Start M4.5e1e1** with this opening prompt. It replaces `plan.md`'s general one for this session: no plan
-   mode (the plan is complete), and only the records the plan rests on:
-
-   ```
-   You are the orchestrator of M4.5e1e1 (arrays of scalars in structures and static storage). Do not use plan
-   mode: the plan is complete. Read CLAUDE.md, .claude/plans/m4-5e1e1-arrays-of-scalars.md (all of it), the
-   M4.5e1d entry of internal/status.md, internal/handoff.md §1, §2, the rules of §4, §6 and §8, and decision
-   records 0059, 0060, 0043, 0044, 0041, 0028 (items 1, 2, 5, 11 and 16), 0024 (item 6), 0037 (items 6-8),
-   0061 (items 1 and 3), 0062 (item 4) and 0012 (item 11) (not the rest of internal/decisions/). Then execute the plan from its section 5. Use the
-   ensemble exactly as its section 2 assigns it: edg-backend, il-analyst and test-mutator (Sonnet) and the
-   soundness-auditor (Opus) from .claude/agents/, and the Fable advisor. Keep to the plan's test budget
-   (section 3): run no test it does not list, and every test run goes to the x86-64 box. Take every question,
-   yours or an agent's, to the Fable advisor first; stop and ask me only for what the plan's section 12 says is
-   mine, or what the advisor cannot settle, and log each answer the advisor settles in internal/handoff.md §8.
-   ```
-6. **Or another session first** (`plan.md`'s M4.5 table): M4.5e1f (short: questions 238 and 242, from S45 (r), §3
-   "M4.5e1f"; it may run before or after e1e1, whose plan holds either way) or M4.5e2 (pointer arithmetic; its
-   `malloc(n * sizeof(struct S))` waits for M4.5e1e2). Each plans with `plan.md`'s opening prompt. Questions
-   start at 301.
+1. **Run the full check on the box** (skipped in the session at the owner's request): bundle the branch into
+   `~/cerastes-s8/p-ubuntu-26.04` (handoff §4: `git bundle create … m4.5e1e1-arrays-of-scalars`, fetch, check out),
+   then `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` there (e1d's took 50 min). A failure is the next session's
+   first task. The preflight items not rerun on the final tree: `run_tests.py --check-headers`, `mutate.py
+   --validate` (both green earlier in the session).
+2. **Review** §8's questions 301–309 (each settled by the advisor, fail closed; 308 closed a soundness hole open since
+   M4.5c2a; 309 lowered question 295's limit from 64 to 7) and **answer 304** (open), and the status entry's deviations
+   and question-160 corrections.
+3. **Fast-forward `main`** to `m4.5e1e1-arrays-of-scalars` and **push** (`main` also carries the unpushed planning
+   commits `28bb427` and `4e28487`).
+4. **Remove** the session's worktrees `.claude/worktrees/m4.5e1e1`, `m4.5e1e1-audit`, `m4.5e1e1-audit3` and
+   `m4.5e1e1-aux` (and e1d's `m4.5e1d`, `m4.5e1d-audit` and branch `m4.5e1d-pure-functions` if still there); the refs
+   `refs/tmp/e1e1-*` go with them. `build/m4.5e1e1/` in the session worktree holds every agent report, the audit
+   reports and the orchestrator's state log. On the box, `~/cerastes-e1e1/` and `~/cerastes-e1d/` (lanes and
+   containers) may be removed, or kept for the next session's lanes.
+5. **CI** (question 176): unchanged.
+6. **Start M4.5e1e2's planning** with `plan.md`'s opening prompt (or a short planning in e1c's form: decision tables,
+   the ensemble assigned), or M4.5e1f / M4.5e2 first. Questions start at 310.
 
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
+
+**From M4.5e1e1** (record 0063; its plan's sections 14 and 15; the audit reports `build/m4.5e1e1/auditor-report-*.md`
+go with the session's worktree):
+- **M4.5e1e2** (arrays of structures and arrays of arrays; plan section 14 has its scope and inputs; S47 (x) verified
+  both of its unknowns: per-leaf quantifiers over an array of structures and a two-variable permission over `int
+  m[2][3]`, 8.7–9.9 s): heap storage of a structure with an array member (question 292); an array member beside an
+  `owning` or marked member, and markers on pointers to such structures (293, 294); contract places through a heap
+  read whose structure has an array member (306); an `ensures` atom with no `requires` partner on such a structure;
+  a written atom in a loop invariant on such a place; an array member or a global array (in a contract) as a
+  quantifier's or `pure` function's argument, structure members under a binder.
+- **M4.5e2:** part of a global array or an array member in a contract (`owns_range(g, n)`, `owns_range(p->a, n)`,
+  `&g[2]`), atoms on one element, `g + i`, `int *gp = s.a;` and `&g[k]` as global initializers.
+- **M4.5e1f:** the first-slot amount of an array leaf or of `owns(g)` (question 238's limit applies to them).
+- **M4.5f3:** structure values with more than 7 array elements by value (question 309: the worst by-value shape took
+  19 s at 6 elements, 25 s at 7, 35 s at 8, 129 s at 12, over 120 s at 16, on a quiet box lane — about 1.4 times
+  per element, not diagnosed; 64 timed out at 600 s); one constant `vir::kMaxByValueArrayElements` and three tests
+  to raise it.
+- **M4.8:** the listed false alarms of record 0063 (a store by name to any member of a structure local reaches every
+  array place of its field, items 10 and 0043 item 11; `f__wf` does not tie a member element's two states; a
+  `static` structure local's implicit atom does not cover a partnerless atom through an array leaf; the copy's guard
+  between two `owns` places whose leaves of the field are all array members); arrays of owning pointers; the
+  `unsequenced_calls` message wording for a write that is not a call (audit 2c, N1); the lint's `bool` array of
+  unknown value with no listed element (audit 2, N4).
+- **M8:** array designators, VLAs, zero-length and flexible members, pointers to arrays (`&(int[]){…}`), `[static
+  N]`, `thread_local` and block-scope `extern` arrays, `__datasizeof`, `_Alignof` of an expression, C++ array
+  literals; a compound literal whose element writes in a position other than a whole statement, initializer or list
+  element (question 308's over-strictness); an unused block-scope array typedef (question 302, the warning sweep).
+- **Question 304** (open): C++'s `{0}` over a nested-structure first member.
 
 **From M4.5e1d** (record 0062; its plan's section 13):
 - **M4.5e2:** applications under a quantifier's binder and a `cerastes_forall` naming a function with a contract
@@ -1072,8 +1075,9 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-No question is open. Questions 292–299 (at the end) are defaults that M4.5e1e1's plan builds on, each fail closed,
-for the owner's review; an answer is written inline, as before. Answered
+**Question 304 is open** (at the end; nothing waits on it). Questions 301–303 and 305–309 were settled with the
+Fable advisor in M4.5e1e1, for the owner's review; 292–299 are the defaults M4.5e1e1's plan built on (295 changed by
+309). An answer is written inline, as before. Answered
 questions 1–246 are recorded in the decision records, the session plans, `internal/status.md` and the earlier
 handoffs:
 `git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
@@ -1169,7 +1173,7 @@ closed: a rejection with a diagnostic and a pin, never a wrong proof; answer inl
   Alternative: accepted now, the eight owner sites of the plan's site table audited for it.
 - **294** `ref_to_uninit` and `must_init` on a pointer to a structure with an array member are rejected in e1e1
   (M4.5e1e2). Alternative: per-element flag rows now.
-- **295** A structure value of more than 64 array elements is not passed or returned by value (M4.5f3: array
+- **295** (changed in the session by question 309: the number is 7, not 64) A structure value of more than 64 array elements is not passed or returned by value (M4.5f3: array
   values as ghost sequences); a copy has no limit. Alternative: another number, or no limit (Silicon then
   decides by timing out, exit 3).
 - **296** A whole-structure copy needs every element of the source's array members initialized (question 92's
@@ -1233,6 +1237,17 @@ Just document the decisions made in the handoff documents"; each below went to t
   re-read, the root cause. No pre-session outcome changes. Alternative: (a) mark the literal's comma as not a sequence
   point in the Sequencer and lowering's rows (more precise; it would touch the files Part C holds).
 
+- **309** (fail closed either way: a rejection, or a Silicon timeout that is exit 3) Question 295's default limit of 64
+  array elements in a structure value passed or returned by value does not verify: a 64-element by-value structure
+  timed out at Silicon's 600 s cap on the box (each element is a formal written into the entry copy with its own
+  permission assert). **Answer** (the advisor; 295's own alternative "another number"): the limit is the largest count
+  whose worst by-value shape (taken and returned by value, a caller passing an object and storing the result) verifies
+  in under about 30 s on a quiet box lane: **N = 7** (measured: 6 elements 19 s, 7 25 s, 8 35 s, 12 129 s, 16 over 120
+  s; the advisor's first floor of 12 came from a parameter-only case and was withdrawn). It is one constant,
+  `vir::kMaxByValueArrayElements` in `src/vir/vir.h`, and three test files (`tests/memory/struct_array_limit.c`, its
+  twin, `negative/struct_array_reject_limit.c`): the owner can raise it cheaply. Alternative: keep 64 and let larger
+  values time out (exit 3).
+
 **Open for the owner (nothing waits on it):**
 - **304** (not unsoundness: an over-acceptance of a warning shape) The compiler matrix of M4.5e1e1's Step 0 shows
   clang++ warning `-Wmissing-braces` at `-Wall` on C++'s `{0}` over a structure whose first member is a nested
@@ -1242,4 +1257,4 @@ Just document the decisions made in the handoff documents"; each below went to t
   use it become C-only or are rewritten with full braces), in a session that may change existing outcomes.
   Alternative: accept the array-member form in C++ as well (lift 303). Until answered, both stand as built.
 
-The next questions start at 309.
+The next questions start at 310.

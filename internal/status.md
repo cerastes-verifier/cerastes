@@ -13,122 +13,117 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 9d98fe8:internal/status.md`, M4.5d2a's `git show bb41d55:internal/status.md`, S6's `git show 9255b93:internal/status.md`, M4.5d2v's `git show c2bc48d:internal/status.md`, S7's `git show a660abc:internal/status.md`, M4.5d2b1's
 `git show c1b691d:internal/status.md`, S8's `git show 15bcdc6:internal/status.md`, M4.5d2b2a's
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
-`git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, M4.5e1a's `git show 685034b:internal/status.md`, M4.5e1b's `git show 7964d33:internal/status.md`, and M4.5e1c's `git show c65f618:internal/status.md`.
+`git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, M4.5e1a's `git show 685034b:internal/status.md`, M4.5e1b's `git show 7964d33:internal/status.md`, M4.5e1c's `git show c65f618:internal/status.md`, and M4.5e1d's `git show 4e28487:internal/status.md`.
 
-## M4.5e1d — Pure functions and the exact sum (2026-11-24/25): done; on `main` and pushed (`68384d1`)
+## M4.5e1e1 — Arrays of scalars in structures and static storage (2026-11-25): done; on the branch, local only; the full check.sh not run (owner)
 
-Plan: `.claude/plans/m4-5e1d-pure-functions.md` (approved 2026-11-24; executed without re-planning). Record 0062
-(accepted; amends 0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061). Read `internal/handoff.md`
-next: §1, §2, §3 "From M4.5e1d", §8. The owner answered questions 287–289 on 2026-11-25, each "Follow
-recommendation" (287: M4.5e2 fixes R4-S5). Branched from local `main` = `c65f618` (the planning
-commit). Session from 2026-11-24 about 16:00 UTC to 2026-11-25 about 02:10 UTC; Commit 4 is `2fc6a21`.
+Plan: `.claude/plans/m4-5e1e1-arrays-of-scalars.md` (written at M4.5e1e's planning; executed without re-planning,
+from its section 5). Record 0063 (amends 0012, 0024, 0028, 0041, 0043, 0044, 0059, 0060, 0061, 0062). Read
+`internal/handoff.md` next: §1, §2, §3 "From M4.5e1e1", §8 (questions 301–308 settled with the advisor, 304 open).
+**Branched from local `main` = `4e28487`** (the planning's commits were not on `origin`: the owner had not pushed).
+Session from 2026-11-25 03:04 UTC; the owner went to bed at about 03:24 UTC giving the overnight rule ("if you have any
+questions you may auto accept the recommended answer after your normal routine. Just document the decisions made in
+the handoff documents"); every question went to the Fable advisor first and none had to be decided by that rule.
 
-**Owner decisions in the session** (record 0062's header has each with its reason): 273 (H', the lint's name rule), 274
-(digits-only ids), 275 (Silicon's axiomatisation warning accepted for `pf_` functions), 276 (keep fact (iii)), 277
-(multi-error twins list every error), 278 (a `check`'s pure lines first), 279 (two unsafe facts as listed limits,
-M4.8), 280 (two rejection pins moved to a `check`), 281 (a read pure function counts as one function verified), 282
-(the definition-unknown false alarm pinned), 283 (pure lines as rows in loop invariants), 284 (an application in a
-`do … while (0)` invariant takes the `check` form), **285** (two tests over 120 s on the box moved to `tests/long/`;
-the recommendation was two-element programs), 286 (Silicon's prover count capped at 16, fixed in this session).
-Mid-session the owner moved **all testing to the x86-64 box** ("in the future do all testing on the ssh box rather
-than doing some there and some on my local machine, unless there's a huge performance difference"), allowed several
-agents on it at once, and asked for fewer intermediate checks.
+**Done** (commits on `m4.5e1e1-arrays-of-scalars`, local only):
+- **Commit 1** `d9a51fc`: record 0063's draft revised by P82 and S47 (every row of both tables on its first branch; cuts
+  3, 4 and 5 not needed), the chapter `## M4.5e1e1` of `internal/il-inventory.md`, 44 S47 fixtures (46 with audit
+  round 1's two copy-implementation fixtures, question 307), nine staging pins, R4's lint defect fixed (a global beside
+  a zero-filled local array was refused) with its test pair, the lint's rules of record item 15, `scripts/box_lane.sh`.
+- **Commit 2** `3935296` (Parts A, B, D and audit round 2's fixes): VIR plumbing (three leaf views, the poison);
+  global and `static` local arrays; array typedefs, `typeof`, `sizeof` of array types; array compound literals in C;
+  round 2's B1/B1' (question 308).
+- **Commit 3** `6aad43c` (Part C and audit round 3's fixes): array members in every storage of a structure.
+- **Commit 4** (Part E and audit round 4's fixes): whole-structure copies of a structure with array members through the
+  trusted `copy_arr_<t>` (S47 (g)'s clause set; the guard only where a place is reached through a pointer), by-value
+  parameters, results, arguments and literal values up to **7** array elements (question 309), `f().a[i]` and contract
+  `s.a[i]` as `ElemValue` with its `out-of-bounds` row; the pages, `internal/encoding.md`, the developer guide.
 
-**Done** (edg-backend, il-analyst-1/2/3 and test-mutator-1/2/3, Sonnet, each successor started from its
-predecessor's state file; the soundness-auditor, Opus, kept for all rounds; the advisor at the plan's checkpoints):
-- **Part A** (`ed16ecc`): VIR and lowered-program plumbing, behaviour-neutral; the driver's one accepted Silicon warning.
-- **Record, P81, S46, Commit 1** (`92294b7`, revised by audit round 1 in `9ca3a6c`): P81 (a)–(f) and S46 (a)–(k) in
-  record 0062's facts table (92 `s46_*` fixtures); the lint (H', `PF_NAME`, the `hva_` facts, the guard quantifier
-  checks, prelude acyclicity), the harness.
-- **Part B** (`e3ed705`): read pure functions as Viper functions (`pf_<name>__<id>`, form Min, the result tag), their
-  `__wf` definition checks, self-recursion with `decreases`, applications in checks and in pure bodies.
-- **Part C** (`10d23cd`): applications in an ordinary function's `requires` and `ensures`, at calls and returns.
-- **Part D** (Commit 4): applications in loop invariants (item 7's framing at entry and back edge, the obligation rows,
-  question 283's pure-line rows, the guarded value), question 284's `do … while (0)` form, **the exact sum
-  (`tests/memory/pure_sum.c`) verifies in both modes**; the application messages in the interval form `a[0..n)`;
-  Silicon's prover cap (question 286); the pages (annotations, verifying, error messages, memory, the tutorial's
-  "The exact sum" in "Arrays and quantifiers"), `internal/encoding.md` §2–§8, the developer guide.
-- **Audits** (`build/m4.5e1d/auditor-report-{1,2,3,4,4b}.md`): round 1 on the record and S46 (B1 the lint admitted
-  fact (ii) without the callee's quantified clause, B2 an application under `cerastes::old` compiles in C++; S1–S6,
-  N1, N2, N9; all taken); round 2 on A+B and round 3 on C (no blocking item; their should-fix items taken and
-  pinned); round 4 on Part D and the pages, probes on the box, also the plan's re-audit (no blocking item; R4-S1–S4
-  taken, R4-S5 a listed limit); 4b, a short read of the post-audit delta (the spelling, the cap, one self-test index).
-- **Cuts:** none taken (cuts 1–5 all stayed in). Split points: A–C at +3,351/−193 against 4,200.
+**Audits** (Opus; four instances, each fresh from the earlier reports — a deviation: the plan had one resumed
+auditor; each instance's context filled in one round): round 1 on Commit 1 (no blocking; S1–S7 taken);
+round 2 on A+B+D (**B1: a write inside a compound literal used as an object was invisible to the sequencing rules,
+unsound since M4.5c2a for `&(T){…}` and `*&(int){…}`**; fixed fail closed, question 308; its re-read found B1', a
+writing literal as a whole element of a braced list, fixed in the list rule; S3 a file-scope typedef bound naming a
+constant, fixed); round 3 on Part C (no blocking; S1–S4 taken); round 4 in two halves — 4a on Commit 3 and the pages
+(no blocking; S1 the lint and pointer-element array members, S2–S3 the pages, all taken) and 4b on Part E (no blocking; S1
+five Part E tests already corrected, S2 a false message for a C++ temporary, S3 the copy's message and the pages, all
+taken). Reports: `build/m4.5e1e1/auditor-report-{1,2,2b,2c,3,4a,4b}.md`.
+
+**Advisor-settled questions** (handoff §8): 301 (the system-typedef pin: one untagged `jmp_buf` pin), 302 (an unused
+block-scope array typedef stays rejected; Flips A → C for `reject_typedef_array_block.c`), 303 (C++ `{0}` over an
+array member rejected), 305 (Part D over its test cap), 306 (heap-read contract places with an array member rejected,
+M4.5e1e2), 307 (the copy's implementation fixtures), 308 (B1/B1'), 309 (the by-value limit 7, not 64: 64 timed out
+at 600 s); **304 open for the owner** (C++ `{0}` over a
+nested-structure member, accepted since M4.5c1 although clang++ warns at `-Wall`).
 
 **Deviations from the plan, for confirmation:**
-- Testing moved to the box mid-session (owner). Box lanes, each a copy of the `ubuntu-26.04` checkout with its own
-  container from a committed image (`cerastes-e1d:26.04`): `~/cerastes-e1d/{base,work,audit}`; the neutrality
-  baseline re-made on the box (6,217 programs; Mac and box differ only by glibc parameter names in 32 `.vpr` and
-  absolute paths in maps, platform not encoding). The Mac ran one cross-check: a self-test case's Silicon verdict.
-- Snapshots for audits and box runs as commit objects through a temporary index (`refs/tmp/e1d-*`), not commits.
-- `arrays_sum_offbyone.c` (the tutorial's failing example) bounds `n < INT_MAX` in its `requires` so that its errors
-  are only the four the text explains: an orchestrator choice, for review.
-- Question 285's move left `pure_sum_caller.c` without a default-tier error twin (question 207's rule), so
-  `tests/memory/negative/pure_sum_caller_write_between_short.c` (the same program over 2 elements) was added.
-- The application messages name the read interval as `a[0..n)` (and a decayed local array by its name), e1b's call
-  and return messages unchanged.
+- Agents replaced as their contexts filled: edg-backend 1→4, il-analyst 1→4 (il-analyst-4 took Part C's round-3
+  fixes and Part E, the plan's il-analyst-3), test-mutator 1→4, the auditor 1→4.
+- Commit 2 was cut from an auxiliary worktree at the proved snapshot `j2` plus the round-2 fixes (Part C was already
+  being built in the main worktree); Commit 3 was composed from the frozen Part C encoder (`refs/tmp/e1e1-srcC`),
+  the VIR after round 3's fixes (`refs/tmp/e1e1-r3fix`) and named test files, while Part E was built in parallel.
+- Part E's encoder half was started before split point 2's decision, on the advisor's projection (checkpoint 3: Part E
+  fits whole only if Commit 3 lands by about 10:30 UTC; it landed at 09:13).
+- Mac single-file probes during development (edg-backend's, il-analyst-1's P82, test-mutator-1's R2 before the box
+  rerun); one extra S47 debug run (`s47_g_dbg`, deleted); S47 (a) re-runs after a fixture change.
+- 68 Part C programs whose Viper changed from `j4` to `j5` only in a trusted contract's comment (round 3's N5), with
+  byte-identical maps, were not rerun (rule 1 read as semantic identity).
+- `struct_array_decay.c` (a Flips A positive) changed one line: its helper `h(int *p)` got a `live(p)` contract (an
+  unconstrained pointer parameter's use is a `lifetime` row).
 
-**Corrections of new tests after their first run** (question 160), and before it: `pure_check_parameter_unframed.c`
-(three errors at L22: the pure line first, the framing, the argument's overflow); `pure_reads_cell.c` and
-`pure_reads_cell_unwritten.c` (EDG's #550 in C++: `q` used); `pure_calls_pure_in_requires.c` and its `_outside` twin
-(item 8's listed limit: the positive gets an `ensures`, L22 → L23); before any run, from the frozen binary or an owner
-answer: `reject_pure_contract_cycle.c` (a prototype, L10 → L12), `reject_pure_body_assign.c` (front-end warning, L12
-→ L13), `reject_pure_void_result.c`, `pure_keep_fact_owns_alias.c`, `reject_pure_call_under_old.cpp`
-(`unsupported_annotation_expression`), `pure_check_local_count_past.c` (`precondition`, question 278),
-`pure_loop_application_unframed.c` (three errors, question 283), `pure_forall_and_check_unframed.c` (replacing a
-memory-free forall that 0061 rejects); the self-test case `ctd_forall_sum_noclause` (its row index named L115's entry
-row when the preserved row fails: i is 0 at entry; Silicon says "not preserved" on the box and the Mac).
+**Corrections of new tests after their first run** (question 160; each a test-design error, no verdict changed;
+details in `build/m4.5e1e1/test-mutator-report-{6,12,16,19}.md`):
+- Parts B/D (report 6): `static_array_implicit_atom.c` (`twice() - twice()` is `unsequenced` by 0041 item 12: two
+  statements); EDG's #550 in `global_array_values.c`, `global_array_escape.cpp`, `global_array_pointer_element_wrong.c`,
+  `global_array_reads_write.c` (a variable used only in a `check`); `frontend-warning` lines added to
+  `array_literal_reject_return.c`, `global_array_reject_initializer_address.c`, `global_array_reject_long_list.c`;
+  `global_array_reject_expressions.c` (a one-`return` pure function; `g == NULL` for `if (g)`).
+- Part C (report 12): `struct_array_reject_annotations.c` (a caller of the declared `mk`); `struct_array_decay.c`
+  (its helper's `live(p)` contract; listed above); the staging pins `struct_array_reject_by_value_param.c` (its member
+  line dropped) and `struct_array_reject_copy.c` (`unsupported_declaration @ L10` → `unsupported_expression @ L18`),
+  both then retired by Part E's Flips A.
+- Part E (report 19): `struct_array_copy_pointers.c`, `negative/struct_array_copy_dest_reads.c`,
+  `negative/struct_array_copy_self_wrong.c`, `struct_array_ptr_elems_owns.c` and its `_wrong` twin (contracts that
+  state what the checks read; `ensures … live(x)`; a bound against an `overflow`).
+- Before any run: Flips A → C for `reject_typedef_array_block.c` (question 302); the two literal pins for a `for` step
+  and a `do` condition (one deleted, question 305); the doc example `array_global_index_error.c` (#550).
+- `compound_literal_reject_list_effects.c` was edited after it passed and restored to Commit 2's text (advisor).
 
-**Not done / limits** (handoff §3 "From M4.5e1d"): record 0062 item 8's listed limits and question 279's two facts
-(M4.8); question 267's range fact (M4.8); R4-S5 (a `must_init` filler whose invariant applies a function over the
-range still being filled: exit 3 on the box, fail closed; question 287); a marked range frames no application (item
-7); the false facts over 3–4 element sums cost 226–356 s of Z3 on the box (now in `tests/long/`); everything item 1
-and question 266 leave to M4.5e2, M4.5f1, M4.5f2 and M6.
+**Not done / limits** (handoff §3 "From M4.5e1e1"): no cut was taken (cuts 1–7 all stayed in). Record 0063's listed
+false alarms: a store by name to any member of a structure local reaches every array place of that field (item 10,
+0043 item 11); `f__wf` does not tie a member element's two states; a `static` structure local's implicit atom does
+not cover a partnerless atom through an array leaf (item 7); a call passing several by-value structures near the
+limit may time out (exit 3, item 13). Everything item 1's table leaves to M4.5e1e2, M4.5e2, M4.5f1, M4.5f3, M4.6,
+M4.8 and M8.
 
-**Checks:**
-- The Mac, before the move (test-mutator-3 report 21, on the build of 2026-11-24 22:34 UTC): `run_tests.py` 15,982
-  passed, 0 failed, 10 skipped; the self-tests (`test_run_tests.py` 1,282, `test_lint_viper.py` 939, `test_mutate.py`
-  299, `test_vlibc_contracts.py` 141, `test_walker_oracle.py` 79); the vlibc checks; `mutate.py` on
-  `static_assert_pure_body.c` (no unexplained survivor); `build_docs.sh`, `check_doc_examples.py` (source and `--html`).
-- The box, on snapshot E (`324e711`; Commit 4 differs from it by one self-test index, a `silicon.h` comment, a
-  `test_run_tests.py` assertion, the long tests' `timeout:` and record text): regeneration 6,403 of 6,403; the
-  6,217 baseline programs byte-identical; no `.vpr` changed by the post-audit fixes (40 maps by the spelling only);
-  VIR self-test 2,318 lowering and 375 rejection cases, 0 problems (`VIR_CASES_MIN` 2318), through Silicon 2,317 of
-  2,318 before the index correction; lint clean (6,403 and 2,318 files); `--selftest` 195; format 90 files;
-  `rejections.py` unchanged; test-mutator-3 report 23: the session's default-tier tests 518 of 518 (native-ok 72 and
-  72), `pure_sum.c` verified, the four doc examples, the two long tests 4 of 4 (210–267 s each with the cap on a
-  quieter box, up to about 14 min under load; their `timeout:` raised from 900 to 1800 before the box check),
-  the short twin (13–22 s), `test_lint_viper.py` 939, `--check-headers` 5,946, `build_docs.sh`, `check_doc_examples.py`
-  (source and `--html`); `test_run_tests.py` 1,287 with one failure, the harness test that pinned one
-  `os.cpu_count()` (the cap adds a second; the test now pins both, its two classes rerun, 15 OK): the full pass is
-  the box check's. The Mac compiles Commit 4 (`--selftest` 195). The auditor's unbounded d12q run had no verdict after 75 min (never "verified") and was stopped.
-- `src/` and `include/` against `c65f618` (measured): +3,654/−195 without the self-test cases, +5,721/−195 with them.
-- The box: `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` **all green** on `2fc6a21` in the `ubuntu-26.04`
-  container (`~/cerastes-s8/p-ubuntu-26.04`, an incremental build over e1c's tree), 50 min (e1c's took 89: the
-  prover cap), exit 0, no rerun: 16,000 tests passed, 0 failed, 10 skipped (native-ok clang and GCC 2,988 each), the
-  long tier ran (the two new long tests in it); lint 6,403 files clean; VIR self-test 2,318 lowering and 375
-  rejection cases, 0 problems, every case through Silicon (2,318 passed); `test_run_tests.py` 1,287 OK and the other
-  self-tests; format 90 files; `--check-headers` 5,946; the doc examples (407 blocks) and the docs (27 pages) clean.
-  No older test timed out under the cap. The closing commit changes only this file, the handoff and `plan.md`,
-  which `check.sh` does not read. Log `~/cerastes-s8/p-ubuntu-26.04/e1d-check.log`.
+**Checks** (every test run on the box, `~/cerastes-e1e1/{base,il,edg,work,audit}`; times in the agents' reports):
+- **Neutrality at every part:** no pre-session program's `.vpr` or `.map` changed (6,403 of 6,403 byte-identical at
+  each joined proof `j1`–`j7`; the last, `refs/tmp/e1e1-j7` = `7ac066a`: 6,683 programs regenerated, 0 missing, no
+  exit 3); the 2,318 baseline VIR cases byte-identical; `rejections.py --base` changed no pre-session entry.
+- **At `j7`** (edg-backend report 16): VIR self-test 2,448 lowering and 398 rejection cases, 0 problems (`VIR_CASES_MIN`
+  2448); `lint_viper.py` clean over 6,683 programs and 2,448 cases; `test_lint_viper.py` 1,006 OK; `format.sh --check`
+  91 files; `py_compile`. On the Mac: `build_docs.sh` exit 0, `check_doc_examples.py` source (26 pages, 0 problems) and
+  `--html` (27 files, 0 problems); `test_run_tests.py` 1,287 OK (1 skipped) after the last harness change.
+- **New tests, each run once on the box, timed** (reports 6, 12, 16, 19 and the last run): Parts B and D 82 files,
+  Part C 51, round 3's 16, Part E 24 and round 4a's 3, the doc examples; all green after the corrections listed
+  above; slowest 42.4 s (`struct_array_init.c`), the limit pair 17.7 s; the S47 fixtures 46 (5.6–42.5 s).
+- **Not run, at the owner's request** (2026-11-25, about 10:40 UTC: "I'm about to leave and disconnect, so skip
+  forward to the advisor check, closing commit and status and handoff updates. I'll handle the checks and runs later
+  and so will CI"): the preflight's `run_tests.py --check-headers` and `mutate.py --validate` on the final tree (both
+  ran green earlier in the session), and **`CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` on the box**.
+- `src/` and `include/` against `4e28487`, measured: +4,944 −439 without the self-test cases (+7,596 −445 with them); the plan
+  estimated 2,340–4,475 for Parts A–D and 600–1,050 more for Part E.
 
-**After the session** (2026-11-25): the branch went to `main` by fast-forward and was pushed (`main` =
-`origin/main` = `68384d1`). M4.5e1e's planning followed, at a session that only planned: the owner cut M4.5e1e in
-two (question 290: M4.5e1e1, arrays of scalars in structures and static storage; M4.5e1e2, arrays of structures
-and arrays of arrays), put whole-structure copies and by-value passing of a structure with an array member in
-M4.5e1e (question 291), to run in e1e1 unless that would pass twelve hours (question 300), asked that questions
-go to the Fable advisor first, and asked for less testing (a test budget per plan).
-
-**First step for the next session:** the owner reviews handoff §8's questions 292–299 (defaults, each fail
-closed) and the Flips of the plan's section 10, pushes `main`, and removes e1d's worktrees `.claude/worktrees/m4.5e1d` and
-`.claude/worktrees/m4.5e1d-audit` and its branch (handoff §2). Then **M4.5e1e1** from
-`.claude/plans/m4-5e1e1-arrays-of-scalars.md` with the opening prompt of handoff §2 (no plan mode), or M4.5e1f
-(short) or M4.5e2 first.
+**First step for the next session:** the owner runs `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` on the box
+(handoff §2), reviews handoff §8's questions 301–309 (304 open) and the deviations above, fast-forwards `main` to
+`m4.5e1e1-arrays-of-scalars` and pushes. Then **M4.5e1e2**'s short planning (`.claude/plans/m4-5e1e1-arrays-of-scalars.md`
+section 14 and handoff §3 "From M4.5e1e1"), or M4.5e1f / M4.5e2.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
+| M4.5e1e1 Arrays of scalars in structures and static storage | 2026-11-25 | `m4.5e1e1-arrays-of-scalars` (local) | 0063 (0012, 0024, 0028, 0041, 0043, 0044, 0059, 0060, 0061, 0062 amended) | global and `static` arrays, array members, array typedefs and `sizeof`, C array literals, structure copies and by-value passing up to 7 array elements; a compound-literal sequencing hole open since M4.5c2a closed; questions 301–309, no cut; the full check left to the owner |
 | M4.5e1d Pure functions and the exact sum | 2026-11-24/25 | `m4.5e1d-pure-functions`, `68384d1` (fast-forward) | 0062 (0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061 amended) | a `pure` function that is called or has a contract as a Viper function with its definition check; self-recursion with `decreases`; applications in checks, contracts, calls and loop invariants; the exact sum verifies; testing moved to the x86-64 box; Silicon's prover cap; questions 273–286, no cut |
 | M4.5e1c Quantifiers | 2026-11-23/24 | `m4.5e1c-quantifiers` | 0061 (0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060 amended) | `cerastes_forall` with an inlined `pure` body in contracts, loop invariants and checks; `f__wf` variant M; the fill loop, max, the carrays port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260); questions 253–263 (256–263 built overnight, for review) |
 | M4.5e1b Ranges in contracts | 2026-11-11/12 | `m4.5e1b-ranges-in-contracts` | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range`/`reads_range` in contracts, element reads in contracts, calls and returns over ranges, loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (two new tags), the carrays port; questions 238–246 |
