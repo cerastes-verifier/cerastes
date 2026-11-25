@@ -15,11 +15,12 @@ history table; the full log up to M4.4c is `git show 1fcc43b:internal/status.md`
 `git show 19d977a:internal/status.md`, M4.5d2b2b's `git show e3f4b9f:internal/status.md`, M4.5d2b2c's
 `git show 023ea50:internal/status.md`, M4.5d2b2d's `git show d88a457:internal/status.md`, M4.5e1a's `git show 685034b:internal/status.md`, M4.5e1b's `git show 7964d33:internal/status.md`, and M4.5e1c's `git show c65f618:internal/status.md`.
 
-## M4.5e1d — Pure functions and the exact sum (2026-11-24/25): done on branch `m4.5e1d-pure-functions`, not merged, not pushed
+## M4.5e1d — Pure functions and the exact sum (2026-11-24/25): done; on `main` and pushed (`68384d1`)
 
 Plan: `.claude/plans/m4-5e1d-pure-functions.md` (approved 2026-11-24; executed without re-planning). Record 0062
 (accepted; amends 0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061). Read `internal/handoff.md`
-next: §1, §2, §3 "From M4.5e1d", §8 (open questions 287–289). Branched from local `main` = `c65f618` (the planning
+next: §1, §2, §3 "From M4.5e1d", §8. The owner answered questions 287–289 on 2026-11-25, each "Follow
+recommendation" (287: M4.5e2 fixes R4-S5). Branched from local `main` = `c65f618` (the planning
 commit). Session from 2026-11-24 about 16:00 UTC to 2026-11-25 about 02:10 UTC; Commit 4 is `2fc6a21`.
 
 **Owner decisions in the session** (record 0062's header has each with its reason): 273 (H', the lint's name rule), 274
@@ -111,16 +112,24 @@ and question 266 leave to M4.5e2, M4.5f1, M4.5f2 and M6.
   No older test timed out under the cap. The closing commit changes only this file, the handoff and `plan.md`,
   which `check.sh` does not read. Log `~/cerastes-s8/p-ubuntu-26.04/e1d-check.log`.
 
-**First step for the next session:** the owner reviews this entry's deviations and handoff §8's questions 287–289,
-merges `m4.5e1d-pure-functions` into `main` and pushes, then removes the worktrees `.claude/worktrees/m4.5e1d` and
-`.claude/worktrees/m4.5e1d-audit` and the box lanes `~/cerastes-e1d` (handoff §2). Then M4.5e1f (short) or M4.5e1e
-(plans again), or M4.5e2.
+**After the session** (2026-11-25): the branch went to `main` by fast-forward and was pushed (`main` =
+`origin/main` = `68384d1`). M4.5e1e's planning followed, at a session that only planned: the owner cut M4.5e1e in
+two (question 290: M4.5e1e1, arrays of scalars in structures and static storage; M4.5e1e2, arrays of structures
+and arrays of arrays), put whole-structure copies and by-value passing of a structure with an array member in
+M4.5e1e (question 291), asked that questions go to the Fable advisor first, and asked for less testing (a test
+budget per plan).
+
+**First step for the next session:** the owner reviews handoff §8's questions 292–299 (defaults, each fail
+closed), pushes `main`, and removes e1d's worktrees `.claude/worktrees/m4.5e1d` and
+`.claude/worktrees/m4.5e1d-audit` and its branch (handoff §2). Then **M4.5e1e1** from
+`.claude/plans/m4-5e1e1-arrays-of-scalars.md` with the opening prompt of handoff §2 (no plan mode), or M4.5e1f
+(short) or M4.5e2 first.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
-| M4.5e1d Pure functions and the exact sum | 2026-11-24/25 | `m4.5e1d-pure-functions` | 0062 (0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061 amended) | a `pure` function that is called or has a contract as a Viper function with its definition check; self-recursion with `decreases`; applications in checks, contracts, calls and loop invariants; the exact sum verifies; testing moved to the x86-64 box; Silicon's prover cap; questions 273–286, no cut |
+| M4.5e1d Pure functions and the exact sum | 2026-11-24/25 | `m4.5e1d-pure-functions`, `68384d1` (fast-forward) | 0062 (0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061 amended) | a `pure` function that is called or has a contract as a Viper function with its definition check; self-recursion with `decreases`; applications in checks, contracts, calls and loop invariants; the exact sum verifies; testing moved to the x86-64 box; Silicon's prover cap; questions 273–286, no cut |
 | M4.5e1c Quantifiers | 2026-11-23/24 | `m4.5e1c-quantifiers` | 0061 (0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060 amended) | `cerastes_forall` with an inlined `pure` body in contracts, loop invariants and checks; `f__wf` variant M; the fill loop, max, the carrays port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260); questions 253–263 (256–263 built overnight, for review) |
 | M4.5e1b Ranges in contracts | 2026-11-11/12 | `m4.5e1b-ranges-in-contracts` | 0060 (0011, 0028, 0029, 0037, 0038, 0039, 0040, 0042, 0059 amended) | `owns_range`/`reads_range` in contracts, element reads in contracts, calls and returns over ranges, loops over parameters' ranges, markers over ranges, `owning(n)` on a parameter, `restrict` with a range, array parameters (two new tags), the carrays port; questions 238–246 |
 | M4.5e1a Arrays inside one function | 2026-11-11 | `m4.5e1a-arrays-in-functions` | 0059 (0011, 0012, 0024, 0028, 0032, 0038, 0039, 0042, 0043, 0054 amended) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers with C's zero fill, `out-of-bounds`, the marked range rows in the driver, loops carrying arrays, sequencing, `sizeof(a)`, `uninit` on arrays; #175, #1162, #138 as errors; array designators rejected (234); the `offset_of == 0` backstops (235) |

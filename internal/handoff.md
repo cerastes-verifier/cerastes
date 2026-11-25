@@ -1,16 +1,18 @@
-# Handoff after M4.5e1d (2026-11-25) — M4.5e1f, M4.5e1e or M4.5e2 next
+# Handoff after M4.5e1d, consolidated at M4.5e1e's planning (2026-11-25) — M4.5e1e1 next
 
 The next session reads this file after `CLAUDE.md` and its plan. `status.md` has the formal entry of the last finished
 session (M4.5e1d). This file adds what a cold start would otherwise have to rediscover, and holds only what is live
 (owner, 2026-10-26).
 
-**What the next session needs here:** §1, §2, its own notes in §3 (M4.5e1d's leftovers are in "From M4.5e1d"), the
-rules of §4, §6 (from M4.5e1d on, every test runs on the x86-64 box) and §8 (open questions 287–289).
+**What the next session needs here:** §1, §2 (its opening prompt), the rules of §4 and §6, and §8 (the standing
+answers; questions 292–299 are defaults for the owner's review). M4.5e1e1's own notes are in its plan's section 13.
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
-M4.5e1b's (both 2026-11-11), at M4.5e1c's (2026-11-23) and at M4.5e1d's (2026-11-24), each at the owner's request.
-**The text before this consolidation is `git show 9ab9a1e:internal/handoff.md`** (M4.5e1c's handoff: questions
-256–263 as asked, the long forms of 247–255, the notes that moved into M4.5e1d's plan); the ones before it are `git
+M4.5e1b's (both 2026-11-11), at M4.5e1c's (2026-11-23), at M4.5e1d's (2026-11-24) and at M4.5e1e's (2026-11-25),
+each at the owner's request.
+**The text before this consolidation is `git show 68384d1:internal/handoff.md`** (M4.5e1d's handoff: questions
+287–289 as asked, the notes that moved into M4.5e1e1's plan, the opening prompt of e1d); the ones before it are
+`git show 9ab9a1e:internal/handoff.md`, `git
 show bdf3581:internal/handoff.md`, `git show 825a9ee:internal/handoff.md`, `git show f57ee43:internal/handoff.md`,
 `git show 262edb3:internal/handoff.md` and `git show 2430529:internal/handoff.md`, whose header names every earlier
 version. Each note below keeps its origin in brackets, so its full wording can be found there. Session plans
@@ -18,37 +20,56 @@ approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes m
 
 ## 1. State
 
-- **M4.5e1d** (2026-11-24/25; record 0062, accepted) is done on branch `m4.5e1d-pure-functions` (worktree
-  `.claude/worktrees/m4.5e1d`), **not merged, not pushed**; local `main` = `c65f618` (its planning commit). Its result
-  is in `internal/status.md`: a `pure` function that is called or has a contract is a Viper function with its
-  definition check, applications stand in checks, contracts, calls and loop invariants, and the exact sum verifies.
-  `build/m4.5e1d/` in that worktree holds the five audit reports, every agent's reports and state files and the
-  orchestrator's state; the audit worktree `.claude/worktrees/m4.5e1d-audit` (detached) goes with it (§2).
-- **Owner rules from this session:** every test runs on the x86-64 box, not split with the Mac (unless the Mac is
-  much faster for that run); several agents may use the box at once, each in its own lane; fewer intermediate checks
-  (§6, §8's standing answers).
+- **M4.5e1d** (2026-11-24/25; record 0062, accepted) is done, **on `main` and pushed**: `main` = `origin/main` =
+  `68384d1` (a fast-forward of `m4.5e1d-pure-functions`, no merge commit) plus this planning's commit. Its result
+  is in `internal/status.md`. Its worktrees `.claude/worktrees/m4.5e1d` and `.claude/worktrees/m4.5e1d-audit` and
+  its branch still exist (§2); `build/m4.5e1d/` in that worktree holds the five audit reports, every agent's
+  reports and the orchestrator's log, and goes with it (the timeline that matters is kept in M4.5e1e1's plan,
+  section 3).
+- **M4.5e1e is two sessions** (owner, 2026-11-25, question 290): the planning's surveys put it at 3,800–7,200
+  `src/` lines, more than one session. **M4.5e1e1** (arrays of scalars in structures and static storage; record
+  0063) is next: `.claude/plans/m4-5e1e1-arrays-of-scalars.md`, planned in full for the ensemble, 2,340–4,475
+  lines for its Parts A–D and 600–1,050 more for Part E (structure values with array members: question 291),
+  which runs in e1e1 only under its split point 2. **M4.5e1e2** (arrays of structures and arrays of arrays) has
+  its scope and inputs in that plan's section 14 and plans briefly after e1e1.
+- **Two process changes from the owner (2026-11-25):** a question goes to the Fable advisor first and to the
+  owner only if it is still open (§8); a session's plan carries a test budget, and a run that is not in it is not
+  made (§6; the plan's section 3).
 - **The box:** `CERASTES_LONG=1 scripts/check.sh` all green on `2fc6a21` (2026-11-25, 50 min, 16,000 tests, the long
-  tier ran; `internal/status.md` has the numbers). `~/cerastes-s8/p-ubuntu-26.04` is detached at `2fc6a21` and keeps
-  `e1d-check.log`; this session's lanes are `~/cerastes-e1d/` (§2 step 4).
-- **CI:** unchanged (question 176 the owner's). The push runs the PR tier over e1d's tests for the first time; the
-  harness now caps Silicon at 16 provers (question 286), which changes no outcome.
+  tier ran). `~/cerastes-s8/p-ubuntu-26.04` is detached at `2fc6a21` and keeps `e1d-check.log`; e1d's lanes are
+  `~/cerastes-e1d/` (§2 step 3), which e1e1's Step 0 copies if they are still there.
+- **CI:** unchanged (question 176 the owner's). The harness caps Silicon at 16 provers (question 286).
 - **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website `45a3d2f` and **the EDG pin** `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Review** status's deviations and §8's open questions 287–289 (each has a recommended answer).
-2. **Merge and push:** merge `m4.5e1d-pure-functions` into `main` (e1c's pattern: a merge commit), then push `main`.
-3. **Remove** the worktrees `.claude/worktrees/m4.5e1d` and `.claude/worktrees/m4.5e1d-audit`, then the branch
-   `m4.5e1d-pure-functions`; the local refs `refs/tmp/e1d-*` (snapshots) go with the worktree's repository
-   (`git update-ref -d` each, or leave them).
-4. **The box:** `~/cerastes-e1d/` (lanes `base`, `work`, `audit`, containers `cerastes-e1d-*`, image
-   `cerastes-e1d:26.04`) may be removed (`docker rm -f cerastes-e1d-base cerastes-e1d-work cerastes-e1d-audit`, `rm -rf
-   ~/cerastes-e1d`, `docker rmi cerastes-e1d:26.04`), or kept as the next session's lanes (§6).
-5. **CI** (question 176): unchanged.
-6. **Next session** (`plan.md`'s M4.5 table): M4.5e1f (short: questions 238 and 242, from S45 (r), §3 "M4.5e1f"),
-   M4.5e1e (arrays in aggregates and storage; P82 and S47, then it plans again) or M4.5e2 (pointer arithmetic, with
-   e1c's cut 1 and §3's notes from e1c and e1d). Each plans with `plan.md`'s opening prompt (plan mode). Questions
-   start at 290.
+1. **Review** questions 292–299 in §8: each is a default M4.5e1e1's plan builds on, fail closed, with its
+   alternative. An answer changes a row of the plan, not the plan; unanswered, they stand.
+2. **Push** `main` (this planning's commit), so that M4.5e1e1 branches from `origin/main`.
+3. **Remove** e1d's worktrees `.claude/worktrees/m4.5e1d` and `.claude/worktrees/m4.5e1d-audit`, then the branch
+   `m4.5e1d-pure-functions`; the local refs `refs/tmp/e1d-*` go with the worktree's repository. On the box,
+   `~/cerastes-e1d/` (lanes `base`, `work`, `audit`, containers `cerastes-e1d-*`, image `cerastes-e1d:26.04`) may
+   be removed, or left for e1e1's Step 0 to copy (§6).
+4. **CI** (question 176): unchanged.
+5. **Start M4.5e1e1** with this opening prompt. It replaces `plan.md`'s general one for this session: no plan
+   mode (the plan is complete), and only the records the plan rests on:
+
+   ```
+   You are the orchestrator of M4.5e1e1 (arrays of scalars in structures and static storage). Do not use plan
+   mode: the plan is complete. Read CLAUDE.md, .claude/plans/m4-5e1e1-arrays-of-scalars.md (all of it), the
+   M4.5e1d entry of internal/status.md, internal/handoff.md §1, §2, the rules of §4, §6 and §8, and decision
+   records 0059, 0060, 0043, 0044, 0041, 0028 (items 1, 2, 5, 11 and 16), 0024 (item 6), 0037 (items 6-8),
+   0061 (items 1 and 3), 0062 (item 4) and 0012 (item 11) (not the rest of internal/decisions/). Then execute the plan from its section 5. Use the
+   ensemble exactly as its section 2 assigns it: edg-backend, il-analyst and test-mutator (Sonnet) and the
+   soundness-auditor (Opus) from .claude/agents/, and the Fable advisor. Keep to the plan's test budget
+   (section 3): run no test it does not list, and every test run goes to the x86-64 box. Take every question,
+   yours or an agent's, to the Fable advisor first; stop and ask me only for what the plan's section 12 says is
+   mine, or what the advisor cannot settle, and log each answer the advisor settles in internal/handoff.md §8.
+   ```
+6. **Or another session first** (`plan.md`'s M4.5 table): M4.5e1f (short: questions 238 and 242, from S45 (r), §3
+   "M4.5e1f"; it may run before or after e1e1, whose plan holds either way) or M4.5e2 (pointer arithmetic; its
+   `malloc(n * sizeof(struct S))` waits for M4.5e1e2). Each plans with `plan.md`'s opening prompt. Questions
+   start at 300.
 
 ## 3. Open notes, by the session that consumes them
 
@@ -59,7 +80,11 @@ Notes that a session consumes move into its plan's "Inputs".
 - **M4.5e2:** applications under a quantifier's binder and a `cerastes_forall` naming a function with a contract
   (questions 265, 266); `old` of an application; pointer-argument forms beyond a parameter, a pointer variable or a
   local array (`&a[1]`, `p + 1`); an application over a range of pointer elements in a `check` or a loop invariant
-  (R3-S2's rejection); R4-S5 if question 287 places it there.
+  (R3-S2's rejection); **R4-S5** (question 287, placed here by the owner: a loop that fills a `must_init` range
+  while its invariant applies a pure function over the part not yet filled times out, exit 3, instead of
+  reporting `uninitialized`; fail closed; il-analyst-3's report 8 found the `uninitialized` row itself fails in
+  11 s and the time is Silicon going on past it; fixed with range atoms in loop invariants and the loop's flag
+  rows).
 - **M4.5f1:** a `cerastes_forall` inside a called `pure` body, calls in a `decreases`, the atoms a `pure` function's
   contract refuses (`owns`, `owns_range`, `live`, conditional atoms; any atom in its `ensures`), pure functions over
   predicates.
@@ -154,7 +179,8 @@ worktree's `build/m4.5e1b/` and are gone with it; record 0060's header digests e
 - M4.5e2: an atom on one element (236); a range atom written in a loop invariant (237); the assigned range parameter's
   false alarms (`range_loop_pin_assigned_param.c`: a read through `p = &p[1]` in a loop is `lifetime`; a call through a
   copy of the original pointer in such a loop is a false `permission`, audit round 4 `c/d2c.c`); ranges whose base is
-  not a pointer parameter (results, globals, loaded pointers; members: e1e); counts and guards of range atoms that read
+  not a pointer parameter (results, globals, loaded pointers, members; M4.5e1e1 gives a global array and an array
+  member their whole-array atoms, and a range on part of one stays here); counts and guards of range atoms that read
   memory; partnerless `ensures` ranges and `ensures` ranges with another count; `owning(n)` beyond parameters; `&p[e]`
   and `p + i` in contracts. [record 0060 item 1]
 - M4.5e1f: questions 238 and 242, in the block below.
@@ -219,10 +245,9 @@ section 10)
   Viper flips over e1b's range calls.
 
 **From M4.5e1a, for later sessions:**
-- e1d: moved into its plan's section 12 (the lint's `HEAP_READ_RE` and a heap-reading application; e1c's reader of a
-  `pure` body, `f__wf` variant M and S45 (d)'s row (7); question 252).
-- e1e: `is_global_ref` and `inv_place_disjunct` treat any `loc(GB_…, i)` as one place (wrong once a global has several
-  slots); an array member decaying to a pointer is an escape of its struct local (0056 item 11). [e1 planning]
+- e1e1: moved into its plan's sections 4 and 13 (the note on `is_global_ref` and `inv_place_disjunct` is corrected
+  there: the shortcut fires for slot 0 only, and an array global needs an interval hit; the escape scan already
+  treats an array member used as a value as an escape of its struct local). [e1 planning; e1e's planning]
 - M4.8: a pointer local the loop reassigns has no loop place (`*pk` fails as for scalars, and `pk[i]` adds `lifetime` and
   `out-of-bounds`); three rows share the message "holding something other than what it began with" and no test isolates
   `flag_follows`' row (`lower.cpp` near 17943 at `ba3034b`); `split_candidates` splits an array cell against its first
@@ -231,7 +256,11 @@ section 10)
   (`-Wgnu-alignof-expression`), as before e1a; `register` without `&` stays accepted. Array designators wait for an EDG
   change that keeps the designator's expression (question 234). [round 3, item 1; round 1, B1]
 
-**M4.5e2 Pointer arithmetic** (needs e1a and e1b; e1e for arrays of structures on the heap)
+**M4.5e1e2 Arrays of structures and arrays of arrays:** its scope, its inputs and the survey facts in hand are
+section 14 of `.claude/plans/m4-5e1e1-arrays-of-scalars.md`; M4.5e1e1's handoff adds what it cut or moved (its
+Part E under split point 2, cuts 3–7, questions 292–294) and S47 (x)'s two verdicts.
+
+**M4.5e2 Pointer arithmetic** (needs e1a and e1b; e1e2 for arrays of structures on the heap)
 - Signed/unsigned and enumeration variants through `void*` cannot be written [M4.5a]; accepted completeness gap for
   its relational comparisons: `&s.x < &s.y` is reported, since members are different blocks [M4.5a].
 - `vlibc_realloc`, `vlibc_aligned_alloc`, `vlibc_free_sized`, `vlibc_free_aligned_sized` get contracts with their
@@ -572,11 +601,13 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
 - **Team:** three Sonnet agents with disjoint files (edg-backend: `src/backend`, `src/driver`, build; il-analyst:
   probes, IL evidence, Silicon spikes, `src/vir` + `src/viper`; test-mutator: tests, harness, compiler matrices,
   `mutate.py`, `lint_viper.py`) and the Opus soundness-auditor (one round per diff plus a re-audit of blocking
-  fixes; should-fix items not taken go to §3). The orchestrator is Opus and may consult a Fable advisor (owner,
-  2026-11-10). **A session's plan assigns the work** (owner, 2026-11-11: the orchestrator does not decide the
-  ensemble): section 2 of M4.5e1b's, M4.5e1c's and M4.5e1d's plans is the model. At most three Sonnet agents are alive at
+  fixes; should-fix items not taken go to §3). The orchestrator is Opus and consults a Fable advisor (owner,
+  2026-11-10); **from M4.5e1e1 every question goes to the advisor first, and to the owner only if the advisor
+  cannot settle it** (owner, 2026-11-25; §8). **A session's plan assigns the work** (owner, 2026-11-11: the
+  orchestrator does not decide the ensemble): section 2 of M4.5e1b's, M4.5e1c's, M4.5e1d's and M4.5e1e1's plans is
+  the model. At most three Sonnet agents are alive at
   once. edg-backend and the test-mutator are resumed between tasks (SendMessage); the il-analyst is replaced by a
-  fresh one after the spikes and wherever the plan says (`lower.cpp` is 21,675 lines), so a session may spawn five. `lower.cpp`
+  fresh one after the spikes and wherever the plan says (`lower.cpp` is 23,269 lines), so a session may spawn five. `lower.cpp`
   and the VIR files have one holder at a time, with a commit or a snapshot between; an agent that needs the file
   while another holds it asks the orchestrator. Each report also goes to `build/<session>/<role>-report-<n>.md`.
 - **While working:** single-file runs (`build/cerastes verify` directly: `run_tests.py` locks `build/vpr`); builds
@@ -585,12 +616,19 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   takes hours we should change our future work to run it less"; targeted runs and the neutrality regeneration
   before it), **on the x86-64 box only, never the Mac** (owner, 2026-11-09: "limit to just the linux because it's
   much faster, and doesn't lock up the local machine"): the branch as a git bundle into S8's `ubuntu-26.04`
-  container, `~/cerastes-s8/p-ubuntu-26.04`, then `scripts/check.sh` there. The Mac keeps its targeted runs.
+  container, `~/cerastes-s8/p-ubuntu-26.04`, then `scripts/check.sh` there. Every other test run is on the box too
+  (owner, 2026-11-24; §6): the Mac builds to compile.
+- **A test budget** (owner, 2026-11-25: "I believe a wasteful amount of testing is occuring and these sessions are
+  taking 10-12 hours each. If that's needed so be it"). A session's plan lists every test run with its reason
+  (M4.5e1e1's section 3 is the model), and a run that is not listed is not made: byte identity of the kept Viper
+  (`vprdiff.py`) stands in for re-running a test; a new test runs once, at its part, timed on the box; no full
+  `run_tests.py` outside the one `check.sh`; spike fixtures and test files are capped. Never cut: invariant 2's
+  pairs, the audit of each `src` commit, the neutrality gate, the one full check.
 - **x86-64:** the EDG suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes
   to `matt@clang4.cpp.al` automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the
   fallback when the host is down).
-- **Records and plans:** a record takes the next free number when it is written (0061 is M4.5e1c's; 0062 is the
-  next, M4.5e1d's unless M4.5e1f runs first). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
+- **Records and plans:** a record takes the next free number when it is written (0062 is M4.5e1d's; 0063 is the
+  next, M4.5e1e1's unless M4.5e1f runs first). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
   protocol"); a sub-session that plans again after its spikes saves that plan the same way.
 - **What a worktree takes with it** (owner, 2026-11-09, question 193): session tools and spike summaries are
   committed. `vprdiff.py` and `regen.py` were lost with d2b1's worktree and again with d2b2a's, and so was S39's
@@ -602,7 +640,7 @@ Finished sessions: `plan.md`'s Done table has a row each, `.claude/plans/` their
 `internal/status.md` their results and the commits it names. The warning sweep (was M4.4e) is an M8 entry in
 `plan.md`.
 
-**Pending side sessions** (none blocks M4.5e1d):
+**Pending side sessions** (none blocks M4.5e1e1):
 - **The EDG box session** (§4.1, pending since M4.2c).
 - **The vlibc `<stdlib.h>` shim session** (owner, 2026-11-09, question 170: "Follow recommendation using a vlibc
   session"). With clang 20 and 18, vlibc's `<stdlib.h>` shim meets glibc's declarations with an incompatible linkage
@@ -645,39 +683,41 @@ M4.5e2 replaces it as a benchmark); 14 of the 22 files run VeriFast with `-disab
 need `requires` bounds; `functions.c`'s predicate families and constructors, consumed fractions, backward `goto` and
 `open_module` are M8 entries.
 
-**Finished: b1a to e1c** (records 0032–0061). `plan.md`'s Done table has a row each and `.claude/plans/` their
+**Finished: b1a to e1d** (records 0032–0062). `plan.md`'s Done table has a row each and `.claude/plans/` their
 plans; the narrative of their splits is in `git show 2430529:internal/handoff.md` §4.2. Each session rejects what a
 later one makes precise (fail closed). **Sizes against estimates**, for the next plans: M4.5d2b2b landed about 2,750
 `src/` lines against 1,700–3,300; M4.5d2b2c about 900 lines of `lower.cpp` against 295–495 (the owner's in-session
 answers, questions 206–214); M4.5d2b2d about 1,960 against 740–1,170 (the audits' fixes); M4.5e1a +1,943/−93 without self-tests (+3,457 with
 them) against 2,200–3,450; M4.5e1b +2,754/−155 (+6,289 with them) against 2,050–3,050; M4.5e1c +3,514/−294 (+6,038
-with them) against 1,500–2,200, with one cut. M4.5e1d's estimate, 3,350–5,000, comes from a design check against
-`lower.cpp` calibrated on what e1c landed.
+with them) against 1,500–2,200, with one cut; M4.5e1d +3,654/−195 (+5,721 with them) against 3,350–5,000 (a design
+check against `lower.cpp` calibrated on what e1c landed), with no cut, in 11.5 hours. M4.5e1e1's estimate
+(2,340–4,475 for Parts A–D, 600–1,050 more for Part E) comes from three read-only surveys compared with the
+commits of e1a, e1b, c1, c2a and b2a.
 
 **Pre-approved** (owner): a session may retire or re-expect exactly the rejection pins its plan lists (its "Flips"),
 and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:`
 comment name the new session.
 
-**M4.5e1 Arrays** (planned 2026-11-11; `.claude/plans/m4-5e1-arrays.md`; questions 226–228). Six sub-sessions
-(e1f added at e1c's planning, 2026-11-23), each a session of its own with its record, twins, docs, audits and one
-box `check.sh`:
+**M4.5e1 Arrays** (planned 2026-11-11; `.claude/plans/m4-5e1-arrays.md`; questions 226–228). Seven sub-sessions
+(e1f added at e1c's planning, 2026-11-23; e1e cut in two at its own, 2026-11-25, question 290), each a session of
+its own with its record, twins, docs, audits and one box `check.sh`:
 
 | Sub-session | Scope | Plan |
 |---|---|---|
 | **e1a** (done 2026-11-11, record 0059) | local arrays as blocks, `a[i]`, `&a[i]`, `p[i]`, the decay, initializers, scope exits, the marked range rows, `out-of-bounds`, loops over arrays, sequencing, the `offset_of == 0` backstops, `sizeof(a)` | section 3; `internal/status.md` |
 | **e1b** (done 2026-11-12, record 0060) | `owns_range`, `reads_range`, element reads in contracts, array parameters, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, the `carrays.c` port | `.claude/plans/m4-5e1b-ranges-in-contracts.md`, complete: P79 and S44 with decision tables, no second planning |
 | **e1c** (done 2026-11-24, record 0061) | `cerastes_forall` in contracts, loop invariants and checks; the fill loop, max, the `carrays.c` port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260) | `.claude/plans/m4-5e1c-quantifiers.md`; `internal/status.md` |
-| **e1d** (planned in full 2026-11-24, record 0062) | read `pure` functions as Viper functions with their contracts and definition checks, self-recursion with `decreases`, calls of `pure` functions in checks, contracts and loop invariants, the exact sum | `.claude/plans/m4-5e1d-pure-functions.md`, complete: P81 and S46 with decision tables, no second planning |
-| **e1e** | array members, arrays of structures, 2-D arrays, global and `static` arrays, array compound literals, 0024 item 6 lifted for array types | section 7: P82 and S47, then plan again |
+| **e1d** (done 2026-11-25, record 0062) | read `pure` functions as Viper functions with their contracts and definition checks, self-recursion with `decreases`, calls of `pure` functions in checks, contracts and loop invariants, the exact sum | `.claude/plans/m4-5e1d-pure-functions.md`; `internal/status.md` |
+| **e1e1** (planned in full 2026-11-25, record 0063) | arrays of scalars as globals and `static` locals, as members of structures, as compound literals; 0024 item 6 lifted for array types of scalars; structure values with array members (question 291, its Part E) | `.claude/plans/m4-5e1e1-arrays-of-scalars.md`, complete: P82 and S47 with decision tables, a test budget, no second planning |
+| **e1e2** | arrays of structures (`p[i].x`, ranges over structures), arrays of arrays (`int m[2][3]`, `int a[][3]`), `forall` over them; what e1e1 cuts or moves | section 14 of e1e1's plan: scope and inputs; a short planning after e1e1 |
 | **e1f** | range call rows: the minimum read amount over a range (238), `owns_range`'s row order D (242) | section 10: planned after e1c, from its spike S45 (r); §3 "M4.5e1f" |
 
-A sub-session marked "plan again" starts outside plan mode with its Step 0, Step 1, probes and spikes as its section
-gives them (they change no `src/`), commits their results to `internal/il-inventory.md`, then plans the encoding
-steps from them and from the as-built facts of the sub-sessions before it. Only e1e still does: the owner had e1b,
-e1c and e1d each planned in full before its spikes (2026-11-11, 2026-11-23, 2026-11-24), each probe and spike with a
-table of what is built per outcome.
+No sub-session plans again after its spikes any more: the owner had e1b, e1c, e1d and e1e1 each planned in full
+(2026-11-11, 2026-11-23, 2026-11-24, 2026-11-25), each probe and spike with a table of what is built per outcome.
+e1e2 has a short planning of its own after e1e1, from e1e1's as-built names and S47 (x)'s verdicts.
 
-**M4.5e2 Pointer arithmetic** (needs e1a and e1b; may run before e1c–e1e). `p + i`, `p - i`, `p - q`, relational
+**M4.5e2 Pointer arithmetic** (needs e1a and e1b; may run before e1e and e1f; its `malloc(n * sizeof(struct S))`
+waits for e1e2). `p + i`, `p - i`, `p - q`, relational
 comparisons within one object, `malloc(n * sizeof(T))`, `calloc(n, …)`, `realloc`; relational comparisons and
 `p - q` under `pointer-comparison` (the category and the `==` exception of 0028 item 3 landed in M4.5b1b);
 `out-of-bounds` and a one-past-the-end `&a[n]` are already e1a's. Port: an array insertion sort (in place of
@@ -894,9 +934,18 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   per agent that builds; a neutrality baseline and its comparison on the same host (the Mac and the box differ by
   glibc parameter names and absolute paths). `tail` there is uutils (`tail -n 3`, not `tail -3`). The box's Z3 is
   3–6.5 times slower than the Mac's per query on a hard refutation, while its 172 threads win on suites.
+- **Where M4.5e1d's 11.5 hours went** (its orchestrator's log; M4.5e1e1's plan, section 3, has the times): 4 h 25
+  came after the last part was built and proved. A full `run_tests.py` on the Mac (15,982 runs, 1 h 50) that the
+  box check then repeated; each part's run repeating the earlier parts' tests (333, 436, 483 runs) although
+  `vprdiff` had shown their Viper byte-identical; two tests found slow on the box only at hour 9, because the
+  Mac's Z3 is 3–6.5 times faster per hard query; a third validation round after the last audit. **From M4.5e1e1 a
+  plan carries a test budget** (§4): the box's lanes from Step 0, a new test timed there at its first run, one
+  preflight built from `check.sh`'s own steps, then the box check.
 - **What keeps a session short:** fixed scope with stop rules; the owner's decisions and pre-approved expectation
   changes asked up front, each with a concrete default; the record written while the probes' results come in, audited in
-  the background; three agents with disjoint files; single-file runs during the work.
+  the background; three agents with disjoint files; single-file runs during the work; questions to the advisor
+  first, the asking agent going on with what the question does not block (M4.5e1d waited on the owner fourteen
+  times, questions 273–286).
 - **Worktree.** Each session creates its own worktree, `.claude/worktrees/<session>` on its branch from `origin/main`
   (`git worktree add .claude/worktrees/m4.5b2b -b <branch> origin/main`; the old `.claude/worktrees/m4.2b1` is gone since
   M4.5b2b), with its submodules cloned with `--reference` to the main checkout's module stores (`third_party/edg`,
@@ -1013,7 +1062,8 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-Questions 287–289 are open (below). An open question has a recommended answer and is answered inline, as before. Answered
+No question is open. Questions 292–299 (at the end) are defaults that M4.5e1e1's plan builds on, each fail closed,
+for the owner's review; an answer is written inline, as before. Answered
 questions 1–246 are recorded in the decision records, the session plans, `internal/status.md` and the earlier
 handoffs:
 `git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
@@ -1021,7 +1071,7 @@ handoffs:
 asked: their answers are below), `git show bdf3581:internal/handoff.md` §8 has 238–246 as asked, with the
 owner's inline answers to 238–242, and `git show 9ab9a1e:internal/handoff.md` §8 has 247–263 as asked. Records
 0055–0058 hold what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3. Questions 264–272 are
-M4.5e1d's planning's and 273–289 its session's, below.
+M4.5e1d's planning's, 273–289 its session's and 290–299 M4.5e1e's planning's, below.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).
@@ -1034,111 +1084,87 @@ M4.5e1d's planning's and 273–289 its session's, below.
 - **No test runs while a fix is queued** (owner, 2026-11-10, M4.5d2b2c): "For all of these fix now items you should
   discontinue the testing runs since we know that things are going to change." Stop any suite or timing run on a build
   a queued fix will replace; the implementer's own proof of its fix still runs; one test run after the last fix.
-- **A question stops the work it blocks** (owner, 2026-11-24, M4.5e1d's planning: "If you or any of the
-  implementers have questions stop and ask me for an answer or guidance"): a session does not answer for the
-  owner. M4.5e1c's overnight rule (build the recommended, fail-closed answer and log it here for review) applies
-  only when the owner gives it for that session.
+- **Questions go to the Fable advisor first** (owner, 2026-11-25, M4.5e1e's planning: "If you or the subagents
+  have questions first consult the Fable advisor, and then if you still need an answer or guidance you may stop
+  and ask me"). It replaces 2026-11-24's "stop and ask me" for every question. An agent's question goes to the
+  orchestrator, who takes it to the advisor with the facts and a recommended answer; the agent goes on with what
+  the question does not block. **The advisor settles** a choice inside the record's stated rules, a choice
+  between fail-closed alternatives, test mechanics, message wording and a question-160 correction, a cut on the
+  plan's list and a split point under the plan's rules. **Still the owner's, and the work it blocks waits:** an
+  `expect:` change outside the plan's Flips and question 160 (invariant 1), any existing program's Viper, map or
+  golden changing, a cut the plan protects or does not list, a soundness finding with no fail-closed fix, the
+  twelve-hour cap, and what the advisor says is the owner's. (The list of what the advisor settles is the
+  planner's reading of the owner's sentence, for review.) **Each answer the advisor settles is logged here**,
+  numbered on, the soundness statement first, with the alternative. M4.5e1c's overnight rule (build the
+  recommended, fail-closed answer and log it here) applies only when the owner gives it for that session.
+- **285, as the standing rule** (question 299): a test that is slow on the box because of what it must refute
+  goes to `tests/long/` with a short default-tier twin.
 
 Other answers that steer a later session are in that session's notes (§3, §4) or its plan: 66, 79, 189, 194, 196,
 212, 215, 216, 222, 225, 246, 249, 262 and 267 (M4.8), 78 (M4.6), 120, 229, 236, 237, 253, 255, 259, 260, 261,
-265 and 266 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
+265, 266 and 287 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 290–299 (M4.5e1e1's plan, sections 1 and 15), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
 256–258 and 263 (M4.5e1c's plan and record 0061), 238 and 242 (M4.5e1f), 252 and 264–272 (M4.5e1d's plan), 269
 (M6), 230, 234 and 241 (M8).
 
-**Answered 224–237** (2026-11-11: before and at M4.5e1's planning, around M4.5e1a, and at M4.5e1b's planning and
-in its session): recorded in the headers of records 0059 and 0060 and in section 1 of
-`.claude/plans/m4-5e1-arrays.md` and of `.claude/plans/m4-5e1b-ranges-in-contracts.md`; the digests that stood here
-are in `git show bdf3581:internal/handoff.md` §8. M4.5e1a's and M4.5e1b's listed deviations (their status
-entries) stand: the owner answered the questions beside them and wrote nothing about them.
-
-**Answered after M4.5e1b (2026-11-12, inline; the owner's words; the questions as asked are in `git show
-bdf3581:internal/handoff.md` §8):**
-- **238** (`reads_range`'s ghost amount from the range's first cell: a pinned false `permission` for a caller whose
-  holding over the range is uneven): "This sounds like unsoundness, so we need to relook this case and how we can
-  fix it." Relooked at M4.5e1c's planning (§3, "M4.5e1f"): it is a false alarm, fail closed, not unsoundness; the
-  owner then placed the fix (below).
-- **239** (the `must_init` loop filler pinned until e1c): "Follow recommendation."
-- **240** (array-parameter shapes the compilers warn about rejected, by the matrix): "Follow recommendation."
-- **241** (VLA parameters on a bodiless declaration rejected until M8): "Follow recommendation."
-- **242** (the built row order at a call; order D not built): "Follow recommendation, but add where we are going to
-  address this, because it seems incorrect." Placed at M4.5e1c's planning (below).
-- **243–246** (built overnight under the owner's instruction of 2026-11-11: Part E kept whole; a local array's place
-  frames `q[i]` read through a pointer in an invariant; the back-edge rows of read range places in the sum form;
-  audit round 4's S1 listed for M4.8): the owner answered 238–242 beside them and wrote nothing about them, so
-  they stand unless the owner says otherwise.
-
-**Answered at M4.5e1c's planning and in M4.5e1c (2026-11-23/24): 238 and 242's placement, 247–255.** Record
-0061's header holds each with the owner's words, and `git show 9ab9a1e:internal/handoff.md` §8 has them as asked.
+**Answered 224–286** (2026-11-11 to 2026-11-25: M4.5e1's planning and sessions e1a–e1d). Each is recorded with
+the owner's words in the header of its record (0059 for 224–235, 0060 for 236–246, 0061 for 247–263, 0062 for
+264–286) and in section 1 of its session's plan; the questions as asked, and the digests that stood here, are in
+`git show 68384d1:internal/handoff.md` §8. M4.5e1a's to M4.5e1d's listed deviations (their status entries) stand.
 What still steers a later session:
-- **238 and 242:** the fix of 238 and order D are built in M4.5e1f, from e1c's spike S45 (r) (§3, "M4.5e1f").
-- **249** (nested `forall`, `!forall`, `exists`): "Keep rejected until M4.8 and document that this needs to be
-  handled in M4.8" (§3; `plan.md`'s M4.8 row).
-- **253** (the multi-class quantifier's one-term false alarm): "M4.5e2 lifts it" (the recommendation was M4.8).
-- **255** (four fail-closed narrowings): a `forall` on the left of `||` to M4.8; the multi-class guard that reads
-  memory, arithmetic over two classes and a converted index to M4.5e2.
-- **252** (a contract on a `pure` function): M4.5e1d reads it (its plan, record 0062 item 2); at a `forall` it stays
-  rejected (265).
+- **238 and 242** (`reads_range`'s amount from the range's first slot, a false alarm and not unsoundness; row
+  order D): both are built in M4.5e1f, from e1c's spike S45 (r) (§3, "M4.5e1f").
+- **249, 255 and 262** (nested `forall`, `!forall`, `exists`; a `forall` on the left of `||`; a `forall` only as a
+  top-level conjunct in a loop invariant or a `check`): M4.8 (§3; `plan.md`'s M4.8 row).
+- **253, 255, 259, 260, 261, 265 and 266** (the multi-class one-term false alarm; a multi-class guard that reads
+  memory; the narrowings in loops and checks; `cerastes_old` in loop invariants; arithmetic over a non-first
+  class's read; a `forall` naming a function with a contract; calls under a binder): M4.5e2 (§3). 266 also sends
+  a `forall` inside a called `pure` body and calls in measures to M4.5f1, and mutual recursion to M4.5f2.
+- **267 and 279** (a caller learns an application's range only from the function's `ensures`; two facts left
+  out of `f__wf`): M4.8 (§3, "From M4.5e1d"). **269** (a `pure` function with no body in the unit): M6.
+- **285 and 286** (two tests over 120 s on the box moved to `tests/long/`; Silicon capped at 16 provers, record
+  0011 item 11): 285 is the standing rule above.
 
-**Answered at M4.5e1d's planning (2026-11-24): 256–263, built overnight in M4.5e1c as recommended.** The owner:
-"All stand as built". Each as asked, with its alternative, is in `git show 9ab9a1e:internal/handoff.md` §8;
-record 0061 holds what was built.
-- **256** split point 1: e1c continued to Part C under a ceiling. **263** Part C passed that ceiling by audit round
-  3's fixes.
-- **257** a read class read in both states has one trigger set per state in `f__wf` (0061 item 7).
-- **258** the lint admits earlier quantified invariant clauses in a loop obligation's guard (items 9, 11).
-- **259** narrowings in loops and checks (item 1): M4.5e2 lifts them.
-- **260** cut 1: `cerastes_old` in loop invariants moved to M4.5e2 (item 12; §3 "M4.5e2").
-- **261** in a loop invariant or a `check`, arithmetic over a read of a class other than the first is rejected:
-  M4.5e2.
-- **262** in a loop invariant or a `check` a `forall` stands only as a top-level conjunct (a `check` is split per
-  conjunct): M4.8, with 249's positions.
-- **254's second case:** `forall_invariant_unframed_read.c`'s two errors are expected (item 9).
+**Answered after M4.5e1d (2026-11-25, inline; the owner's words): 287–289,** each "Follow recommendation". The
+questions as asked are in `git show 68384d1:internal/handoff.md` §8.
+- **287** (fail closed: exit 3, never "verified"; audit round 4's R4-S5: a loop that fills a `must_init` range while
+  its invariant also applies a pure function over the part not yet filled times out instead of reporting
+  `uninitialized`): **M4.5e2** fixes it, with range atoms in loop invariants and the loop's flag rows (§3 "M4.5e2";
+  `plan.md`'s e2 row).
+- **288** (test mechanics): `tests/memory/negative/pure_sum_caller_write_between_short.c` (the two-element twin
+  question 285's move made necessary) is kept.
+- **289** (docs): the tutorial's `arrays_sum_offbyone.c` keeps `n < INT_MAX` in its `requires`.
 
-**Answered at M4.5e1d's planning (2026-11-24), for M4.5e1d** (its plan, sections 1 and 13; record 0062's header
-will quote them; each the recommendation except 271 and 272):
-- **264** A wrong `ensures` on a `pure` function and a recursive call whose measure does not decrease are reported
-  from Viper's own check of the function, mapped to C lines ("Viper's own check, mapped"); every other obligation is
-  an explicit row.
-- **265** A `cerastes_forall` that names a function with a contract: "Keep rejected"; M4.5e2 lifts it with calls
-  under a binder.
-- **266** A call under a quantifier's binder (M4.5e2), a `cerastes_forall` inside a called `pure` body (M4.5f1),
-  mutual recursion between `pure` functions (M4.5f2) and a call in a `decreases` (M4.5f1): "None: all stay
-  rejected".
-- **267** Outside `f__wf` a caller learns the range of a call's result only from the function's `ensures` (a false
-  alarm otherwise, fail closed): "Accept; M4.8 reviews".
-- **268** Which `pure` functions are read: "Called, or has a contract". **269** A `pure` function with no body in
-  the unit that an annotation calls: "Rejected" (M6's contract manifest). **270** "One session, split points" (on
-  an estimate of 2,000–3,100 lines). (These three were this planning's first questions, numbered here for the
-  record.)
-- **271** Asked again when the design check put e1d at 3,050–4,500 lines (the recommendation was two sessions
-  planned now): "One session, split points". The first split point is expected to be reached; the tree is closed
-  and green there, and the rest can run from the same plan with no second planning.
-- **272** Which of three constructs to leave out to hold the size (the recommendation was all three): "None: keep
-  all three in". A `cerastes_forall` in a `pure` function's contract, arguments that read memory and calls in a
-  `pure` function's own contract are in e1d's scope, as its pre-agreed cuts 2, 3 and 4.
+**Answered at M4.5e1e's planning (2026-11-25), in the question dialog:**
+- **290** M4.5e1e does not fit one session (3,800–7,200 `src/` lines by the planning's surveys; e1d landed 3,654 in
+  11.5 hours). Where is it cut? **"Scalars, then structures"** (the recommendation): M4.5e1e1 is arrays of scalars
+  in new places (global and `static` arrays, array members, array compound literals, array typedefs and
+  `sizeof`), M4.5e1e2 arrays of structures and arrays of arrays. The alternatives were `plan.md`'s "aggregates,
+  then storage" (question 233) and one session with split points.
+- **291** (rejecting is fail closed) Should a whole-structure copy of a structure with an array member (`t = s;`,
+  `struct S t = s;`) verify in M4.5e1e, by-value passing staying rejected until M4.5f3? **"Copy and by-value
+  now"**: both are in M4.5e1e (the recommendation was the copy as a last part and first cut). Built as item 13
+  and Part E of M4.5e1e1's plan: the copy through a trusted `copy_arr_<t>`, by value as one Viper value per
+  element. Part E runs in e1e1 only under its split point 2 (Parts A–D under 3,300 lines and 7.5 hours);
+  otherwise it opens M4.5e1e2, still in M4.5e1e.
 
-**Answered in M4.5e1d (2026-11-24/25): 273–286.** Record 0062's header holds each with its reason; the status entry
-lists them. Each was the recommendation except **285** (two tests over 120 s on the box: "Move to tests/long/"; the
-recommendation was two-element programs). What steers a later session: 279 and 267 (M4.8, §3 "From M4.5e1d"); 286
-(the prover cap, record 0011 item 11); 285 (the long tests, §3).
+**Defaults M4.5e1e1's plan builds on, for the owner's review** (the planner's and the advisor's; each fail
+closed: a rejection with a diagnostic and a pin, never a wrong proof; answer inline, or leave them):
+- **292** Heap storage of a structure with an array member (`malloc(sizeof(struct S))`, `owns_block`, `free`) is
+  rejected in e1e1 and lifted by M4.5e1e2. Alternative: a sixth part in e1e1 (about 200–350 lines).
+- **293** A structure with both an array member and an `owning` or marked member is rejected in e1e1 (M4.5e1e2).
+  Alternative: accepted now, the eight owner sites of the plan's site table audited for it.
+- **294** `ref_to_uninit` and `must_init` on a pointer to a structure with an array member are rejected in e1e1
+  (M4.5e1e2). Alternative: per-element flag rows now.
+- **295** A structure value of more than 64 array elements is not passed or returned by value (M4.5f3: array
+  values as ghost sequences); a copy has no limit. Alternative: another number, or no limit (Silicon then
+  decides by timing out, exit 3).
+- **296** A whole-structure copy needs every element of the source's array members initialized (question 92's
+  rule for members, extended to elements; stricter than C, which lets a partly written buffer be copied).
+  Alternative: the flags follow the copy, element by element.
+- **297** If Silicon does not take the trusted `copy_arr_<t>` (spike S47 (g)), the copy is written element by
+  element under 295's limit, with no trusted method, and a longer copy is rejected (M4.5f3).
+- **298** No new tutorial section in e1e1; M4.5e1e2 completes "arrays in aggregates" and writes it.
+- **299** Question 285's answer becomes the standing rule for a test that is slow on the box because of what it
+  must refute (`tests/long/` with a short default-tier twin), settled with the advisor at its part.
 
-**Open** (each with a recommended answer; answer inline):
-
-- **287** (fail closed: exit 3, never "verified"; audit round 4's R4-S5). A loop that fills a `must_init` range while
-  its invariant also applies a pure function over the part not yet filled (`sum_to(a, n)` beside `s == sum_to(a, i)`)
-  times out on the box (exit 3 at 300 s) instead of reporting `uninitialized`. Il-analyst-3 report 8: the
-  `uninitialized` row itself fails in 11 s; the time is Silicon going on past it (every error is reported), with the
-  failed flags row assumed at the loop head; the same program with the marked `ensures` ended after 1,410 s with the
-  right errors. Fixes: stop a member after an entry `uninitialized` row (a driver retry with one error per member when
-  the first run passes a budget), or assert such a row before the loop instead of as an invariant line (changes the
-  reported rows: a design question). **Recommended: M4.5e2** (it takes range atoms in loop invariants and the loop's
-  flag rows); alternative M4.8.
-- **288** (test mechanics, no soundness question). Question 285's move left `pure_sum_caller.c` without a
-  default-tier error twin (question 207's rule), so `tests/memory/negative/pure_sum_caller_write_between_short.c`
-  (the same program over 2 elements, about 30 s) was added. **Recommended: keep it**; alternative a twin failing
-  for another reason (a count past the array, `precondition`).
-- **289** (docs, no soundness question). The tutorial's failing example `arrays_sum_offbyone.c` bounds `n <
-  INT_MAX` in its `requires` so that `i + 1` cannot overflow and its errors are only the four the text explains.
-  **Recommended: keep it**; alternative drop the bound and show the overflow error too.
-
-The next questions start at 290.
+The next questions start at 300.
