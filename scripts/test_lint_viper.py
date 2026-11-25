@@ -9744,6 +9744,147 @@ class BlockTermRowTests(unittest.TestCase):
         self.some(self.fixture(self.global_method(rows=[bad, *self.rows(b, 4, "requires"), *self.rows(b, 4, "ensures")])), "`old` in a `requires`")
 
 
+class BoundLocalRowTests(unittest.TestCase):
+    """Decision 0063 item 15's bound local: a `Ref` local of a method body assigned exactly `loc(GB_<g>(), 0)` or `loc(member(<chain>, k), 0)` is e1a's array
+    local, and its rows (the pure `assert` rows of a call or a scope exit) are `{ loc(block_of(t), k) } 0 <= k && k < N ==> ...` with N the count the
+    block's length fact states.  The accepting cases are S47's lines (s47_a_global.vpr:65, s47_c_owns_member.vpr:114-115, s47_g_copy_locals.vpr:108's
+    copy of a bound local); every twin breaks one thing: another start, a local bound to another slot, a block outside the grammar, a count that is not
+    the fact's.  The block-term form in a body stays refused (the lowering writes a row in code over the local)."""
+
+    B = BlockTermRowTests
+    A = ArrayGlobalRowTests
+    FLAG = "assert forall k: Int :: {{ loc(block_of({x}), k) }} (({lo} <= k) && (k < {hi})) ==> loc(block_of({x}), k).d_int"
+    RANGE = ("assert forall k: Int :: {{ loc(block_of({x}), k) }} (({lo} <= k) && (k < {hi})) ==> "
+             "(loc(block_of({x}), k).d_int ==> (((-2147483648) <= loc(block_of({x}), k).v_int) && (loc(block_of({x}), k).v_int <= 2147483647)))")
+    ALLOC_S = ["// cerastes:trusted-contract allocation of a local of a struct type", "method alloc_struct_0_S() returns (r: Ref)",
+               *[Check("  " + t, P, "internal") for t in (
+                   "ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)",
+                   "ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)",
+                   *ArrayStructAllocationTests.arr(),
+                   "ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)")],
+               "  decreases _"]
+
+    def rows(self, x, lo=0, hi=4):
+        return [Check("  " + t.format(x=x, lo=lo, hi=hi), A, "internal") for t in (self.FLAG, self.RANGE)]
+
+    def with_body(self, method, body):
+        assert method[-2:] == ["{", "}"], method[-4:]
+        return [*method[:-2], "{", *body, "}"]
+
+    BT = BlockTermRowTests("test_the_rows_of_a_global_array_atom_are_clean")
+
+    def global_case(self, body):
+        return self.BT.fixture(self.with_body(self.BT.global_method(), body))
+
+    def member_case(self, body, lens="(len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)"):
+        return self.BT.fixture(self.with_body(self.BT.member_method(lens=lens), body))
+
+    def alloc_case(self, body):
+        # the allocation's trusted method stands before the method that calls it
+        method = ["method f_loc__3()", Check("  requires " + self.A.facts(), WF, "internal"), "  decreases", "{", *body, "}"]
+        base = self.BT.fixture(method)
+        return [*base[:len(base) - len(method)], *self.ALLOC_S, *method]
+
+    @staticmethod
+    def strict(lines):
+        return GlobalsTests.strict(lines)
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    def test_a_local_bound_to_a_global_array_has_the_rows_over_zero_to_the_count(self):
+        # s47_a_global.vpr:65
+        body = ["  var v_g: Ref", "  v_g := loc(GB_g__1(), 0)", *self.rows("v_g")]
+        self.assertEqual(self.strict(self.global_case(body)), [])
+        # e1a's own start, `offset_of(t)`, is still accepted for the same local
+        e1a = Check("  " + self.FLAG.format(x="v_g", lo="offset_of(v_g)", hi="(offset_of(v_g) + 4)"), A, "internal")
+        self.assertEqual(self.strict(self.global_case(["  var v_g: Ref", "  v_g := loc(GB_g__1(), 0)", e1a])), [])
+
+    def test_a_local_bound_to_a_member_of_a_formal_has_the_rows_over_zero_to_the_count(self):
+        # s47_c_owns_member.vpr:114-115 (there the local's block is `member(p, 1)` of the formal)
+        body = ["  var v_a: Ref", "  v_a := loc(member(p, 1), 0)", *self.rows("v_a")]
+        self.assertEqual(self.strict(self.member_case(body)), [])
+        # a nested chain, the facts stating the nested member's length
+        lens = "(len(member(p, 0)) == 1) && (len(member(loc(member(p, 0), 0), 1)) == 4)"
+        body = ["  var v_a: Ref", "  v_a := loc(member(loc(member(p, 0), 0), 1), 0)", *self.rows("v_a")]
+        nested = self.with_body(self.BT.member_method(lens=lens, rows=self.BT.rows("member(loc(member(p, 0), 0), 1)", 4, "requires")), body)
+        self.assertEqual(self.strict(self.BT.fixture(nested)), [])
+
+    def test_a_local_bound_to_a_member_of_an_allocated_structure_takes_the_count_of_the_allocation(self):
+        # s47_c_owns_member.vpr:98-115, s47_g_copy_locals.vpr: `v_s := alloc_struct_0_S()`, `v_a := loc(member(v_s, 1), 0)`
+        body = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a")]
+        lines = self.alloc_case(body)
+        self.assertEqual(self.strict(lines), [])
+        bad = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a", hi=5)]
+        self.some(self.alloc_case(bad), "is not the `len(...) == N` its block's facts state (4)")
+
+    def test_a_copy_of_a_bound_local_is_not_a_bound_local(self):
+        # the ruling is "assigned exactly `loc(...)`": s47_g_copy_locals.vpr:94 and :108 (`v_sa := v_a`, then rows over `v_sa`) are fixture differences,
+        # refused until lowering is shown to write them (the coordinator's question: should a copy of a bound local count?)
+        body = ["  var v_a: Ref", "  var v_sa: Ref", "  v_a := loc(member(p, 1), 0)", "  v_sa := v_a", *self.rows("v_sa")]
+        self.some(self.member_case(body), "the range does not start at `offset_of(v_sa)`")
+
+    def test_a_declaration_with_its_value_is_an_assignment(self):
+        body = ["  var v_a: Ref := loc(member(p, 1), 0)", *self.rows("v_a")]
+        self.assertEqual(self.strict(self.member_case(body)), [])
+        body = ["  var v_a: Ref := loc(member(p, 1), 1)", *self.rows("v_a")]
+        self.some(self.member_case(body), "is bound to slot 1")
+
+    def test_a_multi_target_call_can_reassign_a_bound_local(self):
+        # `v_a, v_b := f()` assigns v_a something that is no `loc(B, 0)`
+        body = ["  var v_a: Ref", "  var v_b: Ref", "  v_a := loc(member(p, 1), 0)", "  v_a, v_b := f_two()", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+        body = ["  var v_a: Ref", "  var v_b: Ref", "  v_b, v_a := f_two()", "  v_a := loc(member(p, 1), 0)", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+
+    def test_a_local_that_is_an_allocation_result_and_something_else_is_no_root(self):
+        # `v_s := alloc_struct_0_S()` roots the chain only when it is the local's one assignment
+        ok = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a")]
+        self.assertEqual(self.strict(self.alloc_case(ok)), [])
+        twice = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_s := p", "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a")]
+        self.some(self.alloc_case(twice), "is neither `GB_g()` of a declared array global nor `member(<chain>, k)`")
+
+    def test_the_rows_of_a_bound_local_are_refused_when_one_thing_is_wrong(self):
+        def mem(binding, rows, lens="(len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)"):
+            return self.member_case(["  var v_a: Ref", f"  v_a := {binding}", *rows], lens)
+
+        def glob(binding, rows):
+            return self.global_case(["  var v_a: Ref", f"  v_a := {binding}", *rows])
+
+        bound = "loc(member(p, 1), 0)"
+        cases = {
+            "another start than 0 or offset_of(t)": (mem(bound, self.rows("v_a", lo=1)), "the range does not start at `offset_of(v_a)`"),
+            "a start at 0 of a local that is not bound": (mem("p", self.rows("v_a")), "the range does not start at `offset_of(v_a)`"),
+            "a local bound to another slot": (mem("loc(member(p, 1), 1)", self.rows("v_a")), "is bound to slot 1 of `member(p,1)`, not the first slot"),
+            "a local bound to the slot before": (mem("loc(member(p, 1), -1)", self.rows("v_a")), "is bound to slot -1"),
+            "a count past the fact's": (mem(bound, self.rows("v_a", hi=5)), "is not the `len(...) == N` its block's facts state (4)"),
+            "a count short of the fact's": (mem(bound, self.rows("v_a", hi=3)), "is not the `len(...) == N` its block's facts state (4)"),
+            "a computed count": (mem(bound, self.rows("v_a", hi="(2 + 2)")), "is not the `len(...) == N` its block's facts state (4)"),
+            "no length fact for the block": (mem(bound, self.rows("v_a"), lens="(len(member(p, 0)) == 1)"), "no `len(member(p,1)) == N` fact"),
+            "a block outside the grammar (a member of an unknown local)": (mem("loc(member(zz, 1), 0)", self.rows("v_a")), "is neither `GB_g()` of a declared array global nor `member("),
+            "a block outside the grammar (through block_of)": (mem("loc(member(loc(block_of(p), 0), 1), 0)", self.rows("v_a")), "is neither `GB_g()` of a declared array global"),
+            "a block of an undeclared global": (glob("loc(GB_x__9(), 0)", self.rows("v_a")), "is neither `GB_g()` of a declared array global"),
+            "a scalar global's slot as an array": (glob("loc(GB_h__2(), 0)", self.rows("v_a", hi=1)), "is not an array global"),
+            "an array global's rows of another count": (glob("loc(GB_g__1(), 0)", self.rows("v_a", hi=3)), "is not the `len(...) == N` its block's facts state (4)"),
+        }
+        for what, (lines, fragment) in cases.items():
+            with self.subTest(what):
+                self.some(lines, fragment)
+
+    def test_a_local_assigned_two_different_things_is_not_bound(self):
+        body = ["  var v_a: Ref", "  v_a := loc(member(p, 1), 0)", "  v_a := p", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+        body = ["  var v_a: Ref", "  v_a := loc(member(p, 1), 0)", "  v_a := loc(member(p, 0), 0)", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+
+    def test_the_block_term_form_stays_refused_in_a_body(self):
+        # s47_c_owns_member.vpr:71-74 write the rows over `member(p, 1)` itself in the body: lowering writes them over the bound local
+        row = self.A.q("member(p, 1)", 0, 4, "loc(member(p, 1), k).d_int")
+        body = [Check("  assert " + row, A, "internal")]
+        self.some(self.member_case(body), "a quantified `assert` that is not a marked range row of decision 0059 item 7")
+
+
 class ArrayCopyTests(unittest.TestCase):
     """Decision 0063 item 13: `copy_arr_<t>` is trusted (the tag rule), so it is pinned clause by clause like `alloc_arr_<t>` and `zero_arr_<t>`: the shape
     of s47_g_copy_*.vpr, with the destination's value `old(source value)` and the source unchanged.  Each mutant weakens or strengthens one clause (a

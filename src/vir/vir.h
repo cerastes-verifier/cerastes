@@ -74,16 +74,17 @@ struct Type
     // or itself an accepted pointer, at any depth (`int **`, `int ***`: a pointer variable whose address is taken is a cell of a pointer
     // type).  Every other pointer type (a pointee that is void, at any level) is built as is and rejected there.
     // Struct (decision 0043 item 3; appended): a C structure of the Program (Program::add_struct), the type of a struct local (always a
-    // cell, address-taken) and the pointee of a pointer.  A struct VALUE (decision 0044 item 2: a tuple of the struct's leaves, in struct_leaves
-    // order) exists only between a few producers and consumers, and check_program rejects it in every other position: producers are a `Call` of a
+    // cell, address-taken) and the pointee of a pointer.  A struct VALUE (decision 0044 item 2: a tuple of the struct's leaves, in struct_value_leaves
+    // order: an array member's elements are leaves of their own, decision 0063 item 13) exists only between a few producers and consumers, and check_program rejects it in every other position: producers are a `Call` of a
     // struct-returning function, an `Aggregate`, a struct-typed `Field`, and a `Formal` or the `Result` of a contract directly under a `Field`
     // (a `Formal` may also sit in an `Old` under a `Field`); consumers are a call argument matching a struct parameter, a `Return` matching a
     // struct result, a struct `Store` whose value is a `Call`, an `Aggregate` or a `Field` chain over one of them, an `ExprStmt` of a `Call`,
     // and a `Field`.  A struct local, a copy and an initializer stay expanded by the encoder into leaf stores (decision 0043).
     // Pointers to structs are accepted at any depth like the other pointers (`struct S *`, `struct S **`).
-    // Array (decision 0059 item 2; appended, M4.5e1a part A): `count` elements of type `element`.  The type of an automatic local array, nothing else:
-    // check_program accepts it nowhere yet (a local's, a parameter's, a result's, a member's or a pointee's type is rejected, as is every expression of it);
-    // Program::array_of builds it.
+    // Array (decision 0059 item 2; appended, M4.5e1a part A): `count` elements of type `element`.  The type of an automatic local array (accepted since M4.5e1a), and,
+    // from decision 0063 item 4 (M4.5e1e1 part A: representable, accepted by nothing yet), of a StructMember and of a Global.  check_program accepts it as the type
+    // of an automatic local only (a parameter's, a result's, a member's, a global's or a pointee's type is rejected, as is every expression of it: an array
+    // has no value); Program::array_of builds it.
     enum class Kind
     {
         Void,
@@ -181,7 +182,9 @@ struct Type
 };
 
 // A member of a C structure, in declaration order (decision 0043 item 2): `type` is a Bool or Int (an enumeration included), an accepted
-// pointer (the innermost pointee may be a struct, also the struct itself: `struct node *next`) or a nested accepted struct.
+// pointer (the innermost pointee may be a struct, also the struct itself: `struct node *next`) or a nested accepted struct.  Decision 0063 item 4 (M4.5e1e1
+// part A): `type` may be an Array of scalars, which check_program refuses until part C (the layout, decision 0063 item 3: the block `member(slot, k)` of
+// `count` slots).
 struct StructMember
 {
     std::string name;
@@ -197,7 +200,7 @@ struct StructMember
 
 // A C structure type (decision 0043 items 2 and 3), interned in the Program by Program::add_struct (one object per C type: two structs are
 // the same VIR type iff they are the same object).  Its layout in Viper: an object is a slot, member k is the block `member(slot, k)` of
-// length 1 and a scalar or pointer member the leaf cell `loc(member(slot, k), 0)`; a nested struct member is itself a slot there.  A struct has
+// length 1 (of length `count` for an array member, decision 0063 item 3) and a scalar or pointer member the leaf cell `loc(member(slot, k), 0)`; a nested struct member is itself a slot there.  A struct has
 // no value of its own, only leaves.
 struct StructType
 {
@@ -216,6 +219,11 @@ struct StructType
 
 // One leaf of a struct type: a scalar or pointer member reached through nested struct members (decision 0043 item 3).  `path` is the
 // member indices from the root (the last one the leaf itself), `type` the leaf's Bool, Int or Ptr type, `text` its source spelling.
+// Decision 0063 item 4 (M4.5e1e1 part A): a struct may have an array member, and a leaf then has one of three shapes, by the VIEW that built it: struct_leaves
+// (the old view, below) returns the array member as ONE leaf whose `type` is the array's type, with `array` false and `elem` -1: the POISON, so that
+// a consumer that still treats every leaf as a cell is stopped (lowering's guard); struct_object_leaves returns it as one ARRAY LEAF (`array` true, `type`
+// the array type, `element` its element type, `count` its element count); struct_value_leaves returns every element as a leaf of its own (`elem` the
+// element's index, `type` the element type).  For a struct without an array member the three views are the same list.
 struct StructLeaf
 {
     std::vector<int> path;
@@ -226,11 +234,25 @@ struct StructLeaf
     // the member is `[[cerastes::ref_to_uninit]]` (decision 0058 item 4): with `owning`, the closure of this leaf's block is the marked mode, and a marked owner's own
     // closure closes over nothing (question 202)
     bool ref_to_uninit {false};
+    // struct_object_leaves only: this leaf is an array member (decision 0063 item 4): `element` is its element type and `count` the number of elements (`type` is the array type)
+    bool array {false};
+    Type element;
+    unsigned long long count {0U};
+    // struct_value_leaves only: the index of this element in the array member at `path` (`text` is `member[elem]`); -1 for every other leaf
+    int elem {-1};
 };
 // The leaves of `s` in declaration order, depth first (a nested struct's leaves in place).  `text` is `root_text` followed by `.name` for each
 // member on the way (`->name` for the first when `arrow`): struct_leaves(s, "t", false) gives "t.x", "t.u.y", struct_leaves(s, "p", true) "p->x", "p->u.y".
-// An empty `root_text` gives "x", "u.y".
+// An empty `root_text` gives "x", "u.y".  THE OLD VIEW (decision 0063 item 4): an array member is one leaf of the array's type with `array` false; every
+// consumer that was written before arrays in structures keeps calling this and is stopped on such a leaf (lowering's internal-error guard).
 std::vector<StructLeaf> struct_leaves(const StructType& s, const std::string& root_text = "", bool arrow = false);
+// THE OBJECT VIEW (decision 0063 item 4): the same list, an array member as one array leaf (`array`, `element`, `count`), its `text` the member's spelling
+// (`s.a`).  The view of the sites that lay out or give permission to the object's cells (allocation, scope exit, atoms, loops).
+std::vector<StructLeaf> struct_object_leaves(const StructType& s, const std::string& root_text = "",
+                                             bool arrow = false);
+// THE VALUE VIEW (decision 0063 items 4 and 13): a struct VALUE is the tuple of these leaves; an array member contributes one leaf per element, in index
+// order (`elem` 0, 1, ...; `type` the element type; `text` `s.a[0]`, `s.a[1]`).  The view of by-value parameters, results, aggregates and copies.
+std::vector<StructLeaf> struct_value_leaves(const StructType& s, const std::string& root_text = "", bool arrow = false);
 // The member paths at which `a` holds a slot of struct type `b`: `{}` (the empty path) when `a` is `b` itself, then each nested member that is `b`
 // (and `b`s nested deeper), in declaration order, depth first.  Empty vector: `a` does not contain `b` (decision 0043 item 9: two struct atoms
 // overlap iff one root is a nested slot of the other).
@@ -288,10 +310,10 @@ enum class BinaryOp
 // ghost amount (`amount` stays -1, requires_atom_count and contract_atoms skip it) and no partner rule: in a `requires` alone the function takes
 // the block, in an `ensures` alone (on the `Result`) it hands the block to the caller, in both on one `Formal` it borrows and returns it.
 //
-// Record 0060 item 3 (M4.5e1b, Part A: plumbing only; the encoder builds none yet and check_program refuses them): `OwnsRange` and `ReadsRange` take the pointer
-// `p` in `a` (a pointer `Formal`, in an `ensures` its entry value) and the count `n` in `b` (an integer expression that reads no memory), and stand for the
-// permission on the elements `p[0..n)`: write permission for `OwnsRange`, the atom's ghost amount for `ReadsRange`.  They carry a ghost amount like `Owns`
-// and `Reads`, numbered with them.  Every consumer that does not handle them refuses them; Part B lifts the refusals it reads.
+// Record 0060 item 3 (M4.5e1b): `OwnsRange` and `ReadsRange` take the pointer `p` in `a` (a pointer `Formal`, in an `ensures` its entry value) and the count `n`
+// in `b` (an integer expression that reads no memory), and stand for the permission on the elements `p[0..n)`: write permission for `OwnsRange`, the atom's
+// ghost amount for `ReadsRange`.  They carry a ghost amount like `Owns` and `Reads`, numbered with them (check_program accepts them in a contract, a loop's
+// invariant and a `check`'s positions as 0060 states them).
 enum class AtomKind
 {
     Owns,
@@ -420,7 +442,7 @@ struct Expr
         // own.
         Field,
         // a struct value built from its leaves: `type` is a Struct; `args` holds one expression per leaf of the struct
-        // in struct_leaves order (depth first), each exactly the leaf's VIR type (a pointer leaf's Null has that
+        // in struct_value_leaves order (depth first; an array member's elements in index order: decision 0063 items 4 and 13), each exactly the leaf's VIR type (a pointer leaf's Null has that
         // pointer type).  Allowed in code only (never in a contract). The arguments are unsequenced siblings, like the
         // arguments of a call but without a sequence point after them.
         Aggregate,
@@ -430,13 +452,15 @@ struct Expr
         // or, when `a` is a pointer to an array (`AddrOf` of an array local, the decay), a pointer to its element type.  The address of the element `b` slots after the address `a`; lowered to `loc(block_of(a), offset_of(a) + b)`.  PLACE versus
         // VALUE as for MemberAddr: the operand of a Deref, the `addr` of a Store or the `c` of a StoreE is a place access (`a[i]`), any other position
         // an address used as a value (`&a[i]`).  c_text: "&" + the place spelling (`&a[i]`, `&p[i]`); place_text gives `a[i]` / `p[i]`.  check_program
-        // accepts it nowhere yet (part B lifts it for a local array); a node of this kind is a check error in every position.
+        // accepts it over `AddrOf` of an array local and over a pointer to a scalar (decision 0059).  Decision 0063 item 5 (M4.5e1e1 part A: built by
+        // Builder, refused by check_program): `a` may also be `GlobalAddr` of an array global (`g[i]`) or a `MemberAddr` of an array member (`s.a[i]`, `p->a[i]`,
+        // `t.s.a[i]`: a named base, whose place text is member_place's, then `[i]`); a PLACE access of such a base is not a use of the root pointer's value.
         ElemAddr,
         // ---- quantifiers (record 0061 item 5; appended, M4.5e1c part A) ----
         // `forall(f, args...)`, the quantifier of a `pure` function's body inlined at the site (question 226): for every value of the bound variable
         // (`bound_id`, of the integer type `bound_type`) the Bool `a` holds; `a` mentions the variable as `Bound` nodes with the same `bound_id`.
-        // `c_text` is the site's spelling (`forall(f, a, n)`), `forall_name` is `f`'s name.  Part A plumbs it: check_program refuses it in every
-        // position (fail closed) until part B admits it in contracts (item 3) and part C in loop invariants and checks.
+        // `c_text` is the site's spelling (`forall(f, a, n)`), `forall_name` is `f`'s name.  check_program admits it in contracts, loop
+        // invariants and `check`s (record 0061 items 3 and 7), and refuses it elsewhere.
         Forall,
         // the bound variable `bound_id` of the enclosing `Forall`; `type` is that quantifier's `bound_type`; no obligation of its own.  Valid only
         // under its Forall (check_program).
@@ -451,9 +475,15 @@ struct Expr
         // encoded arguments (already converted to the parameter types, each evaluated once at the site, in the site's state).  `c_text` is the site's
         // spelling (`sum_to(a, n)`) for messages.  Not `Kind::Call`: that is the code call lowering hoists as a statement; an application is an
         // expression of a contract, a loop invariant, a `check` or a `pure` body, never hoisted.  `reads_heap` is true for it, whatever its callee reads
-        // (item 4): where a rule asks that an expression read no memory, an application is refused, and `old` over one is refused.  Part A plumbs it:
-        // check_program refuses it in every position (fail closed) until part B admits it.
-        Apply
+        // (item 4): where a rule asks that an expression read no memory, an application is refused, and `old` over one is refused.  check_program
+        // admits it in contracts, loop invariants, `check`s and a `pure` body (record 0062 items 5-9) and refuses it elsewhere.
+        Apply,
+        // ---- an element of an array member of a struct VALUE (decision 0063 items 4 and 13; appended, M4.5e1e1 part A: built by Builder, refused by check_program) ----
+        // `a.m[b]`: `a` is a struct-typed producer exactly as for Field (a Call, an Aggregate, another Field, or in a contract a Formal or the Result), `index` the
+        // index of its member `m`, which must be an array member of scalars, `b` an Int expression (the index, which may be outside [0, count): the bound is
+        // an obligation of the lowering, `out-of-bounds`); type = the array's element type.  The value of element `b` of `a`'s tuple (the value view's leaves
+        // of `m`): an `ite` chain over the elements.  c_text: `a`'s spelling, `.m[`, `b`'s spelling, `]` when `a` and `b` have one.
+        ElemValue
     };
     Kind kind {Kind::Const};
     Type type; // the type of the value (Void only for a Call of a void function)
@@ -561,13 +591,23 @@ struct Stmt
         // pointee's type.  The two are unsequenced operands (sequence_problems).  `*p op= e`, `++*p` and `(*p)--` are
         // Stores whose `expr` reads a Deref that SHARES the `addr` node (Builder::compound_store, inc_dec_store): the
         // lowering evaluates the pointer once.  The target's spelling for messages is "*" + addr->c_text.
-        Store
+        Store,
+        // ---- arrays inside structures and in static storage (decision 0063 items 4, 6 and 13; appended, M4.5e1e1 part A: built by Builder, refused by check_program) ----
+        // `addr` is the address of an array (a `MemberAddr` of an array member, a `GlobalAddr` of an array global, an `AddrOf` of an array local: a pointer to an
+        // array type): every element of the array becomes zero (`false`, null), and every flag is set: C's static-storage fill of the elements an initializer does not write.
+        // The written elements follow as ordinary Stores to `ElemAddr` of the same address.  (Var::zero_filled stays the declaration form of an array local.)
+        ArrayZero,
+        // `addr` is the DESTINATION array's address and `expr` the SOURCE array's, both pointers to the same array type (`Ptr(Array(T, N))`): every element
+        // of the destination takes the source's value and its flag is set.  The whole-structure copy's array leaf (item 13); the lowering checks the source's
+        // permission and flags and the destination's permission first, and does nothing when source and destination are one object.
+        ArrayCopy
     };
     Kind kind {Kind::Block};
     SrcLoc loc;
     const Var* var {nullptr};   // Decl, Assign
-    const Expr* expr {nullptr}; // see Kind
-    const Expr* addr {nullptr}; // Store: the pointer written through
+    const Expr* expr {nullptr}; // see Kind (ArrayCopy: the source array's address)
+    const Expr* addr {
+        nullptr}; // Store: the pointer written through; ArrayZero: the array's address; ArrayCopy: the destination array's address
     SrcLoc end_loc; // Block: the closing brace (decision 0032 item 8: where leaving the block's scope is reported);
                     // required (known) by check_program on a Block that declares a cell; unknown elsewhere is fine
     const Stmt* then_body {nullptr}; // If
@@ -678,6 +718,18 @@ enum class GlobalInit
 // The initial value of one leaf of a struct global (decision 0044 item 8): the same four kinds as a scalar global's, with the fields each names.  `kind`
 // and the fields it names are read as Global's own are (Global::Init); `loc` is the leaf's position (the initializer element, or the global when
 // the leaf has none), unknown means the global's.
+//
+// An ARRAY (decision 0063 items 4 and 9; M4.5e1e1 part A: representable, refused by check_program): the initial values of an array of scalars, of a global (Global::elems)
+// or of a struct global's array leaf (GlobalLeaf::elems), are the LISTED PREFIX, one GlobalLeaf per written element in index order from 0 (each with its own kind,
+// `init` and position: a constant, null, an address, or unknown), and the REST of the array: `ArrayRest::Zero` (C's static zero fill: every element past the prefix is
+// 0, `false` or null; the known case) or `ArrayRest::Unknown` (no element past the prefix is known, each is initialized and in range, `WF` for a pointer; the linkage and
+// escape cases of item 9).  When `rest` is Unknown the listed elements need not be known either: each says so by its own kind.
+enum class ArrayRest
+{
+    Zero,
+    Unknown
+};
+
 struct GlobalLeaf
 {
     GlobalInit kind {GlobalInit::Value};
@@ -686,6 +738,9 @@ struct GlobalLeaf
     std::string value {"0"};        // Value: EDG's value, a decimal literal of the leaf's type ("0"/"1" for bool)
     const Global* target {nullptr}; // Addr: another Global of the program
     SrcLoc loc;
+    // an array leaf of a struct global (object view; the fields above are then unused): the listed prefix, and what the rest is (see ArrayRest)
+    std::vector<GlobalLeaf> elems;
+    ArrayRest rest {ArrayRest::Zero};
 };
 
 struct Global
@@ -702,7 +757,8 @@ struct Global
     using Init = GlobalInit;
     int id {0};         // the index in Program::globals(); unique in the Program; part of the Viper name
     std::string c_name; // the C/C++ name as messages say it (`g`, `count`, `ns::g`)
-    // Bool, Int (an enumeration included), an accepted pointer or (decision 0044 item 8) a struct of the Program
+    // Bool, Int (an enumeration included), an accepted pointer or (decision 0044 item 8) a struct of the Program; from decision 0063 item 4 also an Array of scalars
+    // (representable, refused by check_program until part B)
     Type type;
     SrcLoc loc; // the defining declaration (the position of its `program_start` row)
     // a `static` local: the function whose body names it (decision 0041 item 12); null for a file/namespace-scope
@@ -713,9 +769,14 @@ struct Global
     std::string value {"0"};        // Init::Value: EDG's value
     const Global* target {nullptr}; // Init::Addr
     std::string c_type_name;        // the C/C++ spelling of the type, for messages (empty: use type.str())
-    // A STRUCT global (decision 0044 item 8): one entry per leaf of the struct in struct_leaves order (depth first), each with its own initial value; the
+    // A STRUCT global (decision 0044 item 8): one entry per leaf of the struct in struct_object_leaves order (depth first; an array member one array leaf, decision 0063 item 4), each with its own initial value; the
     // scalar fields above (`init_kind`, `init`, `value`, `target`) are then unused (check_program: `init` and `target` null).  Empty for every other global.
     std::vector<GlobalLeaf> leaves;
+    // An ARRAY global (decision 0063 items 4 and 9): `type` is an Array of scalars; `elems` is the listed prefix of its initial values, one entry per written
+    // element in index order, and `rest` what the elements past it are (see ArrayRest); the scalar fields above (`init_kind`, `init`, `value`, `target`) and
+    // `leaves` are then unused.  Empty and Zero for every other global.
+    std::vector<GlobalLeaf> elems;
+    ArrayRest rest {ArrayRest::Zero};
     // `[[cerastes::owning]]` and `[[cerastes::ref_to_uninit]]` on this pointer global or `static` local (decision 0054 item 5; the encoder sets them, on a
     // mutable pointer-to-object variable that is not `void *`, a pointer to a function or to a `const`/`volatile` type, whose every declaration carries
     // the attribute and whose initializer is absent or null).  `owning`: the variable owns the heap block it points to, so every `owns(g)` of it in a
@@ -1293,8 +1354,12 @@ public:
     // a pointer to an array (`addr_of` of an array local, the decay) (an ill-typed `base` or `index` is built as is and
     // rejected by check_program).  c_text "&" + the place spelling (see Expr::Kind::ElemAddr); `deref` of it is `a[i]` / `p[i]`.
     const Expr* elem_addr(const Expr* base, const Expr* index, SrcLoc loc);
+    // `a.m[index]` (decision 0063 items 4 and 13): element `index` of the array member `member` of the struct value `a`; type = the array member's element type (an
+    // ill-typed `a`, a member that is no array or an index out of range is built with `a`'s type and rejected by check_program).  c_text: `a`'s followed by `.m[`, the
+    // index's spelling (or constant value) and `]` when they have one.
+    const Expr* elem_value(const Expr* a, int member, const Expr* index, SrcLoc loc);
     // `forall(f, args...)` over the bound variable `id` of integer type `t` (record 0061 item 5): `body` is a Bool that mentions the variable as
-    // `bound(id, t, ...)` nodes; `text` is the site's spelling and `f_name` the function's.  A Bool.  Part A: check_program refuses it everywhere.
+    // `bound(id, t, ...)` nodes; `text` is the site's spelling and `f_name` the function's.  A Bool.
     // `args` are the encoded trailing arguments in f's parameter order after the bound variable; the body reads them as `forall_arg(id, k, ...)`.
     const Expr* forall(int id, const IntType* t, const Expr* body, std::vector<const Expr*> args, std::string text,
                        std::string f_name, SrcLoc loc);
@@ -1306,7 +1371,7 @@ public:
     // `a.m` (decision 0044 item 2): member `index` of the struct value `a`; type = the member's type (an ill-typed `a` or an index out of range is built with
     // `a`'s type and rejected by check_program).  c_text: `a`'s followed by `.m` when `a` has one.
     const Expr* field(const Expr* a, int index, SrcLoc loc);
-    // A struct value of `struct_type` (a Struct type) built from one expression per leaf, in struct_leaves order (see Expr::Kind::Aggregate).
+    // A struct value of `struct_type` (a Struct type) built from one expression per leaf, in struct_value_leaves order (see Expr::Kind::Aggregate).
     const Expr* aggregate(Type struct_type, std::vector<const Expr*> args, SrcLoc loc);
 
     // Statements.
@@ -1344,6 +1409,10 @@ public:
     const Stmt* block(std::vector<const Stmt*> stmts, SrcLoc loc, SrcLoc end_loc);
     // `*addr = value` (decision 0032): `value` has the pointee's type.
     const Stmt* store(const Expr* addr, const Expr* value, SrcLoc loc);
+    // C's zero fill of the array at `addr` (decision 0063 items 4 and 6): a pointer to an array type; see Stmt::Kind::ArrayZero.
+    const Stmt* array_zero(const Expr* addr, SrcLoc loc);
+    // The copy of the array at `source` into the array at `dest` (decision 0063 items 4 and 13): two pointers to the same array type; see Stmt::Kind::ArrayCopy.
+    const Stmt* array_copy(const Expr* dest, const Expr* source, SrcLoc loc);
     // `*addr op= rhs`, `++*addr` and `(*addr)--` as Stores, with the computation and the conversions of compound_assign (below): the
     // stored value is `(T)((C)(*addr) op (C)rhs)` where `*addr` is a Deref sharing the `addr` node.  The pointee must be an Int (anything
     // else is built ill-typed and rejected by check_program).

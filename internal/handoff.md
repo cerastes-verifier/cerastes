@@ -1206,6 +1206,33 @@ Just document the decisions made in the handoff documents"; each below went to t
   lost); C's `{0}` and `{}` in both modes stay accepted; `{0}` positives are C-only. Alternative: accept it in C++
   for consistency with the nested-structure case (question 304).
 
+- **305** (test mechanics) Part D's tests are 43 files against the plan's cap of 30: its fifteen flips and their
+  error twins already fill 30. **Answer:** accepted over the cap; the literal pins for a `for` step and a `do`
+  condition are dropped only if the encoder rejects them at the loop condition's site; the later parts keep their
+  caps, invariant 2's pairs are never cut, and an audit's requested pins are rule 4's "one per rejected row"; the final
+  count is reported against 150 in status. Alternative: trim Part D's twins (the harness requires them).
+- **306** (fail closed: a rejection) Are array members reached through a heap read in scope (audit round 1, N8)?
+  **Answer:** in code, `p->q->a[i]` is an element access through a member of a pointer value (Part C, with its own
+  pair of tests); in contracts, any place reached through a heap read (0045) with a structure that has an array
+  member anywhere on its path, root included (`owns(*p->q)`, `p->q->a[i]`), is rejected naming M4.5e1e2 (record 0063
+  item 1's table), unless audit round 3's site table gives 0045's load sites a verdict. Alternative: build them in
+  Part C.
+- **307** (evidence) The audit's p5 (the loop `d[k] = s[k]` verified against `copy_arr_int`'s pinned contract) and
+  p5v (`assert false` after it fails) are committed as S47 fixtures (46 in all, the cap 45). Alternative: record them
+  in the chapter only.
+
+- **308** (**unsound before this session, now fail closed**; audit round 2, B1) A write inside a compound literal's
+  element used as an object was invisible to the sequencing rules: `x = (int[]){x++}[0];`, `x = *&(int){x++};` and
+  `*p = *&(int){(*p)++};` verified (undefined behaviour: a literal's initializers are not full expressions; clang
+  warns `-Wunsequenced`). The scalar and structure object forms had it since M4.5c2a (record 0044 item 7). **Answer**
+  ((b), the advisor): the encoder rejects a compound literal used as an object whose element writes (calls exempt)
+  unless the literal is the whole full expression or a declaration's initializer, `unsupported_expression`, by
+  position (record 0063 item 12; an amendment of 0044 item 7); over-strict, lifted in M8 when the sequencing rules
+  see inside literals; and (the auditor's re-read, B1') the initializer-list rule now sees a write inside a compound
+  literal of an element (`int *a[2] = {(int[]){x++}, (int[]){x}};` verified before, fixing one order), fix (a) of the
+  re-read, the root cause. No pre-session outcome changes. Alternative: (a) mark the literal's comma as not a sequence
+  point in the Sequencer and lowering's rows (more precise; it would touch the files Part C holds).
+
 **Open for the owner (nothing waits on it):**
 - **304** (not unsoundness: an over-acceptance of a warning shape) The compiler matrix of M4.5e1e1's Step 0 shows
   clang++ warning `-Wmissing-braces` at `-Wall` on C++'s `{0}` over a structure whose first member is a nested
@@ -1215,4 +1242,4 @@ Just document the decisions made in the handoff documents"; each below went to t
   use it become C-only or are rewritten with full braces), in a session that may change existing outcomes.
   Alternative: accept the array-member form in C++ as well (lift 303). Until answered, both stand as built.
 
-The next questions start at 305.
+The next questions start at 309.

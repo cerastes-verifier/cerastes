@@ -284,3 +284,5 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
 - Contracts that read through a pointer member, a pointer to a pointer or a pointer global wait for M4.5c2b.
 
 *2026-11-24, amended by 0062 (M4.5e1d): item 4 — a `pure` function that takes or returns a structure by value is rejected, its message naming M4.5f1 (0062 item 1).*
+
+*2026-11-25, amended by 0063 (M4.5e1e1): item 7 — a compound literal used as an object whose element writes (an assignment, `++`, `--`, a compound assignment; a call itself exempt) is rejected unless the literal is the whole full expression or a declaration's initializer: the sequencing rules did not see the element's writes against the enclosing expression's (audit round 2 of M4.5e1e1, B1; question 308; 0063 item 12). Items 2, 3, 4, 7 and 8 — array members and array globals (0063 items 6, 9 and 13).*

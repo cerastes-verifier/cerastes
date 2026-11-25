@@ -3743,7 +3743,8 @@ def _std_type_range(cons: str, cell: str, t: str) -> bool:
     return (low, high) in VIEW_STANDARD_RANGES
 
 
-def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]) -> str | None:
+def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str],
+                           bound: Callable[[str], tuple[set[int], str] | None] | None = None) -> str | None:
     """Decision 0060 item 16: why the quantified `requires`, `ensures` or pure `assert` row `q` (under `guard`) is not one of the rows
     of a range atom, or None.  The rows (X a variable, F = `loc(block_of(X), k)`, the range `offset_of(X) <= k && k <
     offset_of(X) + n`): `acc(F.f[, a])` with `a` a `Perm` formal of the method (a `requires` or `ensures`; the marked `assert` rows are
@@ -3762,11 +3763,20 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
         return "an antecedent beyond the range"
     # the emitter parenthesizes every sum under a comparison: `k < (offset_of(p) + n)`
     low, high = _squash(_strip_wrap(lo)), _squash(_strip_wrap(hi))
-    if low != f"offset_of({x})":
+    info = bound(x) if bound is not None and low == "0" else None
+    if info is not None:
+        # decision 0063 item 15: the rows over a bound local (`t := loc(GB_g(), 0)`, `t := loc(member(X, k), 0)`) run over `[0, N)`, N the block's length fact
+        counts, why = info
+        if why:
+            return why
+        if not re.fullmatch(r"[0-9]+", high) or int(high) not in counts:
+            return f"the count {high} of the rows over the bound local `{x}` is not the `len(...) == N` its block's facts state ({', '.join(map(str, sorted(counts)))})"
+    elif low != f"offset_of({x})":
         return f"the range does not start at `offset_of({x})`"
-    rem = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
-    if not rem or re.search(rf"(?<![\w$']){re.escape(k)}(?![\w$'])", rem):
-        return f"the range does not end at `offset_of({x}) + <a count that does not name {k}>`"
+    else:
+        rem = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
+        if not rem or re.search(rf"(?<![\w$']){re.escape(k)}(?![\w$'])", rem):
+            return f"the range does not end at `offset_of({x}) + <a count that does not name {k}>`"
     cell = f"loc({_squash(b)},{k})"
     cells = re.escape(cell)
     acc = _range_acc(cons, k, b)
@@ -3823,6 +3833,67 @@ def method_len_facts(src: Source, d: Decl) -> dict[str, set[int]]:
         if kw in ("requires", "ensures"):
             for b, n in re.findall(r"len\((.+?)\)==([0-9]+)", norm_viper(text)):
                 out.setdefault(b, set()).add(int(n))
+    return out
+
+
+LOCAL_ASSIGN_RE = re.compile(rf"^\s*(?P<lhs>{IDENT}(?:\s*,\s*{IDENT})*)\s*:=\s*(?P<rhs>.+?)\s*$")
+LOCAL_VAR_INIT_RE = re.compile(rf"^\s*var\s+(?P<x>{IDENT})\s*:\s*[A-Za-z]+\s*:=\s*(?P<rhs>.+?)\s*$")
+BOUND_RHS_RE = re.compile(r"^loc\((?P<b>.+),(?P<j>-?[0-9]+)\)$")
+ALLOC_CALL_RE = re.compile(r"^(?P<name>alloc_struct_[0-9]+_[\w$']+)\(\)$")
+
+
+def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays: dict[str, int]) -> dict[str, tuple[set[int], str]]:
+    """Decision 0063 item 15's bound local: the `Ref` locals of method `d` that some statement of its body assigns `loc(B, j)` with B a block term
+    (`GB_<g>()` or `member(<chain>, k)`), as {local: (the counts the block's length fact states, why it is no bound local of the grammar or "")}.  A
+    bound local is e1a's array local whose rows are `block_of(t)` over `0 <= k < N`: it is assigned exactly `loc(B, 0)` (every assignment the same text)
+    with B in the block grammar, an array global of the unit or a member of a chain rooted at a formal, a result or a local assigned an
+    `alloc_struct_*` call, and N is the count of B's `len(B) == N` fact (`program_start`'s facts, the method's own clauses, or the allocation's
+    `ensures` for a local it assigned). """
+    assigns: dict[str, list[str]] = {}
+    for n in range(d.line + 1, d.end_line + 1):
+        line = src.code[n - 1]
+        m = LOCAL_ASSIGN_RE.match(line)
+        if m:
+            targets = [t.strip() for t in m.group("lhs").split(",")]
+            for t in targets:
+                # a multi-target call (`a, b := m(...)`) assigns each target something that is no `loc(B, 0)`
+                assigns.setdefault(t, []).append(norm_viper(m.group("rhs")) if len(targets) == 1 else f"<multi-target {norm_viper(m.group('rhs'))}>")
+        elif (m := LOCAL_VAR_INIT_RE.match(line)):
+            assigns.setdefault(m.group("x"), []).append(norm_viper(m.group("rhs")))
+    by_name = {e.name: e for e in decls if e.kind == "method"}
+    lens = {b: set(ns) for b, ns in method_len_facts(src, d).items()}
+    roots = {*_formal_names(src, d), *(n for n, _t in method_results(src, d))}
+    for x, rhss in assigns.items():
+        am = ALLOC_CALL_RE.match(rhss[0]) if len(rhss) == 1 else None  # a root has ONE assignment: the call
+        if am and am.group("name") in by_name:
+            roots.add(x)
+            for b, ns in method_len_facts(src, by_name[am.group("name")]).items():
+                lens.setdefault(re.sub(r"(?<![\w$'])r(?![\w$'])", x, b), set()).update(ns)
+    out: dict[str, tuple[set[int], str]] = {}
+    for x, rhss in assigns.items():
+        if x in roots or not any(r.startswith("loc(") for r in rhss):
+            continue
+        ms = [BOUND_RHS_RE.match(r) for r in rhss]
+        if any(m is None for m in ms) or len(set(rhss)) != 1:
+            out[x] = (set(), f"the local `{x}` is not assigned one `loc(B, 0)` (it is assigned {', '.join(f'`{r}`' for r in sorted(set(rhss)))})")
+            continue
+        m = ms[0]
+        b = m.group("b")
+        bt = block_term(b, gbs, roots)
+        if m.group("j") != "0":
+            out[x] = (set(), f"the local `{x}` is bound to slot {m.group('j')} of `{b}`, not the first slot of an array")
+        elif bt is None:
+            out[x] = (set(), f"the local `{x}` is bound to `loc({b}, 0)`, whose block is neither `GB_g()` of a declared array global nor `member(<chain>, k)` over "
+                             "the canonical chain rooted at a formal, a result or a local from an `alloc_struct_*` call (decision 0043 item 13)")
+        elif bt[0] == "gb":
+            if bt[1] in arrays:
+                out[x] = ({arrays[bt[1]]}, "")
+            else:
+                out[x] = (set(), f"`{bt[1]}` is not an array global (no row group of it in `program_start`)")
+        elif lens.get(b):
+            out[x] = (lens[b], "")
+        else:
+            out[x] = (set(), f"no `len({b}) == N` fact states the count of the block the local `{x}` is bound to")
     return out
 
 
@@ -5002,6 +5073,7 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
     gb_names = {m.group("name") for l in src.code if (m := GB_DECL_RE.match(l))}
     array_counts = array_global_counts(src, decls)
     block_ctx: dict[int, tuple[set[str], dict[str, set[int]]]] = {}
+    bound_ctx: dict[int, dict[str, tuple[set[int], str]]] = {}
     labels_before: dict[int, set[str]] = {}
     for d in decls:
         if d.kind != "method":
@@ -5079,7 +5151,10 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                 old_labels = c[1]
         elif q is not None and kind in ("requires", "ensures", "assert") and m is not None and lineno in method_of:
             # decision 0060 item 16: a range atom's quantifiers in a method's clauses and its pure rows
-            why = range_atom_row_problem(kind, guard, q, perm_formals(lineno)) or ""
+            md0 = method_of[lineno]
+            if md0.line not in bound_ctx:
+                bound_ctx[md0.line] = bound_locals(src, md0, decls, gb_names, array_counts)
+            why = range_atom_row_problem(kind, guard, q, perm_formals(lineno), bound_ctx[md0.line].get) or ""
             ok = not why
         elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
                 and (bq := parse_block_row(body)) is not None:

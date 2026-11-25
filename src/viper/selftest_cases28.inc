@@ -99,11 +99,12 @@ void define_arrays_rejected_until_part_b()
            // struct S { int a[3]; };
            k.strukt("S", {{"a", A3(k)}});
        });
-    rc("arr_rej_array_global", "is not a bool, an integer or a pointer to one",
+    rc("arr_rej_array_global_of_structs", "decision 0059 items 1 and 2",
        [=](Kit& k)
        {
-           // int g[3];
-           k.prog.add_global("g", A3(k), k.at(), nullptr);
+           // struct T { int x; }; struct T g[3]; (M4.5e1e2)
+           StructType* T {k.strukt("T", {{"x", k.i32}})};
+           k.prog.add_global("g", k.prog.array_of(k.st(T), 3U), k.at(), nullptr);
        });
     rc("arr_rej_array_zero_length", "of no elements",
        [=](Kit& k)

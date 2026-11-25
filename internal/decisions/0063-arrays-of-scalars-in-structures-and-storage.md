@@ -4,7 +4,15 @@
   (`.claude/plans/m4-5e1e1-arrays-of-scalars.md`, written at M4.5e1e's planning and executed without re-planning);
   revised by P82's and S47's decision tables (the plan's section 6; `internal/il-inventory.md`, chapter M4.5e1e1;
   44 fixtures `tests/viper-smoke/memory/s47_*.vpr`; every row on its first branch, the table at the end), Step 0's
-  runs and the advisor's rulings 301–303; to be revised by audit round 1. Owner decisions:
+  runs and the advisor's rulings 301–303; and by audit round 1 (Opus, on Commit 1 `d9a51fc` and Part A's design: no
+  blocking item; should-fix S1 the poison over every walk of a structure's members, item 4; S2 the copy's guard,
+  item 13; S3 the rows that pair array leaves over slot terms, item 7; S4 the bound local's grammar, item 15; S5 the
+  count's source, item 15; S6 `int g[];`, item 2; S7 the decay by its `expr` and both escape directions, item 9;
+  notes N2–N5, N7–N10 taken in items 2, 7, 9, 12, 13 and the tests; `build/m4.5e1e1/auditor-report-1.md`), with the
+  advisor's rulings 305–307; and by audit round 2 (a fresh Opus auditor, on Parts A, B and D at `2aa4903`: one
+  blocking item, B1, a write inside a compound literal used as an object, unsound since M4.5c2a, item 12, question
+  308; should-fix S1–S2 tests, S3 a file-scope typedef whose bound names a constant, item 14, S4 a page; notes N1, N2,
+  N5 taken in items 4, 7 and 10; `build/m4.5e1e1/auditor-report-2.md`). Owner decisions:
   - At M4.5e1e's planning (2026-11-25): **290** M4.5e1e is two sessions, "scalars, then structures" (this record's
     arrays of scalars; M4.5e1e2's arrays of structures and of arrays); **291** a structure with an array member is
     copied and passed and returned by value in M4.5e1e ("Copy and by-value now"; item 13, the plan's Part E);
@@ -80,7 +88,9 @@ construct rejected before this record; where an existing function is touched (`i
    | `cerastes_forall` and `pure` applications whose pointer argument is a member (`p->a`, `s.a`), or a global array in a contract; structure members under a binder | M4.5e1e2 |
    | heap storage of a structure with an array member (`malloc(sizeof(struct S))`, `owns_block`, `free`) | M4.5e1e2 (question 292) |
    | a structure with both an array member and an `owning` or marked member; `ref_to_uninit` and `must_init` on a pointer to a structure with an array member; a written atom in a loop invariant on a structure place with an array member | M4.5e1e2 (questions 293, 294) |
-   | a range on part of a global array or of an array member (`owns_range(g, n)`, `owns_range(p->a, n)`, `&g[2]` as a base); an atom on one element; `&g[i]` and `&p->a[i]` in a contract; a global initializer `&g[2]`; `g + i` | M4.5e2 |
+   | a contract place reached through a heap read (0045) with a structure that has an array member anywhere on its path, root included (`owns(*p->q)`, `p->q->a[i]` in a contract) | M4.5e1e2 (question 306) |
+   | an `ensures` atom with no `requires` partner (0052) on an array member or a structure with an array member (`owns(*r)` of a result) | M4.5e1e2 |
+   | a range on part of a global array or of an array member (`owns_range(g, n)`, `owns_range(p->a, n)`, `&g[2]` as a base); an atom on one element; `&g[i]` and `&p->a[i]` in a contract; a global initializer `&g[2]`, `int *gp = s.a;` or `&s.a[k]`; `g + i` | M4.5e2 |
    | a structure value that holds more than 64 array elements, passed or returned by value (a copy has no limit) | M4.5f3 (question 295: array values as ghost sequences) |
    | a read `pure` function over a structure or a global (0062 item 1, 0041 item 12) | M4.5f1 |
    | `const` arrays in any storage (a `const` global table, `static const`); `char s[] = "abc"`, `sizeof("abc")`, `sizeof((char[4]){0})` | M4.6 |
@@ -101,8 +111,12 @@ construct rejected before this record; where an existing function is touched (`i
      a local array's** (a global's, a member's, a typedef's, a type operand's) is an `unsigned long` constant whose
      `expr` is a compiler-generated cast over the written tree, a literal `[3]` included (P82 (b), as P79 F2 found for
      parameter bounds): the bound is read under that generated cast, through the written tree.
+   - **A member's bound is a prologue constant whenever its structure type is accepted** (as an object's type, a
+     pointee, a type operand, in a static assertion; audit round 1, N9), so `sizeof(struct S)` never skips a wrapped
+     member bound.
    - **Rejected:** item 1's table; `owning`, `ref_to_uninit` and `uninit` on an array member or a global array (0059
-     item 2's rule for a local; `unsupported_annotation`).
+     item 2's rule for a local; `unsupported_annotation`); `int g[];`, a tentative array definition without a bound,
+     like the compilers (clang and GCC warn by default; EDG completes it to one element silently; audit round 1, S6).
 
 3. **Layout** (0028 items 5 and 16, as decided in M4.5a).
    - A global or `static` local array `T g[N]` is the one block `GB_g()` of `len` N; element `k` is `loc(GB_g(), k)`
@@ -122,8 +136,13 @@ construct rejected before this record; where an existing function is touched (`i
      **array leaf** (the member's path, the element type, the count). The **value view** (`struct_value_leaves`, item
      13): every element of an array member is a leaf of its own, in index order (`StructLeaf::elem`). **The old view,
      `struct_leaves`, is unchanged and keeps returning an array member as one leaf of the array's type: it is the
-     poison.** A site that still treats that leaf as a cell is stopped: lowering's `leaf_cells` and every direct
-     `struct_leaves` loop report an internal error on an array-typed leaf (exit 3; `cell_suffix` already does),
+     poison.** A site that still treats that leaf as a cell is stopped: **every walk of a structure's members** in
+     lowering — `leaf_cells` and every `struct_leaves` loop, and also `leaf_count`, `leaf_span` (and so `field_of`),
+     `has_pointer_leaf` (and so `struct_ptr_uses` and `expr_touches`) and `struct_lens` (audit round 1, S1: by
+     reading, `leaf_span` would make `f().n` read `a[1]` in the value view), and `alloc_struct_method`'s member walk
+     (audit round 2, N5: it wrote `len(member(r, k)) == 1` for every member of a trusted contract; Part C replaces
+     it) — reports an internal error on an array member until its part gives that walk a view (exit 3;
+     `cell_suffix` already does),
      `check.cpp` refuses a structure with an array member in every position not yet lifted, and the encoder rejects it
      there first with a diagnostic at the C line (invariants 3 and 7). For a structure without an array member the
      three views are the same list, so every existing program is lowered as before.
@@ -186,8 +205,12 @@ construct rejected before this record; where an existing function is touched (`i
      `{{1, 2, 3, 4}, 5}` have the same nested IL, and only the inner aggregate's `explicit_braces_on_aggregate` tells
      them apart; `{0}`'s inner aggregate has no such flag. C++ designated lists carry a compiler-generated leading
      placeholder (an empty aggregate for an array first member), skipped as 0043 item 6 skips its zero fillers. An
-     excess inner element is the front end's error in both modes. An element that reads, writes or takes the address
-     of the structure being initialized is rejected through an `ElemAddr` too.
+     excess inner element is the front end's error in both modes. **An initializer element that reads, writes or
+     takes the address of an element of an array member of the structure being initialized** (`{{1, s.a[0]}, 2}`,
+     through `ElemAddr` at any depth) **is rejected** (`unsupported_declaration`, as 0043 item 6 rejects writes and
+     addresses); a read of a scalar member keeps 0043 item 6's rule (`{1, s.x}`: `uninitialized` in C). The
+     `ArrayZero` of a member therefore comes before the C temporaries' evaluation without any element of it being
+     observable early.
    - **Without an initializer** every flag stays false; `cerastes::uninit` on the structure local is accepted and
      emits nothing (0043 item 9).
 
@@ -196,7 +219,11 @@ construct rejected before this record; where an existing function is touched (`i
      at the atom's ghost amount, the flags, the element range, one liveness fraction), in the block-term form over
      `loc(GB_g(), k)`, `0 <= k && k < N`. `owns(*p)` and `reads(*p)` of a structure with an array member: 0043 item
      9's lines for the cell leaves and, per array leaf, the same four lines over `loc(member(X, k), j)`. `owns(p->a)`
-     and `reads(p->a)` (and `g.a` of a structure global): that array leaf alone, with one liveness fraction. **An atom
+     and `reads(p->a)` (and `g.a` of a structure global): that array leaf alone, with one liveness fraction. **As
+     built for an array global** (Part B): `owns(g)` and `reads(g)`, written or implicit (a `static` local array), are
+     lowered as e1b's range atom over the whole array (`OwnsRange`/`ReadsRange`, base `loc(GB_g(), 0)`, the count the
+     literal N), so every rule of 0060 items 4–11 — the amounts, the shape, marked, flag and range rows at calls and
+     returns, the sum forms, the separation rows, the partners — applies to it as written. **An atom
      never names part of an array here:** `owns_range` on a global or member base, an atom on one element and
      `&p->a[i]` in a contract stay M4.5e2's.
    - **Element reads:** `g[e]`, `p->a[e]`, `r->a[e]` of a pointer result and `g.a[e]` in `requires`, `ensures`, a
@@ -210,7 +237,27 @@ construct rejected before this record; where an existing function is touched (`i
      `f__wf`'s distinctness and equal-ghost facts, framing disjuncts, the case splits, loop places), **a range of N
      slots at `loc(member(X, k), 0)` or `loc(GB_g(), 0)`**: it meets a cell `q` of its element field when `q` lies in
      that block within `[0, N)` (`in_range`'s test), and another array leaf or range when the intervals of one block
-     meet. So `f(&s, &s.a[1])` with `owns(*p) && owns(*q)` fails its sum row (`permission`), as `f(&s, &s.x)` does.
+     meet. So `f(&s, &s.a[1])` with `owns(*p) && owns(*q)` fails at the call (`permission`), as `f(&s, &s.x)` does,
+     and so does `f(&g[1])` against `owns(*p) && owns(g)`.
+   - **The rows that pair an array leaf with another site are e1b's, over slot terms** (audit round 1, S3, N3; the
+     standing row rules of 0028 item 11 and 0060 items 7–9, which the lint and the map's expected-reason column
+     carry): no entry separation is asserted for an array leaf (as for a range, 0060 item 7); at a call and a return,
+     with a cell `q` of its field where either atom is an `owns`, the pure interval separation row `!(g && block_of(q)
+     == block_of(t) && 0 <= offset_of(q) && offset_of(q) < N)` (`permission`), `t` the leaf's bound local; with another
+     array leaf or a range of the field where either is an `owns`, 0060 item 8's two-range row, and for two array
+     leaves of one structure type at one index the first-slot inequality `t1 != t2` — **never a bare block
+     comparison** such as `member(p, 0) != member(q, 0)`, which Silicon does not decide from quantified permissions
+     (the audit's p10a; `loc(member(p, 0), 0) != loc(member(q, 0), 0)` verifies, p10b); for two `reads` sites, the
+     sum form of 0060 items 8 and 9 in marked `acc` rows, never `perm` under a quantifier. A row Silicon cannot decide
+     is a false `permission` or an exit 3, never a proof (the audit's p1: without any row the call's own exhale
+     fails).
+   - **For an array global** (audit round 2, N2): `f__wf` emits no distinctness fact between a cell and the array
+     atom and no slot ghost for its elements (both only weaken); its "a `reads` place keeps its value" fact covers
+     `reads(g)` (0060 item 5's argument: no verified callee writes a slot it holds only through read atoms).
+   - **`f__wf`'s assumed facts over array leaves are by slot** (audit round 1, N4), never a comparison of member
+     paths: an `owns` cell against an `owns` array leaf `g_i && g_j ==> !(block_of(q) == B && 0 <= offset_of(q) &&
+     offset_of(q) < N)`; two `owns` array leaves the first-slot inequality; equal ghosts `loc(B, i) == loc(B', j) ==>
+     h == h'`. Each is implied by the `requires`.
    - **Amounts** (0037 item 6, 0060 item 6): a `reads` atom's amount at a call is the minimum over its cell leaves
      and, for each array leaf, the leaf's first slot (0060 item 6's rule, with its listed limit for an uneven
      holding: question 238, M4.5e1f).
@@ -244,8 +291,16 @@ construct rejected before this record; where an existing function is touched (`i
      transitively (`static int h; int *tab[2] = {&h, 0};` with `tab` of external linkage: another unit's initializer
      may write `*tab[0]` before `main`). **And the other direction:** in C++ an array global whose decay is the
      initial value of a global of unknown value (`static int g[3] = {1, 2, 3}; int *gp = g;` with `gp` of external
-     linkage, or the element of such an array) has unknown values in every element, transitively (another unit's
+     linkage, or the element of such an array, or the leaf of such a structure global: `static int g[3]; struct P {
+     int *p; } ps = { g };` with `ps` external) has unknown values in every element, transitively (another unit's
      initializer may write `gp[1]` before `main`); a twin relies on such an element's value and must fail.
+   - **The decay is recognized by its `expr`** (audit round 1, S7 (c)): a `ck_address` over an array global is the
+     decay only when its `expr` is `array_to_pointer` of the variable, with offset 0 and no subobject path as
+     consistency checks; any other `ck_address` over an array (`&g[k]`, `g + k`, a folded cast) is rejected.
+     `int *gp = s.a;` and `&s.a[k]` as a global initializer (a structure global's array member: a `ck_address` with
+     a subobject path) are rejected as `&h.x` is (0044 item 8; item 1's table, M4.5e2).
+   - P38's loss of `expr` is per list (audit round 1, N5): in a list of 1,002 elements or more, every element under an
+     implicit conversion loses it, from index 0.
    - **A `static` local array** is a global whose name its function sees (0041 item 12), with the implicit `owns` atom
      of item 7's array form in its function's and its callers' contracts.
    - **A structure global** with an array member: its row gains the array leaf's lines; its facts the length.
@@ -263,7 +318,10 @@ construct rejected before this record; where an existing function is touched (`i
       (0043 item 11's rule for members, unchanged).
     - **A global's place is hit by an interval:** `inv_place_disjunct`'s shortcut for a global is the identical slot-0
       term today; an array global's place is hit when the read's block is `GB_g()` and its offset is in `[0, N)`. For
-      a scalar global the emitted text is unchanged.
+      a scalar global the emitted text is unchanged. **As built** (audit round 2, N1): an array global is never a
+      cell place; in `main` it is e1a's array place, elsewhere e1b's range place over its bound local
+      (`ga_<name>__<id>`, assigned `loc(GB_g(), 0)` once in every method of a unit with an array global), both hit by
+      the interval test, and `inv_place_disjunct` is unchanged.
     - Invariant and measure reads of `g[e]`, `s.a[e]` and `p->a[e]` are framed by these places, with 0059 item 8's
       `out-of-bounds` and `uninitialized` obligations.
 
@@ -273,12 +331,34 @@ construct rejected before this record; where an existing function is touched (`i
     row; the same element named twice with a write is rejected like the compilers (`unsequenced_modification`).
 
 12. **Array compound literals** (C; amends 0044 item 7). `(T[]){…}` and `(T[N]){…}` designate an unnamed array
-    object of the enclosing block: a hidden array local, allocated at block entry as e1a's are, zero-filled and
-    written inside the expression when the literal is evaluated (C's rule: every element first), exited with its
-    block; its value is its decay. 0044 item 7's rejections hold for it (C++, file scope, `const`, a loop condition, a
+    object of the enclosing block: a hidden array local, allocated at block entry as e1a's are, exited with its
+    block; its value is its decay. **As built:** the hidden local is declared just before the statement that holds
+    the literal (0044 item 7's block rule), zero-filled at that declaration when the list leaves elements out (as S47
+    (f)'s fixture has it: no pointer to the object exists before the literal is evaluated, and every evaluation is a
+    fresh entry of its block, since a backward `goto`, a loop condition, a `for` step and a `do` condition holding a
+    literal are rejected), and its listed elements are stored inside the expression where the literal is evaluated,
+    in list order (two elements with effects are rejected, `unsequenced_calls`, so the order is not observable);
+    `&(int[]){…}` (a pointer to an array) stays rejected (M8). 0044 item 7's rejections hold for it (C++, file scope, `const`, a loop condition, a
     `for` step, a `do` condition, `return` of its address). P82 (e): the literal is `array_to_pointer` over an
     `enk_temp_init` flagged `is_compound_literal`, its elements in e1a's aggregate shape; **C++20 accepts array
-    literals with no diagnostic at all**, so the encoder's rejection is the only guard there.
+    literals with no diagnostic at all**, so the encoder's rejection is the only guard there. A literal with a
+    storage-class specifier (`(static int[]){…}`) is EDG's error #80 today (GCC 16 accepts it); the encoder rejects it
+    should a later EDG accept it (audit round 1, N10).
+    **A write inside a literal used as an object** (audit round 2, B1; question 308, the advisor's ruling; **unsound
+    since M4.5c2a** for the scalar and structure object forms of 0044 item 7): the object form is built as a comma of
+    element stores ending with the address, and the sequencing rules took that comma's left side as a sequence
+    point, so `x = (int[]){x++}[0];`, `x = *&(int){x++};` and `*p = *&(int){(*p)++};` verified although a compound
+    literal's initializers are not full expressions (C11 6.8p4: each is `x = x++`). **Rejected, by position:** a
+    compound literal used as an object (an array literal, `&(T){…}`, `*&(int){…}`) whose element writes (an
+    assignment, `++`, `--`, a compound assignment, anywhere in the element, among a call's arguments too; the call
+    itself is sequenced and exempt) is `unsupported_expression` unless the literal is the whole full expression (an
+    expression statement, after a `(void)`), a declaration's whole initializer or a whole element of a braced
+    initializer list (C23: each is a full expression). **Between the elements of a braced list** (audit round 2's
+    re-read, B1'): the list rule of 0021 and 0043 item 6 ("two elements of an initializer list, one of them with a side
+    effect", `unsequenced_calls`) now sees a write inside a compound literal of an element, so `int *a[2] =
+    {(int[]){x++}, (int[]){x}};` is rejected as `{x++, x}` is (it verified, fixing one order; the scalar form `&(int){x++}`
+    since M4.5c2a). Over-strict (it also rejects the defined `f((int[]){x++}[0])`); lifted when the
+    sequencing rules see inside a literal (M8). The value form keeps 0044 item 5's `unsequenced_modification`.
 
 13. **Structure values with an array member** (question 291; amends 0043 item 7 and 0044 items 2–5).
     - **The copy** (`t = s`, `*p = *q`, `p->t = s.t`, an initializer from an object). The cell leaves as 0043 item 7
@@ -287,18 +367,24 @@ construct rejected before this record; where an existing function is touched (`i
       elements: question 296), the destination's permission at `write` (a marked row); then, **unless source and
       destination are one object**, `copy_arr_<t>(d, s, N, rd)`. An exact self-copy is guarded out (`*p = *p`
       verifies, as before); partial overlap cannot arise (two structure places of one type are one slot or disjoint).
-      **The guard `d != s` is written only where the two places may be one object** (both reached through pointers,
-      `*p = *q`): S47 (g) found that Silicon proves `block_of(d) != block_of(s)` for two distinct structure locals (and
-      for a local against a `reads` parameter) from what the function holds, but does not decide a guard `d != s`
-      between them from quantified permissions alone, so a guard there would leave a feasible branch that copies
-      nothing (a false alarm, never a proof). Under the guard, `d != s` gives `block_of(d) != block_of(s)`: both are
+      **The guard `d != s` is written wherever either place is reached through a pointer** (`*p = *q`, `*p = s`, `s
+      = *p`, `p->t = s.t`; audit round 1, S2: `struct S *p = &s; *p = s;` is valid C, an exact overlap) **and not
+      between two named objects** (structure locals, globals, a by-value parameter's copy): S47 (g) found that
+      Silicon proves `block_of(d) != block_of(s)` for two distinct structure locals (and for a local against a
+      `reads` parameter) from what the function holds, but does not decide a guard `d != s` between them from
+      quantified permissions alone, so a guard there would leave a feasible branch that copies nothing (a false
+      alarm, never a proof). **Listed false alarm:** for a structure whose leaves of the element's field are all
+      array members, the guard between two places reached through `owns` parameters is not decided either, and a
+      read of the copied values after it may fail. Under the guard, `d != s` gives `block_of(d) != block_of(s)`: both are
       first slots `loc(member(X, k), 0)` and `loc(member(Y, k), 0)` of array leaves at one index of one structure
       type, so `d != s` makes `X != Y`, `member_inv` makes the blocks differ.
     - **`copy_arr_<t>`** is a trusted method (`// cerastes:trusted-contract`), one per element cell type, as
       `zero_arr_<t>` is: it requires `1 <= n`, that `d` and `s` are the first slots of blocks of length `n`,
       `block_of(d) != block_of(s)` and every source flag set; it takes and returns full permission to the
-      destination's value and flag fields over `n` slots and the amount `rd` (`none < rd && rd <= write`; `rd ==
-      write` when the caller owns the source whole) of the source's value and flag fields, and ensures that each
+      destination's value and flag fields over `n` slots and the amount `rd` (`none < rd && rd <= write`) of the
+      source's value and flag fields — `rd` is the source's first-slot amount, 0060 item 6's minimum of the value and
+      flag permissions at the first slot, so `write` when the caller owns the source whole (the audit's p2 verifies
+      it; the S47 fixture passes half of it, which verifies too) — and ensures that each
       destination value is the source's old value at the same index, each destination flag is set, each source value
       is unchanged and **each source flag stays set** (S47 (g): without it the source's next read fails its
       `uninitialized` row).
@@ -361,12 +447,28 @@ construct rejected before this record; where an existing function is touched (`i
       array global or `member(<chain>, k)` with `<chain>` 0043 item 13's canonical chain rooted at a formal, `r` or
       `loc(GB_<g>(), 0)`; the bounds `0` and the literal count the facts state. Nothing else. **In a method body
       the block-term form is refused:** a row in code is over a bound local (item 5).
-    - **The bound local** is e1a's array local for the lint: a `Ref` local assigned exactly `loc(GB_<g>(), 0)` or
-      `loc(member(<chain>, k), 0)` (the block grammar above), whose rows are e1a's and e1b's with the block
+    - **The bound local** is e1a's array local for the lint: a `Ref` local assigned once, after its root, exactly
+      `loc(GB_<g>(), 0)` or `loc(member(<chain>, k), 0)`, whose rows are e1a's and e1b's with the block
       `block_of(t)` and the literal bounds `0` and the count the block's length fact states (S47 wrote them so;
       every other start than `offset_of(t)` or `0` for such a local, a local bound to another slot, or a block
-      outside the grammar is refused). The S47 fixtures write some rows in code in the block-term form and element
-      flags directly; those are fixture differences (the chapter lists them), not shapes lowering writes.
+      outside the grammar is refused). The chain's root may be a formal, `r`, `loc(GB_<g>(), 0)`, a structure local's
+      Viper local (assigned by `alloc_struct_*`; its count from the allocation's `len`), and a pointer temporary
+      (`call_atoms`' bound argument, a load for 0045's places) whose length fact the method states (audit round 1,
+      S4 (2)). **As settled with Part C's lowering:** a member's bound local is a temporary (`t__<n>`; the lint keys on its assignment, not its name), assigned once, directly
+      `loc(member(<chain>, k), 0)` with `<chain>` rooted at a Viper variable only (a formal, `r`, a structure local, or
+      a call-row temporary bound from the argument first; never an expression); its count is the literal of the
+      member at that index in an `alloc_struct_*` of a structure with that member (emitted for every such structure,
+      the next bullet), the same literal `struct_lens` states. An element access (no quantifier) is written over the block term directly (`len(member(X, k))`, `loc(member(X, k), i)`). A `reads` site with array parts binds its call amount to a `Perm` local, the minimum over its cell leaves, each array part's first slot, the liveness cell and the method's own read amounts (0060 item 6's rule). `owns(p->a)` and `reads(p->a)` stay plain atoms whose
+      pointee is the array (a structure-like site with no cell leaf and one array part), not range atoms: the range
+      machinery is keyed by a formal, the member needs its root and path. The audit found the
+      rule not needed for 0059 item 7's single reason (S4 (1): any `block_of` of a Viper local with literal bounds and
+      a heap-free amount reads no heap; a wrong binding gives a false alarm or an exit 3, never a proof); it pins the
+      shape. The S47 fixtures write some rows in code (call and return rows among them, S4 (4)) in the block-term form,
+      rows over a copy of a bound local, and element flags directly; those are fixture differences (the chapter lists
+      them), not shapes lowering writes.
+    - **The count's source** (audit round 1, S5): lowering emits `alloc_struct_<n>_<tag>()` for every structure type
+      with an array member, called or not (a trusted method nobody calls, as `program_start` is in a unit without
+      `main`), so the lint's count of every array member always has its pinned source.
     - `alloc_struct_*`: per array member exactly `len(member(X, k)) == N` and the three quantifiers of item 6, each
       (receiver, field) once. `struct_lens`' conjunct: `== N` for an array member, with the count of the allocation of
       that structure. The global facts: `len(GB_g()) == N` for an array global, the same N in all three places the

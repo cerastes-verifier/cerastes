@@ -29,8 +29,28 @@ std::string Type::str() const
 }
 
 namespace {
+// Which view of the leaves of a struct (decision 0063 item 4): Old is struct_leaves (an array member one leaf of the array's type, the poison), Object is
+// struct_object_leaves (an array member one array leaf), Value is struct_value_leaves (an array member one leaf per element).
+enum class LeafView
+{
+    Old,
+    Object,
+    Value
+};
+
+StructLeaf make_leaf(const std::vector<int>& path, const Type& type, std::string text, const StructMember& m)
+{
+    StructLeaf l;
+    l.path = path;
+    l.type = type;
+    l.text = std::move(text);
+    l.owning = m.owning;
+    l.ref_to_uninit = m.ref_to_uninit;
+    return l;
+}
+
 void collect_leaves(const StructType& s, std::vector<int>& path, const std::string& text, bool first_arrow,
-                    std::vector<StructLeaf>& out, int depth)
+                    std::vector<StructLeaf>& out, int depth, LeafView view)
 {
     if (depth > 64)
     {
@@ -44,11 +64,32 @@ void collect_leaves(const StructType& s, std::vector<int>& path, const std::stri
         path.push_back(static_cast<int>(k));
         if (m.type.is_struct() && m.type.struct_type != nullptr)
         {
-            collect_leaves(*m.type.struct_type, path, t, false, out, depth + 1);
+            collect_leaves(*m.type.struct_type, path, t, false, out, depth + 1, view);
+        }
+        else if (m.type.is_array() && view == LeafView::Object)
+        {
+            StructLeaf l {make_leaf(path, m.type, std::move(t), m)};
+            l.array = true;
+            l.count = m.type.count;
+            if (m.type.element != nullptr)
+            {
+                l.element = *m.type.element;
+            }
+            out.push_back(std::move(l));
+        }
+        else if (m.type.is_array() && view == LeafView::Value && m.type.element != nullptr)
+        {
+            // every element is a leaf of its own, in index order (a count that is absurd is a check_program error: the member is refused there first)
+            for (unsigned long long i {0U}; i < m.type.count && i < 1048576U; ++i)
+            {
+                StructLeaf l {make_leaf(path, *m.type.element, t + "[" + std::to_string(i) + "]", m)};
+                l.elem = static_cast<int>(i);
+                out.push_back(std::move(l));
+            }
         }
         else
         {
-            out.push_back(StructLeaf {path, m.type, std::move(t), m.owning, m.ref_to_uninit});
+            out.push_back(make_leaf(path, m.type, std::move(t), m));
         }
         path.pop_back();
     }
@@ -79,12 +120,29 @@ void collect_slots(const StructType& a, const StructType& b, std::vector<int>& p
 }
 } // namespace
 
-std::vector<StructLeaf> struct_leaves(const StructType& s, const std::string& root_text, bool arrow)
+namespace {
+std::vector<StructLeaf> leaves_in_view(const StructType& s, const std::string& root_text, bool arrow, LeafView view)
 {
     std::vector<StructLeaf> out;
     std::vector<int> path;
-    collect_leaves(s, path, root_text, arrow, out, 0);
+    collect_leaves(s, path, root_text, arrow, out, 0, view);
     return out;
+}
+} // namespace
+
+std::vector<StructLeaf> struct_leaves(const StructType& s, const std::string& root_text, bool arrow)
+{
+    return leaves_in_view(s, root_text, arrow, LeafView::Old);
+}
+
+std::vector<StructLeaf> struct_object_leaves(const StructType& s, const std::string& root_text, bool arrow)
+{
+    return leaves_in_view(s, root_text, arrow, LeafView::Object);
+}
+
+std::vector<StructLeaf> struct_value_leaves(const StructType& s, const std::string& root_text, bool arrow)
+{
+    return leaves_in_view(s, root_text, arrow, LeafView::Value);
 }
 
 std::vector<std::vector<int>> struct_slots_of(const StructType& a, const StructType& b)
@@ -184,6 +242,12 @@ void scan_assigned(const Stmt& s, std::set<int>& assigned, std::set<int>& declar
             break;
         // `*addr = expr`: either operand may hold an assignment (`*(p = q) = 1`, `*p = (q = r, 1)`)
         case Stmt::Kind::Store:
+            scan_assigned_expr(s.addr, assigned);
+            scan_assigned_expr(s.expr, assigned);
+            break;
+        // decision 0063: the two addresses of an array statement (check_program refuses them until part B); scanned like a Store's operands
+        case Stmt::Kind::ArrayZero:
+        case Stmt::Kind::ArrayCopy:
             scan_assigned_expr(s.addr, assigned);
             scan_assigned_expr(s.expr, assigned);
             break;
@@ -669,11 +733,25 @@ const Expr* Builder::range_atom(AtomKind kind, const Expr* ptr, const Expr* coun
 
 const Expr* Builder::global_atom(AtomKind kind, const Expr* global_addr, int amount, SrcLoc loc, bool implicit)
 {
-    Expr* e {fresh(p_, Expr::Kind::Atom, Type::bool_type(), std::move(loc))};
+    Expr* e {fresh(p_, Expr::Kind::Atom, Type::bool_type(), loc)};
     e->atom = kind;
     e->a = global_addr;
     e->amount = amount;
     e->implicit_atom = implicit;
+    // Decision 0063 item 7: `owns(g)` and `reads(g)` of a global or `static` array of N elements is the range atom over the whole array, `owns_range`/`reads_range` of its first slot with
+    // the literal count N (the atom's `a` is the array's address, `GlobalAddr`, a pointer to the array; the lowering reads its place as the global's key and its elements by slot).  Its
+    // spelling is the user's (`owns(g)`).
+    if (global_addr != nullptr && global_addr->kind == Expr::Kind::GlobalAddr && global_addr->global != nullptr &&
+        global_addr->global->type.is_array() && (kind == AtomKind::Owns || kind == AtomKind::Reads))
+    {
+        e->atom = kind == AtomKind::Owns ? AtomKind::OwnsRange : AtomKind::ReadsRange;
+        Expr* n {fresh(p_, Expr::Kind::Const, Type::integer(p_.int_type_of(64, true)), std::move(loc))};
+        n->value = std::to_string(global_addr->global->type.count);
+        n->c_text = n->value;
+        e->b = n;
+        e->c_text = std::string(kind == AtomKind::Owns ? "owns(" : "reads(") + global_addr->global->c_name + ")";
+        return e;
+    }
     if (global_addr != nullptr && global_addr->global != nullptr)
     {
         const std::string& n {global_addr->global->c_name};
@@ -872,6 +950,37 @@ const Expr* Builder::elem_addr(const Expr* base, const Expr* index, SrcLoc loc)
     {
         e->c_text = "&" + place;
     }
+    return e;
+}
+
+const Expr* Builder::elem_value(const Expr* a, int member, const Expr* index, SrcLoc loc)
+{
+    Type t {
+        a->type}; // ill-typed on purpose when `a` is no struct value, the member is no array or the index is out of range
+    std::string text;
+    if (a->type.is_struct() && a->type.struct_type != nullptr && member >= 0 &&
+        static_cast<size_t>(member) < a->type.struct_type->members.size())
+    {
+        const StructMember& m {a->type.struct_type->members[static_cast<size_t>(member)]};
+        if (m.type.is_array() && m.type.element != nullptr)
+        {
+            t = *m.type.element;
+        }
+        std::string idx {index != nullptr ? index->c_text : std::string()};
+        if (idx.empty() && index != nullptr && index->kind == Expr::Kind::Const)
+        {
+            idx = index->value;
+        }
+        if (!a->c_text.empty() && !idx.empty())
+        {
+            text = a->c_text + "." + (m.name.empty() ? "<" + std::to_string(member) + ">" : m.name) + "[" + idx + "]";
+        }
+    }
+    Expr* e {fresh(p_, Expr::Kind::ElemValue, t, std::move(loc))};
+    e->a = a;
+    e->b = index;
+    e->index = member;
+    e->c_text = std::move(text);
     return e;
 }
 
@@ -1084,6 +1193,21 @@ const Stmt* Builder::store(const Expr* addr, const Expr* value, SrcLoc loc)
     Stmt* s {fresh_stmt(p_, Stmt::Kind::Store, std::move(loc))};
     s->addr = addr;
     s->expr = value;
+    return s;
+}
+
+const Stmt* Builder::array_zero(const Expr* addr, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::ArrayZero, std::move(loc))};
+    s->addr = addr;
+    return s;
+}
+
+const Stmt* Builder::array_copy(const Expr* dest, const Expr* source, SrcLoc loc)
+{
+    Stmt* s {fresh_stmt(p_, Stmt::Kind::ArrayCopy, std::move(loc))};
+    s->addr = dest;
+    s->expr = source;
     return s;
 }
 
@@ -1336,6 +1460,7 @@ private:
 bool reads_heap(const Expr& e)
 {
     // record 0062 item 4: an application counts as a read of memory, whatever its callee reads (`old` over one would otherwise be read in the post-state)
+    // decision 0063 (M4.5e1e1 part A): an ElemValue reads no heap of its own (a struct VALUE's element; its operands are walked below), nor does an ElemAddr (an address)
     if (e.kind == Expr::Kind::Deref || e.kind == Expr::Kind::Atom || e.kind == Expr::Kind::Apply)
     {
         return true;
@@ -1419,6 +1544,9 @@ bool same_pure_expr(const Expr& a, const Expr& b)
         // an application reads memory (record 0062 item 4): never "equal", as a read of memory is not
         case Expr::Kind::Apply:
             return false;
+        // decision 0063: a struct VALUE's element: only a struct-typed producer (a Call, an Aggregate, a Field of one) sits under it, none of which this compares
+        case Expr::Kind::ElemValue:
+            return false;
         default:
             return false; // a call, a read of memory, an atom, an assignment, ...: never "equal"
     }
@@ -1501,6 +1629,11 @@ PlaceKey atom_place(const Expr& atom)
         if (atom.a->kind == Expr::Kind::Formal)
         {
             k.root = atom.a->index;
+        }
+        else if (atom.a->kind == Expr::Kind::GlobalAddr && atom.a->global != nullptr && atom.a->global->type.is_array())
+        {
+            // decision 0063 item 7: `owns(g)` / `reads(g)` of an array global: the place of the global, no steps and no path
+            k.root = kGlobalSiteBase + atom.a->global->id;
         }
         return k;
     }
@@ -1729,13 +1862,14 @@ bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const Struc
     }
     if (base->is_struct() && base->struct_type != nullptr)
     {
-        const std::vector<StructLeaf> leaves {struct_leaves(*base->struct_type)};
+        // decision 0063 item 4: the object view, and an array leaf holds cells of its element type (`int *` can point at `s->a[i]`)
+        const std::vector<StructLeaf> leaves {struct_object_leaves(*base->struct_type)};
         // A pointer to a struct that has a cell of the target's field (any depth of nesting): a pointer loaded from the object reaches that cell (audit S1).
         if (steps > 0)
         {
             for (const StructLeaf& l : leaves)
             {
-                if (l.type == target)
+                if ((l.array ? l.element : l.type) == target)
                 {
                     return true;
                 }
@@ -1745,7 +1879,7 @@ bool may_hold_pointer_to(const Type& t, const Type& target, std::set<const Struc
         {
             for (const StructLeaf& l : leaves)
             {
-                if (may_hold_pointer_to(l.type, target, seen))
+                if (may_hold_pointer_to(l.array ? l.element : l.type, target, seen))
                 {
                     return true;
                 }
@@ -1944,9 +2078,9 @@ bool restrict_backed(const Function& f, int param, int* offender)
         {
             return false;
         }
-        for (const StructLeaf& l : struct_leaves(*qt.pointee->struct_type))
+        for (const StructLeaf& l : struct_object_leaves(*qt.pointee->struct_type))
         {
-            if (l.type == *mine.pointee)
+            if ((l.array ? l.element : l.type) == *mine.pointee)
             {
                 return true;
             }
