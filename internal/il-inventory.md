@@ -9130,3 +9130,83 @@ Fixtures `tests/viper-smoke/memory/s48_{c2,z,v}_*.vpr` (same header convention a
 - Not tested: a nested pairing with a **second array** as the other site (the other site is element 3 of the same array, which is the harder case for the row), a cell held by a fraction (`fwd_row`) and a forwarded `struct S` atom of the element's own type (`fwd3_row`; the auditor's decided probes, not fixtures); the record's flat `struct P` is covered by pass 1; `reads` sites against `owns` sites in the nested pairings; Form S for any nested pairing.
 
 **sha256 of the files as they ran in the lane** (the Mac's and the lane's lists are identical): `build/m4.5e1e2/s48-fixtures-after-audit.mac.sha` (25 lines). The 54 earlier `s48_*` files are unchanged by this pass (the first 37 equal `build/m4.5e1e2/s48-fixtures.mac.sha`).
+
+### P83 (h) and the session's other measurements (summaries; the data stayed in the session's `build/m4.5e1e2/`, which goes with its worktree: question 193)
+
+Written by the orchestrator at the session's close from the agents' reports (`test-mutator-report-{1,2,4,7,12}.md`,
+`edg-backend-report-{4,5}.md`, `auditor-report-{1,2,2b}.md`). Compilers: clang 21.1.8 and GCC 16.0.1 on the box (the
+Mac's Apple clang 21 and GCC 16.2 agree on all but 8 of 8,016 cells, none of the warnings below); tiers: no flag (D),
+`-Wall` (A), `-Wall -Wextra` (E); the rule is record 0020 item 5's union of D and A over both compilers.
+
+**The matrix M** (668 shapes, both modes, 8,016 compiles). Every positive shape of record 0064 compiles with `-Wall
+-Wextra -Werror` in both compilers. Per family: a constant index outside a dimension: clang `-Warray-bounds` at D
+(EDG's #175 fires on each, an error in verify mode; not on `&m[2][0]`, `&m[1][3]`, `&v[3]`); a truth test or null
+comparison of an array's name or a member array's decay: clang at D, GCC `-Waddress` at A (`array_address_null_test`
+since 0059); unsequenced same-element writes: GCC `-Wsequence-point` at A; `sizeof(a)` of a parameter `int a[][3]`,
+`int a[2][3]`, `struct P v[2]`: both at D (`-Wsizeof-array-argument`), not for `int (*a)[3]`; elision of a non-zero
+list: clang `-Wmissing-braces` at A in both modes, GCC at A in C only; an excess initializer: both by default in C,
+an error in C++; an unused block-scope typedef of an array of structures: both at A; an array compound literal in
+C++: clang `-Wdangling` at D.
+
+**Brace elision under a zero** (record 0064 item 16; questions 304, 321, 327).
+- clang++ `-Wmissing-braces` at A: a list is flagged exactly when some subaggregate whose braces it elides has, as
+  its parent, an array (any length) or a structure with two or more members; an only member is never flagged; depth,
+  storage and the value do not matter; `{}` never. No counterexample among 668 shapes and 31 depth probes. g++ never
+  warns `-Wmissing-braces` at A.
+- GCC's C at A: any elision except where the object's whole initializer is the lone `{0}` (silent at any depth):
+  flagged are `T v[2] = {{0}}`, `struct W { T t; int k; } w = {{0}}`, `{{{0}}}` and `T t = {{0}}` over a structure
+  that begins with a structure beginning with an array, and every non-zero elision, an only member included. clang's
+  C is silent on every literal `{0}`, `{}` and `{{0}}` form, and flags a lone zero that is NOT an integer literal
+  (`{(0)}`, `{'\0'}`, `{false}`, `{NULL}`, an enumerator, `{1 - 1}`, `{-0}`, `{(int)0}`) wherever its C++ predicate
+  applies (audit round 1; question 325).
+- Designators (96 shapes, then 62 forms with every warning by name): a designator does not change either compiler's
+  `-Wmissing-braces` answer; clang++ adds `-Wc99-designator` at D on every UNBRACED designated structure or array
+  member (`{.p = 0}`, `{.a = 1}`), whatever the parent and the value; g++ is silent; in C both are silent on an
+  unbraced designated zero and GCC flags a braced designated value that elides (`{.t = {0}}`) and a non-zero
+  unbraced one.
+- The base (`f07d80a`) on the forms it can express (60 + 96 runs): it accepted C++'s `{0}` over a nested-structure
+  first member of several, `struct W w = {{0}}` in both modes where the compilers flag it, and every unbraced
+  designated form; it rejected, in both modes, `{0}` over a structure whose first member is a structure that begins
+  with an array (a defect: C's compilers are silent). A compile pass of all 5,344 test and example sources with
+  `-Wall -Wmissing-braces` flagged seven files, none a positive the rule changes.
+
+**Address tests** (question 322; 376 shapes). GCC `-Waddress` at A flags a truth test or null comparison of every
+array object (name or member, `p->a` included), a row `m[i]`, `&E[i]` for every subscripted `E` and any index
+(pointers included, except `&p[0]`), `&E[i].x`, and `(p + 1)`; it is silent on a bare `p`, `&p[0]` and `&*p`. clang at
+D flags a whole array's name or decay and `&E[i].m`, and nothing else. The base accepts `if (&a[1])`, `&a[1] == NULL`
+and `&p[1] == NULL` on arrays of scalars; no existing test or doc example holds one (three passes).
+
+**`restrict`** (record 0064 item 19; question 326). Each program below is the pattern "write through `p`, write the
+same object by another route, read through `p`", with an `ensures` true only of the aliased value; "verifies" means
+cerastes reported `verified` and the twin with the other value failed (the alias path is live); the compilers' `-O2`
+results are against the model's value 2.
+
+| Form | On the base | gcc / clang `-O2` | After Commit 2 |
+|---|---|---|---|
+| the body names the global (`p == &g`; also `&g4[1]`, a structure global's member) | verifies | 1 / 2 | rejected (i) |
+| through a local `int *q = &g`, or a local structure holding `&g` | verifies | 1 / 2 | rejected (i) |
+| the contract says `p == &g`, the body writes `g` | verifies | 1 / 1 | rejected (i) |
+| the body calls a function whose contract owns `g` | verifies | 2 / 1 | rejected (ii) |
+| a call's pointer result (`ensures r == &g`) | verifies | 1 / 2 | rejected (iii) |
+| an out-parameter (`getp(&q)`) | verifies | 1 / 1 | rejected (iii) |
+| a structure result with a pointer leaf | verifies | 1 / 2 | rejected (iii) |
+| a partial atom `owns(g.x)`, `p == &g.y` tested in the body | verifies | 1 / 2 | rejected (i) |
+| `p` passed to a callee whose own body names `g` (also through its callee; a callee that only reads `g`; a bodiless callee) | verifies | 1 / 1 | rejected (iv) |
+| `owns(*p) && owns_range(q, n) && q == p`, called with `n == 0` (also `reads_range`; `p` backed by a possibly empty range beside `owns(*q)`; two ranges with counts 0 and 1; `owns_range(p, n) && owns(g) && p == &g`) | verifies | 1 / 1 | rejected (the pair rule) |
+| **`owns_range(p, n) && owns_range(q, n) && owns(g) && p == &g && q == &g`, called with `n == 0`; the body never names `g`** | verifies | 1 / 1 | **verifies: open and unsound** |
+| a loaded pointer, a member pointer, a pointer global, a second parameter with no atom, `live` only or a guarded atom | rejected (0037, 0043) | | rejected |
+| controls: `owns(g)` or `reads(g)` beside `owns(*p)`; a `static` local's implicit atom | verifies; the alias branch is dead | | verifies |
+| over-strict: a body that only reads the global; `same(p)`; a guarded atom on the global; `set(p, 3)`; `malloc` of the pointee's type | verifies (C allows each) | as the model | rejected |
+
+Scan of `tests/` at the base: 56 files contain `restrict`, 44 functions have a `restrict` parameter and a body; 43
+call nothing; six name a global (one positive, `struct_global_restrict.c`, which holds it by `owns(g)`; its twin; four
+rejection pins); no doc example and nothing in vlibc's headers uses `restrict`.
+
+**Cost of local arrays of structures** (question 328; alone, in C, on the box at load 1 to 4): a function holding 1,
+2, 3, 4, 5 arrays `struct P a[2]` (two `int` leaves), each with an initializer and one check: 7, 11, 17, 36, 65 s;
+five mixed arrays (11 leaves, 22 quantified chunks, 88 quantified scope-exit rows): 735 s; five `int a[2]` arrays: 14 s
+on the joined build and 15 s on the base. No case split is emitted for such a function.
+
+**Step 0** (R1 to R3): every pin of the plan's section 10 had the outcome it lists (30 Flips D rows unchanged); 174
+probes, 340 runs: nothing of record 0064's "In" list verified on the base; `rejections.py`: 2,569 rejection runs
+recorded (2,593 with the 12 staging pins).

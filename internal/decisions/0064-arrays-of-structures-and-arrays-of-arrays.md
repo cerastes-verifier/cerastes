@@ -533,8 +533,8 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
     - Each rule with a refusing twin in `scripts/test_lint_viper.py`.
 18. **Categories and tags:** none new. **Facts:** P83, S48.
 19. **`restrict` and what the body can reach** (question 326; audit round 1, blocking 1; amends 0037 item 2 and
-    0043 item 10). **Not of this record's arrays: a hole in the base, closed here because Part C would widen
-    it** (a global array of structures adds `g[i].x` by name).
+    0043 item 10). **Not of this record's arrays: a hole in the base, narrowed here because Part C would widen
+    it, and not closed: one form is known to verify still (below)** (a global array of structures adds `g[i].x` by name).
     - **The hole.** 0037 item 2 argues that "an access to `*p`'s object through a pointer not based on `p`
       cannot verify", and 0043 item 10 extended its conditions to the function's parameters, atoms and the
       globals its contract names. Both look at the contract only. Permissions belong to cells, not to
