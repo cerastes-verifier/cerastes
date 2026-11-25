@@ -1181,4 +1181,38 @@ closed: a rejection with a diagnostic and a pin, never a wrong proof; answer inl
 - **299** Question 285's answer becomes the standing rule for a test that is slow on the box because of what it
   must refute (`tests/long/` with a short default-tier twin), settled with the advisor at its part.
 
-The next questions start at 301.
+**Settled with the advisor in M4.5e1e1, for the owner's review** (the owner, 2026-11-25 at about 03:24 UTC: "I'm
+going to bed so if you have any questions you may auto accept the recommended answer after your normal routine.
+Just document the decisions made in the handoff documents"; each below went to the advisor first):
+- **301** (fail closed either way; test mechanics) Record 0063 item 14's rule for an array typedef declared outside
+  the verified files needs a pin, but no system typedef of an array of scalars is the same on both CI hosts
+  (`jmp_buf` is `int[48]` on macOS and `struct __jmp_buf_tag[1]` on Linux; `va_list` an array of a structure on
+  Linux, no array on macOS; P82 (f)). **Answer** (revised: the first answer, a test library header through the
+  harness's library-fixture hook, failed both of its checks — no file under `tests/` can select the hook, and a
+  library header is verified like user code, record 0046, so its typedef is accepted): the encoder tests the
+  system-typedef rule before the element rule, so `jmp_buf b;` gives the same diagnostic and line on both hosts
+  (measured on the box and the Mac with Part D's build); **one untagged pin over the real `<setjmp.h>`**.
+  Alternative: two platform-tagged pins (`; platform: macos`, `; platform: linux`).
+- **302** (fail closed: a rejection kept) `tests/scalar/negative/reject_typedef_array_block.c` declares an unused
+  block-scope `typedef char buf_t[4];`; both compilers warn at `-Wall` (`-Wunused-local-typedef(s)`), a family
+  cerastes has no rule for (an unused `typedef int T;` is accepted). **Answer:** an unused block-scope typedef or
+  alias of an array type stays rejected like the compilers (the plan's default for a warning family with no rule),
+  `unsupported_declaration` at the typedef as today, the message naming M8's warning sweep; "unused" read on the
+  strict side. The file moves from the plan's Flips A (retired) to Flips C (message only); its `expect:` line is
+  unchanged. Alternative: accept it, as a positive without `native-ok`.
+- **303** (fail closed: a rejection) `struct S s = {0};` in C++ where `S`'s first member is an array: clang++ warns
+  `-Wmissing-braces` at `-Wall`, C is silent. **Answer:** rejected in C++ by the existing elision rule (0020 item 5's
+  union of the first two tiers; no program with an array member was accepted before, so nothing accepted is
+  lost); C's `{0}` and `{}` in both modes stay accepted; `{0}` positives are C-only. Alternative: accept it in C++
+  for consistency with the nested-structure case (question 304).
+
+**Open for the owner (nothing waits on it):**
+- **304** (not unsoundness: an over-acceptance of a warning shape) The compiler matrix of M4.5e1e1's Step 0 shows
+  clang++ warning `-Wmissing-braces` at `-Wall` on C++'s `{0}` over a structure whose first member is a nested
+  structure (`init_local_nested_struct_zero.cpp`), which cerastes has accepted since M4.5c1 (record 0043 item 6
+  says C++'s `{0}` warns only at `-Wextra`). Question 303 rejects the same shape for an array member. Should the two
+  agree? **Recommendation: reject the nested-structure C++ `{0}` too** (0020 item 5's rule; existing positives that
+  use it become C-only or are rewritten with full braces), in a session that may change existing outcomes.
+  Alternative: accept the array-member form in C++ as well (lift 303). Until answered, both stand as built.
+
+The next questions start at 305.

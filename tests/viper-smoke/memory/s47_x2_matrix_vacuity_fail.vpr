@@ -1,0 +1,114 @@
+// expect: error assert:assertion.false @ L113
+// S47 (x) vacuity twin: `assert false` after the scope exit of s47_x2_matrix: the two-variable allocation, the lens quantifier and the loop conjuncts are consistent.
+// int m[2][3]: the outer block of 2 slots, slot i's member 0 the inner block of 3; element (i, j) is loc(member(loc(block_of(m), i), 0), j).
+// (hand-written spike fixture of record 0063 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of a local int m[2][3] (0028 item 16, S26 matrix): the outer block of 2 slots whose member 0 is the inner block of 3; each permission one quantifier over i and j with the trigger loc(member(loc(block_of(r), i), 0), j)
+method alloc_mat() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 2)
+  ensures forall i: Int :: { loc(block_of(r), i) } ((0 <= i) && (i < 2)) ==> (len(member(loc(block_of(r), i), 0)) == 3)
+  ensures forall i: Int, j: Int :: { loc(member(loc(block_of(r), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(r), i), 0), j).v_int)
+  ensures forall i: Int, j: Int :: { loc(member(loc(block_of(r), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(r), i), 0), j).d_int)
+  ensures forall i: Int, j: Int :: { loc(member(loc(block_of(r), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> (!loc(member(loc(block_of(r), i), 0), j).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+method f_mat()
+{
+  var vm: Ref
+  var tin: Ref
+  var tw: Ref
+  var v_i: Int
+  var v_j: Int
+  var kl_0: Perm
+  var kl_1: Perm
+  vm := alloc_mat()
+  v_i := 0
+  assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int) //MARKED
+  assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int) //MARKED
+  kl_0 := perm(lvloc(block_of(vm)).lv)
+  label lh_0
+  while (v_i < 2)
+    invariant acc(lvloc(block_of(vm)).lv, kl_0)
+    invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int)
+    invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int)
+    invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> (old[lh_0](loc(member(loc(block_of(vm), i), 0), j).d_int) ==> loc(member(loc(block_of(vm), i), 0), j).d_int)
+    invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> (loc(member(loc(block_of(vm), i), 0), j).d_int ==> (((-2147483648) <= loc(member(loc(block_of(vm), i), 0), j).v_int) && (loc(member(loc(block_of(vm), i), 0), j).v_int <= 2147483647)))
+    invariant (0 <= v_i) && (v_i <= 2)
+  {
+    v_j := 0
+    assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int) //MARKED
+    assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int) //MARKED
+    kl_1 := perm(lvloc(block_of(vm)).lv)
+    label lh_1
+    while (v_j < 3)
+      invariant acc(lvloc(block_of(vm)).lv, kl_1)
+      invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int)
+      invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int)
+      invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> (old[lh_1](loc(member(loc(block_of(vm), i), 0), j).d_int) ==> loc(member(loc(block_of(vm), i), 0), j).d_int)
+      invariant forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> (loc(member(loc(block_of(vm), i), 0), j).d_int ==> (((-2147483648) <= loc(member(loc(block_of(vm), i), 0), j).v_int) && (loc(member(loc(block_of(vm), i), 0), j).v_int <= 2147483647)))
+      invariant (0 <= v_j) && (v_j <= 3)
+      invariant (0 <= v_i) && (v_i < 2)
+    {
+      assert !((offset_of(vm) + v_i < 0) || (len(block_of(vm)) <= offset_of(vm) + v_i)) //BOUND1
+      tin := loc(member(loc(block_of(vm), offset_of(vm) + v_i), 0), 0)   // the inner array's first slot, a bound local
+      assert !((offset_of(tin) + v_j < 0) || (len(block_of(tin)) <= offset_of(tin) + v_j)) //BOUND2
+      tw := loc(block_of(tin), offset_of(tin) + v_j)
+      assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+      tw.v_int := 0
+      tw.d_int := true
+      v_j := v_j + 1
+      assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int) //MARKED
+      assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int) //MARKED
+      assert !(perm(lvloc(block_of(vm)).lv) < kl_1) //LIVE
+    }
+    v_i := v_i + 1
+    assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int) //MARKED
+    assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int) //MARKED
+    assert !(perm(lvloc(block_of(vm)).lv) < kl_0) //LIVE
+  }
+  assert !((offset_of(vm) + 1 < 0) || (len(block_of(vm)) <= offset_of(vm) + 1)) //BOUND1
+  tin := loc(member(loc(block_of(vm), offset_of(vm) + 1), 0), 0)   // the inner array's first slot, a bound local
+  assert !((offset_of(tin) + 2 < 0) || (len(block_of(tin)) <= offset_of(tin) + 2)) //BOUND2
+  tw := loc(block_of(tin), offset_of(tin) + 2)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 5
+  tw.d_int := true
+  assert !((offset_of(vm) + 1 < 0) || (len(block_of(vm)) <= offset_of(vm) + 1)) //BOUND1
+  tin := loc(member(loc(block_of(vm), offset_of(vm) + 1), 0), 0)   // the inner array's first slot, a bound local
+  assert !((offset_of(tin) + 2 < 0) || (len(block_of(tin)) <= offset_of(tin) + 2)) //BOUND2
+  tw := loc(block_of(tin), offset_of(tin) + 2)
+  assert perm(tw.v_int) > none //PERM
+  assert tw.d_int //INIT
+  assert tw.v_int == 5
+  assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int) //MARKED
+  assert forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int) //MARKED
+  assert perm(lvloc(block_of(vm)).lv) == write //LIVE
+  exhale forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).v_int)
+  exhale forall i: Int, j: Int :: { loc(member(loc(block_of(vm), i), 0), j) } (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(vm), i), 0), j).d_int)
+  exhale acc(lvloc(block_of(vm)).lv)
+  assert false
+}

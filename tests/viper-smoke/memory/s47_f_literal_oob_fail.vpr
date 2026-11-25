@@ -1,0 +1,107 @@
+// expect: error assert:assertion.false @ L79
+// S47 (f) twin: p[3] over (int[]){1, 2, 3}: the pointer read's BOUND row fails with assertion.false (out-of-bounds), nothing else on the path.
+// (hand-written spike fixture of record 0063 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1) (record 0059 item 3)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+// cerastes:trusted-contract the static-object part of an array initializer: it takes and returns the same permissions and ensures every element zero and initialized (record 0059 item 3)
+method zero_arr_int(r: Ref, n: Int)
+  requires ((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(r), k).v_int == 0)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> loc(block_of(r), k).d_int
+  decreases _
+
+method f_lit() returns (res: Int)
+{
+  var v_l1: Ref
+  var v_l2: Ref
+  var v_p: Ref
+  var v_q: Ref
+  v_l1 := alloc_arr_int(3)   // the hidden array local of the literal's block
+  assert !((offset_of(v_l1) + 0 < 0) || (len(block_of(v_l1)) <= offset_of(v_l1) + 0)) //BOUND
+  assert !((perm(loc(block_of(v_l1), offset_of(v_l1) + 0).v_int) != write) || (perm(loc(block_of(v_l1), offset_of(v_l1) + 0).d_int) != write)) //WPERM
+  loc(block_of(v_l1), offset_of(v_l1) + 0).v_int := 1
+  loc(block_of(v_l1), offset_of(v_l1) + 0).d_int := true
+  assert !((offset_of(v_l1) + 1 < 0) || (len(block_of(v_l1)) <= offset_of(v_l1) + 1)) //BOUND
+  assert !((perm(loc(block_of(v_l1), offset_of(v_l1) + 1).v_int) != write) || (perm(loc(block_of(v_l1), offset_of(v_l1) + 1).d_int) != write)) //WPERM
+  loc(block_of(v_l1), offset_of(v_l1) + 1).v_int := 2
+  loc(block_of(v_l1), offset_of(v_l1) + 1).d_int := true
+  assert !((offset_of(v_l1) + 2 < 0) || (len(block_of(v_l1)) <= offset_of(v_l1) + 2)) //BOUND
+  assert !((perm(loc(block_of(v_l1), offset_of(v_l1) + 2).v_int) != write) || (perm(loc(block_of(v_l1), offset_of(v_l1) + 2).d_int) != write)) //WPERM
+  loc(block_of(v_l1), offset_of(v_l1) + 2).v_int := 3
+  loc(block_of(v_l1), offset_of(v_l1) + 2).d_int := true
+  // int *p = (int[]){1, 2, 3}: the value of the literal is its decay
+  v_p := loc(block_of(v_l1), offset_of(v_l1) + 0)
+  assert v_p != null
+  assert (v_p != null) ==> (perm(lvloc(block_of(v_p)).lv) > none)
+  assert !((offset_of(v_p) + 1 < 0) || (len(block_of(v_p)) <= offset_of(v_p) + 1)) //BOUND
+  assert perm(loc(block_of(v_p), offset_of(v_p) + 1).v_int) > none //PERM
+  assert loc(block_of(v_p), offset_of(v_p) + 1).d_int //INIT
+  res := loc(block_of(v_p), offset_of(v_p) + 1).v_int
+  assert res == 2
+  assert v_p != null
+  assert (v_p != null) ==> (perm(lvloc(block_of(v_p)).lv) > none)
+  assert !((offset_of(v_p) + 3 < 0) || (len(block_of(v_p)) <= offset_of(v_p) + 3)) //BOUND
+  assert perm(loc(block_of(v_p), offset_of(v_p) + 3).v_int) > none //PERM
+  assert loc(block_of(v_p), offset_of(v_p) + 3).d_int //INIT
+  v_l2 := alloc_arr_int(4)   // the hidden array local of the literal's block
+  zero_arr_int(v_l2, 4)
+  assert !((offset_of(v_l2) + 0 < 0) || (len(block_of(v_l2)) <= offset_of(v_l2) + 0)) //BOUND
+  assert !((perm(loc(block_of(v_l2), offset_of(v_l2) + 0).v_int) != write) || (perm(loc(block_of(v_l2), offset_of(v_l2) + 0).d_int) != write)) //WPERM
+  loc(block_of(v_l2), offset_of(v_l2) + 0).v_int := 1
+  loc(block_of(v_l2), offset_of(v_l2) + 0).d_int := true
+  v_q := loc(block_of(v_l2), offset_of(v_l2) + 0)
+  assert v_q != null
+  assert (v_q != null) ==> (perm(lvloc(block_of(v_q)).lv) > none)
+  assert !((offset_of(v_q) + 3 < 0) || (len(block_of(v_q)) <= offset_of(v_q) + 3)) //BOUND
+  assert perm(loc(block_of(v_q), offset_of(v_q) + 3).v_int) > none //PERM
+  assert loc(block_of(v_q), offset_of(v_q) + 3).d_int //INIT
+  assert loc(block_of(v_q), offset_of(v_q) + 3).v_int == 0 // the zero fill of (int[4]){1}
+  assert forall k: Int :: { loc(block_of(v_l2), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_l2), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_l2), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_l2), k).d_int) //MARKED
+  assert perm(lvloc(block_of(v_l2)).lv) == write //LIVE
+  exhale forall k: Int :: { loc(block_of(v_l2), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_l2), k).v_int)
+  exhale forall k: Int :: { loc(block_of(v_l2), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_l2), k).d_int)
+  exhale acc(lvloc(block_of(v_l2)).lv)
+  assert forall k: Int :: { loc(block_of(v_l1), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_l1), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_l1), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_l1), k).d_int) //MARKED
+  assert perm(lvloc(block_of(v_l1)).lv) == write //LIVE
+  exhale forall k: Int :: { loc(block_of(v_l1), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_l1), k).v_int)
+  exhale forall k: Int :: { loc(block_of(v_l1), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_l1), k).d_int)
+  exhale acc(lvloc(block_of(v_l1)).lv)
+}

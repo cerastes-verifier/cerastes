@@ -1,0 +1,115 @@
+// expect: error assert:assertion.false @ L114
+// S47 (g) twin: a wrong value read back after the copy: t.a[2] == 4 while s.a[2] is 3: the check fails with assertion.false.
+// struct S { int n; int a[4]; }: member 0 is n (a cell), member 1 is a (the array leaf, the block member(p, 1), 4 elements). copy_arr_int is the trusted copy (item 13).
+// (hand-written spike fixture of record 0063 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of a local of type struct S (record 0063 item 6): a one-slot block whose members are blocks; a cell member of length 1 uninitialized with full permission, an array member of its length with each element uninitialized, each quantified permission its own
+method alloc_struct_0_S() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)
+  ensures len(member(r, 1)) == 4
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 1), j).v_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 1), j).d_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> (!loc(member(r, 1), j).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract the copy of n elements of int between two distinct blocks (record 0063 item 13): it takes and returns full permission to the destination's value and flag fields over n slots and the amount rd of the source's fields; each destination value is the source's old value at the same index, each destination flag is set, each source value is unchanged and each source flag stays set. It is the contract of the loop d[k] = s[k] over two disjoint ranges
+method copy_arr_int(d: Ref, s: Ref, n: Int, rd: Perm)
+  requires (1 <= n) && (d == loc(block_of(d), 0)) && (len(block_of(d)) == n) && (s == loc(block_of(s), 0)) && (len(block_of(s)) == n)
+  requires block_of(d) != block_of(s)
+  requires (none < rd) && (rd <= write)
+  requires forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).v_int)
+  requires forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).d_int)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).v_int, rd)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).d_int, rd)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).d_int
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).v_int)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).d_int)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).v_int, rd)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).d_int, rd)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> loc(block_of(d), k).v_int == old(loc(block_of(s), k).v_int)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> loc(block_of(d), k).d_int
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).v_int == old(loc(block_of(s), k).v_int)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).d_int
+  decreases _
+
+method f_copy()
+{
+  var v_s: Ref
+  var v_t: Ref
+  var v_a: Ref
+  var v_sa: Ref
+  var v_ta: Ref
+  var t0: Ref
+  var t1: Ref
+  var rd: Perm
+  v_s := alloc_struct_0_S()
+  t0 := loc(member(v_s, 0), 0)
+  assert !((perm(t0.v_int) != write) || (perm(t0.d_int) != write))
+  t0.v_int := 7
+  t0.d_int := true
+  v_a := loc(member(v_s, 1), 0)   // the bound local of s.a
+  assert !((offset_of(v_a) + 0 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 0)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 0).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 0).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 0).v_int := 1
+  loc(block_of(v_a), offset_of(v_a) + 0).d_int := true
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 1).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 1).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 1).v_int := 2
+  loc(block_of(v_a), offset_of(v_a) + 1).d_int := true
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 2).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 2).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 2).v_int := 3
+  loc(block_of(v_a), offset_of(v_a) + 2).d_int := true
+  assert !((offset_of(v_a) + 3 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 3)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 3).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 3).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 3).v_int := 4
+  loc(block_of(v_a), offset_of(v_a) + 3).d_int := true
+  v_t := alloc_struct_0_S()
+  v_ta := loc(member(v_t, 1), 0)
+  v_sa := v_a
+  assert perm(loc(member(v_s, 0), 0).v_int) > none
+  assert loc(member(v_s, 0), 0).d_int
+  t1 := loc(member(v_t, 0), 0)
+  assert !((perm(t1.v_int) != write) || (perm(t1.d_int) != write))
+  t1.v_int := loc(member(v_s, 0), 0).v_int
+  t1.d_int := true
+  assert perm(loc(block_of(v_sa), offset_of(v_sa) + 0).v_int) > none
+  rd := perm(loc(block_of(v_sa), offset_of(v_sa) + 0).v_int) / 2
+  assert none < rd
+  assert rd < write
+  assert forall k: Int :: { loc(block_of(v_sa), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_sa), k).v_int, rd) //MARKED
+  assert forall k: Int :: { loc(block_of(v_sa), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_sa), k).d_int, rd) //MARKED
+  assert forall k: Int :: { loc(block_of(v_sa), k) } ((0 <= k) && (k < 4)) ==> loc(block_of(v_sa), k).d_int //FLAGS
+  assert forall k: Int :: { loc(block_of(v_ta), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_ta), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_ta), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_ta), k).d_int) //MARKED
+  copy_arr_int(v_ta, v_sa, 4, rd) //CALL
+  assert !((offset_of(v_ta) + 2 < 0) || (len(block_of(v_ta)) <= offset_of(v_ta) + 2)) //BOUND
+  assert perm(loc(block_of(v_ta), offset_of(v_ta) + 2).v_int) > none //PERM
+  assert loc(block_of(v_ta), offset_of(v_ta) + 2).d_int //INIT
+  assert loc(block_of(v_ta), offset_of(v_ta) + 2).v_int == 4
+}
