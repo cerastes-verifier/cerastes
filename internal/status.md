@@ -21,7 +21,7 @@ Plan: `.claude/plans/m4-5e1e1-arrays-of-scalars.md` (written at M4.5e1e's planni
 from its section 5). Record 0063 (amends 0012, 0024, 0028, 0041, 0043, 0044, 0059, 0060, 0061, 0062). Read
 `internal/handoff.md` next: §1, §2, §3 "From M4.5e1e1", §8 (questions 301–308 settled with the advisor, 304 open).
 **Branched from local `main` = `4e28487`** (the planning's commits were not on `origin`: the owner had not pushed).
-Session from 2026-11-25 03:04 UTC; the owner went to bed at about 03:24 UTC giving the overnight rule ("if you have any
+Session from 2026-11-25 03:04 UTC to about 10:45 UTC (commits at 04:05, 08:03, 09:12, 10:39 and the closing one); the owner went to bed at about 03:24 UTC giving the overnight rule ("if you have any
 questions you may auto accept the recommended answer after your normal routine. Just document the decisions made in
 the handoff documents"); every question went to the Fable advisor first and none had to be decided by that rule.
 
@@ -34,7 +34,8 @@ the handoff documents"); every question went to the Fable advisor first and none
   global and `static` local arrays; array typedefs, `typeof`, `sizeof` of array types; array compound literals in C;
   round 2's B1/B1' (question 308).
 - **Commit 3** `6aad43c` (Part C and audit round 3's fixes): array members in every storage of a structure.
-- **Commit 4** (Part E and audit round 4's fixes): whole-structure copies of a structure with array members through the
+- **Commit 4** `643befb` (Part E and audit round 4's fixes; its tree for `src/`, `include/`, `tests/`, `scripts/` and
+  `doc/` is exactly the last joined proof's, `refs/tmp/e1e1-j7`): whole-structure copies of a structure with array members through the
   trusted `copy_arr_<t>` (S47 (g)'s clause set; the guard only where a place is reached through a pointer), by-value
   parameters, results, arguments and literal values up to **7** array elements (question 309), `f().a[i]` and contract
   `s.a[i]` as `ElemValue` with its `out-of-bounds` row; the pages, `internal/encoding.md`, the developer guide.
@@ -49,7 +50,10 @@ constant, fixed); round 3 on Part C (no blocking; S1–S4 taken); round 4 in two
 five Part E tests already corrected, S2 a false message for a C++ temporary, S3 the copy's message and the pages, all
 taken). Reports: `build/m4.5e1e1/auditor-report-{1,2,2b,2c,3,4a,4b}.md`.
 
-**Advisor-settled questions** (handoff §8): 301 (the system-typedef pin: one untagged `jmp_buf` pin), 302 (an unused
+**Advisor-settled questions** (handoff §8; the orchestrator settled inside the record's rules, without the advisor,
+and lists for review: the lint's bound-local rule (item 15), dropping the N9 sibling test `struct_array_loop_keeps_other.c`
+as 0043 item 11's rule, restoring the `for`-step literal pin, and the array literal's zero fill at its declaration
+(item 12, as built)): 301 (the system-typedef pin: one untagged `jmp_buf` pin), 302 (an unused
 block-scope array typedef stays rejected; Flips A → C for `reject_typedef_array_block.c`), 303 (C++ `{0}` over an
 array member rejected), 305 (Part D over its test cap), 306 (heap-read contract places with an array member rejected,
 M4.5e1e2), 307 (the copy's implementation fixtures), 308 (B1/B1'), 309 (the by-value limit 7, not 64: 64 timed out
@@ -66,6 +70,9 @@ nested-structure member, accepted since M4.5c1 although clang++ warns at `-Wall`
   fits whole only if Commit 3 lands by about 10:30 UTC; it landed at 09:13).
 - Mac single-file probes during development (edg-backend's, il-analyst-1's P82, test-mutator-1's R2 before the box
   rerun); one extra S47 debug run (`s47_g_dbg`, deleted); S47 (a) re-runs after a fixture change.
+- Runs outside the plan's section 3 table: the 900 s run of a 64-element by-value case and the limit's bisection
+  (each alone on a lane; question 309); the auditors' probes. Round 4b's two message fixes (the C++ temporary's, the
+  copy's) landed without a re-read (should-fix items, message text only).
 - 68 Part C programs whose Viper changed from `j4` to `j5` only in a trusted contract's comment (round 3's N5), with
   byte-identical maps, were not rerun (rule 1 read as semantic identity).
 - `struct_array_decay.c` (a Flips A positive) changed one line: its helper `h(int *p)` got a `live(p)` contract (an
@@ -105,12 +112,17 @@ M4.8 and M8.
   91 files; `py_compile`. On the Mac: `build_docs.sh` exit 0, `check_doc_examples.py` source (26 pages, 0 problems) and
   `--html` (27 files, 0 problems); `test_run_tests.py` 1,287 OK (1 skipped) after the last harness change.
 - **New tests, each run once on the box, timed** (reports 6, 12, 16, 19 and the last run): Parts B and D 82 files,
-  Part C 51, round 3's 16, Part E 24 and round 4a's 3, the doc examples; all green after the corrections listed
-  above; slowest 42.4 s (`struct_array_init.c`), the limit pair 17.7 s; the S47 fixtures 46 (5.6–42.5 s).
+  Part C 51, round 3's 16, Part E and round 4a's 24, the doc examples; all green after the corrections listed
+  above; slowest 42.4 s (`struct_array_init.c`), the limit pair 17.7 s; the S47 fixtures 46 (5.6–42.5 s). **Count
+  against the plan's cap of 150** (question 305): 188 new test and doc-example files (182 tests, 6 examples) besides
+  the 46 S47 fixtures, 18 retired (flips and staging pins), 14 edited — over the cap by Part D's 42 (accepted over its
+  30) and the audits' requested pins and twins.
 - **Not run, at the owner's request** (2026-11-25, about 10:40 UTC: "I'm about to leave and disconnect, so skip
   forward to the advisor check, closing commit and status and handoff updates. I'll handle the checks and runs later
-  and so will CI"): the preflight's `run_tests.py --check-headers` and `mutate.py --validate` on the final tree (both
-  ran green earlier in the session), and **`CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` on the box**.
+  and so will CI"): **`python3 scripts/mutate.py --validate` (never run in the session; the session moved and deleted
+  many tests, so it is the first suspect if `check.sh` fails)** and **`CERASTES_LONG=1 CERASTES_JOBS=32
+  scripts/check.sh` on the box**. `run_tests.py --check-headers` passed on the final test tree (6,162 headers, the Mac,
+  after the last pin).
 - `src/` and `include/` against `4e28487`, measured: +4,944 −439 without the self-test cases (+7,596 −445 with them); the plan
   estimated 2,340–4,475 for Parts A–D and 600–1,050 more for Part E.
 

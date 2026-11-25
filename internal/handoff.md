@@ -40,8 +40,8 @@ it are named there. Each note below keeps its origin in brackets. Session plans 
 1. **Run the full check on the box** (skipped in the session at the owner's request): bundle the branch into
    `~/cerastes-s8/p-ubuntu-26.04` (handoff §4: `git bundle create … m4.5e1e1-arrays-of-scalars`, fetch, check out),
    then `CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` there (e1d's took 50 min). A failure is the next session's
-   first task. The preflight items not rerun on the final tree: `run_tests.py --check-headers`, `mutate.py
-   --validate` (both green earlier in the session).
+   first task. **`mutate.py --validate` was never run in the session** (the session moved and deleted many tests:
+   the first suspect if `check.sh` fails); `run_tests.py --check-headers` passed on the final test tree.
 2. **Review** §8's questions 301–309 (each settled by the advisor, fail closed; 308 closed a soundness hole open since
    M4.5c2a; 309 lowered question 295's limit from 64 to 7) and **answer 304** (open), and the status entry's deviations
    and question-160 corrections.
