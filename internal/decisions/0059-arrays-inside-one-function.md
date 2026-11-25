@@ -16,6 +16,9 @@
     too (item 3); **235** the 1,080 existing `.vpr` files item 10 changes (item 10).
   - Standing: 69 (no EDG work), 77 (one context), 160 (a new test's expect line corrected after its first run, listed
     in status).
+- **Amended by 0064** (M4.5e1e2's first session, 2026-11-25): an automatic local array's element may be a
+  verified structure (items 1 to 4, 6 and 8 here are extended per leaf path: record 0064 items 2 to 6 and 10);
+  item 4's truth-test rule gains the address of an element of an array of structures (0064 item 5).
 - **Milestone:** M4.5e1a.
 - **Amends:** 0011 item 10; 0012 item 12; 0024 item 6; 0028 items 4, 10 and 11; 0032 items 3 (the driver's
   `--diag_error` list gains EDG's #1162 and #138 in C and #175 in both modes), 4 and 8; 0038 items 3 and 4; 0039 item 3; 0042

@@ -1,6 +1,9 @@
 # 0012 — Encoding scalar C and C++ into Viper (M3)
 
 - **Status:** accepted for M3. Facts marked (P*n*) are confirmed by the M3 IL probes before code relies on them.
+- **Amended by 0064** (M4.5e1e2's first session, 2026-11-25): item 11's lint gains the clause sets of the trusted
+  `alloc_arr_<E>` and `zero_arr_<E>` for an array of structures and the leaf rows over one of its leaves (record
+  0064 item 17, first rules; the rules for ranges, globals, members, rows and binders are its continuation's).
 - **Milestone:** M3 (2026-10-16)
 
 ## Context

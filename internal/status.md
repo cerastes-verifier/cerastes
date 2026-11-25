@@ -144,17 +144,25 @@ rejected before by a defect; the compilers are silent).
 **Deviations from the plan, for confirmation:**
 - Briefings carried an "Additions" block (the lane environment file `build/m4.5e1e2/box.env`; the other
   sessions' lanes are copy sources only; lane-free first legs because the lanes did not exist yet).
-- P83 (a)–(g) ran on the Mac with the frozen front end (single-file front-end probes), then once in the `il`
-  lane: identical.
+- Runs on the Mac: P83 (a)–(g) with the frozen front end (single-file front-end probes), then once in the `il`
+  lane: identical; test-mutator-1's preliminary compiler matrix and front-end typo checks of its probes (the box
+  matrix is the one on record); edg-backend-2's single-file `cerastes verify` probes of tags and item-16 forms,
+  redone in its lane for its report's tables; the docs builds (as the plan has them).
+- **Amendment lines:** records 0012, 0037, 0043, 0059, 0060 and 0063 each got a line naming what 0064 changed in
+  them so far; **not done:** the lines in 0024, 0028, 0044, 0045, 0047, 0052, 0055, 0058, 0061 and 0062, whose
+  amending items are the continuation's (Parts C to F), and which the session that builds each item adds.
 - The lint's first rules missed Commit 1 (the advisor: do not hold round 1 for them) and are in Commit 2.
-- Instances: edg-backend 1→3, il-analyst 1→1b→1c for the spike and 2→2b for Part B, test-mutator 1→4, a fresh
-  auditor per round. Two il-analyst instances ran at once for an hour (Part B's lowering; the audit-requested
+- Instances: edg-backend 1→3, il-analyst 1→1b→1c for the spike and 2→2b→2c for Part B (2c built the two `restrict`
+  fixes of audit round 2 and corrected the self-test case), test-mutator 1→4, a fresh auditor per round and for
+  the short read. Two il-analyst instances ran at once for an hour (Part B's lowering; the audit-requested
   fixtures), within three Sonnet agents alive.
 - Part B's tests were written before audit round 1 returned and revised from the record's diff; audit round 2
   started while those tests had their first run.
-- Part B has 42 test files against its cap of 35 (the advisor accepted the seven: two audit-requested twins, the
-  designated-list pins, the invariant-read pair, the pointer-base twin and pin) and item 19 six more; S48 has 79
-  fixtures against 56 (question 324).
+- **Test counts against the caps:** 56 new test files (45 `array_struct_*` for Part B against its cap of 35, and 11
+  `restrict_body_*` for item 19, which the plan did not have): beyond the first 35, two twins asked by audit round
+  1's record changes, the designated-list pins and positives' pins, the invariant-read pair, the pointer-base twin
+  and pin, and the eleven files audit round 2 asked for (three for Part B, eight for `restrict`); four pins were
+  retired (the plan's Flips A for Part B). S48 has 79 fixtures against 56 (question 324).
 - **The full check ran twice**, and this session's new VIR self-test cases had been proved by the il-analysts' own
   sweeps (Silicon by hand, comparing the SET of error lines with the expect lines) instead of through
   `scripts/run_tests.py`, which counts errors exactly: one case with two errors at one line passed the sweep and

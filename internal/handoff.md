@@ -65,9 +65,13 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
    `internal/status.md`.
 3. **Start the continuation:** `claude --agent orchestrator --effort high`, first message `M4.5e1e2, from Part C`.
    Branch `m4.5e1e2b-arrays-of-structures`, worktree `.claude/worktrees/m4.5e1e2b`, `build/m4.5e1e2b/`, lanes
-   `~/cerastes-e1e2` (reuse them: ship the new base to each lane and rebuild; take a new baseline). It runs the
-   plan's Step 0 again on the new base (worktree, lanes, baseline, R1 and R3) and goes on from Part C's line in
-   the plan's "Order of work"; audit rounds number on from 3. Questions start at 331.
+   `~/cerastes-e1e2` (reuse them: ship the new base to each lane and rebuild; take a new baseline). **Its base is
+   the commit that holds this session's commits** (`main` after the merge of step 1; if `main` has not been merged
+   yet, the tip of `m4.5e1e2-arrays-of-structures`): the plan's Step 0 says "the commit of `main` that holds this
+   plan", which is `f07d80a` and has no Parts A and B, so the continuation checks that its base contains `aebf158`
+   and **stops and says so if neither `main` nor the branch does**. It runs the plan's Step 0 again on that base
+   (worktree, lanes, baseline, R1 and R3) and goes on from Part C's line in the plan's "Order of work"; audit
+   rounds number on from 3. Questions start at 331.
 4. **Remove, when convenient:** e1d's and e1e1's worktrees and merged branches (as before); this session's
    `.claude/worktrees/m4.5e1e2-audit`; the refs `refs/tmp/e1e2-*`. Keep `.claude/worktrees/m4.5e1e2/build/m4.5e1e2/`
    until the continuation has started: it holds every agent report, both audit reports, the auditors' probes
@@ -1317,7 +1321,7 @@ rejection with a diagnostic and a pin, or a listed false alarm, never a wrong pr
   `int g; int f(int *restrict p)` with `owns(*p)`, whose body tests `p == &g`, writes `*p = 1`, then `g = 2`, and
   returns `*p`, verifies with `ensures r == 0 || r == 2`, while `gcc -O2` returns 1 (C23 6.7.3.1p4). Record 0037
   item 2's argument ("an access to `*p`'s object through a pointer not based on `p` cannot verify") covers other
-  parameters only. M4.5e1e2 builds a fail-closed rejection for the forms found (its record 0064 and audit round 2
+  parameters only. M4.5e1e2 builds a fail-closed rejection for every form found but the last (its record 0064 and audit round 2
   have the rule and what it leaves); **the complete rule for `restrict` is the owner's** (see "Questions for the
   owner" at the session's close).
 - **325** (not unsoundness). clang's C warns `-Wmissing-braces` at `-Wall` on a lone zero that is not an integer
