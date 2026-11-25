@@ -71,7 +71,7 @@ Cerastes/
     differential/verifast/  # original //@ versions from the VeriFast PRs
   scripts/
     bootstrap.sh  check.sh  run_tests.py  mutate.py  lint_viper.py  build_docs.sh
-  .claude/agents/           # subagents (soundness-auditor, test-mutator, edg-backend, il-analyst)
+  .claude/agents/           # orchestrator (an execution session's main session); subagents (soundness-auditor, test-mutator, edg-backend, il-analyst)
 ```
 
 ### Test format (used from M0 on)
@@ -164,7 +164,8 @@ decision record; non-template code, one translation unit. `.c` tests run in both
 valid in both. Strictly C (owner, 2026-10-20): C++ references, `new`/`delete` and classes are M7.
 
 **Sessions.** Each is sized to one context (question 77) and lands its decision record (invariant 6), must-verify/must-fail pairs
-(invariant 2) and its docs (invariant 9), with one Opus audit round per diff plus a re-audit of blocking fixes and
+(invariant 2) and its docs (invariant 9), with one audit round per diff (the soundness-auditor: Fable at `xhigh` from
+2026-11-25, owner; Opus before) plus a re-audit of blocking fixes and
 `check.sh` once, at the end, after the last code change, on the x86-64 box rather than the Mac (owner, 2026-11-09: it
 now takes hours; the box is much faster and leaves the Mac free). From M4.5e1e1 (owner, 2026-11-25) every test run is on
 the box, a session's plan carries a test budget (each run listed with its reason; a run that is not listed is not
@@ -439,6 +440,12 @@ expect to write. Do not modify files until I approve the plan.
 **The approved plan** (owner, 2026-10-28): its first execution step saves it in the repository as
 `.claude/plans/<milestone>-<topic>.md`, the branch name with `.` written as `-` (`m4-5b1b-pointer-params.md`), committed
 with the planning commit and named in the status entry and the handoff.
+
+**Execution sessions** (owner, 2026-11-25): a session that executes an approved plan starts with
+`claude --agent orchestrator --effort high` and the milestone's name. `.claude/agents/orchestrator.md` (Fable at
+`high`) holds what the pasted opening prompts repeated, so a planning writes no opening prompt: the plan itself names
+the decision records its orchestrator reads and the section execution starts from. The flag is needed: checked on
+2026-11-25, a main session started from the file alone ran at the saved effort level, not the file's.
 
 **During the session**
 - Delegate must-fail twins and mutants to the `test-mutator` subagent.

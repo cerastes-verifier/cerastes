@@ -1,7 +1,7 @@
 ---
 name: soundness-auditor
-description: Read-only Opus reviewer. Reviews diffs to src/backend, src/vir, or src/viper for unsoundness before commit, and audits gate evidence (IL inventory claims, pass/fail verdicts), EDG configuration and test-harness changes that later soundness depends on. Use proactively on any encoder or back-end change. Never edits.
-model: opus
+description: Read-only Fable reviewer. Reviews diffs to src/backend, src/vir, or src/viper for unsoundness before commit, and audits gate evidence (IL inventory claims, pass/fail verdicts), EDG configuration and test-harness changes that later soundness depends on. Use proactively on any encoder or back-end change. Never edits.
+model: fable
 effort: xhigh
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit

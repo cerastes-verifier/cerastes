@@ -613,8 +613,11 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   (8).
 - **Team:** three Sonnet agents with disjoint files (edg-backend: `src/backend`, `src/driver`, build; il-analyst:
   probes, IL evidence, Silicon spikes, `src/vir` + `src/viper`; test-mutator: tests, harness, compiler matrices,
-  `mutate.py`, `lint_viper.py`) and the Opus soundness-auditor (one round per diff plus a re-audit of blocking
-  fixes; should-fix items not taken go to §3). The orchestrator is Opus and consults a Fable advisor (owner,
+  `mutate.py`, `lint_viper.py`) and the Fable soundness-auditor at `xhigh` (owner, 2026-11-25; Opus before; one
+  round per diff plus a re-audit of blocking fixes; should-fix items not taken go to §3). The orchestrator is Fable
+  at `high` (owner, 2026-11-25; Opus before): the main session, started with `claude --agent orchestrator --effort high`
+  (`.claude/agents/orchestrator.md` holds what the pasted opening prompts repeated; the plan names the records it
+  reads and its starting section, `plan.md`'s "Session protocol"). It consults a Fable advisor (owner,
   2026-11-10); **from M4.5e1e1 every question goes to the advisor first, and to the owner only if the advisor
   cannot settle it** (owner, 2026-11-25; §8). **A session's plan assigns the work** (owner, 2026-11-11: the
   orchestrator does not decide the ensemble): section 2 of M4.5e1b's, M4.5e1c's, M4.5e1d's and M4.5e1e1's plans is
@@ -842,7 +845,7 @@ instances before that rejection is lifted.
   non-dependent calls in a prototype and `old(v)`, `t.m`/`-v`/`v++`/`v += 1`/`(int)v`/`sizeof(T)`/lambdas, parameter
   kinds, loops with attributes and `return v + 1`, `r == (0 <= v && v < 10)`, `a_constant.expr` vs `variant.expr`);
   test-mutator harness header + oracle category; orchestrator the record; edg-backend the checker; goldens checked
-  by il-analyst; one Opus audit. Stop rules: cut the oracle's structural checks, then tag coverage automation, then
+  by il-analyst; one audit. Stop rules: cut the oracle's structural checks, then tag coverage automation, then
   `main` in the ports; any rule family not done by 2:10 returns ineligible "not checked" (fail closed).
 
 **M5b EDG (box).** Best just before M5g. Fork commit Q: a registration flag
@@ -855,7 +858,7 @@ paths — check member and template paths; GH tests in `tests/tests/changes/GH-*
 (the `predicate` and `pure` rows of `register_attributes.cpp`'s table). Fork commit R: EDG diagnoses series L's silent error node for a `decltype(p)`
 lambda parameter (§3, "M5.0 and M5"); the `decltype` tests move from `cerastes-annotation_substitution_error` to EDG's diagnostic
 at the same line (owner's rule). Plus the close-out audit B's missing tests (§3, "M5.0 and M5"). Fail-before/pass-after,
-Opus audit, the full box suites (baseline mismatches `cwg1835`, `cwg2881`), pin move, 0006/0007 and the upstream
+the audit, the full box suites (baseline mismatches `cwg1835`, `cwg2881`), pin move, 0006/0007 and the upstream
 draft amended. Stop rules: box unavailable → topic branch, pin moved in a short follow-up; new box mismatch → no pin
 move.
 
