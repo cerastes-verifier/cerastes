@@ -1,0 +1,89 @@
+// expect: error assert:insufficient.permission @ L82
+// S47 (a) twin: keep_cell(&s.a[1]) keeps the element, then the scope exit: the first marked row (v_int over the bound local) fails with insufficient.permission, and Silicon reports nothing else on the path.
+// struct S { int n; int a[4]; }: member 0 is n (a cell), member 1 is a (an array leaf of 4 elements, the block member(s, 1)).
+// (hand-written spike fixture of record 0063 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of a local of type struct S (record 0063 item 6): a one-slot block whose members are blocks; a cell member of length 1 uninitialized with full permission, an array member of its length with each element uninitialized, each quantified permission its own
+method alloc_struct_0_S() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)
+  ensures len(member(r, 1)) == 4
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 1), j).v_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 1), j).d_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> (!loc(member(r, 1), j).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// a callee that takes the permission to one element and keeps it (owns(*p) in the requires, nothing returned)
+method keep_cell(p: Ref)
+  requires (p != null) && (p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p)) && (offset_of(p) <= len(block_of(p)))
+  requires (offset_of(p) < len(block_of(p))) && acc(p.v_int) && acc(p.d_int) && p.d_int
+  requires acc(lvloc(block_of(p)).lv, 1/2)
+  ensures acc(lvloc(block_of(p)).lv, 1/2)
+  decreases _
+
+method m_keeps()
+{
+  var v_s: Ref
+  var v_a: Ref
+  var t0: Ref
+  v_s := alloc_struct_0_S()
+  t0 := loc(member(v_s, 0), 0)
+  assert !((perm(t0.v_int) != write) || (perm(t0.d_int) != write))
+  t0.v_int := 7
+  t0.d_int := true
+  v_a := loc(member(v_s, 1), 0)   // the bound local of s.a (record 0063 item 5)
+  assert !((offset_of(v_a) + 0 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 0)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 0).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 0).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 0).v_int := 1
+  loc(block_of(v_a), offset_of(v_a) + 0).d_int := true
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 1).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 1).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 1).v_int := 2
+  loc(block_of(v_a), offset_of(v_a) + 1).d_int := true
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 2).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 2).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 2).v_int := 3
+  loc(block_of(v_a), offset_of(v_a) + 2).d_int := true
+  assert !((offset_of(v_a) + 3 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 3)) //BOUND
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 3).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 3).d_int) != write)) //WPERM
+  loc(block_of(v_a), offset_of(v_a) + 3).v_int := 4
+  loc(block_of(v_a), offset_of(v_a) + 3).d_int := true
+  // keep_cell(&s.a[1]): the call's rows, then the call
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  assert perm(lvloc(block_of(v_a)).lv) > none
+  assert !((perm(loc(block_of(v_a), offset_of(v_a) + 1).v_int) != write) || (perm(loc(block_of(v_a), offset_of(v_a) + 1).d_int) != write))
+  assert loc(block_of(v_a), offset_of(v_a) + 1).d_int
+  keep_cell(loc(block_of(v_a), offset_of(v_a) + 1))
+  assert !((perm(loc(member(v_s, 0), 0).v_int) != write) || (perm(loc(member(v_s, 0), 0).d_int) != write))
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  assert perm(lvloc(block_of(v_s)).lv) == write //LIVE
+  exhale (acc(loc(member(v_s, 0), 0).v_int) && acc(loc(member(v_s, 0), 0).d_int))
+  exhale forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_a), k).v_int)
+  exhale forall k: Int :: { loc(block_of(v_a), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_a), k).d_int)
+  exhale acc(lvloc(block_of(v_s)).lv)
+}

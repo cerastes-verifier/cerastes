@@ -1,0 +1,103 @@
+// expect: verified
+// S47 (b), record 0063 items 9 and 10: int g[4] = {1, 2} in main: program_start with the row group of item 9, then e1a's loop conjuncts over the bound local v_g := loc(GB_g__1(), 0): a sum loop (values kept, s <= 2 * i, so s <= 8) and a fill loop (g[i] = i: values not kept, the range and the flags kept), the marked rows after. Verifies.
+// (hand-written spike fixture of record 0063 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract program start: every global holds its initial value with full permission and its liveness cell; an array global's row group in the order of record 0063 item 9
+method program_start()
+  ensures (len(GB_g__1()) == 4) && (lvloc(GB_g__1()) == loc(GB_g__1(), (-2)))
+  ensures forall k: Int :: { loc(GB_g__1(), k) } ((0 <= k) && (k < 4)) ==> acc(loc(GB_g__1(), k).v_int)
+  ensures forall k: Int :: { loc(GB_g__1(), k) } ((0 <= k) && (k < 4)) ==> acc(loc(GB_g__1(), k).d_int)
+  ensures forall k: Int :: { loc(GB_g__1(), k) } ((0 <= k) && (k < 4)) ==> loc(GB_g__1(), k).d_int
+  ensures loc(GB_g__1(), 0).v_int == 1
+  ensures loc(GB_g__1(), 1).v_int == 2
+  ensures forall k: Int :: { loc(GB_g__1(), k) } ((2 <= k) && (k < 4)) ==> loc(GB_g__1(), k).v_int == 0
+  ensures acc(lvloc(GB_g__1()).lv)
+  decreases _
+
+method f_main()
+{
+  var v_g: Ref
+  var v_i: Int
+  var v_s: Int
+  var kl_0: Perm
+  var kl_1: Perm
+  program_start()
+  v_g := loc(GB_g__1(), 0)   // the bound local of g (record 0063 item 5)
+  v_i := 0
+  v_s := 0
+  assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).d_int) //MARKED
+  kl_0 := perm(lvloc(block_of(v_g)).lv)
+  label lh_0
+  while ((v_i < 4))
+    invariant acc(lvloc(block_of(v_g)).lv, kl_0)
+    invariant forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).v_int)
+    invariant forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).d_int)
+    invariant forall k: Int :: { loc(block_of(v_g), k) } (((0 <= k) && (k < 4)) && old[lh_0](loc(block_of(v_g), k).d_int)) ==> loc(block_of(v_g), k).d_int
+    invariant forall k: Int :: { loc(block_of(v_g), k) } (((0 <= k) && (k < 4)) && loc(block_of(v_g), k).d_int) ==> (((-2147483648) <= loc(block_of(v_g), k).v_int) && (loc(block_of(v_g), k).v_int <= 2147483647))
+    invariant forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> (loc(block_of(v_g), k).v_int == old[lh_0](loc(block_of(v_g), k).v_int))
+    invariant (0 <= v_i) && (v_i <= 4)
+    invariant 0 <= v_s
+    invariant v_s <= 2 * v_i
+  {
+    assert !((offset_of(v_g) + v_i < 0) || (len(block_of(v_g)) <= offset_of(v_g) + v_i)) //BOUND
+    assert perm(loc(block_of(v_g), offset_of(v_g) + v_i).v_int) > none //PERM
+    assert loc(block_of(v_g), offset_of(v_g) + v_i).d_int //INIT
+    assert !(((v_s + loc(block_of(v_g), offset_of(v_g) + v_i).v_int) < (-2147483648)) || (2147483647 < (v_s + loc(block_of(v_g), offset_of(v_g) + v_i).v_int)))
+    v_s := v_s + loc(block_of(v_g), offset_of(v_g) + v_i).v_int
+    v_i := v_i + 1
+    assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).v_int) //MARKED
+    assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).d_int) //MARKED
+    assert !(perm(lvloc(block_of(v_g)).lv) < kl_0) //LIVE
+  }
+  assert v_s <= 8 // the bound on the sum, from the values kept
+  v_i := 0
+  assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).d_int) //MARKED
+  kl_1 := perm(lvloc(block_of(v_g)).lv)
+  label lh_1
+  while ((v_i < 4))
+    invariant acc(lvloc(block_of(v_g)).lv, kl_1)
+    invariant forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).v_int)
+    invariant forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).d_int)
+    invariant forall k: Int :: { loc(block_of(v_g), k) } (((0 <= k) && (k < 4)) && old[lh_1](loc(block_of(v_g), k).d_int)) ==> loc(block_of(v_g), k).d_int
+    invariant forall k: Int :: { loc(block_of(v_g), k) } (((0 <= k) && (k < 4)) && loc(block_of(v_g), k).d_int) ==> (((-2147483648) <= loc(block_of(v_g), k).v_int) && (loc(block_of(v_g), k).v_int <= 2147483647))
+    invariant (0 <= v_i) && (v_i <= 4)
+  {
+    assert !((offset_of(v_g) + v_i < 0) || (len(block_of(v_g)) <= offset_of(v_g) + v_i)) //BOUND
+    assert !((perm(loc(block_of(v_g), offset_of(v_g) + v_i).v_int) != write) || (perm(loc(block_of(v_g), offset_of(v_g) + v_i).d_int) != write)) //WPERM
+    loc(block_of(v_g), offset_of(v_g) + v_i).v_int := v_i
+    loc(block_of(v_g), offset_of(v_g) + v_i).d_int := true
+    v_i := v_i + 1
+    assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).v_int) //MARKED
+    assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).d_int) //MARKED
+    assert !(perm(lvloc(block_of(v_g)).lv) < kl_1) //LIVE
+  }
+  assert v_i == 4
+  assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_g), k) } ((0 <= k) && (k < 4)) ==> acc(loc(block_of(v_g), k).d_int) //MARKED
+}

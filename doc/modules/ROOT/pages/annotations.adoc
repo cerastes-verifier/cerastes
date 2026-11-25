@@ -962,7 +962,12 @@ read on another (`c ? owns(*p) : reads(*p)`), never both on one path, and an
 invariant they may name any pointer variable, the object behind a pointer read from memory
 (`+owns(**pp)+`, `+owns(*gp)+`), and a structure or a member of one (`owns(*q)`, `+owns(q->x)+`)
 (xref:memory.adoc#loops[Loops]), but not a global itself, which every loop of a
-function that holds it keeps already. `owns_range` and `reads_range` take a pointer
+function that holds it keeps already. `owns(g)` and `reads(g)` of a global array name
+every element of it, and a contract may then read `g[i]`
+(xref:memory.adoc#global-arrays[Global arrays]); `owns(*p)` and `reads(*p)` of a structure
+with an array member name every element with the other members, and `owns(p->a)` and
+`reads(p->a)` the array member alone, after which a contract may read `p->a[i]`
+(xref:memory.adoc#array-members[Array members]). `owns_range` and `reads_range` take a pointer
 parameter and a count that reads no memory, in a function's `requires` and `ensures`
 (an `ensures` range gives back the `requires` range of the same kind, parameter and
 count), as a conjunct, after a condition that reads no memory and `||`, or as an arm of
@@ -1032,8 +1037,8 @@ passed for `const int *`, but a `long` is not passed for an `int` parameter, nor
 otherwise `cerastes-forall_argument_mismatch`. An argument reads no memory: write the read inside
 `f`. Each argument is evaluated once, at the `forall`, and its own checks (an overflow in `n +
 1`) are made there, whether or not `f` uses it. A pointer argument whose elements `f` reads
-is a pointer parameter in a contract, and a pointer variable or a local array in a loop
-invariant or a `check`. In a loop invariant and a `check`, `E` does not dereference an array
+is a pointer parameter in a contract, and a pointer variable, a local array or a global
+array in a loop invariant or a `check`. In a loop invariant and a `check`, `E` does not dereference an array
 argument (`*a`) or use a pointer argument as a value (`p != q`), and when it reads through two
 pointers or at two offsets it computes only with the reads of the first one `E` reads (`a[k] <= a[k + 1]` is
 accepted, `a[k] < a[k + 1] + 1` is not yet). In a `check` it also reads only elements at an

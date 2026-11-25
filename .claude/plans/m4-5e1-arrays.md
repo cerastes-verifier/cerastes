@@ -1,4 +1,4 @@
-# Plan: M4.5e1 — Arrays (six sub-sessions, records from 0059)
+# Plan: M4.5e1 — Arrays (seven sub-sessions, records from 0059)
 
 **Approved by the owner on 2026-11-11**, at a session that only planned (question 224). Its commit also split
 M4.5e1 into five sub-sessions (e1a–e1e); e1c's planning (2026-11-23) added a sixth, e1f.
@@ -19,8 +19,14 @@ own, `.claude/plans/m4-5e1d-pure-functions.md`, planned in full as e1b and e1c w
 is `git show 9ab9a1e:.claude/plans/m4-5e1-arrays.md`**: its section 6 is e1d's sketch (proposed, P81 and S46,
 tests and docs).
 
-e1e starts with its probes and spikes as written here, then plans again (section 1), unless the owner has it
-planned in full as e1b, e1c and e1d were.
+**Trimmed a fourth time at M4.5e1e's planning (2026-11-25).** e1d is done (record 0062). e1e does not fit one
+session and is two (question 290): **e1e1** has a plan of its own, `.claude/plans/m4-5e1e1-arrays-of-scalars.md`,
+planned in full as e1b, e1c and e1d were, and **e1e2** has its scope and inputs in that plan's section 14. **The
+text before this trim is `git show 68384d1:.claude/plans/m4-5e1-arrays.md`**: its section 7 is e1e's sketch
+(decided and proposed, P82 and S47, the known pins) and its section 9 e1e's inputs.
+
+What is left here is the umbrella: the owner's decisions for all of M4.5e1, the table of sub-sessions, the rules
+they share, and e1f's section (10), the one sub-session that has no plan of its own yet.
 
 ## 1. Context
 
@@ -34,7 +40,9 @@ planned in full as e1b, e1c and e1d were.
 ranges, markers over ranges, `owning(n)` on a parameter, array parameters). e1c built quantifiers (record 0061:
 `cerastes_forall` with an inlined `pure` body in contracts, loop invariants and checks, `f__wf` variant M, the
 `carrays.c` port in full, the tutorial chapter; `cerastes_old` in loop invariants was cut to M4.5e2, question 260;
-`internal/status.md`). e1d is planned in full.
+`internal/status.md`). e1d built `pure` functions (record 0062: a `pure` function that is called or carries a
+contract as a Viper function with its definition check, applications in checks, contracts, calls and loop
+invariants, the exact sum; no cut). e1e1 is planned in full.
 
 **Owner decisions.**
 - **226 `forall` in C: inline the body.** `cerastes_forall(f, free...)`, where `f` is a `pure` function whose body
@@ -56,6 +64,10 @@ ranges, markers over ranges, `owning(n)` on a parameter, array parameters). e1c 
 - **At e1d's planning (2026-11-24):** e1d is planned in full; a `pure` function is read when it is called or
   carries a contract; a `pure` function with no body in the unit cannot be called; one session with split points
   (questions 264–272: e1d's plan, sections 1 and 13).
+- **At e1e's planning (2026-11-25):** e1e is cut in two, "scalars, then structures" (question 290); a structure
+  with an array member is copied and passed by value in M4.5e1e (question 291), in e1e1 unless that would pass
+  the twelve-hour cap (question 300); a question goes to the Fable advisor first; a plan carries a test budget
+  (e1e1's plan, sections 3, 12 and 15; questions 292–299 are its defaults, for review).
 
 **Standing:** 69 (no EDG work), 77 (one context), 160 (a new test's expect line may be corrected after its first
 run, each listed in status), 176 (the owner handles CI); `check.sh` once, at the end, on the x86-64 box; no test
@@ -68,26 +80,24 @@ runs while a fix is queued; no Claude trailer; commits stay local.
 | **e1a Arrays inside one function** | local arrays as blocks, `a[i]`, `&a[i]`, initializers, scope exits, the marked range rows, `out-of-bounds`, loops over arrays, sequencing, pointers into arrays, the `offset_of == 0` restatements | — | landed 1,943 | **done** (record 0059) |
 | **e1b Ranges in contracts** | `owns_range`, `reads_range`, element reads in contracts, calls and returns over ranges, `f__wf`, loops over parameter ranges, markers over ranges, `owning(n)` on a parameter, array parameters, the `carrays.c` port | e1a | landed 2,754 | **done** (record 0060) |
 | **e1c Quantifiers** | `cerastes_forall` (question 226), triggers, `old` under a binder, max, the fill loop, the full `carrays.c` port, the tutorial chapter; the spike for e1f (`cerastes_old` in loop invariants cut to M4.5e2) | e1b | landed 3,514 (estimate 1,500–2,200) | **done** (record 0061) |
-| **e1d Pure functions and the exact sum** | read `pure` functions as Viper functions with their contracts and definition checks, self-recursion with `decreases`, calls of `pure` functions in checks, contracts and loop invariants, the exact sum (question 227) | e1c | 3,350–5,000 (a design check calibrated on e1c) | **planned in full**: `.claude/plans/m4-5e1d-pure-functions.md` |
-| **e1e Arrays in aggregates and storage** | array members, arrays of structures, 2-D arrays, global and `static` arrays, array compound literals, 0024 item 6 lifted for array types | e1b (e1c for its quantified tests) | 1,500–2,500 | **plan mode again** (section 7) |
+| **e1d Pure functions and the exact sum** | read `pure` functions as Viper functions with their contracts and definition checks, self-recursion with `decreases`, calls of `pure` functions in checks, contracts and loop invariants, the exact sum (question 227) | e1c | landed 3,654 (estimate 3,350–5,000), in 11.5 hours | **done** (record 0062) |
+| **e1e1 Arrays of scalars in structures and static storage** | global and `static` arrays, array members, array compound literals, 0024 item 6 lifted for array types of scalars; structure values with array members (question 291, its Part E) | e1b | 2,340–4,475 for Parts A–D, 600–1,050 more for Part E (three surveys at `68384d1`) | **planned in full**: `.claude/plans/m4-5e1e1-arrays-of-scalars.md` |
+| **e1e2 Arrays of structures and arrays of arrays** | arrays of structures, ranges and `forall` over them, 2-D arrays, `int a[][3]`; what e1e1 cuts or moves | e1e1 | 1,700–3,100 | **a short planning after e1e1** (section 14 of e1e1's plan) |
 | **e1f Range call rows** | the minimum read amount over a range at a call (question 238) and `owns_range`'s row order D (question 242); one set of Viper flips over e1b's range calls | e1c (its spike S45 (r)) | 150–400 | **planned after e1c**, from the spike (section 10) |
 
 The estimates are insertions without self-tests; each sub-session's own planning measures them again. Each
 sub-session is a session of its own (question 77): its branch and worktree, its record (the next free number), its
-twins, docs, audits and one box `check.sh`. **M4.5e2** needs e1a and e1b (and e1e for `malloc(n * sizeof(struct
-S))`); it may run before e1c–e1e.
+twins, docs, audits and one box `check.sh`. **M4.5e2** needs e1a and e1b (and e1e2 for `malloc(n * sizeof(struct
+S))`); it may run before e1e and e1f.
 
-**What "plan mode again" means.** The sub-session starts outside plan mode with its Step 0, Step 1, probes and
-spikes exactly as written here (they change no `src/`), commits their results to `internal/il-inventory.md`,
-then enters plan mode. That planning takes the spike results and the as-built facts of the sub-sessions before it,
-refines the record draft and the encoding steps, lists the Flips, and is saved as
-`.claude/plans/m4-5e1<x>-<topic>.md`. (e1b, e1c and e1d did not: the owner had each planned in full, with a
-decision table per probe and spike in place of the second planning; e1e may be planned the same way.)
+**No sub-session plans again after its spikes.** The owner had e1b, e1c, e1d and e1e1 each planned in full, with
+a decision table per probe and spike in place of the second planning this plan first foresaw; e1e2 has a short
+planning of its own after e1e1, from what e1e1 built.
 
 ## 2. Rules for every sub-session
 
-`internal/handoff.md` §4's rules and §6's process notes apply. e1b's, e1c's and e1d's plans (their section 2) are
-the model for the team: who owns which files, when an agent is replaced, the build and runner rules, the audit rounds and the
+`internal/handoff.md` §4's rules and §6's process notes apply. e1b's, e1c's, e1d's and e1e1's plans (their section
+2) are the model for the team: who owns which files, when an agent is replaced, the build and runner rules, the audit rounds and the
 advisor's checkpoints. The rules this plan relies on:
 - **Team** (`.claude/agents/`): three Sonnet agents with disjoint files and the Opus `soundness-auditor`,
   read-only. The orchestrator is Opus and consults the Fable advisor before a record is accepted, at any cut or
@@ -95,7 +105,7 @@ advisor's checkpoints. The rules this plan relies on:
   - **edg-backend:** `src/backend`, `src/driver`, `include/cerastes.h`, the joined builds,
     `regen_vpr.py`/`vprdiff.py` after each part.
   - **il-analyst:** the probes and spikes; then `src/vir` and `src/viper` with the VIR self-test cases. A fresh
-    il-analyst takes over after the spikes and wherever its context would run low (`lower.cpp` is 20,479 lines).
+    il-analyst takes over after the spikes and wherever its context would run low (`lower.cpp` is 23,269 lines).
   - **test-mutator:** tests, twins, exactly the Flips, the compiler matrix (`native-ok`: clang and GCC, both modes,
     `-Wall -Wextra -Werror`), `run_tests.py`, `lint_viper.py` and their self-tests, the doc example files.
   - **soundness-auditor:** one round per diff on a snapshot commit in `.claude/worktrees/<session>-audit`, one
@@ -103,7 +113,9 @@ advisor's checkpoints. The rules this plan relies on:
   - **Orchestrator:** Steps 0 and 1, the record, the vprdiff verdict per part, docs prose, integration, status and
     handoff.
 - **`lower.cpp` is held by one agent at a time,** with a commit or a snapshot between holders.
-- **Every agent:** any question stops that work and goes to the owner; each report is also written to
+- **Every agent:** any question stops that work and goes to the orchestrator, who takes it to the Fable advisor
+  first and to the owner only if it is still open (owner, 2026-11-25); it runs no test its plan's test budget
+  does not list, and every test run is on the x86-64 box; each report is also written to
   `build/<session>/<role>-report-<n>.md`; builds are serialized (`lockf build/<session>/build.lock cmake --build
   build/cmake`) and held before a directory-wide run; one agent runs `run_tests.py`, the others use
   `build/cerastes verify <file>`; a test generator lives in `build/<session>/` and is never re-run over the tree;
@@ -121,8 +133,6 @@ Done as planned, nothing cut. Its approved plan is section 3 of `git show dc4037
 what was built is record 0059 (each item says so), `internal/status.md`'s entry and `internal/il-inventory.md`,
 chapter M4.5e1a (P78, S43).
 
-In section 7 below, `E` is `src/backend/encode.cpp` and `L` is `src/vir/lower.cpp`, with lines at `f57ee43`
-(before e1a): its planning refreshes them.
 
 ## 4. M4.5e1b — Ranges in contracts (record 0060; done 2026-11-12)
 
@@ -144,12 +154,11 @@ binder per read class, decided by the spike), `forall` in a `check` has its own 
 invariant was added as Part D, and the spike for e1f rides along. Done with one cut: Part D (question 260) went to
 M4.5e2; what was built is record 0061 and `internal/status.md`'s entry.
 
-## 6. M4.5e1d — Pure functions and the exact sum (record 0062; planned in full)
+## 6. M4.5e1d — Pure functions and the exact sum (record 0062; done 2026-11-25)
 
-**Its plan is `.claude/plans/m4-5e1d-pure-functions.md`** (approved 2026-11-24). The sketch that stood here (the
-slice of M4.5f1/f2 an exact sum needs, what was proposed, P81 and S46, the tests and docs) is section 6 of `git
-show 9ab9a1e:.claude/plans/m4-5e1-arrays.md`; the new plan fixes its proposals and replaces its "plan again" by
-decision tables. Against the sketch:
+**Its plan is `.claude/plans/m4-5e1d-pure-functions.md`** (approved 2026-11-24; executed without re-planning, no
+cut; what was built is record 0062 and `internal/status.md`'s entry). The sketch that stood here is section 6 of
+`git show 9ab9a1e:.claude/plans/m4-5e1-arrays.md`. Against the sketch:
 - a `pure` function is read when it is called or carries a contract, and one that only a `cerastes_forall` names
   stays inlined and unread (so no existing program's Viper changes);
 - the definition check is the function's own `__wf` method (the body as one more clause), not a method beside it;
@@ -163,67 +172,39 @@ decision tables. Against the sketch:
 - a `pure` function with no body in the unit cannot be called; mutual recursion, a call under a quantifier's
   binder, a `cerastes_forall` inside a called body and a call in a measure stay rejected (M4.5f2, M4.5e2, M4.5f1).
 
-## 7. M4.5e1e — Arrays in aggregates and storage (the next free record) — ⟲ plan mode again after P82 and S47
+## 7. M4.5e1e — Arrays in aggregates and storage (two sessions: e1e1, record 0063, planned in full; e1e2)
 
-**Scope.** Array members (`member(r, k)` of length n), arrays of structures, arrays of arrays (a row is
-`member(loc(b, i), 0)`; 0028 item 16), global and `static` arrays, array compound literals, array types in
-`sizeof(type)`, `typeof`, `_Alignof` and typedefs (0024 item 6 lifted for arrays), structure copies with array
-members, range atoms and `forall` over them. Its planning may split it in two (aggregates; storage): question 233.
-
-### 7.1 Decided and proposed
-
-- **Decided** (0028 items 2 and 16; S26): over an array of structures there is one quantifier per member and
-  field, triggered `{ loc(member(loc(block_of(a), k), j), 0) }`; a matrix's contract fixes `offset_of(a) == 0`;
-  `a[0][3]` and `a[2][0]` fail their bounds; `&a[0][3]` is formed.
-- **Globals:** `len(GB_g()) == N` in `global_facts` (`L` 6277–6294) and the lint (`global_facts_atoms`);
-  `program_start` gives the initial values, zero as one quantifier, written elements through `constant_value`
-  (P38: a list over 1,000 elements keeps no `expr`, and that shape is rejected, never read from `ck_aggregate`);
-  `owns(g)` and `reads(g)` of an array global mean every element. **`is_global_ref` and `inv_place_disjunct`
-  (`L` 6267–6271, 3809–3817) treat any `loc(GB_…, i)` as one place: wrong once a global has several slots.**
-- **Escape scan** (0056 item 11): an array member decaying to a pointer is an escape of its struct local
-  (`escapes_in_expr`, `L` 2930).
-- **Stay rejected, to be confirmed:** an owning field inside an array of structures and arrays of owning pointers
-  (closures over ranges: M4.8 or M4.5f2); a by-value structure with an array member, unless S47 shows the
-  quantified copy is cheap; `const` arrays (M4.6).
-
-### 7.2 P82 and S47 (run before the re-plan)
-
-- **P82:** array members and their initializers (brace elision), `s.a[i]`, `p->a[i]`, `&s.a[i]`, the decay of
-  `s.a`; `struct S v[3]`, `v[i].x`; `int m[2][3]`, `m[i][j]`, `m[i]` as a value; global and `static` arrays with
-  and without initializers, a 1,001-element list; `(int[]){1, 2, 3}`; `sizeof(int[3])`, a typedef of an array
-  type and its uses.
-- **S47:** S26's member fixtures re-run in the encoder's shapes with e1a's loops and e1b's atoms; a global array
-  through `program_start` with a loop in `main`; a structure copy with an array member; costs. **Stop rule:** any
-  program over 60 s.
-
-### 7.3 Known pins
-
-`global_array.c`, `reject_struct_array_member.c`, the array compound literal messages (`E` 9663, 9735), and
-the list from records 0024 and 0018 in `tests/scalar/negative` (`reject_sizeof_*array*`, `reject_typedef_array_*`,
-`reject_alias_array.cpp`, `reject_alignof_array.c`, `reject_datasizeof_array.cpp`, `reject_decltype_array.cpp`,
-`reject_enum*_array*`, `reject_static_assert_sizeof_array.c`, `reject_contract_sizeof_array.c`,
-`reject_skipped_*array*`; `reject_sizeof_compound_literal.c` and `reject_sizeof_string.c` are M4.6's);
-`reject_struct_flexible_member.c` stays (M8).
+**e1e1's plan is `.claude/plans/m4-5e1e1-arrays-of-scalars.md`** (written 2026-11-25); **e1e2's scope and inputs
+are its section 14.** The sketch that stood here (decided and proposed, P82 and S47, the known pins) is section 7
+of `git show 68384d1:.claude/plans/m4-5e1-arrays.md`. Against the sketch:
+- **the cut is by element type, not "aggregates; storage"** (question 233's seam): e1e1 takes every array of
+  scalars (globals, `static` locals, members, literals, computed types), which needs one extension of e1a's and
+  e1b's range machinery (any block term as a range's block); e1e2 takes arrays of structures (a member tail
+  under the element slot) and arrays of arrays (two bound variables, of which one S26 fixture is all the
+  evidence);
+- **a structure is no longer a finite list of cells:** the leaves get an object view (cells and array leaves) and
+  a value view (every element a leaf), and the old view keeps an array member as one poisoned leaf, so that a
+  site that was not migrated stops with an internal error instead of reading the array as one cell;
+- **a by-value structure with an array member is not left rejected** (the sketch's "to be confirmed"): question
+  291 puts the copy (a trusted `copy_arr_<t>`) and by-value passing (one Viper value per element, at most 64) in
+  M4.5e1e;
+- **the note on `is_global_ref` was overstated:** the shortcut fires for slot 0 only, and an array global needs an
+  interval hit;
+- whole-array atoms (`owns(g)`, `owns(p->a)`) are e1e1's, and a range on part of a global array or of an array
+  member is M4.5e2's;
+- an owning field or a marker beside an array member, and heap storage of such a structure, are rejected in e1e1
+  and lifted by e1e2 (questions 292–294, defaults for review); arrays of owning pointers stay M4.8's and `const`
+  arrays M4.6's.
 
 ## 8. Open questions
 
-None here: 229–233 are answered (section 1; the questions as asked are in the commit named at the top), and so
-are 238–263 (record 0061's header; `internal/handoff.md` §8) and 264–272 (e1d's plan, section 13).
+None here: 229–233 are answered (section 1), and so are 238–289 (the records' headers; `internal/handoff.md` §8)
+and 290, 291 and 300 (e1e1's plan, section 15, which also lists its defaults 292–299).
 
-## 9. Inputs e1e still takes (from handoff §3 and §4.2 at M4.5e1's planning; e1c's and e1d's moved into their plans)
+## 9. Inputs
 
-- P38's braced initializers: a list of more than 1,000 elements keeps no `expr` for its elements
-  (`REDUCE_BACKING_EXPRESSION_USE`), only an `orig_type`; read every element through `constant_value`, which
-  rejects that shape, never through `ck_aggregate`'s values directly, or a wrapping element would pass unchecked.
-  P78 (b) found the loss only for static storage, so it is e1e's. [M4.4a, record 0022 item 3]
-- Record 0056 item 11's escape scan must see an array member decaying to a pointer as an escape of the struct
-  local. [d2b2c re-audit] (e1e)
-- M4.4b2's types computed from a constant (`sizeof`, `typeof`, typedefs), and a bound that names a local constant
-  (P78 F1). (e1e)
-- From e1b's plan: ranges over structures, array members and global arrays are e1e's.
-- **The survey's contradictions, settled:** `reject_forall_pointer.cpp` is the C++ lambda form (M7), not e1's;
-  0024's "until M4.5e" also names `_BitInt`, vectors and non-type template arguments, which stay rejected;
-  "M4.5e" in 0022 and 0047 for `n * sizeof(T)`, `calloc(n, …)` and `realloc` is M4.5e2.
+e1e's inputs moved into e1e1's plan (its sections 4, 13 and 14) at its planning; what stood here is section 9 of
+`git show 68384d1:.claude/plans/m4-5e1-arrays.md`.
 
 ## 10. M4.5e1f — Range call rows (the next free record) — planned after e1c, from its spike
 
@@ -251,4 +232,5 @@ order D alone and question 238 goes to M4.8's work on read amounts (question 66)
 **Shape of the session.** Small (150–400 `src/` lines): its record, the lint rule and its twins, the two changes,
 the flips (every `.vpr` of a test with a range call: outcomes unchanged, the changed lines classified by exact
 inverse rules, e1a's lesson), the pins re-expected as positives with twins, one audit round, one box `check.sh`. It
-needs e1c only for the spike; it may run before e1d and e1e.
+needs e1c only for the spike; it may run before or after e1e1 and e1e2. After e1e1, an array leaf of a `reads`
+atom takes its amount from its first slot too (e1e1's record, item 7), so the fix of question 238 has to reach it.

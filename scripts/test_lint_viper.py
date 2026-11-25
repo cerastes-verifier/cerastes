@@ -3433,6 +3433,18 @@ class GlobalsTests(unittest.TestCase):
         lines.pop(i)
         self.one(lines, "`method f__1` of a program with globals must take the global facts as its first `requires`")
 
+    def test_the_trusted_zero_fill_of_an_array_needs_no_facts(self):
+        # M4.5e1e1 R4: `zero_arr_<t>` is a trusted method like `alloc_*` and carries no facts line (decision 0059 item 3), so a program with a
+        # global and a zero-filled local array (`int a[4] = {1};`) is clean; the exemption is the emitter's name prefix `zero_arr_` and no wider
+        A = ArrayAllocationTests("test_the_two_contracts_are_clean_for_each_field_type")
+        lines = self.fixture() + A.method("zero_arr_int", A.zero_clauses(), fields=False)
+        self.assertEqual(self.strict(lines), [])
+        # twins: the same clauses under a name that is not the prefix's (`zero_arr`, `zero_array_int`) are methods like any other
+        for name in ("zero_arr", "zero_array_int", "my_zero_arr_int"):
+            with self.subTest(name=name):
+                lines = self.fixture() + A.method(name, A.zero_clauses(), fields=False)
+                self.some(lines, f"`method {name}` of a program with globals must take the global facts as its first `requires`")
+
     def test_a_method_with_the_facts_second_or_changed_is_refused(self):
         lines = self.fixture()
         i = find(lines, "requires " + self.facts())
@@ -7245,6 +7257,115 @@ class RangeAtomQuantifierTests(unittest.TestCase):
         lines[-2] = f"  l1 := (((v_n > 0) ? {bad} : {self.LIVE})) / 2"
         self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in self.probs(lines)))
 
+    # --- decision 0063 item 8: the amount of a `reads(*p)` or `reads(p->a)` site with array parts (cells, first slots of the array parts, the liveness)
+    SITE_LIVE = "perm(lvloc(block_of(v_p)).lv)"
+
+    def site_lines(self, leaves, guard=None, divisor=2, bind="  ra1 := loc(member(v_p, 1), 0)"):
+        lines = self.own_min_lines([self.LIVE], live=self.LIVE)
+        lines = [bind if l == "  ra1 := v_p" else l for l in lines]
+        rhs = f"({self.fold(leaves)}) / {divisor}"
+        lines[-2] = f"  l1 := {rhs if guard is None else f'({guard} ? ({self.fold(leaves)}) : write) / {divisor}'}"
+        return lines
+
+    def test_the_amount_of_a_structure_site_with_array_parts_is_a_minimum_over_its_permissions(self):
+        cv, cd = "perm(loc(member(v_p, 0), 0).v_int)", "perm(loc(member(v_p, 0), 0).d_int)"
+        nv, nd = "perm(loc(member(loc(member(v_p, 0), 0), 1), 0).v_int)", "perm(loc(member(loc(member(v_p, 0), 0), 1), 0).d_int)"
+        sv, sd = f"perm({self.SLOT}.v_int)", f"perm({self.SLOT}.d_int)"
+        live = self.SITE_LIVE
+        for label, kw in {
+            "one cell leaf and one array part (marr_reads_call.vpr:161)": dict(leaves=[cv, cd, sv, sd, live]),
+            "an array part alone (reads(p->a))": dict(leaves=[sv, sd, live]),
+            "a nested cell leaf": dict(leaves=[cv, cd, nv, nd, sv, sd, live]),
+            "the caller's own amounts": dict(leaves=[cv, cd, sv, sd, live, "amt", "amt2"]),
+            "guarded": dict(leaves=[cv, cd, sv, sd, live], guard="v_p != null"),
+            "a divisor of 3": dict(leaves=[cv, cd, sv, sd, live], divisor=3),
+        }.items():
+            with self.subTest(site=label):
+                self.clean(self.site_lines(**kw))
+
+    def test_a_structure_sites_amount_that_leaves_out_a_permission_is_refused(self):
+        cv, cd = "perm(loc(member(v_p, 0), 0).v_int)", "perm(loc(member(v_p, 0), 0).d_int)"
+        sv, sd = f"perm({self.SLOT}.v_int)", f"perm({self.SLOT}.d_int)"
+        live = self.SITE_LIVE
+        other = "perm(lvloc(block_of(v_q)).lv)"
+        for label, leaves in {
+            "no liveness": [cv, cd, sv, sd],
+            "no cell flag": [cv, sv, sd, live],
+            "no cell value": [cd, sv, sd, live],
+            "no slot flag": [cv, cd, sv, live],
+            "no slot value": [cv, cd, sd, live],
+            "a cell of another type's flag": [cv, "perm(loc(member(v_p, 0), 0).d_bool)", sv, sd, live],
+            "the liveness of another variable": [cv, cd, sv, sd, live, other],
+            "a cell rooted at another variable": [cv, cd, sv, sd, live, "perm(loc(member(v_q, 0), 0).v_int)", "perm(loc(member(v_q, 0), 0).d_int)"],
+            "a cell that is not a member slot": [cv, cd, sv, sd, live, "perm(v_p.v_int)", "perm(v_p.d_int)"],
+            "a cell at another slot of the chain": [cv, cd, sv, sd, live, "perm(loc(member(v_p, 0), 1).v_int)", "perm(loc(member(v_p, 0), 1).d_int)"],
+            "a cell through block_of": [cv, cd, sv, sd, live, "perm(loc(member(loc(block_of(v_p), 0), 0), 0).v_int)", "perm(loc(member(loc(block_of(v_p), 0), 0), 0).d_int)"],
+            "a second slot of an array": [cv, cd, sv, sd, live, f"perm(loc(block_of(ra1), offset_of(ra1) + 1).v_int)"],
+            "a Perm local": [cv, cd, sv, sd, live, "kl"],
+            "the literal write": [cv, cd, sv, sd, live, "write"],
+        }.items():
+            with self.subTest(minimum=label):
+                probs = self.probs(self.site_lines(leaves))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), (label, probs))
+        # the slot's base is the array part's bound local: a local assigned once `loc(member(<chain rooted at the liveness variable>, k), 0)`
+        leaves = [cv, cd, sv, sd, live]
+        for label, bind in {
+            "the base is the structure's own pointer, not a member's first slot": "  ra1 := v_p",
+            "the base is bound to a member of another variable": "  ra1 := loc(member(v_q, 1), 0)",
+            "the base is bound to another slot of the member": "  ra1 := loc(member(v_p, 1), 1)",
+            "the base is bound twice": "  ra1 := loc(member(v_p, 1), 0)\n  ra1 := loc(member(v_p, 2), 0)",
+        }.items():
+            with self.subTest(base=label):
+                first, *more = bind.split("\n")
+                lines = self.site_lines(leaves, bind=first)
+                lines[lines.index(first):lines.index(first) + 1] = [first, *more]
+                probs = self.probs(lines)
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), (label, probs))
+        # a divisor of one, a guard whose else is not write
+        for label, kw in {"a divisor of one": dict(divisor=1), "a divisor of zero": dict(divisor=0)}.items():
+            with self.subTest(minimum=label):
+                probs = self.probs(self.site_lines([cv, cd, sv, sd, live], **kw))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), (label, probs))
+
+    def test_the_amount_of_a_plain_scalar_cell_site_is_a_minimum_over_the_root_cell_and_its_liveness(self):
+        # audit round 3 S2 (il-analyst-4): a call with array parts binds a scalar cell site's amount (marr_alias_reads.vpr:194)
+        rv, rd = "perm(v_p.v_int)", "perm(v_p.d_int)"
+        live = self.SITE_LIVE
+        for label, kw in {
+            "value, flag and liveness, divided by 3 (marr_alias_reads.vpr)": dict(leaves=[rv, rd, live], divisor=3),
+            "the value and flag in the other order": dict(leaves=[rd, rv, live], divisor=2),
+            "with the caller's own amounts": dict(leaves=[rv, rd, live, "amt", "amt2"], divisor=2),
+            "guarded": dict(leaves=[rv, rd, live], guard="v_p != null", divisor=2),
+        }.items():
+            with self.subTest(site=label):
+                self.clean(self.site_lines(**kw))
+
+    def test_a_scalar_cell_sites_amount_that_leaves_out_or_changes_a_permission_is_refused(self):
+        rv, rd = "perm(v_p.v_int)", "perm(v_p.d_int)"
+        live = self.SITE_LIVE
+        cv, cd = "perm(loc(member(v_p, 0), 0).v_int)", "perm(loc(member(v_p, 0), 0).d_int)"
+        for label, leaves in {
+            "the value only": [rv, live],
+            "the flag only": [rd, live],
+            "the value and the flag of another type": [rv, "perm(v_p.d_bool)", live],
+            "the value of one type and the flag of another, both complete": [rv, rd, "perm(v_p.v_bool)", "perm(v_p.d_bool)", live],
+            "a cell that is another variable than the liveness one": ["perm(v_q.v_int)", "perm(v_q.d_int)", live],
+            "the liveness of another variable": [rv, rd, "perm(lvloc(block_of(v_q)).lv)"],
+            "no liveness": [rv, rd],
+            "a second liveness cell": [rv, rd, live, "perm(lvloc(block_of(v_q)).lv)"],
+            "the root cell beside a structure cell": [rv, rd, cv, cd, live],
+            "the root cell and another variable's cell": [rv, rd, "perm(v_q.v_int)", "perm(v_q.d_int)", live],
+            "a Perm local": [rv, rd, live, "kl"],
+            "the literal write": [rv, rd, live, "write"],
+        }.items():
+            with self.subTest(minimum=label):
+                probs = self.probs(self.site_lines(leaves, divisor=3))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), (label, probs))
+        for label, kw in {"a divisor of one": dict(divisor=1), "a divisor of zero": dict(divisor=0)}.items():
+            with self.subTest(minimum=label):
+                probs = self.probs(self.site_lines([rv, rd, live], **kw))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), (label, probs))
+
     def test_a_quotient_is_still_not_assigned_in_a_loop_that_uses_it(self):
         lines = self.method(body=["  var l1: Perm", "  ra1 := v_p", f"  l1 := {self.LIVE} / 2", "  label lh_0", "  while (true)",
                                   "    invariant acc(lvloc(block_of(ra1)).lv, l1)", "  {", f"    l1 := {self.LIVE} / 2", "  }"])
@@ -9287,6 +9408,1058 @@ class KeepFactCellTests(unittest.TestCase):
             with self.subTest(case=label):
                 probs = self.problems_at_fact(self.mutate(old, new))
                 self.assertTrue(any("decision 0062" in p for p in probs), (label, probs))
+
+
+class ArrayGlobalRowTests(unittest.TestCase):
+    """Decision 0063 items 9 and 15 (M4.5e1e1): the row group of an array global in `program_start`, in the order of item 9 (the two quantified
+    permissions and the flags over `[0, N)`, one conjunct per listed element then one quantifier for the rest, `acc(lvloc(GB_g()).lv)`), the facts
+    `len(GB_g()) == N` the same in the three places the facts are pinned, and the block-term rows of an array atom in a method's contract.  The shapes are
+    tests/viper-smoke/memory/s47_a_global.vpr and s47_b_calls.vpr's; each twin breaks one thing."""
+
+    G = GlobalsTests("test_the_emitters_shape_is_clean")
+    NAMES = ["GB_g__1", "GB_h__2"]
+    H_ROW = GlobalsTests.row("GB_h__2", "int", "(loc(GB_h__2(), 0).v_int == 3)")
+    INT_RANGE = "(((-2147483648) <= {c}.v_int) && ({c}.v_int <= 2147483647))"
+
+    @staticmethod
+    def q(b, lo, hi, body, k="k"):
+        return f"forall {k}: Int :: {{ loc({b}, {k}) }} (({lo} <= {k}) && ({k} < {hi})) ==> {body}"
+
+    @classmethod
+    def group(cls, g="GB_g__1", n=4, t="int", listed=("1", "2"), rest="zero", lv=True):
+        """The rows of an array global of n elements: `listed` are the written values, `rest` the zero rest ("zero"), an unknown value's range
+        ("unknown") or nothing (None)."""
+        b = f"{g}()"
+        rows = [cls.q(b, 0, n, f"acc(loc({b}, k).v_{t})"), cls.q(b, 0, n, f"acc(loc({b}, k).d_{t})"), cls.q(b, 0, n, f"loc({b}, k).d_{t}")]
+        rows += [f"loc({b}, {i}).v_{t} == {v}" for i, v in enumerate(listed)]
+        zero = {"int": "0", "bool": "false", "ptr_int": "null"}[t]
+        if rest == "zero":
+            rows.append(cls.q(b, len(listed), n, f"loc({b}, k).v_{t} == {zero}"))
+        elif rest == "unknown":
+            if t == "ptr_int":
+                v = f"loc({b}, k).v_{t}"
+                body = f"(({v} == null) || ((({v} == loc(block_of({v}), offset_of({v}))) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v})))))"
+            else:
+                body = cls.INT_RANGE.format(c=f"loc({b}, k)")
+            rows.append(cls.q(b, 0, n, body))
+        if lv:
+            rows.append(f"acc(lvloc({b}).lv)")
+        return rows
+
+    @staticmethod
+    def facts(n=4, g="GB_g__1", h="GB_h__2"):
+        return " && ".join(f"((len({x}()) == {c}) && (lvloc({x}()) == loc({x}(), (-2))))" for x, c in ((g, n), (h, 1)))
+
+    def fixture(self, rows=None, facts=None, f_requires=None, names=None, **kw):
+        rows = [*self.group(), self.H_ROW] if rows is None else rows
+        facts = self.facts() if facts is None else facts
+        lines = self.G.fixture(names=self.NAMES if names is None else names, facts=facts, rows=rows,
+                               f_requires=facts if f_requires is None else f_requires, **kw)
+        lines[0:0] = ["field v_bool: Bool", "field d_bool: Bool"]
+        return lines
+
+    strict = staticmethod(GlobalsTests.strict)
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), probs)
+
+    GROUP = "the row group of an array global in `program_start`"
+
+    def test_the_emitters_group_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_each_form_of_the_values_is_clean(self):
+        forms = {
+            "every element listed, no rest": self.group(listed=("1", "2", "3", "4"), rest=None),
+            "nothing listed, the zero rest from 0": self.group(listed=(), rest="zero"),
+            "an unknown value's range": self.group(listed=(), rest="unknown"),
+            "a negative literal": self.group(listed=("(-5)",), rest="zero"),
+            "a bool array of unknown value states no value": self.group(t="bool", listed=(), rest=None),
+            "a bool array's listed elements and zero rest": self.group(t="bool", listed=("true",), rest="zero"),
+            "a pointer array: null and the address of a global": self.group(t="ptr_int", listed=("null", "loc(GB_h__2(), 0)"), rest="zero"),
+            "a pointer array of unknown value (WF)": self.group(t="ptr_int", listed=(), rest="unknown"),
+        }
+        for what, rows in forms.items():
+            with self.subTest(what):
+                self.assertEqual(self.strict(self.fixture(rows=[*rows, self.H_ROW])), [])
+
+    def test_an_array_of_one_element_is_clean(self):
+        self.assertEqual(self.strict(self.fixture(rows=[*self.group(n=1, listed=("7",), rest=None), self.H_ROW], facts=self.facts(1))), [])
+
+    def test_two_array_globals_and_a_scalar_are_clean(self):
+        rows = [*self.group(), *self.group(g="GB_h__2", n=3, listed=("5",), rest="zero")]
+        facts = " && ".join(f"((len({x}()) == {c}) && (lvloc({x}()) == loc({x}(), (-2))))" for x, c in (("GB_g__1", 4), ("GB_h__2", 3)))
+        self.assertEqual(self.strict(self.fixture(rows=rows, facts=facts)), [])
+
+    def test_the_facts_state_the_count(self):
+        for what, facts in {"len 1 for an array global of 4": self.facts(1), "len 5 for an array global of 4": self.facts(5),
+                            "the length of the scalar changed": self.facts().replace("(len(GB_h__2()) == 1)", "(len(GB_h__2()) == 2)")}.items():
+            with self.subTest(what):
+                self.some(self.fixture(facts=facts, f_requires=facts), "its first `ensures` row must be the global facts")
+
+    def test_the_first_requires_of_every_method_has_the_same_count(self):
+        # the second of the three places the facts are pinned: a method that takes the facts of a scalar `g` is refused
+        self.some(self.fixture(f_requires=self.facts(1)), "must take the global facts as its first `requires`")
+        self.assertEqual(self.strict(self.fixture(f_requires=self.facts(4))), [])
+
+    def test_a_group_that_breaks_the_order_or_the_ranges_is_refused(self):
+        g = self.group()
+        b = "GB_g__1()"
+        bad = {
+            "the flags before the flag permission": [g[0], g[2], g[1], *g[3:]],
+            "the flag permission before the value permission": [g[1], g[0], *g[2:]],
+            "the flags missing": [g[0], g[1], *g[3:]],
+            "the flags row without the flag": [g[0], g[1], self.q(b, 0, 4, "loc(GB_g__1(), k).v_int == 0"), *g[3:]],
+            "a permission over [1, N)": [self.q(b, 1, 4, f"acc(loc({b}, k).v_int)"), *g[1:]],
+            "a permission over [0, N + 1)": [self.q(b, 0, 5, f"acc(loc({b}, k).v_int)"), *g[1:]],
+            "the flags over another count": [g[0], g[1], self.q(b, 0, 3, f"loc({b}, k).d_int"), *g[3:]],
+            "a computed bound": [g[0].replace("(k < 4)", "(k < (2 + 2))"), *g[1:]],
+            "the liveness cell missing": self.group(lv=False),
+            "the liveness cell twice": [*g, g[-1]],
+            "a block that is not a declared global": [r.replace("GB_g__1", "GB_x__9") for r in g],
+            "a flag permission of another field": [g[0], g[1].replace("d_int", "d_bool"), *g[2:]],
+            "a value permission of an undeclared field": [r.replace("v_int", "v_long") if i == 0 else r for i, r in enumerate(g)],
+            "a value permission under an extra antecedent": [g[0].replace("(k < 4))", "(k < 4)) && (k != 2)"), *g[1:]],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                probs = self.strict(self.fixture(rows=[*rows, self.H_ROW]))
+                self.assertTrue(any(self.GROUP in p or "`program_start` row" in p for p in probs), (what, probs))
+
+    def test_a_duplicate_group_is_refused(self):
+        self.some(self.fixture(rows=[*self.group(), *self.group(listed=("9",)), self.H_ROW]), "a second `program_start` row for `GB_g__1`")
+
+    def test_a_group_and_a_scalar_row_for_one_global_are_refused(self):
+        rows = [*self.group(g="GB_h__2"), self.H_ROW, *self.group()]
+        self.some(self.fixture(rows=rows), "a second `program_start` row for `GB_h__2`")
+
+    def test_the_values_are_pinned(self):
+        g = self.group()  # listed 1, 2, zero rest from 2
+        b = "GB_g__1()"
+        bad = {
+            "a missing zero rest": g[:5] + g[6:],
+            "a zero rest that starts early": g[:5] + [self.q(b, 1, 4, f"loc({b}, k).v_int == 0"), g[-1]],
+            "a zero rest that starts late (a slot without a value)": g[:5] + [self.q(b, 3, 4, f"loc({b}, k).v_int == 0"), g[-1]],
+            "a zero rest of another value": g[:5] + [self.q(b, 2, 4, f"loc({b}, k).v_int == 1"), g[-1]],
+            "a zero rest of the wrong type's zero": [r for r in self.group(t="bool", listed=("true",), rest=None)][:4] + [self.q(b, 1, 4, f"loc({b}, k).v_bool == true"), g[-1]],
+            "a value conjunct at the listed prefix's end": g[:5] + ["loc(GB_g__1(), 2).v_int == 3", g[5], g[-1]],
+            "a value conjunct past the listed prefix": g[:5] + ["loc(GB_g__1(), 3).v_int == 3", g[5], g[-1]],
+            "a listed element twice": g[:4] + ["loc(GB_g__1(), 1).v_int == 2", *g[4:]],
+            "a listed element out of order": [*g[:3], "loc(GB_g__1(), 1).v_int == 2", "loc(GB_g__1(), 0).v_int == 1", *g[5:]],
+            "a conjunct after the zero rest": g[:6] + ["loc(GB_g__1(), 3).v_int == 5", g[-1]],
+            "a second quantifier after the zero rest": g[:6] + [self.q(b, 2, 4, f"loc({b}, k).v_int == 0"), g[-1]],
+            "a listed element that is not a literal": g[:3] + ["loc(GB_g__1(), 0).v_int == loc(GB_g__1(), 1).v_int", *g[4:]],
+            "a listed element that is a range": g[:3] + ["((0 <= loc(GB_g__1(), 0).v_int) && (loc(GB_g__1(), 0).v_int <= 9))", *g[4:]],
+            "a listed element over the count": self.group(n=2, listed=("1", "2", "3"), rest=None),
+            "an unknown range beside a listed element": self.group(listed=("1",), rest=None)[:4] + [self.q(b, 0, 4, self.INT_RANGE.format(c=f"loc({b}, k)")), g[-1]],
+            "an unknown range over [1, N)": self.group(listed=(), rest=None)[:3] + [self.q(b, 1, 4, self.INT_RANGE.format(c=f"loc({b}, k)")), g[-1]],
+            "an unlisted int array with no rest": self.group(listed=(), rest=None),
+            "a pointer array whose rest is the address of a global": self.group(t="ptr_int", listed=(), rest=None)[:3]
+                + [self.q(b, 0, 4, f"loc({b}, k).v_ptr_int == loc(GB_h__2(), 0)"), g[-1]],
+            "a listed pointer that points at an undeclared global": self.group(t="ptr_int", listed=("loc(GB_x__9(), 0)",), rest="zero"),
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                lines = self.fixture(rows=[*rows, self.H_ROW], facts=self.facts(2) if what == "a listed element over the count" else None)
+                probs = self.strict(lines)
+                self.assertTrue(any(self.GROUP in p or "points at" in p for p in probs), (what, probs))
+
+    def test_a_pointer_element_must_point_at_a_global_of_the_pointee_type(self):
+        rows = self.group(t="ptr_int", listed=("loc(GB_g__1(), 0)",), rest="zero")  # g itself: its elements are pointers, not ints
+        self.some(self.fixture(rows=[*rows, self.H_ROW]), "points at the array `GB_g__1`")
+
+    def test_an_array_global_may_be_pointed_at_through_its_first_element(self):
+        rows = [*self.group(g="GB_g__1", n=4, listed=("1",), rest="zero"), *self.group(g="GB_h__2", n=2, t="ptr_int", listed=("loc(GB_g__1(), 0)", "null"), rest=None)]
+        facts = " && ".join(f"((len({x}()) == {c}) && (lvloc({x}()) == loc({x}(), (-2))))" for x, c in (("GB_g__1", 4), ("GB_h__2", 2)))
+        self.assertEqual(self.strict(self.fixture(rows=rows, facts=facts)), [])
+
+    def test_a_view_in_a_program_with_an_array_global_takes_the_same_count(self):
+        # the third place the facts are pinned: the leading `requires` of a typed view (decision 0047 item 4, 0041 item 4), over the emitted view of
+        # scripts/testdata/heap_views/malloc_struct_global.vpr whose first global `x` is made an array global of 3 elements
+        text = HeapViewTests("test_every_emitted_view_is_clean").text("malloc_struct_global")
+        row = next(l for l in text.split("\n") if l.startswith("  ensures (((acc(loc(GB_x__0(), 0).v_int)"))
+        group = self.group(g="GB_x__0", n=3, listed=(), rest="zero")
+        text3 = text.replace(row, "\n".join("  ensures " + r for r in group)).replace("(len(GB_x__0()) == 1)", "(len(GB_x__0()) == 3)")
+        self.assertEqual(HeapViewTests.problems(text3), [])
+        probs = []
+        src = lv.split_source(text3)
+        decls = lv.declarations(src)
+        has_globals, facts = lv.lint_globals(src, decls, lambda n, why: probs.append(why))
+        self.assertEqual(probs, [])
+        self.assertIn("len(GB_x__0())==3", facts)
+        # the view still has the scalar's count: refused
+        stale = text3.replace("  requires ((len(GB_x__0()) == 3)", "  requires ((len(GB_x__0()) == 1)")
+        self.assertEqual(len(HeapViewTests.problems(stale)), 1)
+        self.assertIn("global facts of the program", HeapViewTests.problems(stale)[0])
+
+    def test_an_array_global_s_group_that_names_a_member_block_without_its_structure_is_refused(self):
+        # a group over `member(<chain>, k)` needs the structure global's own cell row first (StructGlobalArrayLeafTests): with none it is refused
+        b = "member(loc(GB_g__1(), 0), 1)"
+        rows = [*self.group(), *[r.replace("GB_h__2()", b) for r in self.group(g="GB_h__2")]]
+        self.assertTrue(self.strict(self.fixture(rows=rows)))
+
+    # --- the flag of an element goes through a Ref temporary (lint_flags is unchanged) ---
+
+    def test_an_element_flag_is_written_through_a_ref_temporary(self):
+        start = Check("  program_start()", PRE, "internal")
+        ok = ["  var t: Ref", start, "  t := loc(GB_g__1(), 1)", "  t.v_int := 5", "  t.d_int := true"]
+        self.assertEqual(self.strict(self.fixture(main_lines=ok)), [])
+        direct = ["  var t: Ref", start, "  loc(GB_g__1(), 1).v_int := 5", "  loc(GB_g__1(), 1).d_int := true"]
+        self.some(self.fixture(main_lines=direct), "the flag of an array element is written through a `Ref` temporary")
+        # a flag set without the write of its value, through the temporary, is the flag rule's as before
+        orphan = ["  var t: Ref", start, "  t := loc(GB_g__1(), 1)", "  t.d_int := true"]
+        self.some(self.fixture(main_lines=orphan), "does not directly follow a write `t.v_int := ...`")
+
+
+class ArrayStructAllocationTests(unittest.TestCase):
+    """Decision 0063 items 6 and 15: `alloc_struct_<n>_<tag>` of a structure with an array member states, for the member block, exactly `len(member(X,
+    k)) == N` and then three quantifiers (the value permission, the flag permission, every flag false), each over the block `member(X, k)` with the
+    trigger `{ loc(member(X, k), j) }` and the range `0 <= j && j < N`, each (receiver, field) once.  The shape is s47_a_struct_local.vpr's and
+    s47_e_nested.vpr's; each twin breaks one thing."""
+
+    M = MemoryModelTests("test_the_emitters_struct_allocations_are_clean")
+
+    ROOT = "ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)"
+    CELL0 = "ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)"
+    LIVE = "ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"
+
+    @staticmethod
+    def arr(x="r", k=1, n=4, t="int"):
+        b = f"member({x}, {k})"
+        q = lambda body: f"ensures forall j: Int :: {{ loc({b}, j) }} ((0 <= j) && (j < {n})) ==> {body}"  # noqa: E731
+        return [f"ensures len({b}) == {n}", q(f"acc(loc({b}, j).v_{t})"), q(f"acc(loc({b}, j).d_{t})"), q(f"(!loc({b}, j).d_{t})")]
+
+    def alloc(self, ensures, name="alloc_struct_0_S"):
+        return self.M.with_struct_alloc(ensures, name=name)
+
+    def problems(self, ensures, name="alloc_struct_0_S"):
+        return self.M.strict(self.alloc(ensures, name))
+
+    def test_a_structure_with_an_array_member_is_clean(self):
+        # struct S { int n; int a[4]; }
+        self.assertEqual(self.problems([self.ROOT, self.CELL0, *self.arr(), self.LIVE]), [])
+        # struct S { int a[4]; int n; }: the array member first
+        cell1 = self.CELL0.replace("member(r, 0)", "member(r, 1)")
+        self.assertEqual(self.problems([self.ROOT, *self.arr(k=0), cell1, self.LIVE]), [])
+        # two array members, one of them of one element
+        self.assertEqual(self.problems([self.ROOT, *self.arr(k=0), *self.arr(k=1, n=1), self.LIVE]), [])
+
+    def test_a_nested_structure_with_an_array_member_is_clean(self):
+        # struct T { struct S { int n; int a[4]; } s; int z; }: the slot of s is loc(member(r, 0), 0)
+        x = "loc(member(r, 0), 0)"
+        cell_n = f"ensures (((len(member({x}, 0)) == 1) && acc(loc(member({x}, 0), 0).v_int)) && acc(loc(member({x}, 0), 0).d_int)) && (!loc(member({x}, 0), 0).d_int)"
+        z = "ensures (((len(member(r, 1)) == 1) && acc(loc(member(r, 1), 0).v_int)) && acc(loc(member(r, 1), 0).d_int)) && (!loc(member(r, 1), 0).d_int)"
+        good = [self.ROOT, "ensures len(member(r, 0)) == 1", "ensures r != loc(member(r, 0), 0)", cell_n, *self.arr(x=x, k=1), z, self.LIVE]
+        self.assertEqual(self.problems(good, name="alloc_struct_1_T"), [])
+        # the array member of a nested slot whose struct member block is not stated
+        bad = [self.ROOT, cell_n, *self.arr(x=x, k=1), z, self.LIVE]
+        self.assertTrue(any("is not the trusted struct allocation" in p for p in self.problems(bad, name="alloc_struct_1_T")))
+
+    def test_each_departure_from_the_array_member_rows_is_refused(self):
+        base = self.arr()
+        len_, v, d, nd = base
+        bad = {
+            "the length without its quantifiers": [len_],
+            "the length with two of the three quantifiers": [len_, v, d],
+            "the quantifiers without the length": [v, d, nd],
+            "the quantifiers in another order": [len_, d, v, nd],
+            "no `!flag`": [len_, v, d, d],
+            "the value permission twice": [len_, v, v, nd],
+            "a fourth quantifier (a second set)": [*base, v],
+            "a length of 0": [*self.arr(n=0)],
+            "a quantifier over another count": [len_, v.replace("(j < 4)", "(j < 3)"), d, nd],
+            "a quantifier over [1, N)": [len_, v.replace("(0 <= j)", "(1 <= j)"), d, nd],
+            "a computed bound": [len_, v.replace("(j < 4)", "(j < (2 + 2))"), d, nd],
+            "a trigger over another block": [len_, v.replace("{ loc(member(r, 1), j) }", "{ loc(member(r, 0), j) }"), d, nd],
+            "a quantifier over another member": [len_, v.replace("member(r, 1)", "member(r, 0)"), d, nd],
+            "a quantifier over a block of the root": [len_, v.replace("loc(member(r, 1), j)", "loc(block_of(r), j)"), d, nd],
+            "an unrooted chain": [len_.replace("member(r, 1)", "member(q, 1)"), v.replace("member(r, 1)", "member(q, 1)"), d.replace("member(r, 1)", "member(q, 1)"), nd.replace("member(r, 1)", "member(q, 1)")],
+            "a flag of another suffix": [len_, v, d.replace("d_int", "d_bool"), nd],
+            "a value and a flag of two suffixes": [len_, v, d.replace("_int", "_long"), nd.replace("_int", "_long")],
+            "an undeclared suffix": [x.replace("_int", "_long") if i else x for i, x in enumerate(base)],
+            "the flag not negated": [len_, v, d, nd.replace("(!loc(member(r, 1), j).d_int)", "loc(member(r, 1), j).d_int")],
+            "an extra conjunct": [len_, v.replace("acc(loc(member(r, 1), j).v_int)", "acc(loc(member(r, 1), j).v_int) && loc(member(r, 1), j).v_int == 0"), d, nd],
+            "a permission amount": [len_, v.replace("v_int)", "v_int, 1 / 2)"), d, nd],
+            "an antecedent beyond the range": [len_, v.replace("(j < 4))", "(j < 4)) && (j != 2)"), d, nd],
+            "the length twice": [len_, len_, v, d, nd],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                probs = self.problems([self.ROOT, self.CELL0, *rows, self.LIVE])
+                self.assertEqual(len(probs), 1, (what, probs))
+                self.assertIn("`method alloc_struct_0_S` is not the trusted struct allocation", probs[0])
+
+    def test_an_array_member_inside_a_struct_slot_that_is_not_stated_is_refused(self):
+        x = "loc(member(r, 0), 0)"
+        probs = self.problems([self.ROOT, *self.arr(x=x, k=0), self.LIVE])
+        self.assertTrue(any("is not inside a nested struct member" in p for p in probs), probs)
+
+    def test_a_length_other_than_1_without_quantifiers_stays_refused(self):
+        # the older rule: a cell member's `len == 2` (the quantifier-free `len(member(r, 1)) == 4` is read as an array member and needs its rows)
+        probs = self.problems([self.ROOT, self.CELL0, "ensures len(member(r, 1)) == 4", self.LIVE])
+        self.assertTrue(any("is not followed by its three quantified permissions" in p for p in probs), probs)
+
+    # --- struct_lens: the WF_S conjunct of an unknown pointer's row states the count of the allocation ---
+
+    G = GlobalsTests("test_a_struct_pointer_row_with_wf_s_is_clean")
+    V = GlobalsTests.V
+
+    def pointer_fixture(self, lens, ensures=None, name="alloc_struct_0_S"):
+        lines = self.G.struct_fixture(lens)
+        if ensures is not None:
+            at = next(i for i, line in enumerate(lines) if isinstance(line, str) and line.startswith("// cerastes:trusted-contract program start"))
+            lines[at:at] = ["// cerastes:trusted-contract allocation of a local of a struct type", f"method {name}() returns (r: Ref)",
+                            *[Check("  " + t, P, "internal") for t in ensures], "  decreases _"]
+        return lines
+
+    def test_the_wf_s_of_a_pointer_to_a_structure_with_an_array_member_states_the_count(self):
+        V = self.V
+        alloc = [self.ROOT, self.CELL0, *self.arr(), self.LIVE]
+        good = f"(len(member({V}, 0)) == 1) && (len(member({V}, 1)) == 4)"
+        self.assertEqual(self.G.strict(self.pointer_fixture(good, alloc)), [])
+        bad = {
+            "the count 1 for the array member": f"(len(member({V}, 0)) == 1) && (len(member({V}, 1)) == 1)",
+            "another count": f"(len(member({V}, 0)) == 1) && (len(member({V}, 1)) == 5)",
+            "the count 4 for a cell member": f"(len(member({V}, 0)) == 4) && (len(member({V}, 1)) == 4)",
+        }
+        for what, lens in bad.items():
+            with self.subTest(what):
+                self.G.some(self.pointer_fixture(lens, alloc), "the value of the `program_start` row of `GB_gp__1`")
+        # no allocation of that structure in the unit: a count other than 1 has no count to equal
+        self.G.some(self.pointer_fixture(good), "the value of the `program_start` row of `GB_gp__1`")
+        # an allocation of a structure whose member is a cell: the array count is refused there
+        cells = [self.ROOT, self.CELL0, self.CELL0.replace("member(r, 0)", "member(r, 1)"), self.LIVE]
+        self.G.some(self.pointer_fixture(good, cells), "the value of the `program_start` row of `GB_gp__1`")
+
+
+class BlockTermRowTests(unittest.TestCase):
+    """Decision 0063 item 15's block grammar: where a line has no Viper local (a method's `requires` and `ensures`), a quantified row of an array atom is
+    `forall k: Int :: { loc(B, k) } 0 <= k && k < N ==> C` with B `GB_<g>()` of a declared array global or `member(<chain>, k)` over the canonical chain rooted
+    at a formal, a result or `loc(GB_<g>(), 0)`, the bounds `0` and the count the facts state, and C one of the atom's consequents.  Nothing else.  The
+    shapes are s47_b_calls.vpr's (a global) and s47_c_owns_member.vpr's (a member through a pointer)."""
+
+    A = ArrayGlobalRowTests
+    INT = "(((-2147483648) <= loc({b}, k).v_int) && (loc({b}, k).v_int <= 2147483647))"
+    WF_P = "(p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))"
+
+    def rows(self, b, n, kw, amount="amt_0", extra=()):
+        q = self.A.q
+        return [Check(f"  {kw} " + t, WF if kw == "requires" else P, "internal") for t in (
+            q(b, 0, n, f"acc(loc({b}, k).v_int, {amount})" if amount else f"acc(loc({b}, k).v_int)"),
+            q(b, 0, n, f"acc(loc({b}, k).d_int, {amount})" if amount else f"acc(loc({b}, k).d_int)"),
+            q(b, 0, n, f"loc({b}, k).d_int"),
+            q(b, 0, n, self.INT.format(b=b)), *extra)]
+
+    def global_method(self, rows=None, facts=None):
+        facts = self.A.facts() if facts is None else facts
+        rows = rows if rows is not None else [*self.rows("GB_g__1()", 4, "requires"), *self.rows("GB_g__1()", 4, "ensures")]
+        req = [r for r in rows if r.text.lstrip().startswith("requires")]
+        ens = [r for r in rows if not r.text.lstrip().startswith("requires")]
+        return ["method f_arr__3(amt_0: Perm)", Check("  requires " + facts, WF, "internal"), Check("  requires (none < amt_0) && (amt_0 < write)", WF, "internal"),
+                *req, Check("  requires acc(lvloc(GB_g__1()).lv, amt_0)", WF, "internal"), *ens,
+                Check("  ensures acc(lvloc(GB_g__1()).lv, amt_0)", P, "internal"), "  decreases", "{", "}"]
+
+    def fixture(self, method=None, facts=None):
+        lines = ArrayGlobalRowTests("test_the_emitters_group_is_clean").fixture(facts=facts)
+        return lines + (method if method is not None else self.global_method(facts=facts))
+
+    def strict(self, lines):
+        return GlobalsTests.strict(lines)
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), probs)
+
+    def test_the_rows_of_a_global_array_atom_are_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_the_member_rows_over_a_formal_are_clean(self):
+        lens = Check("  requires (len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)", WF, "internal")
+        method = ["method f_mem__3(p: Ref, amt_0: Perm)", Check("  requires " + self.A.facts(), WF, "internal"),
+                  Check("  requires (none < amt_0) && (amt_0 < write)", WF, "internal"), Check("  requires p != null", WF, "internal"), lens,
+                  *self.rows("member(p, 1)", 4, "requires"), Check("  requires acc(lvloc(block_of(p)).lv, amt_0)", WF, "internal"),
+                  *self.rows("member(p, 1)", 4, "ensures"), Check("  ensures acc(lvloc(block_of(p)).lv, amt_0)", P, "internal"), "  decreases", "{", "}"]
+        self.assertEqual(self.strict(self.fixture(method)), [])
+        # a nested slot's array member
+        x = "loc(member(p, 0), 0)"
+        lens2 = Check("  requires (len(member(p, 0)) == 1) && (len(member(loc(member(p, 0), 0), 1)) == 4)", WF, "internal")
+        method2 = [*method[:4], lens2, *self.rows(f"member({x}, 1)", 4, "requires"),
+                   Check("  requires acc(lvloc(block_of(p)).lv, amt_0)", WF, "internal"), *self.rows(f"member({x}, 1)", 4, "ensures"),
+                   Check("  ensures acc(lvloc(block_of(p)).lv, amt_0)", P, "internal"), "  decreases", "{", "}"]
+        self.assertEqual(self.strict(self.fixture(method2)), [])
+
+    def member_method(self, b="member(p, 1)", n=4, lens="(len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)", rows=None, header="method f_mem__3(p: Ref, amt_0: Perm)"):
+        rows = rows if rows is not None else self.rows(b, n, "requires")
+        return [header, Check("  requires " + self.A.facts(), WF, "internal"), Check("  requires (none < amt_0) && (amt_0 < write)", WF, "internal"),
+                Check("  requires p != null", WF, "internal"), *([Check("  requires " + lens, WF, "internal")] if lens else []), *rows,
+                Check("  requires acc(lvloc(block_of(p)).lv, amt_0)", WF, "internal"), "  decreases", "{", "}"]
+
+    def test_the_count_is_read_from_a_guarded_length_fact_after_another_len(self):
+        # what lowering writes for `owns(p->a)` (Part C, j4's struct_array_owns_array.c): `WF_S`'s conjunct and a guarded fact, each with an earlier
+        # `len(block_of(p))` in the same clause; the count of the member's rows is the one the guarded `len(member(p, 1)) == 4` states
+        guard = "((p != null) && (offset_of(p) < len(block_of(p)))) ==> "
+        for lens in (guard + "((len(member(p, 0)) == 1) && (len(member(p, 1)) == 4))", guard + "(len(member(p, 1)) == 4)"):
+            with self.subTest(lens=lens):
+                self.assertEqual(self.strict(self.fixture(self.member_method(lens=lens))), [])
+        # twins: a count the fact does not state, and a fact for another member
+        for what, (lens, n) in {"a count of 5": (guard + "(len(member(p, 1)) == 4)", 5), "the fact of another member": (guard + "(len(member(p, 0)) == 4)", 4)}.items():
+            with self.subTest(what):
+                probs = self.strict(self.fixture(self.member_method(lens=lens, rows=self.rows("member(p, 1)", n, "requires"))))
+                self.assertTrue(any("the method states no `len(member(p,1)) ==" in p for p in probs), probs)
+
+    def ptr_rows(self, b, n, kw, wf=None, field="ptr_int"):
+        """The rows of an array member of POINTER elements (audit round 4 S1): `acc` of the value and the flag, the flag, and the range of the value, which
+        is `WF` of the pointer (null, or its own block with 0 <= offset <= len)."""
+        q = self.A.q
+        v = f"loc({b}, k).v_{field}"
+        wf = wf or f"(({v} == null) || ((({v} == loc(block_of({v}), offset_of({v}))) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v})))))"
+        return [Check(f"  {kw} " + x, WF if kw == "requires" else P, "internal") for x in (
+            q(b, 0, n, f"acc(loc({b}, k).v_{field}, amt_0)"), q(b, 0, n, f"acc(loc({b}, k).d_{field}, amt_0)"), q(b, 0, n, f"loc({b}, k).d_{field}"),
+            q(b, 0, n, wf))]
+
+    def ptr_fixture(self, rows):
+        lines = self.fixture(self.member_method(rows=rows))
+        lines[0:0] = ["field v_ptr_int: Ref", "field d_ptr_int: Bool"]
+        return lines
+
+    def test_the_range_of_a_pointer_element_in_a_member_row_is_wf_of_the_pointer(self):
+        # `struct S { int *a[4]; int n; }` under owns(*p): the range consequent of the member's rows is the pointer's WF, the same text as a view's
+        self.assertEqual(self.strict(self.ptr_fixture(self.ptr_rows("member(p, 1)", 4, "requires"))), [])
+        b = "member(p, 1)"
+        v = f"loc({b}, k).v_ptr_int"
+        blk = f"loc(block_of({v}), offset_of({v}))"
+        bad = {
+            "no `null` disjunct": f"((({v} == {blk}) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v}))))",
+            "no lower bound on the offset": f"(({v} == null) || (({v} == {blk}) && (offset_of({v}) <= len(block_of({v})))))",
+            "no upper bound on the offset": f"(({v} == null) || (({v} == {blk}) && (0 <= offset_of({v}))))",
+            "the offset past the length by one": f"(({v} == null) || ((({v} == {blk}) && (0 <= offset_of({v}))) && (offset_of({v}) <= (len(block_of({v})) + 1))))",
+            "another pointer than the element": f"(({v} == null) || ((({v} == {blk}) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of(loc({b}, 0).v_ptr_int)))))",
+            "an integer range": "(((-2147483648) <= " + v + ") && (" + v + " <= 2147483647))",
+            "just `true`": "true",
+            "a disjunct that is always true": f"(({v} == null) || true)",
+        }
+        for what, wf in bad.items():
+            with self.subTest(what):
+                self.some(self.ptr_fixture(self.ptr_rows(b, 4, "requires", wf=wf)), "the consequent is not `acc(F.f)`")
+
+    def test_a_row_that_leaves_the_grammar_is_refused(self):
+        q = self.A.q
+        b = "GB_g__1()"
+        ok = self.rows(b, 4, "requires")
+        mem = lambda **kw: self.member_method(**kw)  # noqa: E731
+        count, scalar, neither = "is not the `len(GB_g__1()) == 4` of the facts", "is not an array global", "is neither `GB_g()` of a declared global nor `member("
+        generic, perm_formal, consequent, states = "their pure `assert` rows)", "the amount of an `acc` is a `Perm` formal", "the consequent is not `acc(F.f)`", "the method states no `len("
+        bad_global = {
+            "another count": (self.rows(b, 3, "requires"), count),
+            "a count that is the scalar's": (self.rows(b, 1, "requires"), count),
+            "a block of a scalar global": (self.rows("GB_h__2()", 1, "requires"), scalar),
+            "a block of an undeclared global": (self.rows("GB_x__9()", 4, "requires"), neither),
+            "a block through block_of": (self.rows("block_of(loc(GB_g__1(), 0))", 4, "requires"), neither),
+            "a range from 1": ([Check("  requires " + q(b, 1, 4, f"acc(loc({b}, k).v_int, amt_0)"), WF, "internal"), *ok[1:]], "the range starts at 1"),
+            "a computed upper bound": ([Check("  requires " + q(b, 0, "(2 + 2)", f"acc(loc({b}, k).v_int, amt_0)"), WF, "internal"), *ok[1:]], generic),
+            "an amount that is not a Perm formal": (self.rows(b, 4, "requires", amount="1 / 2"), perm_formal),
+            "an amount that is a local": (self.rows(b, 4, "requires", amount="zz"), perm_formal),
+            "an extra antecedent": ([Check("  requires " + q(b, 0, 4, f"acc(loc({b}, k).v_int, amt_0)").replace("(k < 4))", "(k < 4)) && (k != 2)"), WF, "internal"), *ok[1:]], generic),
+            "a consequent that is not an atom's": ([Check("  requires " + q(b, 0, 4, f"loc({b}, k).v_int == 0"), WF, "internal"), *ok[1:]], consequent),
+            "a consequent with two permissions": ([Check("  requires " + q(b, 0, 4, f"acc(loc({b}, k).v_int, amt_0) && acc(loc({b}, k).d_int, amt_0)"), WF, "internal"), *ok[1:]], consequent),
+            "a trigger over another term": ([Check("  requires " + q(b, 0, 4, f"acc(loc({b}, k).v_int, amt_0)").replace("{ loc(GB_g__1(), k) }", "{ loc(GB_h__2(), k) }"), WF, "internal"), *ok[1:]], scalar),
+            "a guard that holds a permission": ([Check("  requires acc(loc(GB_g__1(), 0).v_int) ==> " + q(b, 0, 4, f"acc(loc({b}, k).v_int, amt_0)"), WF, "internal"), *ok[1:]], "the guard holds a permission"),
+        }
+        for what, (rows, fragment) in bad_global.items():
+            with self.subTest(what):
+                self.some(self.fixture(self.global_method(rows=[*rows, *self.rows(b, 4, "ensures")])), fragment)
+        bad_member = {
+            "a count the method does not state": (mem(lens="(len(member(p, 0)) == 1) && (len(member(p, 1)) == 5)"), states),
+            "no length fact at all": (mem(lens=None), states),
+            "a chain rooted at a local": (mem(rows=self.rows("member(zz, 1)", 4, "requires")), neither),
+            "a chain with block_of": (mem(rows=self.rows("member(loc(block_of(p), 0), 1)", 4, "requires")), neither),
+            "a chain with parent_of": (mem(rows=self.rows("member(parent_of(member(p, 0)), 1)", 4, "requires")), neither),
+            "a negative member index": (mem(rows=self.rows("member(p, -1)", 4, "requires")), neither),
+            "a block of a local (the older range atoms' form: it has no count)": (mem(rows=self.rows("block_of(p)", 4, "requires")), "the range does not start at `offset_of(p)`"),
+            "a member of the slot of an undeclared global": (mem(rows=self.rows("member(loc(GB_x__9(), 0), 1)", 4, "requires")), neither),
+        }
+        for what, (method, fragment) in bad_member.items():
+            with self.subTest(what):
+                self.some(self.fixture(method), fragment)
+
+    def test_a_row_over_a_block_term_is_only_a_requires_or_an_ensures(self):
+        # in a method's body the rows are over a local (`block_of(v)`): the block-term form there is refused
+        b = "GB_g__1()"
+        body = ["  assert " + self.A.q(b, 0, 4, f"acc(loc({b}, k).v_int)")]
+        lines = self.fixture(["method f_body__3()", "  decreases", "{", *body, "}"])
+        self.some(lines, "a quantified `assert` that is not a marked range row of decision 0059 item 7")
+
+    def test_an_ensures_may_state_that_the_flags_are_kept(self):
+        b = "GB_g__1()"
+        keep = Check("  ensures " + self.A.q(b, 0, 4, f"old(loc({b}, k).d_int) ==> loc({b}, k).d_int"), P, "internal")
+        rows = [*self.rows(b, 4, "requires"), *self.rows(b, 4, "ensures"), keep]
+        self.assertEqual(self.strict(self.fixture(self.global_method(rows=rows))), [])
+        # `old` in a `requires` has no pre-state
+        bad = Check("  requires " + self.A.q(b, 0, 4, f"old(loc({b}, k).d_int) ==> loc({b}, k).d_int"), WF, "internal")
+        self.some(self.fixture(self.global_method(rows=[bad, *self.rows(b, 4, "requires"), *self.rows(b, 4, "ensures")])), "`old` in a `requires`")
+
+
+class BoundLocalRowTests(unittest.TestCase):
+    """Decision 0063 item 15's bound local: a `Ref` local of a method body assigned exactly `loc(GB_<g>(), 0)` or `loc(member(<chain>, k), 0)` is e1a's array
+    local, and its rows (the pure `assert` rows of a call or a scope exit) are `{ loc(block_of(t), k) } 0 <= k && k < N ==> ...` with N the count the
+    block's length fact states.  The accepting cases are S47's lines (s47_a_global.vpr:65, s47_c_owns_member.vpr:114-115, s47_g_copy_locals.vpr:108's
+    copy of a bound local); every twin breaks one thing: another start, a local bound to another slot, a block outside the grammar, a count that is not
+    the fact's.  The block-term form in a body stays refused (the lowering writes a row in code over the local)."""
+
+    B = BlockTermRowTests
+    A = ArrayGlobalRowTests
+    FLAG = "assert forall k: Int :: {{ loc(block_of({x}), k) }} (({lo} <= k) && (k < {hi})) ==> loc(block_of({x}), k).d_int"
+    RANGE = ("assert forall k: Int :: {{ loc(block_of({x}), k) }} (({lo} <= k) && (k < {hi})) ==> "
+             "(loc(block_of({x}), k).d_int ==> (((-2147483648) <= loc(block_of({x}), k).v_int) && (loc(block_of({x}), k).v_int <= 2147483647)))")
+    ALLOC_S = ["// cerastes:trusted-contract allocation of a local of a struct type", "method alloc_struct_0_S() returns (r: Ref)",
+               *[Check("  " + t, P, "internal") for t in (
+                   "ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)",
+                   "ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)",
+                   *ArrayStructAllocationTests.arr(),
+                   "ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)")],
+               "  decreases _"]
+
+    _X = "loc(member(r, 0), 0)"
+    ALLOC_T = ["// cerastes:trusted-contract allocation of a local of a struct type", "method alloc_struct_1_T() returns (r: Ref)",
+               *[Check("  " + t, P, "internal") for t in (
+                   ArrayStructAllocationTests.ROOT, "ensures len(member(r, 0)) == 1", "ensures r != loc(member(r, 0), 0)",
+                   f"ensures (((len(member({_X}, 0)) == 1) && acc(loc(member({_X}, 0), 0).v_int)) && acc(loc(member({_X}, 0), 0).d_int)) && (!loc(member({_X}, 0), 0).d_int)",
+                   *ArrayStructAllocationTests.arr(x=_X, k=1),
+                   "ensures (((len(member(r, 1)) == 1) && acc(loc(member(r, 1), 0).v_int)) && acc(loc(member(r, 1), 0).d_int)) && (!loc(member(r, 1), 0).d_int)",
+                   ArrayStructAllocationTests.LIVE)],
+               "  decreases _"]
+
+    def rows(self, x, lo=0, hi=4):
+        return [Check("  " + t.format(x=x, lo=lo, hi=hi), A, "internal") for t in (self.FLAG, self.RANGE)]
+
+    def with_body(self, method, body):
+        assert method[-2:] == ["{", "}"], method[-4:]
+        return [*method[:-2], "{", *body, "}"]
+
+    BT = BlockTermRowTests("test_the_rows_of_a_global_array_atom_are_clean")
+
+    def global_case(self, body):
+        return self.BT.fixture(self.with_body(self.BT.global_method(), body))
+
+    def member_case(self, body, lens="(len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)", alloc=None):
+        # the count of a member's bound local is the literal of the member in an `alloc_struct_*` of the unit (item 15): S { int n; int a[4]; } by default
+        method = self.with_body(self.BT.member_method(lens=lens), body)
+        base = self.BT.fixture(method)
+        return [*base[:len(base) - len(method)], *(self.ALLOC_S if alloc is None else alloc), *method]
+
+    def alloc_case(self, body):
+        # the allocation's trusted method stands before the method that calls it
+        method = ["method f_loc__3()", Check("  requires " + self.A.facts(), WF, "internal"), "  decreases", "{", *body, "}"]
+        base = self.BT.fixture(method)
+        return [*base[:len(base) - len(method)], *self.ALLOC_S, *method]
+
+    @staticmethod
+    def strict(lines):
+        return GlobalsTests.strict(lines)
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    def test_a_local_bound_to_a_global_array_has_the_rows_over_zero_to_the_count(self):
+        # s47_a_global.vpr:65
+        body = ["  var v_g: Ref", "  v_g := loc(GB_g__1(), 0)", *self.rows("v_g")]
+        self.assertEqual(self.strict(self.global_case(body)), [])
+        # e1a's own start, `offset_of(t)`, is still accepted for the same local
+        e1a = Check("  " + self.FLAG.format(x="v_g", lo="offset_of(v_g)", hi="(offset_of(v_g) + 4)"), A, "internal")
+        self.assertEqual(self.strict(self.global_case(["  var v_g: Ref", "  v_g := loc(GB_g__1(), 0)", e1a])), [])
+
+    def test_a_local_bound_to_a_member_of_a_formal_has_the_rows_over_zero_to_the_count(self):
+        # s47_c_owns_member.vpr:114-115 (there the local's block is `member(p, 1)` of the formal)
+        body = ["  var v_a: Ref", "  v_a := loc(member(p, 1), 0)", *self.rows("v_a")]
+        self.assertEqual(self.strict(self.member_case(body)), [])
+        # a nested chain, the facts stating the nested member's length
+        lens = "(len(member(p, 0)) == 1) && (len(member(loc(member(p, 0), 0), 1)) == 4)"
+        body = ["  var v_a: Ref", "  v_a := loc(member(loc(member(p, 0), 0), 1), 0)", *self.rows("v_a")]
+        nested = self.with_body(self.BT.member_method(lens=lens, rows=self.BT.rows("member(loc(member(p, 0), 0), 1)", 4, "requires")), body)
+        base = self.BT.fixture(nested)
+        # the count is the allocation's: struct T { struct S { int n; int a[4]; } s; int z; }, the array at the key (0, 1)
+        self.assertEqual(self.strict([*base[:len(base) - len(nested)], *self.ALLOC_T, *nested]), [])
+        self.some([*base[:len(base) - len(nested)], *self.ALLOC_S, *nested], "no `alloc_struct_*` of the unit has an array member at (0, 1)")
+
+    def test_a_local_bound_to_a_member_of_an_allocated_structure_takes_the_count_of_the_allocation(self):
+        # s47_c_owns_member.vpr:98-115, s47_g_copy_locals.vpr: `v_s := alloc_struct_0_S()`, `v_a := loc(member(v_s, 1), 0)`
+        body = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a")]
+        lines = self.alloc_case(body)
+        self.assertEqual(self.strict(lines), [])
+        bad = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a", hi=5)]
+        self.some(self.alloc_case(bad), "is not the `len(...) == N` its block's facts state (4)")
+
+    def test_a_copy_of_a_bound_local_is_not_a_bound_local(self):
+        # the ruling is "assigned exactly `loc(...)`": s47_g_copy_locals.vpr:94 and :108 (`v_sa := v_a`, then rows over `v_sa`) are fixture differences,
+        # refused until lowering is shown to write them (the coordinator's question: should a copy of a bound local count?)
+        body = ["  var v_a: Ref", "  var v_sa: Ref", "  v_a := loc(member(p, 1), 0)", "  v_sa := v_a", *self.rows("v_sa")]
+        self.some(self.member_case(body), "the range does not start at `offset_of(v_sa)`")
+
+    def test_a_declaration_with_its_value_is_an_assignment(self):
+        body = ["  var v_a: Ref := loc(member(p, 1), 0)", *self.rows("v_a")]
+        self.assertEqual(self.strict(self.member_case(body)), [])
+        body = ["  var v_a: Ref := loc(member(p, 1), 1)", *self.rows("v_a")]
+        self.some(self.member_case(body), "is bound to slot 1")
+
+    def test_a_multi_target_call_can_reassign_a_bound_local(self):
+        # `v_a, v_b := f()` assigns v_a something that is no `loc(B, 0)`
+        body = ["  var v_a: Ref", "  var v_b: Ref", "  v_a := loc(member(p, 1), 0)", "  v_a, v_b := f_two()", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+        body = ["  var v_a: Ref", "  var v_b: Ref", "  v_b, v_a := f_two()", "  v_a := loc(member(p, 1), 0)", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+
+    def test_a_local_that_is_an_allocation_result_and_something_else_is_no_root(self):
+        # `v_s := alloc_struct_0_S()` roots the chain only when it is the local's one assignment
+        ok = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a")]
+        self.assertEqual(self.strict(self.alloc_case(ok)), [])
+        twice = ["  var v_s: Ref", "  var v_a: Ref", Check("  v_s := alloc_struct_0_S()", "call.precondition", "internal"), "  v_s := p", "  v_a := loc(member(v_s, 1), 0)", *self.rows("v_a")]
+        self.some(self.alloc_case(twice), "is neither `GB_g()` of a declared array global nor `member(<chain>, k)`")
+
+    def test_the_rows_of_a_bound_local_are_refused_when_one_thing_is_wrong(self):
+        def mem(binding, rows, lens="(len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)"):
+            return self.member_case(["  var v_a: Ref", f"  v_a := {binding}", *rows], lens)
+
+        def glob(binding, rows):
+            return self.global_case(["  var v_a: Ref", f"  v_a := {binding}", *rows])
+
+        bound = "loc(member(p, 1), 0)"
+        cases = {
+            "another start than 0 or offset_of(t)": (mem(bound, self.rows("v_a", lo=1)), "the range does not start at `offset_of(v_a)`"),
+            "a start at 0 of a local that is not bound": (mem("p", self.rows("v_a")), "the range does not start at `offset_of(v_a)`"),
+            "a local bound to another slot": (mem("loc(member(p, 1), 1)", self.rows("v_a")), "is bound to slot 1 of `member(p,1)`, not the first slot"),
+            "a local bound to the slot before": (mem("loc(member(p, 1), -1)", self.rows("v_a")), "is bound to slot -1"),
+            "a count past the fact's": (mem(bound, self.rows("v_a", hi=5)), "is not the `len(...) == N` its block's facts state (4)"),
+            "a count short of the fact's": (mem(bound, self.rows("v_a", hi=3)), "is not the `len(...) == N` its block's facts state (4)"),
+            "a computed count": (mem(bound, self.rows("v_a", hi="(2 + 2)")), "is not the `len(...) == N` its block's facts state (4)"),
+            "no allocation states an array at the member (the method's own fact does not count)": (mem("loc(member(p, 0), 0)", self.rows("v_a", hi=1)), "no `alloc_struct_*` of the unit has an array member at (0,)"),
+            "a block outside the grammar (a member of an unknown local)": (mem("loc(member(zz, 1), 0)", self.rows("v_a")), "is neither `GB_g()` of a declared array global nor `member("),
+            "a block outside the grammar (through block_of)": (mem("loc(member(loc(block_of(p), 0), 1), 0)", self.rows("v_a")), "is neither `GB_g()` of a declared array global"),
+            "a block of an undeclared global": (glob("loc(GB_x__9(), 0)", self.rows("v_a")), "is neither `GB_g()` of a declared array global"),
+            "a scalar global's slot as an array": (glob("loc(GB_h__2(), 0)", self.rows("v_a", hi=1)), "is not an array global"),
+            "an array global's rows of another count": (glob("loc(GB_g__1(), 0)", self.rows("v_a", hi=3)), "is not the `len(...) == N` its block's facts state (4)"),
+        }
+        for what, (lines, fragment) in cases.items():
+            with self.subTest(what):
+                self.some(lines, fragment)
+
+    def test_a_local_assigned_two_different_things_is_not_bound(self):
+        body = ["  var v_a: Ref", "  v_a := loc(member(p, 1), 0)", "  v_a := p", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+        body = ["  var v_a: Ref", "  v_a := loc(member(p, 1), 0)", "  v_a := loc(member(p, 0), 0)", *self.rows("v_a")]
+        self.some(self.member_case(body), "is not assigned one `loc(B, 0)`")
+
+    def test_a_members_bound_local_is_rooted_at_a_viper_variable_only(self):
+        # Part C's lowering (`ma_<n>`): `ma_n := loc(member(<chain>, k), 0)` with the chain rooted at a formal, `r`, a structure local, or a call-row
+        # temporary bound from the argument first (assigned once); never an expression
+        def mem(root_lines, root, rows=None):
+            return self.member_case(["  var t: Ref", "  var ma_0: Ref", *root_lines, f"  ma_0 := loc(member({root}, 1), 0)", *(rows or self.rows("ma_0"))])
+
+        # the temporary bound from the argument first: `t := p`, and a pointer a call returned
+        self.assertEqual(self.strict(mem(["  t := p"], "t")), [])
+        self.assertEqual(self.strict(mem([Check("  t := f_get(p)", "call.precondition", "internal")], "t")), [])
+        # a temporary that is the address of a nested slot (`f(&s.t)`: `t := loc(member(p, 0), 0)`) is a root too, not an array
+        self.assertEqual(self.strict(mem(["  t := loc(member(p, 0), 0)"], "t")), [])
+        # twins, one thing each: the root assigned twice (not "bound from the argument first"), a root that is no variable of the method, an expression
+        # as the root, and a chain rooted at another bound local (a first slot is no structure)
+        self.some(mem(["  t := p", "  t := null"], "t"), "is neither `GB_g()` of a declared array global nor `member(<chain>, k)`")
+        self.some(mem(["  t := p"], "zz"), "is neither `GB_g()` of a declared array global nor `member(<chain>, k)`")
+        self.some(mem(["  t := p"], "loc(block_of(p), 0)"), "is neither `GB_g()` of a declared array global nor `member(<chain>, k)`")
+        self.some(mem(["  t := p"], "null"), "is neither `GB_g()` of a declared array global nor `member(<chain>, k)`")
+        other = self.member_case(["  var ma_0: Ref", "  var ma_1: Ref", "  ma_0 := loc(member(p, 1), 0)", "  ma_1 := loc(member(ma_0, 1), 0)", *self.rows("ma_1")])
+        self.some(other, "is neither `GB_g()` of a declared array global nor `member(<chain>, k)`")
+
+    def test_a_members_count_is_the_literal_of_any_allocation_with_an_array_member_there(self):
+        # item 15: the count of the member at that path and index in ANY `alloc_struct_*` of a structure with an array member there
+        def other(x):
+            if isinstance(x, Check):
+                text = x.text.replace("len(member(r, 1)) == 4", "len(member(r, 1)) == 8").replace("j < 4", "j < 8")
+                return Check(text, x.error_id, x.category, x.message)
+            return x.replace("alloc_struct_0_S", "alloc_struct_2_U")
+
+        t8 = [other(x.replace("alloc_struct_0_S", "alloc_struct_2_U") if isinstance(x, str) else x) for x in self.ALLOC_S]
+        both = [*self.ALLOC_S, *t8]
+        body = lambda hi: ["  var ma_0: Ref", "  ma_0 := loc(member(p, 1), 0)", *self.rows("ma_0", hi=hi)]  # noqa: E731
+        for n in (4, 8):
+            with self.subTest(n=n):
+                self.assertEqual(self.strict(self.member_case(body(n), alloc=both)), [])
+        for n in (3, 5, 9):
+            with self.subTest(n=n):
+                self.some(self.member_case(body(n), alloc=both), "is not the `len(...) == N` its block's facts state")
+        # the count is looked up by the member's path and index: another structure's array at ANOTHER index does not lend its count
+        asx = ArrayStructAllocationTests
+        cell1 = asx.CELL0.replace("member(r, 0)", "member(r, 1)")
+        v5 = ["// cerastes:trusted-contract allocation of a local of a struct type", "method alloc_struct_3_V() returns (r: Ref)",
+              *[Check("  " + t, P, "internal") for t in (asx.ROOT, *asx.arr(k=0, n=5), cell1, asx.LIVE)], "  decreases _"]
+        self.assertEqual(self.strict(self.member_case(["  var ma_0: Ref", "  ma_0 := loc(member(p, 0), 0)", *self.rows("ma_0", hi=5)], alloc=[*self.ALLOC_S, *v5])), [])
+        self.some(self.member_case(body(5), alloc=[*self.ALLOC_S, *v5]), "is not the `len(...) == N` its block's facts state (4)")
+        # the method's own `len(member(p, 1)) == 4` is no source: with only the 8-element allocation the 4 rows are refused, and with no
+        # allocation of a structure with an array member there is no count at all
+        self.some(self.member_case(body(4), alloc=t8), "is not the `len(...) == N` its block's facts state (8)")
+        self.some(self.member_case(body(4), alloc=[]), "no `alloc_struct_*` of the unit has an array member at (1,)")
+
+    def test_the_block_term_form_stays_refused_in_a_body(self):
+        # s47_c_owns_member.vpr:71-74 write the rows over `member(p, 1)` itself in the body: lowering writes them over the bound local
+        row = self.A.q("member(p, 1)", 0, 4, "loc(member(p, 1), k).d_int")
+        body = [Check("  assert " + row, A, "internal")]
+        self.some(self.member_case(body), "a quantified `assert` that is not a marked range row of decision 0059 item 7")
+
+
+class StructGlobalArrayLeafTests(unittest.TestCase):
+    """Decision 0063 items 9 and 15: a structure global with an array member in `program_start`.  The shape is il-analyst-3's (marr_global_read_write.vpr
+    of the VIR self-test): the facts row states `len(member(loc(GB_g(), 0), k)) == N` for the array member (`== 1` for a cell member), the cell row
+    is the structure's cell leaves ending with `acc(lvloc(GB_g()).lv)` (decision 0044's row, unchanged), and each array member has its own group over
+    `member(loc(GB_g(), 0), k)` in item 9's order WITHOUT the liveness row (the cell row has it).  A structure with no cell leaf has no place for the
+    liveness and is refused until the lowering shows one; every twin breaks one thing."""
+
+    A = ArrayGlobalRowTests
+    S = StructGlobalTests
+    G = "GB_g__1"
+    B = "member(loc(GB_g__1(), 0), 1)"   # struct { int n; int a[4]; }: n is member 0, a member 1
+
+    @classmethod
+    def cell_row(cls, v="7"):
+        return cls.S.srow(cls.G, [cls.S.int_leaf(cls.G, (0,), v)])
+
+    @classmethod
+    def group(cls, b=None, n=4, **kw):
+        b = b or cls.B
+        return [r for r in ArrayGlobalRowTests.group(g="GB_g__1", n=n, lv=False, **kw)] and [
+            r.replace("GB_g__1()", b) for r in ArrayGlobalRowTests.group(g="GB_g__1", n=n, lv=False, **kw)]
+
+    @classmethod
+    def facts(cls, n=4, member_one=1):
+        r = cls.S.slot(cls.G)
+        parts = [f"((len({cls.G}()) == 1) && (lvloc({cls.G}()) == loc({cls.G}(), (-2))))", f"(len(member({r}, 0)) == {member_one})", f"(len(member({r}, 1)) == {n})",
+                 "((len(GB_h__2()) == 1) && (lvloc(GB_h__2()) == loc(GB_h__2(), (-2))))"]
+        return " && ".join(parts)
+
+    def fixture(self, rows=None, facts=None):
+        rows = [self.cell_row(), *self.group(), ArrayGlobalRowTests.H_ROW] if rows is None else rows
+        f = self.facts() if facts is None else facts
+        lines = ArrayGlobalRowTests("test_the_emitters_group_is_clean").G.fixture(names=["GB_g__1", "GB_h__2"], facts=f, rows=rows, f_requires=f)
+        lines[0:0] = ["field v_bool: Bool", "field d_bool: Bool"]
+        return lines
+
+    strict = staticmethod(GlobalsTests.strict)
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    def test_the_lowerings_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_each_form_of_the_values_is_clean(self):
+        for what, kw in {"a full list": dict(listed=("1", "2", "3", "4"), rest=None), "an unknown value": dict(listed=(), rest="unknown"),
+                         "a partial list and the zero rest": dict(listed=("1",), rest="zero")}.items():
+            with self.subTest(what):
+                self.assertEqual(self.strict(self.fixture(rows=[self.cell_row(), *self.group(**kw), ArrayGlobalRowTests.H_ROW])), [])
+
+    def test_two_array_members_are_two_groups(self):
+        # struct { int n; int a[4]; int b[2]; }: members 1 and 2
+        b2 = "member(loc(GB_g__1(), 0), 2)"
+        r = self.S.slot(self.G)
+        facts = self.facts() + f" && (len(member({r}, 2)) == 2)"
+        rows = [self.cell_row(), *self.group(), *self.group(b2, n=2, listed=("5",)), ArrayGlobalRowTests.H_ROW]
+        self.assertEqual(self.strict(self.fixture(rows=rows, facts=facts)), [])
+        # the facts must state the second member's count too
+        self.some(self.fixture(rows=rows), "its first `ensures` row must be the global facts")
+
+    def test_a_group_that_breaks_the_order_is_refused(self):
+        g = self.group()
+        cell = self.cell_row()
+        bad = {
+            "the groups before the cell row": [*g, cell],
+            "the liveness row in the group (the cell row has it)": [cell, *g, f"acc(lvloc({self.G}()).lv)"],
+            "a duplicated group": [cell, *g, *g],
+            "the flags before the flag permission": [cell, g[0], g[2], g[1], *g[3:]],
+            "the value of a slot past the list's end listed twice": [cell, *g[:3], "loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 1", "loc(member(loc(GB_g__1(), 0), 1), 0).v_int == 1", *g[4:]],
+            "a zero rest from the wrong slot": [cell, *g[:3], g[3], g[4].replace("(2 <= k)", "(1 <= k)")],
+            "no zero rest and no range for the elements past the list": [cell, *g[:5]],
+            "a count that is not the facts'": [cell, *self.group(n=3)],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                probs = self.strict(self.fixture(rows=[*rows, ArrayGlobalRowTests.H_ROW]))
+                self.assertTrue(probs, what)
+
+    def test_a_group_with_no_cell_row_and_no_lone_liveness_row_is_refused(self):
+        self.some(self.fixture(rows=[*self.group(), ArrayGlobalRowTests.H_ROW]), "before the structure's cell row, or the structure has no cell leaf")
+
+    LONE = "acc(lvloc(GB_g__1()).lv)"
+
+    def only_facts(self, n=4):
+        r = self.S.slot(self.G)
+        return (f"((len({self.G}()) == 1) && (lvloc({self.G}()) == loc({self.G}(), (-2)))) && (len(member({r}, 0)) == {n}) && "
+                "((len(GB_h__2()) == 1) && (lvloc(GB_h__2()) == loc(GB_h__2(), (-2))))")
+
+    def only_fixture(self, rows):
+        return self.fixture(rows=[*rows, ArrayGlobalRowTests.H_ROW], facts=self.only_facts())
+
+    def only_group(self, **kw):
+        return self.group(b="member(loc(GB_g__1(), 0), 0)", **kw)
+
+    def test_an_array_only_structure_global_is_its_liveness_cell_and_the_group(self):
+        # struct W { int a[4]; } w = {{3}} (marr_global_array_only.vpr): the cell row is the liveness cell alone, exactly once
+        self.assertEqual(self.strict(self.only_fixture([self.LONE, *self.only_group(listed=("3",))])), [])
+        self.assertEqual(self.strict(self.only_fixture([self.LONE, *self.only_group(listed=(), rest="unknown")])), [])
+
+    def test_a_lone_liveness_row_is_refused_when_anything_else_stands_with_it(self):
+        g = self.only_group(listed=("3",))
+        bad = {
+            "two liveness rows": [self.LONE, self.LONE, *g],
+            "the group before the lone row": [*g, self.LONE],
+            "an extra conjunct in the row": [f"{self.LONE} && true", *g],
+            "a permission amount": ["acc(lvloc(GB_g__1()).lv, 1 / 2)", *g],
+            "the liveness of another global": ["acc(lvloc(GB_h__2()).lv)", *g],
+            "the liveness row after the group": [*g[:3], self.LONE, *g[3:]],
+            "the lone row with no group": [self.LONE],
+            "the lone row and a cell row for the same global": [self.LONE, self.cell_row(), *g],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                self.assertTrue(self.strict(self.only_fixture(rows)), what)
+
+    def test_the_facts_state_the_members_counts(self):
+        for what, facts in {"the array member as a cell (len 1)": self.facts(n=1), "the array member's count 5": self.facts(n=5),
+                            "the cell member's length 2": self.facts(member_one=2)}.items():
+            with self.subTest(what):
+                self.some(self.fixture(facts=facts), "its first `ensures` row must be the global facts")
+
+    def test_a_group_over_a_block_that_is_no_member_of_a_declared_global_is_refused(self):
+        for what, b in {"a member of an undeclared global": "member(loc(GB_x__9(), 0), 1)", "a block_of in the chain": "member(loc(block_of(loc(GB_g__1(), 0)), 0), 1)",
+                        "a chain not rooted at the global's first slot": "member(GB_g__1(), 1)"}.items():
+            with self.subTest(what):
+                self.assertTrue(self.strict(self.fixture(rows=[self.cell_row(), *self.group(b), ArrayGlobalRowTests.H_ROW])), what)
+
+
+class ArrayCopyTests(unittest.TestCase):
+    """Decision 0063 item 13: `copy_arr_<t>` is trusted (the tag rule), so it is pinned clause by clause like `alloc_arr_<t>` and `zero_arr_<t>`: the shape
+    of s47_g_copy_*.vpr, with the destination's value `old(source value)` and the source unchanged.  Each mutant weakens or strengthens one clause (a
+    permission conjured, a value not copied, the distinctness of the blocks dropped, an amount past `write`) and must be refused; with `alloc_*` and
+    `zero_arr_*` the method is exempt from the global facts and from the ghost-amount bounds of a method's formals."""
+
+    A = ArrayAllocationTests("test_the_two_contracts_are_clean_for_each_field_type")
+    HEADER = "method copy_arr_int(d: Ref, s: Ref, n: Int, rd: Perm)"
+
+    def lines(self, clauses=None, name="copy_arr_int", header=None, t="int", ty="Int", tail="  decreases _"):
+        clauses = lv.array_copy_clauses("int") if clauses is None else clauses
+        header = header or f"method {name}(d: Ref, s: Ref, n: Int, rd: Perm)"
+        body = [Check(f"  {kw} {text}", WF if kw == "requires" else P, "internal") for kw, text in clauses]
+        return [*self.A.fields(t, ty), "// cerastes:trusted-contract array copy", header, *body, tail]
+
+    def probs(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "trusted array copy" in p or "ghost amount" in p or "global facts" in p]
+
+    def test_the_contract_is_clean_for_each_field_type(self):
+        for t, ty in (("int", "Int"), ("bool", "Bool"), ("ptr_int", "Ref")):
+            with self.subTest(t=t):
+                clauses = lv.array_copy_clauses(t)
+                name = f"copy_arr_{t}"
+                self.assertEqual(self.probs(self.lines(clauses, name=name, t=t, ty=ty)), [])
+
+    def test_a_plain_spelling_of_the_same_clauses_is_clean(self):
+        plain = [(kw, text.replace("((0 <= k) && (k < n))", "0 <= k && k < n")) for kw, text in lv.array_copy_clauses("int")]
+        self.assertEqual(self.probs(self.lines(plain)), [])
+
+    def test_every_clause_of_the_copy_is_pinned(self):
+        base = lv.array_copy_clauses("int")
+        out = {}
+        for i, (kw, text) in enumerate(base):
+            out[f"drop clause {i}: {text[:50]}"] = base[:i] + base[i + 1:]
+        out["extra ensures false"] = base + [("ensures", "false")]
+        out["extra ensures a fact"] = base + [("ensures", "len(block_of(d)) == 1")]
+        out["extra requires"] = base + [("requires", "n < 100")]
+        out["the blocks not distinct"] = [c for c in base if c[1] != "block_of(d) != block_of(s)"] + [("requires", "block_of(d) == block_of(s)")]
+        out["the amount up to a bound past write"] = [(kw, t.replace("rd <= write", "rd <= 2 * write")) for kw, t in base]
+        out["the amount without a lower bound"] = [(kw, t.replace("(none < rd) && ", "")) for kw, t in base]
+        out["the amount strict below write"] = [(kw, t.replace("rd <= write", "rd < write")) for kw, t in base]
+        out["the destination at an amount"] = [(kw, t.replace("acc(loc(block_of(d), k).v_int)", "acc(loc(block_of(d), k).v_int, rd)")) for kw, t in base]
+        out["the source at full permission"] = [(kw, t.replace("acc(loc(block_of(s), k).v_int, rd)", "acc(loc(block_of(s), k).v_int)")) for kw, t in base]
+        out["a destination value that is not the source's"] = [(kw, t.replace("== old(loc(block_of(s), k).v_int)", "== 0") if "block_of(d), k).v_int ==" in t else t) for kw, t in base]
+        out["a destination value of the destination's own old value"] = [(kw, t.replace("old(loc(block_of(s), k).v_int)", "old(loc(block_of(d), k).v_int)") if "block_of(d), k).v_int ==" in t else t) for kw, t in base]
+        out["a destination value stated of the source's cell (the source's value twice)"] = [(kw, t.replace("loc(block_of(d), k).v_int == old", "loc(block_of(s), k).v_int == old") if "block_of(d), k).v_int ==" in t else t) for kw, t in base]
+        out["the range to n + 1"] = base[:3] + [(base[3][0], base[3][1].replace("(k < n)", "(k < (n + 1))"))] + base[4:]
+        out["a trigger over the other block"] = base[:3] + [(base[3][0], base[3][1].replace("{ loc(block_of(d), k) }", "{ loc(block_of(s), k) }"))] + base[4:]
+        src_flag = "loc(block_of(s), k).d_int"
+        out["a source flag requirement dropped (an unwritten source element copied)"] = [c for c in base if not (c[0] == "requires" and c[1].endswith(src_flag) and "acc(" not in c[1])]
+        out["the source flags not kept (the source's next read fails its `uninitialized` row)"] = [c for c in base if not (c[0] == "ensures" and c[1].endswith(src_flag) and "acc(" not in c[1])]
+        out["the source flags kept as a requires only"] = [c if not (c[0] == "ensures" and c[1].endswith(src_flag) and "acc(" not in c[1]) else ("requires", c[1]) for c in base]
+        out["the destination flags not set"] = [c for c in base if not (c[0] == "ensures" and c[1].endswith("loc(block_of(d), k).d_int") and "acc(" not in c[1])]
+        out["the source value's ensures dropped (the copy may change the source)"] = [c for c in base if not (c[0] == "ensures" and "block_of(s), k).v_int ==" in c[1])]
+        out["the source value's ensures stated of the destination"] = [(kw, t.replace("loc(block_of(s), k).v_int == old", "loc(block_of(d), k).v_int == old")) if "block_of(s), k).v_int == old" in t else (kw, t) for kw, t in base]
+        for what, clauses in out.items():
+            with self.subTest(what):
+                probs = self.probs(self.lines(clauses))
+                self.assertTrue(any("is not the trusted array copy of decision 0063 item 13" in p for p in probs), (what, probs))
+
+    def test_the_header_the_body_and_the_tail_are_pinned(self):
+        bad = {
+            "a result": self.lines(header=self.HEADER + " returns (r: Ref)"),
+            "swapped blocks": self.lines(header="method copy_arr_int(s: Ref, d: Ref, n: Int, rd: Perm)"),
+            "no amount": self.lines(header="method copy_arr_int(d: Ref, s: Ref, n: Int)"),
+            "an Int amount": self.lines(header="method copy_arr_int(d: Ref, s: Ref, n: Int, rd: Int)"),
+            "a body": [*self.lines(tail="  decreases _"), "{", "}"],
+            "a measure": self.lines(tail="  decreases n"),
+            "an undeclared suffix": self.lines(name="copy_arr_long"),
+        }
+        for what, lines in bad.items():
+            with self.subTest(what):
+                self.assertTrue(any("trusted array copy" in p for p in self.probs(lines)), what)
+
+    def test_the_name_is_the_emitters_and_no_wider(self):
+        # `copy_arr_` followed by anything is the emitter's name; a method that merely looks like it is an ordinary method (here: bodyless, untagged)
+        probs = lv.lint_vpr(*build(self.lines(name="copy_array_int")), "t.vpr", "t.vpr.map")
+        self.assertFalse(any("trusted array copy" in p for p in probs), probs)
+        probs = [p for p in lv.lint_vpr(*build(self.lines(name="copy_arr_int_2")), "t.vpr", "t.vpr.map") if "trusted array copy" in p]
+        self.assertTrue(probs)
+
+    def test_the_copy_is_exempt_from_the_global_facts_and_a_method_that_looks_like_it_is_not(self):
+        g = GlobalsTests("test_the_emitters_shape_is_clean")
+        lines = g.fixture() + self.lines()
+        self.assertEqual([p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "global facts" in p or "ghost amount" in p], [])
+        # the same clauses under a name that is not the prefix's are a method of a program with globals: refused
+        other = self.lines(name="copy_array_int")
+        lines = g.fixture() + other
+        self.assertTrue(any("must take the global facts" in p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")))
+
+    # the trusted copy as S47 (g) passed on the box and as the emitter writes it, verbatim (the rule is not checked against its own generator only)
+    EMITTED = """method copy_arr_int(d: Ref, s: Ref, n: Int, rd: Perm)
+  requires (1 <= n) && (d == loc(block_of(d), 0)) && (len(block_of(d)) == n) && (s == loc(block_of(s), 0)) && (len(block_of(s)) == n)
+  requires block_of(d) != block_of(s)
+  requires (none < rd) && (rd <= write)
+  requires forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).v_int)
+  requires forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).d_int)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).v_int, rd)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).d_int, rd)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).d_int
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).v_int)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).d_int)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).v_int, rd)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).d_int, rd)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> loc(block_of(d), k).v_int == old(loc(block_of(s), k).v_int)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> loc(block_of(d), k).d_int
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).v_int == old(loc(block_of(s), k).v_int)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).d_int
+  decreases _
+"""
+
+    def test_the_emitted_text_of_the_copy_is_clean(self):
+        lines = [*self.A.fields("int", "Int"), "// cerastes:trusted-contract array copy", *[Check(l, WF if l.lstrip().startswith("requires") else P, "internal") if l.startswith("  ") else l for l in self.EMITTED.strip().split("\n")]]
+        self.assertEqual(self.probs(lines), [])
+        # the same text with the source's flags not kept, and with the destination's value row reading the source on both sides (the typo), is refused
+        flags = [l for l in self.EMITTED.strip().split("\n") if not (l.strip().startswith("ensures") and l.endswith("loc(block_of(s), k).d_int"))]
+        typo = [l.replace("loc(block_of(d), k).v_int == old", "loc(block_of(s), k).v_int == old") for l in self.EMITTED.strip().split("\n")]
+        for what, text in (("flags not kept", flags), ("the typo", typo)):
+            with self.subTest(what):
+                ls = [*self.A.fields("int", "Int"), "// cerastes:trusted-contract array copy", *[Check(l, WF if l.lstrip().startswith("requires") else P, "internal") if l.startswith("  ") else l for l in text]]
+                self.assertTrue(any("is not the trusted array copy of decision 0063 item 13" in p for p in self.probs(ls)), what)
+
+    def test_the_exemptions_are_granted_by_the_clause_set_not_by_the_name(self):
+        # a method named `copy_arr_int` whose clauses are not the pinned ones is no exempt method: it takes the global facts and the ghost-amount bounds like any
+        # other (its `rd` has no `none < rd && rd < write`), beside the refusal as a copy
+        g = GlobalsTests("test_the_emitters_shape_is_clean")
+        pinned = lv.array_copy_clauses("int")
+        for what, clauses in {"an extra ensures": pinned + [("ensures", "len(block_of(d)) == 1")],
+                              "a clause dropped": pinned[:-1],
+                              "the amount up to 2 * write": [(kw, t.replace("rd <= write", "rd <= 2 * write")) for kw, t in pinned]}.items():
+            with self.subTest(what):
+                probs = lv.lint_vpr(*build(g.fixture() + self.lines(clauses)), "t.vpr", "t.vpr.map")
+                self.assertTrue(any("must take the global facts" in p for p in probs), (what, probs))
+                self.assertTrue(any("is not the trusted array copy of decision 0063 item 13" in p for p in probs), (what, probs))
+                self.assertTrue(any("ghost amount" in p or "`rd`" in p for p in probs), (what, probs))
+        # the pinned clause set is exempt from both (the other test) and so is a clean program
+        self.assertEqual([p for p in lv.lint_vpr(*build(g.fixture() + self.lines()), "t.vpr", "t.vpr.map") if "global facts" in p or "ghost amount" in p or "`rd`" in p], [])
+
+
+class ArrayCopyCallTests(unittest.TestCase):
+    """Decision 0063 item 13, Part E: a call of the trusted `copy_arr_<t>` is preceded by an explicit row for each of its `requires` (the amount `rd` as the
+    minimum over the source's first slot, `none < rd`, the source's value, flag and flags rows, the destination's value and flag rows) and, immediately
+    before the call, the internal row `block_of(d) != block_of(s)`; a copy that may be a self-copy sits alone in `if (d != s) {`.  Each mutant drops or
+    changes one row and must be refused by this rule (the shapes are those of il-analyst-4's `earr_copy_*` outputs)."""
+
+    A = ArrayCopyTests("test_the_contract_is_clean_for_each_field_type")
+
+    @staticmethod
+    def rows(d="t__1", s="t__2", rd="t__3", n=3, t="int"):
+        def q(b, tail):
+            return f"  assert forall k: Int :: {{ loc(block_of({b}), k) }} ((0 <= k) && (k < {n})) ==> {tail}"
+        cs, cd = f"loc(block_of({s}), k)", f"loc(block_of({d}), k)"
+        return {
+            "rd": f"  {rd} := (perm({s}.v_{t}) < perm({s}.d_{t})) ? perm({s}.v_{t}) : perm({s}.d_{t})",
+            "pos": f"  assert none < {rd}",
+            "sv": q(s, f"acc({cs}.v_{t}, {rd})"), "sd": q(s, f"acc({cs}.d_{t}, {rd})"), "sf": q(s, f"{cs}.d_{t}"),
+            "dv": q(d, f"acc({cd}.v_{t})"), "dd": q(d, f"acc({cd}.d_{t})"),
+            "int": f"  assert block_of({d}) != block_of({s})",
+        }
+
+    def program(self, rows=None, guard=False, drop=(), after=(), call="  copy_arr_int(t__1, t__2, 3, t__3)", guard_text=None):
+        r = dict(self.rows() if rows is None else rows)
+        for k in drop:
+            r.pop(k)
+        order = ["rd", "pos", "sv", "sd", "sf", "dv", "dd"]
+        body = [r[k] for k in order if k in r]
+        tail = [r["int"]] if "int" in r else []
+        tail = tail + list(after)
+        call_lines = [guard_text or "  if (t__1 != t__2) {", *tail, call, "  }"] if guard else [*tail, call]
+        return [*self.A.A.fields("int", "Int"), "// cerastes:trusted-contract array copy", *self.A.lines()[len(self.A.A.fields("int", "Int")) + 1:],
+                "method m__1(v_a: Ref)", "  decreases", "{", "  var t__1: Ref", "  var t__2: Ref", "  var t__3: Perm", *body, *call_lines, "}"]
+
+    def probs(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "is called without its rows" in p]
+
+    def test_the_rows_of_the_emitter_are_clean(self):
+        self.assertEqual(self.probs(self.program()), [])
+        self.assertEqual(self.probs(self.program(guard=True)), [])
+        for t in ("bool", "ptr_int"):
+            with self.subTest(t=t):
+                self.assertEqual(self.probs(self.program(rows=self.rows(t=t), call=f"  copy_arr_{t}(t__1, t__2, 3, t__3)")), [])  # the callee is absent: not this rule's
+
+    def test_a_call_without_a_row_of_its_requires_is_refused(self):
+        for what, drop in {
+            "no amount": ("rd",), "no `none < rd`": ("pos",), "no source value permission": ("sv",), "no source flag permission": ("sd",),
+            "no source flags": ("sf",), "no destination value permission": ("dv",), "no destination flag permission": ("dd",),
+            "no internal row": ("int",),
+        }.items():
+            with self.subTest(what):
+                self.assertTrue(self.probs(self.program(drop=drop)), what)
+                self.assertTrue(self.probs(self.program(drop=drop, guard=True)), what + " (guarded)")
+
+    def test_a_row_that_is_not_the_rows_of_this_call_is_refused(self):
+        good = self.rows()
+        other = {"the amount of the destination": {"rd": good["rd"].replace("t__2", "t__1")},
+                 "the amount of the value permission alone": {"rd": good["rd"].replace("perm(t__2.v_int) < perm(t__2.d_int)) ? perm(t__2.v_int) : perm(t__2.d_int)", "perm(t__2.v_int)")},
+                 "the amount of the flag alone": {"rd": good["rd"].replace(" : perm(t__2.d_int)", " : perm(t__2.v_int)")},
+                 "a count other than the call's": {"sv": good["sv"].replace("(k < 3)", "(k < 2)")},
+                 "the source's rows at full permission": {"sv": good["sv"].replace(", t__3)", ")")},
+                 "the destination's rows over the source": {"dv": good["dv"].replace("block_of(t__1)", "block_of(t__2)")},
+                 "the internal row on other blocks": {"int": "  assert block_of(t__1) != block_of(t__3)"},
+                 "the internal row reversed": {"int": "  assert block_of(t__2) != block_of(t__1)"},
+                 "the amount of another suffix": {"dd": good["dd"].replace(".d_int", ".d_bool")}}
+        for what, change in other.items():
+            with self.subTest(what):
+                self.assertTrue(self.probs(self.program(rows={**good, **change})), what)
+
+    def test_the_internal_row_is_the_line_before_the_call_and_the_guard_is_the_pinned_one(self):
+        self.assertTrue(self.probs(self.program(after=["  assert none < t__3"])), "a row between the internal row and the call")
+        self.assertTrue(self.probs(self.program(guard=True, guard_text="  if (t__2 != t__1) {")), "the guard reversed")
+        self.assertTrue(self.probs(self.program(guard=True, guard_text="  if (t__1 == t__2) {")), "the guard is an equality")
+        self.assertTrue(self.probs(self.program(guard=True, guard_text="  if (t__1 != t__2 && t__3 == none) {")), "the guard has another conjunct")
+        lines = self.program(guard=True)
+        i = lines.index("  }", lines.index("  copy_arr_int(t__1, t__2, 3, t__3)"))
+        lines.insert(i, "  t__3 := none")  # a second statement in the guarded block
+        self.assertTrue(self.probs(lines), "the guarded block holds more than the call")
+        self.assertTrue(self.probs(self.program(call="  copy_arr_int(t__1, t__2, n, t__3)")), "a count that is not a literal")
+        self.assertTrue(self.probs(self.program(call="  copy_arr_int(loc(t__1, 0), t__2, 3, t__3)")), "an argument that is not a variable")
+
+    def test_a_method_that_only_carries_the_name_is_not_a_pinned_copy_and_its_calls_are_not_this_rules(self):
+        lines = self.program()
+        i = lines.index("method copy_arr_int(d: Ref, s: Ref, n: Int, rd: Perm)")
+        lines[i + 1] = "  requires true"
+        self.assertEqual(self.probs(lines), [])  # refused as a copy by the clause rule instead
+        self.assertTrue([p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "not the trusted array copy" in p])
 
 
 if __name__ == "__main__":

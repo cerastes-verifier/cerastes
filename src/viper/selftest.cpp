@@ -588,7 +588,9 @@ struct Reject
     {
         Check,
         Lower,
-        Hook
+        Hook,
+        // lowering runs on a program check_program REFUSES (the guards behind the refusal: decision 0063 item 4), and must report an internal error that contains `must_contain`
+        Raw
     } where {Where::Check};
 };
 std::vector<Reject>& reject_cases()
@@ -610,6 +612,12 @@ void lc(std::string name, std::string doc, std::function<void(Kit&)> build)
 [[maybe_unused]] void rl(std::string name, std::string must_contain, std::function<void(Kit&)> build)
 {
     reject_cases().push_back(Reject {std::move(name), std::move(must_contain), std::move(build), Reject::Where::Lower});
+}
+// A program that check_program refuses (so the driver never lowers it), lowered anyway: the backstop in lowering must report an internal error that contains `must_contain`
+// (and must not crash).
+[[maybe_unused]] void ru(std::string name, std::string must_contain, std::function<void(Kit&)> build)
+{
+    reject_cases().push_back(Reject {std::move(name), std::move(must_contain), std::move(build), Reject::Where::Raw});
 }
 // A program for which lowering, with a hook set, reports an internal error that contains `must_contain`.
 [[maybe_unused]] void rh(std::string name, std::string must_contain, std::function<void(Kit&)> build)
@@ -1541,6 +1549,7 @@ void define_quantifier_loops();
 #include "selftest_cases31.inc"
 #include "selftest_cases32.inc"
 #include "selftest_cases33.inc"
+#include "selftest_cases34.inc"
 
 namespace {
 
@@ -1836,6 +1845,11 @@ int main(int argc, char** argv)
     define_pure_contract_applications();
     define_pure_loop_applications();
     define_pure_function_rejections();
+    define_arrays_in_storage_rejections();
+    define_array_globals();
+    define_member_arrays();
+    define_struct_array_values();
+    define_array_literals();
     int bad {0};
     for (const Case& c : lowering_cases())
     {
@@ -1851,6 +1865,36 @@ int main(int argc, char** argv)
         Kit k;
         r.build(k);
         const std::vector<Diag> d {check_program(k.prog)};
+        if (r.where == Reject::Where::Raw)
+        {
+            if (d.empty())
+            {
+                std::fprintf(
+                    stderr, "FAIL (raw lowering) %s: check_program accepts the program, so it is not a backstop case\n",
+                    r.name.c_str());
+                ++bad;
+                continue;
+            }
+            k.lower_options.skip_check = true;
+            const LowerResult lr {lower_program(k.prog, k.lower_options)};
+            bool ok {false};
+            for (const Diag& x : lr.errors)
+            {
+                if (x.reason.find(r.must_contain) != std::string::npos)
+                {
+                    ok = true;
+                }
+            }
+            if (!ok)
+            {
+                std::fprintf(stderr,
+                             "FAIL (raw lowering) %s: expected an internal error containing \"%s\", got %zu: %s\n",
+                             r.name.c_str(), r.must_contain.c_str(), lr.errors.size(),
+                             lr.errors.empty() ? "(none)" : lr.errors[0U].reason.c_str());
+                ++bad;
+            }
+            continue;
+        }
         if (r.where == Reject::Where::Check)
         {
             bool ok {false};
@@ -1899,6 +1943,7 @@ int main(int argc, char** argv)
             ++bad;
         }
     }
+    bad += check_array_views();
     std::printf("cerastes-vir-selftest: %zu lowering cases written to %s, %zu rejection cases checked, %d problems\n",
                 lowering_cases().size(), dir.c_str(), reject_cases().size(), bad);
     return bad == 0 ? 0 : 1;

@@ -313,3 +313,5 @@ pointers into arrays. Ranges in contracts (`owns_range`, `reads_range`, array pa
 *2026-11-12, amended by 0060 (M4.5e1b): item 1 — `owns_range`, `reads_range`, element reads in contracts, array parameters, `p[i]` of a pointer and an array used as a pointer in loop invariants and measures, and `owning(n)` on a parameter are lifted; atoms on one element go to M4.5e2 (question 236). Item 8 — loops carry the ranges of parameters as range places and read through pointers into local arrays (0060 item 11). Item 10 — `p[i]` under a range atom takes its bound from the atom (0060 item 10).*
 
 *2026-11-24, amended by 0061 (M4.5e1c): item 8 — a quantified invariant states which elements a loop wrote and that they hold values, giving `array_loop_fill_then_read_false_alarm.c` and `array_loop_self_write_false_alarm.c` their verifying siblings; the pins stay (0061 item 9, question 250).*
+
+*2026-11-25, amended by 0063 (M4.5e1e1): items 1, 2, 4, 8 and 11 — global, `static`, member and compound-literal arrays of scalars, array typedefs and `sizeof` of array types are lifted (0063 item 1).*

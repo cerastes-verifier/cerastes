@@ -10,7 +10,8 @@ This version covers pointers to integers, `bool` and enumerations, and
 pointers to such pointers (<<pointers-to-pointers>>): in local variables, as
 parameters and as results, with contracts that say which objects
 a function may read or write (<<contracts>>), in loops (<<loops>>) and across
-jumps (<<leaving>>); local arrays (<<arrays>>); global and `static` local variables
+jumps (<<leaving>>); arrays of scalars as locals, globals, `static` locals,
+structure members and C compound literals (<<arrays>>, <<array-members>>); global and `static` local variables
 (<<globals>>, <<static-locals>>); and memory from `malloc`, `calloc` and `free` (<<heap>>).
 <<not-yet>> lists what is still rejected.
 
@@ -458,20 +459,93 @@ include::example$memory/compound_literal.c[tag=source]
 ----
 
 The elements of a compound literal are evaluated before any member is stored,
-in no particular order, as the elements of an initializer are. In pass:[C++],
+in no particular order, as the elements of an initializer are. In C an array
+literal (`(int[]){1, 2, 3}`) is an object of its block too, and its value is a
+pointer to its first element. A compound literal used as an object whose element
+writes (`x = (int[]){pass:[x++]}[0];`) is rejected unless it is a whole statement, a
+declaration's initializer or a whole element of a braced list (in C, beside
+elements without side effects): C does not order that write with the rest of the
+expression. In pass:[C++],
 where compound literals are a compiler extension creating temporaries, they are
-accepted as values only, and so are `S{1, 2}` and `S()`.
+accepted as values only, and so are `S{1, 2}` and `S()`; array literals are not
+supported there.
 
-Not supported yet, each rejected with a diagnostic: unions, bit-fields, array
-members, `const`, `volatile` and `_Atomic` members, anonymous members, members
+[#array-members]
+*Array members.* A member may be an array of scalars
+(`struct buffer { int data[8]; int len; };`). Its elements are reached as an
+array's are (`b.data[i]`, `p->data[i]`, `&b.data[i]`), with the same
+xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`],
+xref:error-messages.adoc#_permission[`permission`] and
+xref:error-messages.adoc#_uninitialized[`uninitialized`] checks, and `p->data[i]`
+checks that `p` is not null as `p->len` does. In a braced initializer the member
+takes a list of its own (`{{1, 2}, 2}`); the elements it does not list are zero,
+as are those of a member the initializer does not name. Leaving out the inner
+braces (`{1, 2, 3}`) is rejected, as the compilers warn about it, except `{}`, C's
+`+{0}+`, and pass:[C++]'s `+{0}+` for a structure whose only member is the array. `cerastes_owns(*p)` and `cerastes_reads(*p)` give every element with
+the other members; `cerastes_owns(p->data)` and `cerastes_reads(p->data)` give the
+array member alone; after either a contract may read `p->data[i]`. The elements
+are objects apart from every other member, so passing `&b` and `&b.data[1]` to a
+function that owns both is reported as `permission`. Loops carry array members as
+they carry a local array (<<loops>>), and a structure global or `static` local may
+have one:
+
+[source,c]
+----
+include::example$memory/array_member.c[tag=source]
+----
+
+Passing the structure and one of its elements to a function that owns both:
+
+[source,c]
+----
+include::example$memory/array_member_alias_error.c[tag=source]
+----
+
+A structure with an array member is copied as a whole (`t = s;`, `*p = *q;`,
+`struct buffer c = b;`): every element of the source must have a value, as every
+member must (copying a partly written buffer is reported as
+xref:error-messages.adoc#_uninitialized[`uninitialized`], stricter than C), and the
+destination must be owned whole. It may also be passed and returned by value, and
+`f().data[i]` reads an element of a returned value, with the same
+`out-of-bounds` check, as long as the structure holds at most 7 array elements in
+all: a larger one is rejected as a parameter, a result or an argument passed by
+value, and in C as a compound literal used as a value (a copy has no such limit).
+In pass:[C++], a temporary of such a structure (`+S{{1, 2}, 3}+`) inside the
+initializer of a variable that is not the whole initializer is not supported yet.
+A copy and a call by value:
+
+[source,c]
+----
+include::example$memory/struct_array_copy.c[tag=source]
+----
+
+The copy is an object of its own: writing an element of it leaves the source as
+it was, so a check that the source changed fails:
+
+[source,c]
+----
+include::example$memory/struct_array_copy_error.c[tag=source]
+----
+
+A structure with an array member cannot yet be allocated with `malloc`, have an
+`owning` or marked member besides, or be
+the object of `ref_to_uninit` or `must_init`; a contract cannot yet name part of
+the member (`cerastes_owns_range(p->data, n)`), reach it through a pointer read
+from memory (`+cerastes_owns(*p->q)+`), pass it to a quantifier or a `pure`
+function, give a structure with an array member back with an `ensures` atom that
+has no `requires` partner, put `cerastes::owning` on a pointer to one, or name one
+in a loop invariant's atom.
+
+Not supported yet, each rejected with a diagnostic: unions, bit-fields, arrays of
+structures and of arrays as members, `const`, `volatile` and `_Atomic` members, anonymous members, members
 that are `void *` or pointers to functions, `packed` structures, structures
 from system headers (such as `FILE`), structures defined inside a function, and
 in pass:[C++] every class feature beyond a C structure (member functions,
 constructors, base classes, access control, `static` members, default member
-initializers). Passing or returning a structure by value, structure globals,
-initializers that elide the braces of an inner structure
+initializers). Initializers that elide the braces of an inner structure
 (`struct line l = {1, 2, 3, 4};`) and, in C, designators out of declaration
-order are rejected too, and so are a structure `?:`, comma or assignment used as
+order are rejected too, and so are `const` structure parameters and globals, a
+structure `?:`, comma or assignment used as
 a value (`t = c ? a : b;`), the address of a `const` compound literal, a compound
 literal in a loop's condition or step, and a compound literal used as an object
 without `&` (`(struct point){1, 2}.x = 3;`).
@@ -736,9 +810,10 @@ contract's object (`cerastes_owns(p[i])`), a range of elements in a loop invaria
 range whose pointer is not a parameter, a range of structures; pointer arithmetic
 (`p + 1`); and in a `forall`, an index other than `i`, `i + c` and `i - c`, arithmetic on reads
 of two arrays or two offsets (and, in loops and checks, on the second of two reads), a pointer
-argument other than a parameter (in a contract) or a pointer variable or local array (in a loop
-or a `check`), the shapes a loop invariant or a `check` does not accept yet (above), structure members and global arrays
-under the quantifier, and the positions xref:annotations.adoc#forall[forall] lists.
+argument other than a parameter (in a contract) or a pointer variable, local array or global
+array (in a loop or a `check`), the shapes a loop invariant or a `check` does not accept yet
+(above), structure members and array members under the quantifier, and the positions
+xref:annotations.adoc#forall[forall] lists.
 
 [#array-values]
 === A value computed from an array
@@ -819,7 +894,8 @@ only one that can set it:
   merge such definitions, `-fcommon`, are the default on macOS);
 * in pass:[C++], a global that is not `static` starts with an unknown value,
   since another file's initialization may change it before `main` runs, and so
-  does a global whose address is the initial value of such a global.
+  does a global whose address is the initial value of such a global (or of one of
+  its elements or members), and an array whose first element's address is.
 
 The rest of the program is assumed to keep to this file's contracts: code that
 runs before `main` in another file calls none of this file's functions, and a
@@ -844,9 +920,45 @@ A contract can name the object a pointer global points to,
 include::example$memory/pointer_global_target.c[tag=source]
 ----
 
-Globals of other files (`extern int count;` with no definition here) and arrays
-are not supported yet, nor is a structure global initialized with the address of
-another global's member (`&h.x`).
+[#global-arrays]
+*Global arrays.* A global array (`int table[8];`), or a `static` local one, is
+an object of all its elements that exists for the whole run. `main` starts with
+every element: the values its braced initializer lists, zero (`false`, a null
+pointer) for the elements it does not list, or unknown values by the rules
+above. Each listed value is checked as written, like a global's initializer, and
+so is the bound. A contract names the whole array, `cerastes_owns(table)` to read
+and write every element or `cerastes_reads(table)` to read them, and after such
+an atom it may read an element (`table[i]`, `cerastes_old(table[i])`). A loop in
+a function that holds the array carries it, as it carries a local array
+(<<loops>>); `table` passed where a callee takes a range
+(`cerastes_owns_range(p, n)`) gives it the elements it names:
+
+[source,c]
+----
+include::example$memory/array_global.c[tag=source]
+----
+
+An index outside the array is reported as
+xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`], an element read before
+the function holds the array as
+xref:error-messages.adoc#_permission[`permission`]:
+
+[source,c]
+----
+include::example$memory/array_global_index_error.c[tag=source]
+----
+
+A contract cannot yet name
+part of a global array or one of its elements (`cerastes_owns_range(table, n)`,
+`&table[2]`), take its address plus an offset (`table + i`), or pass it to a
+quantifier or a `pure` function (a loop invariant and a `check` can). A `const`
+global array, a global initialized with `&table[2]` and an array of structures
+are not supported yet; a global array declared without a bound or a braced
+initializer (`int table[];`) is rejected, as the compilers warn about it.
+
+Globals of other files (`extern int count;` with no definition here) are not
+supported yet, nor is a structure global initialized with the address of another
+global's member (`&h.x`).
 
 [#static-locals]
 == `static` local variables
@@ -866,8 +978,9 @@ include::example$memory/static_local.c[tag=source]
 Since every caller holds the variable across the call, two calls that both
 reach the function and that C does not order (`next_id() + next_id()`) are
 reported as xref:error-messages.adoc#_unsequenced[`unsequenced`]: the result
-depends on which runs first. A `static` local may be a structure; the function
-and its callers then hold every member. A function may return the address of its
+depends on which runs first. A `static` local may be a structure or an array
+(<<global-arrays,Global arrays>>); the function and its callers then hold every
+member or element. A function may return the address of its
 `static` local; its caller can use the pointer when the contract says what it
 points to (<<results,Results that give a place>>), and otherwise a use of it is
 reported as xref:error-messages.adoc#_lifetime[`lifetime`]. A `static const`
@@ -1839,8 +1952,29 @@ These are rejected with a diagnostic, never approximated
   `*pp` pointed to on entry, read on return; `+cerastes_old(p)->q->x+`), and
   `cerastes_old` in a loop invariant (copy the value into a local before the
   loop);
-* globals defined in another file, `volatile`, `_Atomic`, `const` structure and
-  thread-local globals, `static const` locals, and global arrays;
+* globals defined in another file, `volatile`, `_Atomic`, `const` structure,
+  `const` array and thread-local globals, and `static const` locals;
+* arrays of structures and arrays of arrays, as objects, members or types
+  (`struct point pts[4]`, `int m[2][3]`, `sizeof(int[2][3])`); a structure with an
+  array member that is allocated with `malloc`, that also has an `owning` or marked
+  member, or whose pointer is marked `ref_to_uninit` or `must_init`; part of a
+  global array or of an array member in a contract (`cerastes_owns_range(table,
+  n)`, `&table[2]`), one element as an atom, and `table + i`; an array member as
+  the argument of a quantifier or a `pure` function anywhere, and a global array as
+  one in a contract; an `ensures` atom with no `requires` partner, `owning` on a
+  pointer, or a written atom in a loop invariant, on a structure with an array
+  member or on the member;
+  a place reached through a pointer read from memory whose structure has an array
+  member (`+cerastes_owns(*p->q)+`); a structure value holding more than 7 array
+  elements passed or returned by value; an array compound literal in pass:[C++];
+* false alarms listed for array members (<<array-members>>): a loop that writes a
+  member of a structure by name (an element of an array member, or a member of the
+  element's type, such as `t.n` beside `int a[4]`) cannot keep any array member of
+  that element type unchanged; a function that reads an element of
+  `p->data` in its `requires` and its `ensures` (with `cerastes_reads(p->data)`)
+  cannot use that the two reads are equal; a function that returns the address of
+  an element of its `static` local structure's array member cannot promise
+  `cerastes_owns(*r)`;
 * for pure functions (<<array-values>>): a call in a `decreases`, in the count or the
   condition of an ownership or reading annotation, in an element's index, as a trailing
   argument of `cerastes_forall`, under `old` and in the body of a function that

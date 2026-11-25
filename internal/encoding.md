@@ -178,6 +178,18 @@ Front-end agnostic. The encoder builds a `Program` with a `Builder`; `check_prog
   a local, calls a function or folds cleanly to a non-zero value, and accepted when the checker cannot fold it (its
   obligations and lowering's internal `assert !c` decide); no calls in a `DoOnce` condition (other loop conditions may
   call, 0021); `step` only on a `While`-form loop.
+- **Arrays in structures and in static storage (M4.5e1e1, decision 0063).** `Type::Kind::Array` is now also the type of a `Global` and of a `StructMember`; an array still has no value:
+  its address (`AddrOf` of a local, `GlobalAddr` of a global array, `MemberAddr` of an array member, a `Ptr(Array)`) is the base of an `ElemAddr` and the operand of a whole-array
+  atom, and nowhere else. **Three views of a structure's leaves** (`vir.h`): `struct_object_leaves` (a cell leaf for each scalar member, one *array leaf* for each array member:
+  `StructLeaf::array`, `element`, `count`), `struct_value_leaves` (every element of an array member is a leaf of its own, `StructLeaf::elem` the index, `text` `s.a[2]`; the tuple of a
+  structure *value*) and `struct_leaves` (the old view: an array member is one leaf of array type with `array` false; **the poison**: lowering's guard `leaves_of` and every walk that
+  still treats a leaf as a cell report an internal error on it, so a site not yet given a view stops instead of mistaking an array for a cell). For a structure without an array member
+  the three lists are equal, so no existing program's Viper changed (`vprdiff` proves it after every part). `Global::elems`/`rest` and `GlobalLeaf::elems`/`rest` (`ArrayRest`: Zero or
+  Unknown) carry an array's initial values (the listed prefix and the rest). New statements and expressions, built by the Builder and checked by `check.cpp`: `Stmt::Kind::ArrayZero`
+  (C's zero fill of the elements a list does not write, the array member's address), `Stmt::Kind::ArrayCopy` (the copy of one array member into another of the same type: both
+  operands are `MemberAddr`s of array type) and `Expr::Kind::ElemValue` (`a.m[b]`: element `b` of array member `index` of a structure *value* `a`, a call, an aggregate, a `Field`
+  chain, or in a contract a `Formal`/`Result`; `b` any Int expression, the bound an obligation of lowering). An `Aggregate` of a structure with an array member has one argument per
+  value-view leaf. `check.cpp` refuses a structure value with more than `kMaxByValueArrayElements` array elements (`vir.h`; the encoder rejects it first, question 295, which measured Silicon: a larger tuple does not verify in time).
 
 ## 3. Lowering (`src/vir/lower.cpp`)
 
@@ -1192,6 +1204,52 @@ lowered to a Viper function with its contract and a definition check; an applica
 - **The definition check's argument** (audit round 1 checks it): by induction on the measure, the Viper body computes in unbounded integers, the `__wf` rows show under the `requires`, with every inner
   application's `ensures`, that no operation of `E` overflows, divides by zero, converts out of range or reads what it may not; so the two values agree.
 
+**Arrays of scalars in structures and static storage (M4.5e1e1, decision 0063; facts P82 and S47 in `internal/il-inventory.md`).** Global and `static` local arrays, array members
+(in every storage a structure has), array compound literals in C, array types the front end computes, and structure values with an array member. The encoder's half is
+`encode.cpp` (below, "Arrays in structures and static storage"); this is what lowering does with what it hands over.
+- **Layout** (item 3). An array member is a block of its own, `member(X, k)` of length N, whose element `i` is `loc(member(X, k), i)`; it shares its root's liveness cell. A global array
+  is the block `GB_g()` of length N. Both are hypotheses discharged by an allocation, by `program_start` or by a caller, never axioms. `alloc_struct_<n>_<tag>` ensures
+  `len(member(X, k)) == N` and, per array member, three quantifiers over `[0, N)` (trigger `loc(member(X, k), j)`): the value permission, the flag permission, every flag false; it is
+  emitted for every structure type with an array member, called or not, so the lint's count of array members has its pinned source. `struct_lens` (`WF_S`) states `len == N` for an
+  array member where it states `== 1` for the others.
+- **The bound local** (item 5, S47 (a)). Where a row ranges over an array's slots in code (scope exit, loop entry and back edge, a call's and a return's marked rows), the first slot is
+  bound once to a Viper local and e1a's and e1b's rows run over that local unchanged: `ga_<name>__<id>` for a global array (the Viper name of the block without `GB_`, assigned
+  `loc(GB_g(), 0)` in every method of a unit that has an array global, after `program_start` in `main`), a temporary `t__<n>` for a member (`t__n := loc(member(X, k), 0)`; a root that
+  is not a Viper variable is bound to a temporary first). A marked row's block is thereby `block_of` of a variable. Where there is no local (a method's contract, `alloc_struct`'s
+  `ensures`, `program_start`, the global facts, `struct_lens`) the rows are in the block-term form `loc(member(X, k), j)`, `loc(GB_g(), j)`, and the first slot's offset is folded to 0.
+- **Elements.** `g[i]`, `s.a[i]`, `p->a[i]` are `ElemAddr` over the array's address. A global array and an array member are *named* bases: no null or liveness row of their own (for `p->a[i]`
+  the root's `null-dereference` row once, and the access is no use of `p`'s value: the place mark passes through `MemberAddr`). Then 0059 item 4's bound (`out-of-bounds`), `permission`
+  and, for a read, `uninitialized`.
+- **Atoms and calls** (items 7 and 8). `owns(g)`, `reads(g)` (written or the implicit atom of a `static` local array) are e1b's range atoms over the whole array
+  (`OwnsRange`/`ReadsRange`, base `loc(GB_g(), 0)`, count the literal N), so 0060's amount, shape, marked, flag and sum rules apply as written. `owns(*p)` of a structure with an
+  array member is the cell leaves' lines plus, per array leaf, four lines over `loc(member(X, k), j)`; `owns(p->a)` is that leaf alone (a plain atom whose place is a `Ptr(Array)`).
+  Overlap is by slots: an array leaf is a range of N slots at its first slot, for every rule that pairs two sites, and a pair of array leaves of one structure type at one index is
+  separated by the first-slot inequality `t1 != t2`, **never a bare block comparison** (`member(p, 0) != member(q, 0)` is not decided by Silicon from quantified permissions: the audit's
+  p10a). A `reads` site's amount at a call is the minimum over its cell leaves and, per array leaf, the first slot's (0060 item 6).
+- **`program_start`** (item 9). The row group of an array global, in this order, each row its own `ensures`: the two quantified permissions over `[0, N)`; the flags, every one true; the
+  values (known: one conjunct per listed element and one quantifier for the zero rest; unknown: the element range, or `WF`, as one quantifier; none for a `bool`); the liveness cell. A
+  structure global's array leaf has the same group over `member(<chain>, k)` rooted at `loc(GB_g(), 0)` (no liveness cell of its own), each (receiver, field) pair given once.
+- **Loops** (item 10). Array places of a loop with 0059 item 8's rows over the bound local: every global array in `main`, those a callee's `requires` names elsewhere, every array leaf of a
+  structure object in scope, and each array part of a held structure place. A store by name to an element of a global array reaches that array only; a store to a member's element
+  through a pointer, or a call that owns a cell of the field, reaches every array place of the element field (0043 item 11; the listed false alarm N9).
+- **Zero fill and copy** (items 6 and 13). `ArrayZero` is `zero_arr_<t>(first_slot, N)` after binding; `ArrayCopy` emits the rows in S47 (g)'s order and then `copy_arr_<t>(d, s, N, rd)`:
+  `rd` is a `Perm` local, the source's first-slot amount (the least of value and flag permission), `none < rd` (`permission`: "copies `s`, whose `s.a` the function may not own or may only
+  partly own"), the source's marked rows (value, then flag) at `rd`, every source flag (`uninitialized`, "copies `s`, whose member `s.a` may hold an element without a value": question
+  296), the destination's marked rows at `write`. Then the call: none when both roots are the same named object (`t = t`), unguarded between two named objects (`AddrOf` or `GlobalAddr`
+  roots, which Silicon proves distinct; a guard `d != s` there would be undecided from quantified permissions and leave a branch that copies nothing), and under `if (d != s)` where
+  either root is reached through a pointer (an exact self-copy does nothing). The `internal` row `block_of(d) != block_of(s)` precedes every call, so an omitted guard is a tool failure,
+  never a proof. `copy_arr_<t>` is trusted (the loop `d[k] = s[k]` over two distinct blocks): it takes and returns full permission to the destination's value and flag fields over N slots and
+  the amount `rd` of the source's, and ensures each destination value is the source's old value, each destination flag is set, each source value is unchanged and each source flag stays
+  set. The listed false alarm: between two `owns` parameters whose leaves of the field are all array members the guard is not decided.
+- **Structure values** (item 13). A structure value is the tuple of its value-view leaves: an array member contributes one formal, result or temporary per element, named
+  `p_s__<k>_m<j>_e<i>` and `res_m<j>_e<i>` (`value_suffix`). A parameter's copy block is written from the formals at entry, an object argument and `return s;` read every element, an
+  `Aggregate` carries one argument per element. `ElemValue` is an `ite` chain over the member's leaves (the last the default) with one `out-of-bounds` obligation `0 <= b < N` that comes
+  before every use; it works in code (a call's result leaves) and in contracts (`Formal`, `Result`, `Old`). A struct store (`struct_store`, `struct_cell_write`) writes `loc(member(X, k), i)`
+  per element, with no bound row (the element is inside by construction).
+- **Rejected** (each a pin, fail closed): heap storage of a structure with an array member (question 292), an array member beside an `owning` or marked member (293), a marker on a pointer to such a structure (294), a contract place through a heap read whose
+  path has such a structure (306), an array of structures or of arrays (M4.5e1e2), a range or an atom on part of a global array or member (M4.5e2), a structure value of more than `kMaxByValueArrayElements`
+  array elements (M4.5f3).
+
 ## 4. Viper shape
 
 ```
@@ -1246,16 +1304,19 @@ in `__<digits>`). One pair per VIR type: `long` and `long long` share one (0032 
 A program with an array local (decision 0059) also has `alloc_arr_<t>(n: Int)` (and, for an initializer that leaves elements out, `zero_arr_<t>(r, n)`)
 for each element type it uses: trusted, tagged like `alloc_<t>`, ensuring the block's `len == n` and two quantified permissions over `[0, n)` (§3,
 "Arrays"); `lint_viper.py` pins their contracts beside `alloc_contract`'s `len == 1` rule.
+A program with an array member also has `alloc_struct_<n>_<tag>()` (§3, "Arrays of scalars in structures and static storage"), and one that copies a structure with an array member has
+`copy_arr_<t>(d: Ref, s: Ref, n: Int, rd: Perm)` per element type, trusted and pinned by the lint (8 `requires`, 8 `ensures`, `decreases _`).
 With globals (0041 item 4), the domain also holds one `unique function GB_<name>__<id>(): Block` per global and
 `static` local (the text is unchanged without them), and a trusted bodyless `program_start()` follows the `alloc_<t>`
-methods in every unit with a global: its first `ensures` row is the global facts, then one row per global, positioned at
+methods in every unit with a global: its first `ensures` row is the global facts (an array global's `len(GB_g()) == N`), then one row per global, positioned at
 its declaration (`acc` of the value and flag cells, the flag, the value or a range/`WF` row for an unknown one, `acc` of
-the liveness cell), ending in `decreases _`; `lint_viper.py`'s `lint_globals` pins it.
+the liveness cell; an array global's row group is the two quantified permissions over `[0, N)`, the flags, the values, the liveness cell, each its own `ensures`, and a structure global's
+array leaf has the same group over its member block), ending in `decreases _`; `lint_viper.py`'s `lint_globals` pins it.
 A heap program (decision 0047) adds `field tok: Bool` and its views, bodiless methods tagged with vlibc's reason
 followed by `; typed view: one <T> (<n> bytes), decision 0047`.
 
 Names: every identifier has a prefix that says what it is: functions `f_<name>__<id>` (and `...__wf`), the Viper functions of read `pure` functions `pf_<name>__<id>` (and `pf_<name>__<id>__wf`; `<id>` digits only), the ghost functions of an application `hva_<m>__<g>_<pre|post>`, formals
-`p_<name>__<k>`, locals `v_<name>__<id>`, temporaries `t__<k>`, the result `res`, labels `l_end`, prelude
+`p_<name>__<k>`, locals `v_<name>__<id>`, temporaries `t__<k>` (the bound local of an array member's first slot among them), the bound locals of global arrays `ga_<name>__<id>` (the Viper name of the block without `GB_`), the formals and results of a structure value's array elements `p_<name>__<k>_m<j>_e<i>` and `res_m<j>_e<i>`, the result `res`, labels `l_end`, prelude
 functions `c_*`. A character that is not alphanumeric is written `_x<hex>`, `$` as `_D_`.
 
 Silicon assumes an assertion's condition after reporting that it may fail, so later checks on the same path
@@ -1774,3 +1835,6 @@ that is not address-taken or a named local array (a `check`), `&a[1]` and `&x` a
 `pure_edges_` holds the applications among read functions; a self-application without a `decreases` is `missing_decreases` at the definition, a cycle through two functions is `unsupported_annotation` at each definition, a cycle
 through a contract at the application. The success line counts each read function (`verified_functions()`: question 281). `check_block_static_assertions` exempts the region of a `predicate` and of a `pure` function that was not
 read, and no other.
+
+**Arrays in structures and static storage in the encoder (M4.5e1e1, decision 0063).** *Types:* `array_vtype` is the one rule for which array is read (one dimension, a scalar element that is not `const`, `volatile` or `_Atomic`, a constant bound of at least 1); `global_vtype` tests the `const` rule first (M4.6), then `global_array_vtype`; `struct_info`'s `case tk_array` reads a member (the `const`, flexible, system-typedef, array-of-array or array-of-structure refusals, the member bound as a unit prologue constant "the bound of `S::a`" by `check_array_type_bound(..., unit=true)`, question 293's refusal of a structure that also has an `owning` or `ref_to_uninit` member). *Computed array types:* `array_type_reason` and `check_array_type_bound` (a bound read as written once: a function constant, or a unit prologue constant outside a function; in C++ read under the compiler-generated cast), `note_typedef_uses`, `file_array_typedef` (a file-scope typedef that is an array, a unit constant) and the pending block typedefs (EDG lists a block typedef in the function scope, not in a statement), `reject_computed_sizeof_operand` (the type operand of `sizeof` of such a type is accepted, its value EDG's literal, the bound's `internal` guard tying it). *Globals:* `make_global`, `read_array_global_init`/`read_array_element` (each element through `constant_initializer`, P38's shape rejected, the zero rest, an enumeration without 0 refused for the rest), `is_array_decay_constant`/`decayed_array_variable` (the decay of a global array is recognized by its `expr`, offset 0 and no subobject path: P82 (a)). *Accesses:* `subscript_address` takes a named array (`GlobalAddr`), a member (`place_address(member)`, named base, `in_own_initializer` through `ElemAddr`) or any pointer; `member_array_decay`; `contract_element_address` builds `ElemAddr` over a contract place; `&s.a` and a truth test of an array address are rejected. *Initializers:* `collect_init_elems` maps a nested list to `InitElem{path, elem}` (brace elision rejected, C's `{0}` and a one-member C++ `{0}` accepted: question 303), `struct_initializer` writes `ArrayZero` for each member the list does not write in full and then the element stores (C: every element evaluated first), `read_struct_global_init` the array leaf of a structure global; array compound literals (`array_literal_decay`, C only, a hidden array local zero-filled at its declaration and its elements stored in the expression; `reject_literal_object_writes` for a write inside a literal used as an object). *The rejections:* heap (`allocation_view`, `heap_call`, `spec_block_atom`, `invariant_block_atom`), markers (`read_marker`, result markers, `struct_info`), `reject_array_behind_load` (question 306), written atoms in loop invariants.
+*Structure values* (Part E, item 13): `copy_struct` reads the OBJECT view: each cell leaf through a temporary and then its store (as before), then one `ArrayCopy(dest MemberAddr, source MemberAddr)` per array leaf; **the encoder writes no guard**: a root that is `AddrOf` or `GlobalAddr` is a named object, any other (a pointer value, a `copy_base` temporary) is "through a pointer", and lowering decides the `d != s` guard from the roots. A copy has no size limit. `object_value` (an object passed or returned) is an `Aggregate` over the VALUE view, an element leaf `Deref(ElemAddr(MemberAddr chain, Const i : long))`; `aggregate_value` (a list or literal value) has one argument per value-view leaf, `zero_leaf` for the elements the list does not write, keyed by `(path, elem)`; `signature_vtype` rejects (`unsupported_type`, question 295) a structure whose value holds more than `vir::kMaxByValueArrayElements` array elements (`vir_value_over_limit`; `reject_array_value` is the same limit where a value is built); `elem_value_read` reads `f().a[i]`, `S{...}.a[i]` and `(struct S){...}.a[i]` in code (the base through `struct_value_node`) and `s.a[i]`, `r.a[i]` of a by-value parameter or the result in a contract (through `contract_field_chain`) as `ElemValue`, also under `old` and `cerastes_old`. What stays rejected: `mk().a` as a decay (a pointer to a temporary's member), a structure `?:`, comma or assignment value (0044 item 5), heap storage, and (C++) special members.

@@ -52,11 +52,22 @@ one is recorded and linted:
   {gh}/internal/decisions/0036-axiom-member-lv.md[0036]).
 * The lint accepts the domain only directly under a `cerastes:domain-ok` tag, and an axiom only with its exact text and
   a `cerastes:axiom-ok` tag naming its record. A fifth axiom, or a changed one, fails the lint until it has a record.
-* The trusted methods that create or end objects (`alloc_<type>` for an address-taken local, `program_start` for the
+* The trusted methods that create or end objects (`alloc_<type>` for an address-taken local, `alloc_arr_<type>` and
+  `zero_arr_<type>` for an array and its zero fill, `alloc_struct_<n>_<tag>` for a structure local, which carries the rows of an array member's block and is emitted for every structure type with an array member whether or not it is called,
+  `copy_arr_<type>` for the copy of an array member between two structures, `program_start` for the
   globals, and the typed views of vlibc's `malloc`, `calloc` and `free` and of `vlibc_malloc`, `vlibc_calloc` and
   `vlibc_free`) are assumptions too: the lint pins the text of each one's contract to the shape its decision record
   justifies, including the token's value that says which allocator a block belongs to
   ({gh}/internal/decisions/0050-vlibc-allocator.md[0050]).
+
+`copy_arr_<type>(d, s, n, rd)` is the one that needs an argument beyond the shape: it is the contract of the loop `d[k] = s[k]` over two
+different blocks (decision {gh}/internal/decisions/0063-arrays-of-scalars-in-structures-and-storage.md[0063] item 13). It takes and returns
+full permission to the destination's elements and the amount `rd` of the source's, where `rd` is the source's first-slot amount (the least of
+its value and flag permission, so `write` when the caller owns the source whole), and it requires that `block_of(d) != block_of(s)`. Lowering
+writes that disequality as an `internal` row before every call, so an omitted guard cannot give a proof, it can only give a tool failure. Whether
+the call is guarded is decided from the two places' roots: no call at all for one named object copied onto itself, no guard between two named
+objects (structure locals and globals, whose blocks Silicon proves different), and `if (d != s)` where either place is reached through a
+pointer.
 
 Adding an axiom needs its own decision record and lint tag first.
 

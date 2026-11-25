@@ -348,3 +348,5 @@ under the attribute); a C23 compatible
   fields for M4.5d2.
 
 *2026-11-11, amended by 0059 (M4.5e1a): item 6 — EDG's #1162 (excess initializers) is an error in C verify mode, structure initializers included (0059 item 3).*
+
+*2026-11-25, amended by 0063 (M4.5e1e1): items 2, 3, 4, 6, 7, 8, 9, 11 and 13 — array members of scalars: member blocks of N slots, `alloc_struct` with three quantifiers per array member, nested initializer lists with the zero fill, `owns(*p)` with array leaves and `owns(p->a)`, overlap by slots, loops, the lint (0063 items 2–11, 15).*

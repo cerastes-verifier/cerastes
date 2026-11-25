@@ -191,5 +191,8 @@ and xref:annotations.adoc#pure-functions[Pure functions] the rules for a pure fu
 A loop that changes an array in place, such as adding one to every element, needs to speak
 of each element's value on entry to the function inside its invariant (`cerastes_old` in a
 loop invariant). That, pointer arithmetic (`p + i`), and a quantifier inside another are not
-supported yet. xref:memory.adoc#quantifiers[Facts about every element] has the details of
+supported yet; nor are arrays of structures and arrays of arrays. Arrays of scalars in
+global and `static` storage and as members of structures are on
+xref:memory.adoc#global-arrays[Global arrays] and xref:memory.adoc#array-members[Array
+members]. xref:memory.adoc#quantifiers[Facts about every element] has the details of
 quantifiers in contracts, loops and checks, and the limits that remain.

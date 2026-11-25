@@ -65,6 +65,9 @@ struct LowerOptions
     // branches (decision 0039 item 2, audit R2-B1): `return ((*pick(q) = 5) == 5) && *q == 5;` would read *q before the store, and the access-pair half of the
     // fail-closed check (item 4) must report it.
     bool drop_left_floor {false};
+    // Lower the program WITHOUT check_program first, to reach the backstops behind the checker's refusals (decision 0063 item 4: a structure with an array member, the
+    // array statements and ElemValue are internal errors in lowering if one gets past check_program): the self-test of why they are there.  Never set outside it.
+    bool skip_check {false};
 };
 
 struct LowerResult

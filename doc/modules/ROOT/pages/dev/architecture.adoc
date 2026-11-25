@@ -96,6 +96,16 @@ carries the source position it came from, so an obligation can be reported at th
   and produces the lowered program (`lowered.h`): the overflow, division and conversion checks become explicit
   obligations here.
 
+* A structure's members are enumerated as _leaves_, and since an array can be a member
+  (decision {gh}/internal/decisions/0063-arrays-of-scalars-in-structures-and-storage.md[0063]) there are three views of
+  the list, in `vir.h`. `struct_object_leaves` is the view of an object in memory: a cell for each scalar member and one
+  _array leaf_ for each array member, which is a block of its own. `struct_value_leaves` is the view of a structure
+  _value_ (a by-value parameter or result, an aggregate): every element of an array member is a leaf of its own, and a
+  value holds at most `kMaxByValueArrayElements` array elements (a constant in `vir.h`, measured against Silicon's time). `struct_leaves` is the old view and returns an array member as one leaf of
+  array type; it is the poison, so that a site written before arrays in structures stops with an internal error on a
+  structure that has one instead of treating the array as a cell. When you add a walk over the members of a structure,
+  choose the object view or the value view.
+
 `encode.cpp` and `lower.cpp` hold all the C and pass:[C++] meaning; the emitter decides nothing.
 
 == Viper text and the position map

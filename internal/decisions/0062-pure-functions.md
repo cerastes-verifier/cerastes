@@ -501,3 +501,5 @@ its decision table, and the item it revised. An outcome outside its table stops 
 - Every obligation at an application is an explicit row in source terms; Viper's own checks of an application never
   fail in a program whose rows hold.
 - Programs accepted before e1d keep their Viper and maps byte for byte.
+
+*2026-11-25, amended by 0063 (M4.5e1e1): item 4 — a named global array is an argument of a `pure` application in a loop invariant and a `check` (0063 item 1).*
