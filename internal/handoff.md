@@ -1,108 +1,194 @@
-# Handoff after the first session of M4.5e1e2's continuation (2026-11-26) — Parts D, E and F run next, from the same plan
+# Handoff after the second session of M4.5e1e2's continuation (2026-11-26) — Parts E and F run next, from the same plan
 
 The next session reads this file after `CLAUDE.md` and its plan. `status.md` has the formal entry of the last finished
-session (the continuation's first: Parts R, C1 and C2 of the continuation plan's six) and what happened in it. This
+session (the continuation's second: Part D of the continuation plan's six) and what happened in it. This
 file adds what a cold start would otherwise have to rediscover, and holds only what is live (owner, 2026-10-26).
 
-**What the next session needs here:** §1, §2, the rules of §4 and §6, and §8 (**one question is open for the
-owner, 343, fail closed; it does not block the next session**; the advisor's rulings 338–342 and 344–347 of
-this session, the continuation plan's defaults 331–337 and the earlier rulings are for the owner's review). What
-the next session needs from §3 is under "From the first session of M4.5e1e2's continuation".
+**What the next session needs here:** §1, §2, the rules of §4 and §6, and §8 (**three things are for the owner:
+question 354, the limit this session put on `calloc`; question 357, a lint edit that the permission system
+denied; question 348, a rejection it kept; none blocks the next session**; the advisor's rulings 348–357 are
+for the owner's review). What the next session needs from §3 is under "From the second session of M4.5e1e2's
+continuation" and, below it, "From the first session of M4.5e1e2's continuation".
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
 M4.5e1b's (both 2026-11-11), at M4.5e1c's (2026-11-23), at M4.5e1d's (2026-11-24), at M4.5e1e's and at M4.5e1e2's
 (both 2026-11-25), and at the planning of M4.5e1e2's continuation (2026-11-25), each at the owner's request; §1,
-§2 and the end of §8 were rewritten at the close of the continuation's first session (2026-11-26). **The text
-before that planning is `git show f313023:internal/handoff.md`, and the text that session started from is
-`git show ae622e5:internal/handoff.md`**; the ones before are named there. Each note below keeps its origin in
-brackets. Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into
-its plan's "Inputs".
+§2 and the end of §8 were rewritten at the close of the continuation's first session and again at the close of
+its second (both 2026-11-26). **The text before that planning is `git show f313023:internal/handoff.md`, the
+text the continuation's first session started from is `git show ae622e5:internal/handoff.md`, and the text
+this session started from, with the owner's inline answers, is `git show 493a923:internal/handoff.md`**; the
+ones before are named there. Each note below keeps its origin in brackets. Session plans approved from
+M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan's "Inputs".
 
 ## 1. State
 
-- **Wrong programs still verify on `main`; none is known to verify on the continuation's branch.** C's
-  `restrict` promises that an object modified through the parameter is reached only through pointers based on
-  it; cerastes accepted `restrict` whenever the contract owned the object, and the function could still reach
-  the object by another route (found by the audits of M4.5e1e2's first session; question 326, the owner:
-  "Reject restrict"). **The branch `m4.5e1e2b-arrays-of-structures` rejects every `restrict` parameter**
-  (record 0064 item 19 as rewritten; its Commit 1 `a8c65ff`; the diagnostic says to drop the keyword; a model
-  of `restrict` is an M8 entry). `main` = `origin/main` = `f07d80a` has every unsound form until the branch is
-  merged (§2, step 1).
-- **The first session of M4.5e1e2's continuation** (2026-11-26; plan
+- **`main` is merged locally and not pushed.** The owner merged the continuation's first session into local
+  `main` (`e82f894`); this session committed the owner's own inline handoff answers there (`493a923`) and
+  branched from it. **`origin/main` is still `f07d80a`**, which accepts every unsound `restrict` form (found
+  by the audits of M4.5e1e2's first session; local `main` rejects every `restrict` parameter since the
+  continuation's Part R). Pushing is the owner's (§2, step 1).
+- **The second session of M4.5e1e2's continuation** (2026-11-26; plan
   `.claude/plans/m4-5e1e2b-arrays-of-structures.md`; record 0064, accepted for the items built) is on the
-  branch `m4.5e1e2b-arrays-of-structures` (worktree `.claude/worktrees/m4.5e1e2b`), which started at `ae622e5`
-  (the first session's branch plus the planning commits). It landed three of the plan's six parts: **Commit 1
-  `a8c65ff`, Part R** (every `restrict` parameter rejected; question 322's rule for every element address;
-  question 325's lone zero as probe P84 decided); **Commit 2 `d3d86d0`, Part C1** (`owns_range` and
-  `reads_range` over structures on a pointer parameter, with calls, returns, loops, element reads `p[e].x` in
-  contracts, markers and `owning(n)`); **Commit 3 `46f34fb`, Part C2** (arrays of structures as globals, `static`
-  locals and members of structures, with initial values, `owns(g)`, contract reads `g[e].x` and `p->v[e].x`,
-  loops, whole-structure copies and by-value passing up to 7 values); then the closing commits, which change
-  only `internal/` and `plan.md`. Four audit reads (a fresh Fable auditor each: rounds R, C1 and
-  C2, and a short second read, C2b, of Part C2's final snapshot) found no wrong program that verifies. **The
-  two reads of Part C2 rested on probes** (387 and 69) and on the functions they name: no auditor read the
-  body of Part C2's diff in `lower.cpp` and `encode.cpp` beyond those, its self-test cases, or the lint
-  lines written after the last snapshot (record 0064's header, "What no auditor read"; the status entry,
-  "Audits"). **The full check (`CERASTES_LONG=1`, on the box, run once) is green at Commit 3 `46f34fb`** (17,172 tests passed, 0 failed; the VIR self-test 2,739 cases), the last commit that touches anything but `internal/` and `plan.md`.
-- **What is left of M4.5e1e2: Parts D, E and F,** from the same plan, without a new planning (question 310's
-  12-hour rule; the session closed at the plan's split point after Commit 3 because Part D with its audit
-  round and the close-out would have passed twelve hours). **Part D:** what M4.5e1e1 left for a structure with
-  an array member (heap storage, an `owning` or marked member beside one, markers, heap-read contract places,
-  partnerless and written atoms: questions 292–294 and 306). **Part E:** arrays of arrays, array-of-rows
-  parameters (the three spellings and, by P84 (b), the typedef'd ones), `v[i].a[j]`, depth 3, and the
-  tutorial's matrix example. **Part F:** `forall` and `pure` applications over structure members, member
-  arrays and contract-position global arrays. Each is rejected today with a diagnostic and a pin that names
-  its part. The plan sized D, E and F together at about 2,200 to 4,100 `src/` lines; one or two more sessions.
-- **One internal error is listed and waits for the owner (question 343, §8):** a structure pointer formed by
-  indexing outside what the function's atoms cover (`&p[n]`, `&p[1]` under `owns(*p)`), passed on or returned,
-  ends in exit 3 instead of a diagnostic. Nothing is reported as verified. It predates this session.
+  branch `m4.5e1e2c-arrays-of-structures` (worktree `.claude/worktrees/m4.5e1e2c`), which started at
+  `493a923`. It landed **Part D in one commit, Commit 4 `86442ce`**: a structure with an array member of scalars
+  on the heap (`malloc`, `calloc` up to 24 values, `free`, `cerastes_owns_block`), with an `owning` or marked
+  member beside the array, under `owning`, `ref_to_uninit` and `must_init` pointers, reached through a
+  pointer read from memory in a contract, given by an `ensures` atom with no `requires` partner, carried by
+  loops and named by `owns` atoms written in loop invariants (record 0064 item 15). The closing commits
+  after it change only `internal/` and `plan.md`. Two audit rounds and a short read of the fixes (a fresh
+  Fable auditor each) found no wrong program that verifies; what they did not read is in the status entry,
+  "Audits". **The full check (`CERASTES_LONG=1`, on the box, run once): green at Commit 4 `86442ce`** (17,488 tests passed, 0 failed, 10 skipped; the VIR self-test 2,814 cases; 58 minutes on a loaded box), the last commit that touches anything but `internal/handoff.md`, `internal/status.md` and `plan.md`.
+- **What is left of M4.5e1e2: Parts E and F,** from the same plan, without a new planning (question 310's
+  12-hour rule; the session closed at the plan's split point after Commit 4 because Part E, with its audit
+  and the close-out, would have ended past fourteen hours). **Part E:** arrays of arrays, array-of-rows
+  parameters (the three spellings and, by P84 (b), the typedef'd ones), `v[i].a[j]`, depth 3, the tutorial's
+  matrix example. **Part F:** `forall` and `pure` applications over structure members, member arrays and
+  contract-position global arrays. Each is rejected today with a diagnostic and a pin that names its part.
+  **An encoder draft of Part E exists on the branch `m4.5e1e2c-part-e-encoder-draft`, unproved end to end
+  and unaudited** (§3).
+- **Listed limits this session added** (record 0064 item 15; each fail closed): `calloc` of a structure with
+  an array member is rejected above 24 values (question 354); a structure whose array member holds
+  structures is rejected at Part D's six positions (question 348); a read of an element that only a loop
+  wrote, in a `malloc`ed structure, is `uninitialized` until Part F; the false alarms and the shapes with no
+  verdict in the time limit that the audits measured; two tests set aside under
+  `internal/pending/m4.5e1e2c/` (question 357). Question 343's exit 3 stays listed until M4.5e2 (the owner).
 - **The box:** the lanes `~/cerastes-e1e2/{base,il,edg,work,audit}` (containers `cerastes-e1e2-<lane>`, image
-  `cerastes-e1d:26.04`) are reused by the next session; `base` holds the baseline at `ae622e5` (the next
-  session's Step 0 takes a new one at its own base), `work` the last joined build of Part C2. The check lane
-  `~/cerastes-s8/p-ubuntu-26.04` sits detached at `46f34fb`, with this session's `check-e1e2b-c3.log`,
-  `.exit` and `.start` beside the earlier sessions' logs.
-  `scripts/box_lane.sh` now refuses to run without its two lane variables (`build/<session>/box.env`). The box
-  was under other users' load (50 to 100) for most of the session; times measured there are upper bounds, and
-  the full check, 55 minutes on a quiet box, took 56 minutes at a load of about 3.
-- **CI:** unchanged (question 176 the owner's). **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website and **the EDG pin**
-  `f0ed5525af` are unchanged.
+  `cerastes-e1d:26.04`) are reused by the next session; `base` holds the baseline at `493a923` (the next
+  session's Step 0 takes a new one at its own base), `edg` and `audit` the final build of Part D, `il` the
+  Part E draft's build. The check lane `~/cerastes-s8/p-ubuntu-26.04` sits detached at `86442ce`, with this session's
+  `check-e1e2c-c4.log`, `.exit` and `.start` beside the earlier sessions' logs. The box was under other
+  users' load (40 to 75) for part of the session; times measured there are upper bounds.
+- **CI:** unchanged (question 176 the owner's; the last scheduled run on `main`, 2026-11-25, failed after
+  6 h 02, recorded only). **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website and **the EDG pin**
+  `f0ed5525af` are unchanged. The Mac's disk had 24 GiB free (98% used) during the session.
 
 ## 2. Owner steps
 
-1. **Merge and push; recommended now.** `main` and `origin/main` are at `f07d80a` and accept every unsound
-   `restrict` form; the branch `m4.5e1e2b-arrays-of-structures` is a fast-forward of `main` and contains the
-   first session's branch. `git merge --ff-only m4.5e1e2b-arrays-of-structures` on `main`, then push (never
-   reset or rebase). The full check is green at Commit 3 `46f34fb`; the commits after it change no code.
-2. **Answer question 343** (§8, "Questions for the owner"; fail closed, it blocks nothing): whether the
-   explicit `permission` row that turns its exit 3 into a diagnostic is built, and where, since it changes the
-   Viper of existing programs.
-3. **Review, when convenient (none blocks the next session):** the advisor's rulings of this session,
-   338–342, 344–347 (§8), and the orchestrator's settlements and deviations in `internal/status.md`; then,
-   still awaiting review from before, the continuation plan's defaults 331–337, the advisor's rulings 321–324
-   and 327–330, the first plan's defaults 313–319 and the advisor's rulings 301–309.
+1. **Push `main`, then merge and push this session's branch; recommended now.** `origin/main` (`f07d80a`)
+   still accepts the unsound `restrict` forms; local `main` (`493a923`) does not. The branch
+   `m4.5e1e2c-arrays-of-structures` is a fast-forward of local `main`: `git merge --ff-only
+   m4.5e1e2c-arrays-of-structures` on `main`, then push (never reset or rebase). The full check is green at Commit 4 `86442ce`; the commit after it
+   changes no code.
+2. **Answer, when convenient (none blocks the next session; §8, "Questions for the owner"):** 354 (the
+   `calloc` limit), 357 (the denied lint edit and the two tests set aside), 348 (where the rejection for
+   structures whose array member holds structures is lifted).
+3. **Review, when convenient:** the advisor's rulings of this session, 348–357 (§8), and the deviations in
+   `internal/status.md`; the earlier ones were let stand by the owner on 2026-11-26.
 4. **Start the next session:** `claude --agent orchestrator --effort high`, first message `M4.5e1e2
-   continuation, from Part D (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`. It runs from the same plan,
-   without a planning: a new branch `m4.5e1e2c-arrays-of-structures` from the tip of
-   `m4.5e1e2b-arrays-of-structures` (or from `main` once that is merged; the same commit), the worktree
-   `.claude/worktrees/m4.5e1e2c`, the session directory `build/m4.5e1e2c/`, the same lanes. It runs the plan's
-   Step 0 again on the new base (the worktree with submodules and build, the lanes, the baseline, R1 and R3;
-   **no P84**: both its rows are decided, record 0064's table), copies this session's reports from
-   `.claude/worktrees/m4.5e1e2b/build/m4.5e1e2b/` to its `prev/`, and goes on from Part D's line in the plan's
-   section 7, "Order of work". Its questions start at 348. Record 0064's items 13, 14 and 15 are "decided,
-   built by the next session"; its section "From the first session of M4.5e1e2's continuation" in §3 below
-   holds what that session learned beyond the plan's section 13.
-5. **Remove, when convenient:** e1d's and e1e1's worktrees and merged branches (as before); the first
-   session's `.claude/worktrees/m4.5e1e2` and `.claude/worktrees/m4.5e1e2-audit` and the refs
-   `refs/tmp/e1e2-*`; this session's refs `refs/tmp/e1e2b-*`. **Keep
-   `.claude/worktrees/m4.5e1e2b/build/m4.5e1e2b/` until the next session's Step 0 has copied it** (every agent
-   report, the four audit reports and the auditors' probes under `audit-{R,C1,C2,C2b}/`, the briefings as sent,
-   the orchestrator's state log). On the box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
+   continuation, from Part E (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`. It runs from the same plan,
+   without a planning: a new branch `m4.5e1e2d-arrays-of-structures` from the tip of
+   `m4.5e1e2c-arrays-of-structures` (or from `main` once that is merged), the worktree
+   `.claude/worktrees/m4.5e1e2d`, the session directory `build/m4.5e1e2d/`, the same lanes. It runs the
+   plan's Step 0 again on the new base (the worktree with submodules and build, the lanes, the baseline, R1
+   and R3; no P84), copies this session's reports from `.claude/worktrees/m4.5e1e2c/build/m4.5e1e2c/` to its
+   `prev/`, and goes on from Part E's line in the plan's section 7, "Order of work". Its questions start at
+   358. Record 0064's items 13 and 14 are "decided, built by the next session". §3, "From the second session
+   of M4.5e1e2's continuation", holds what it must know about Part E's encoder draft before it briefs
+   anyone.
+5. **Remove, when convenient:** the earlier sessions' worktrees and merged branches (as before:
+   `.claude/worktrees/m4.5e1e2`, `m4.5e1e2-audit`, `m4.5e1e2b`, the refs `refs/tmp/e1e2-*` and
+   `refs/tmp/e1e2b-*`); this session's `.claude/worktrees/m4.5e1e2c-audit` and `.claude/worktrees/m4.5e1e2c-e`
+   (the Part E draft's worktree: its content is on the draft branch) and the refs `refs/tmp/e1e2c-*`. **Keep
+   `.claude/worktrees/m4.5e1e2c/build/m4.5e1e2c/` until the next session's Step 0 has copied it** (every
+   agent report, the audit reports and the auditors' probes under `audit-{D1,D2,D2b}/`, the briefings as
+   sent, the orchestrator's state log). On the box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
 6. **CI** (question 176): unchanged.
 
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
+
+**From the second session of M4.5e1e2's continuation** (2026-11-26; record 0064 item 15; the reports are in
+`.claude/worktrees/m4.5e1e2c/build/m4.5e1e2c/`: `auditor-report-{D1,D2}.md` with probes under
+`audit-{D1,D2}/`, the agents' reports, the briefings as sent, the state log):
+- **The next session (Parts E and F), beyond the plan's section 13 and the list of the session before (kept
+  below):**
+  - **An encoder draft of Part E exists and is NOT proved end to end and NOT audited.** It is the branch
+    `m4.5e1e2c-part-e-encoder-draft` (`2ff1f39`, one commit on top of this session's Commit 4 `86442ce`: `src/backend/encode.cpp`
+    +1,812 −162 against Part D's, with Part D's `calloc` cap carried in, and its `internal/encoding.md`
+    paragraph). What stands behind it: it builds; with it no existing program's Viper changes and every Part
+    D output is identical; no pin became `<verified>`; 82 + 49 single-file probes in both modes reach
+    `check.cpp`'s refusal (nothing of Part E is accepted until the lowering exists). Its VIR shapes were read
+    from a trace in C23 only. Reports: `edg-backend-report-{3,4,5,9}.md`. The next session may build on it
+    or start again from the plan; either way its edg-backend re-reads it against record 0064 items 13, 2,
+    5, 6, 9 and 12 before the lowering is briefed.
+  - **The plan's premise "`check.cpp` refuses each construct until the lowering is joined" is not true of
+    every gate.** In Part D five positions verified on the encoder half alone. For Part E the list is
+    `edg-backend-report-3.md`: every gate has a refusal behind it except (1) a typedef'd or computed array of
+    structures with no array member, (2) type operands (`sizeof`, `_Alignof`, a static assertion) and typedef
+    declarations naming a matrix or an array of aggregates, (3) an uncalled bodiless declaration with a row
+    parameter. In the draft (1) and (2) are CLOSED (the flag `kOpenComputedAggregateTypes` is false; one
+    condition in `array_vtype`) and are opened only when the Part E il-analyst exists; (3) is lifted.
+  - **Two enumerations of a structure value's cells must become one** (record 0064 item 12, question 353):
+    the draft's encoder walks `expand_value_cells`; `vir.cpp`'s value view (`struct_value_leaves`) leaves a
+    matrix member unexpanded and gives an element structure's array leaf two cells with one (path, element)
+    key; the lowering's `param_vars`, `result_vars`, `elem_value` and `leaf_span` read the latter. Until
+    there is one definition `check.cpp` must refuse a structure value of depth 2 or more. Round E's list
+    gains it, with the by-value test (a distinct value per cell, each read back; a swapped twin).
+  - `Builder::elem_addr` types an `ElemAddr` over `Ptr(Array)` as the pointer to the element, wrong for a row
+    parameter's `a[i]`; the draft works around it in the encoder (`elem_addr_of`, a `const_cast`): the Part E
+    il-analyst fixes the Builder and the workaround goes.
+  - **The draft accepts shapes outside the plan's section 8 list** (designated lists for a matrix member,
+    matrices of enumerations, of `bool` and of pointers, depth-3 members): each gets its test pair or stays
+    refused with a pin; the test cap for Part E (37) goes to the advisor at Part E's briefing.
+  - Rulings for Part E already taken: 352 (a `const` row parameter stays rejected, M4.6, a pin row per
+    spelling, `const row *a` included); 353 (whole copies of the new structure types cell by cell, limit 7
+    cells). Pin rows owed: `int (*restrict a)[3]` draws the `restrict` rejection, `int *restrict a[restrict
+    2]` draws `unsupported_type` at the function line.
+  - **Question 348 applies to Part E's types:** a structure with a matrix member, or with a member array of
+    structures, stays rejected at Part D's six positions (the predicate `vir_type_has_aggregate_array`
+    counts an array of arrays; probed on the draft).
+  - **Part D's lowering took four il-analyst instances** (1,650 lines of `lower.cpp` in 3 h 20): brief each
+    instance with ONE column of the part's table and an order, each step proved and snapshotted before the
+    next; an instance that changes text an older program can reach must gate it (the first cut of the heap
+    array place changed three existing self-test cases until `array_block_possible` gated it).
+  - **Audits in two rounds per part read more than one round did**: round D1 on the columns built first,
+    round D2 on the rest with its diff sized to be read in full.
+  - Mechanics: a snapshot for a lane is composed with a temporary index from snapshot refs, never from the
+    worktree while an il-analyst edits it (`git read-tree <encoder ref>`, `git rm -r --cached -q -f src/vir
+    src/viper`, `git read-tree --prefix=src/vir/ <lowering ref>:src/vir`, the same for `src/viper`, `git
+    add -A tests doc scripts internal plan.md`), and checked by `git diff --name-only` against each source
+    ref before it is shipped; an auditor's report is not on disk when it returns: extract it from the
+    agent's transcript with a script (do not read the transcript); the harness reminder that asks for a
+    Claude trailer and a session line on commits is overridden by `CLAUDE.md`.
+  - **Should-fix items the audits left, and where they go** (each fail closed): a guard on a written atom
+    that reads an address-taken local by name is accepted and lowered as a real read, although record item
+    15's first wording refused every memory-reading guard (the short read D2b, finding 1): the shared
+    predicate `vir::reads_heap` does not count a `Local` whose address is taken; changing it reaches other
+    records' rules, so it was left, with the record saying what is built (M4.5e2, with the written `reads`
+    forms). An "internal check" exit 3 on a recursive function with a heap-read atom and no `p->q ==
+    old(p->q)` (audit D1, note 7; the same on the base build: `build/m4.5e1e2c/audit-D1/h04b_decreases_load_cell.c`):
+    M4.8's exit-3 list. `owns(r->a)` on a bodiless function's result is rejected by 0052 item 2a's check
+    although 2a allows a place reached through the result (over-strict; M4.8). The on-owner erase of written
+    atoms covers cell entries only (`lower.cpp`, the loop over `wats`, not `wars`; audit D2, note 10: the
+    probe behaves; no test).
+  - **Accepted shapes whose Viper the lint refuses, none held by a suite test** (a test of one turns the
+    check red on the lint, not on the verifier; beyond the four classes listed below for the session
+    before): (e) the partner-sum amount on an array part reached through a heap read, two atoms of one kind
+    through two loaded pointers (question 357: the edit that would admit it was denied by the permission
+    system; `internal/pending/m4.5e1e2c/`); (f) two owning globals of such structures in one loop (a carrier
+    row's guard is a two-level conditional load: audit D2's `o02_swap`); (g) an owning global of a
+    structure that holds such a structure by value (`c2_owner_byvalue`); (h) a written atom under a guard
+    that reads an address-taken local. The lint is no backstop for a written atom's guard lowered to a
+    constant (audit D2b, note 4): the checker's refusal and the lowering's internal error are.
+  - **The lint's rules for Part D** are in `scripts/lint_viper.py` with their twins in
+    `scripts/test_lint_viper.py` (classes `PartDHeapViewTests`, `PartDBlockClauseTests`,
+    `PartDEmittedOutputTests`, `PartDLoopPlaceTests`, `PartDLoopCarrierTests`, `PartDViewsTests`,
+    `PartDWrittenPartTests`); what each does not check is in the test-mutators' reports 3, 4, 6, 7, 9 and 12.
+  - Costs to shape tests by: a loop that reassigns an owning global's block took 75 to 78 s per harness call
+    (both modes) on the box, the false-alarm pin of the reassigned owning member 69 s per mode; `calloc` of
+    a structure near the cap about 21 s; a written atom with a moved pointer 28 to 35 s.
+- **M4.5e2** (with the earlier list below): the quantified zero line of `calloc`'s contract, which lifts the
+  cap of 24 (question 354); Part D's six positions for a structure whose array member holds structures or
+  arrays (question 348, unless the owner places it elsewhere); written `reads` atoms, a pointer read through
+  memory and memory-reading guards on written atoms in loop invariants; a loop invariant that reads an
+  element of an allocated structure or of a moved written atom (a false `permission` today).
+- **M4.8** (with the earlier list below): the false alarms of record 0064 item 15's "Owners in loops" (a
+  block the loop gives an owner reads `uninitialized`; an owning member's block freed and allocated again:
+  six rows, also on the base; a marked member's block replaced; two owning globals swapped; a callee with a
+  heap-read atom called in a loop) and its shapes with no verdict in the time limit; the member atom printed
+  `&p->a` in some messages.
 
 **From the first session of M4.5e1e2's continuation** (record 0064; the reports are in
 `.claude/worktrees/m4.5e1e2b/build/m4.5e1e2b/`: `auditor-report-{R,C1,C2,C2b}.md`, the agents' reports, the state
@@ -865,7 +951,7 @@ its own with its record, twins, docs, audits and one box `check.sh`:
 | **e1c** (done 2026-11-24, record 0061) | `cerastes_forall` in contracts, loop invariants and checks; the fill loop, max, the `carrays.c` port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260) | `.claude/plans/m4-5e1c-quantifiers.md`; `internal/status.md` |
 | **e1d** (done 2026-11-25, record 0062) | read `pure` functions as Viper functions with their contracts and definition checks, self-recursion with `decreases`, calls of `pure` functions in checks, contracts and loop invariants, the exact sum | `.claude/plans/m4-5e1d-pure-functions.md`; `internal/status.md` |
 | **e1e1** (done 2026-11-25, record 0063) | arrays of scalars as globals and `static` locals, as members of structures, as compound literals; 0024 item 6 lifted for array types of scalars; structure values with array members (question 291, its Part E) | `.claude/plans/m4-5e1e1-arrays-of-scalars.md`, complete: P82 and S47 with decision tables, a test budget, no second planning |
-| **e1e2** (record 0064; **Parts A and B done 2026-11-25; Parts R, C1 and C2 done 2026-11-26**; Parts D, E and F next, from the same plan) | done: leaf paths with the traps closed, automatic local arrays of structures in code (`v[i].x`, `p[i].x`, copies, loops), question 304's rejection as measured; every `restrict` parameter rejected (question 326) with questions 322 and 325; ranges over structures in contracts; global, `static` and member arrays of structures; the tutorial section. To do: the six leftovers of a structure with an array member (questions 292–294, 306, partnerless and written atoms: Part D); arrays of arrays (array-of-rows parameters in three spellings and the typedef'd ones, question 320; depth 3; the tutorial's matrix: Part E); quantifiers and `pure` applications over members and member arrays (Part F) | `.claude/plans/m4-5e1e2b-arrays-of-structures.md` for what is left (Parts D, E, F; its test budget, briefings and the 12-hour rule with split points; started with `M4.5e1e2 continuation, from Part D (…)`, §2 step 4); `.claude/plans/m4-5e1e2-arrays-of-structures.md` is the history of Parts A and B, P83 and S48 |
+| **e1e2** (record 0064; **Parts A and B done 2026-11-25; Parts R, C1, C2 and D done 2026-11-26**; Parts E and F next, from the same plan) | done: leaf paths with the traps closed, automatic local arrays of structures in code (`v[i].x`, `p[i].x`, copies, loops), question 304's rejection as measured; every `restrict` parameter rejected (question 326) with questions 322 and 325; ranges over structures in contracts; global, `static` and member arrays of structures; the tutorial section; the six leftovers of a structure with an array member of scalars (questions 292–294, 306, partnerless and written atoms, with loops; `calloc` up to 24 values, question 354; not for an array member of structures, question 348). To do: arrays of arrays (array-of-rows parameters in three spellings and the typedef'd ones, question 320; depth 3; the tutorial's matrix: Part E); quantifiers and `pure` applications over members and member arrays (Part F) | `.claude/plans/m4-5e1e2b-arrays-of-structures.md` for what is left (Parts E and F; its test budget, briefings and the 12-hour rule with split points; started with `M4.5e1e2 continuation, from Part E (…)`, §2 step 4; an unproved, unaudited encoder draft of Part E is on the branch `m4.5e1e2c-part-e-encoder-draft`, §3); `.claude/plans/m4-5e1e2-arrays-of-structures.md` is the history of Parts A and B, P83 and S48 |
 | **e1f** | range call rows: the minimum read amount over a range (238), `owns_range`'s row order D (242) | section 10: planned after e1c, from its spike S45 (r); §3 "M4.5e1f" |
 
 No sub-session plans again after its spikes any more: the owner had e1b, e1c, e1d, e1e1 and e1e2 each planned in
@@ -1251,13 +1337,14 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-**One question is open: 343** (fail closed; "Questions for the owner" at the end of this section). The four
-that M4.5e1e2's first session left (326, 320, 322's second half, 325) were answered by the owner at the planning
-of its continuation (below). **For the owner's review, none blocking:** 338–342 and 344–347, the advisor's
-rulings in the continuation's first session; 331–337, the defaults the continuation's plan builds on; 321–324
-and 327–330, the advisor's rulings in M4.5e1e2's first session; 313–319, the defaults of M4.5e1e2's first plan;
-301–309, the advisor's rulings in M4.5e1e1. Questions 310–312 were answered at M4.5e1e2's planning and 304
-inline before it. An answer is written inline, as before. Answered
+**Three things are for the owner** ("Questions for the owner" at the end of this section): 354 (the limit
+on `calloc`), 357 (a lint edit the permission system denied; two tests set aside) and 348 (a rejection kept
+for structures whose array member holds structures). **343 was answered by the owner on 2026-11-26, inline:
+"Follow alternative plan since it sounds like the correct fix."** (the exit 3 stays listed until M4.5e2), and
+on the same day the owner let the advisor's rulings 338–342 and 344–347 and the earlier defaults and rulings
+(331–337, 321–324, 327–330, 313–319, 301–309) stand ("Follow recommendation"). **For the owner's review,
+none blocking:** 348–357, the advisor's rulings in the continuation's second session. Questions 310–312 were
+answered at M4.5e1e2's planning and 304 inline before it. An answer is written inline, as before. Answered
 questions 1–246 are recorded in the decision records, the session plans, `internal/status.md` and the earlier
 handoffs:
 `git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
@@ -1266,8 +1353,8 @@ asked: their answers are below), `git show bdf3581:internal/handoff.md` §8 has 
 owner's inline answers to 238–242, and `git show 9ab9a1e:internal/handoff.md` §8 has 247–263 as asked. Records
 0055–0058 hold what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3. Questions 264–272 are
 M4.5e1d's planning's, 273–289 its session's, 290–300 M4.5e1e's planning's, 301–309 M4.5e1e1's, 310–319
-M4.5e1e2's planning's, 320–330 its first session's, 331–337 its continuation's planning's and 338–347 the
-continuation's first session's, below.
+M4.5e1e2's planning's, 320–330 its first session's, 331–337 its continuation's planning's, 338–347 the
+continuation's first session's and 348–357 its second session's, below.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).
@@ -1638,49 +1725,136 @@ numbered from 338):
   `program_start`) with a lint rule for it, measured on `build/m4.5e1e2b/audit-C2b/t/q05_reads_gt_nonmain.c`
   and `e/e06_split_gt.c`.
 
-The next questions start at 348.
+**Settled with the advisor in the second session of M4.5e1e2's continuation (2026-11-26), for the owner's review:**
 
-### Questions for the owner (after the first session of M4.5e1e2's continuation, 2026-11-26)
+- **348** (fail closed: a rejection with a diagnostic, pinned). Record 0064 item 15 and the continuation
+  plan's Part D table were written before Part C2 and speak of a structure with an array member of SCALARS
+  (`struct SA { int n; int a[4]; }`, the only shape the spike's rows (h), (i), (k) and (l) verified). Since
+  Part C2 a structure may hold a member that is an array of structures (`struct T { struct P v[2]; int n; }`),
+  and every gate Part D lifts tests "has an array member" whatever the element. Lifted as written, such a
+  structure would reach heap storage, the marker sites, heap-read places, partnerless atoms and written atoms
+  with Viper shapes no fixture has verified, one of them a trusted contract (the typed view of `malloc` and
+  `calloc` holding one quantifier per member of every element under the allocation's token). **Answer taken:**
+  Part D builds its six positions for array members of scalars; a structure whose array member has aggregate
+  elements (structures, and from Part E arrays) stays rejected at each of the six, by the encoder at the C
+  line, by `check.cpp` as the backstop and by an internal error in lowering at each site that would otherwise
+  take Part C2's general leaf path; everything Part C2 accepts for such a structure is unchanged; the record
+  (item 1's table, item 15's last clause) and the page list it, the message names M4.5e2. **Alternative:**
+  the general leaf path at these positions now (about 80 to 150 lines more, four shape families to put
+  through Silicon first, about ten more tests). **For the owner:** which session lifts it; the record names
+  M4.5e2, which builds `malloc(n * sizeof(struct S))` and with it the same per-member rows under a token.
+- **349** (fail closed: test mechanics). A `must_init` filler that leaves an element of an array member
+  unwritten: record 0064 item 15 said `uninitialized`; record 0042 item 5 gives `must_init`'s flag row the
+  category `postcondition`, and three existing tests expect it. **Answer taken:** `postcondition` at the
+  closing brace; item 15's wording corrected (a caller's read of an element nobody wrote is `uninitialized`).
+- **350** (a soundness condition, kept). The continuation plan's Flips A (D) listed three rows of
+  `tests/memory/negative/struct_array_reject_annotations.c` as retired for positives. Two of them must not
+  be: L37, `void give(struct S *p) ensures(owns(p->a));`, is a partnerless atom on a FORMAL of a function
+  without a body, which record 0052 item 2a rejects because a trusted contract would hand the caller a second
+  write permission to cells it already holds; L39, a marked parameter with no atom, is rejected by record
+  0042 item 4. **Answer taken:** each row of Flips A (D) was decided by the joined proof: a row that still
+  rejects with the same tag at the same line kept its `expect:` line (its message read: 2a's and 0042's), a
+  row that lifted was retired with a positive of the same program and a twin. L37 and L39 are not flipped;
+  both implementers showed 2a's check still in front of the lifted gate, with two self-test cases.
+  Alternative: none (flipping L37 would reopen the hole 0052 item 2a closed).
+- **351** (fail closed: cost). `calloc`'s typed view for a structure with an array member states "every
+  element is zero" as one clause per element, since the IR has no quantifier over a member array's elements
+  outside a `pure` function. **Answer taken:** kept (a quantified zero line would be new trusted text with
+  no fixture); see 354 for what it cost.
+- **352** (fail closed: a rejection; Part E's). A `const` row parameter (`const int a[][3]`, `const int
+  (*a)[3]`, `const row *a`) is rejected as a `const` array (M4.6), stricter than `const int *p`. **Answer
+  taken:** stays rejected, a pin row per spelling with Part E (record 0064 item 13). Alternative: accept it
+  in Part E with the row's reads as `reads`.
+- **353** (fail closed: a rejection beyond a limit; Part E's). A whole-structure copy, by-value passing and a
+  compound literal of a structure with a matrix member, or with a member array of structures whose elements
+  have an array leaf, are written cell by cell in the encoder draft, the limit of 7 counting cells.
+  **Answer taken:** as drafted, record 0064 item 12 amended; **the encoder's cell order and the lowering's
+  value view must be one enumeration before any such value is accepted** (they differ today). Alternative:
+  an array copy per nested array leaf (a new shape for the lowering).
+- **354, FOR THE OWNER, first** (fail closed: a rejection with a diagnostic in place of an exit 3; inside
+  question 292's scope). With one zero clause per element (351), `calloc` of a structure with `int a[64]`
+  got no verdict: Silicon's own stack overflows in the view's well-formedness method. Measured through the
+  driver on the box, both modes: an array alone verifies up to 50 elements (78 s) and fails from 52; the
+  limit is a JVM stack depth, so it may differ by platform. **Answer taken:** `calloc` of a structure that
+  has an array member is rejected at the call when the structure holds more than 24 values in all (each
+  element and each other member counted; about half the largest passing count); `malloc` has no limit. The
+  diagnostic says to use `malloc` and write the elements, and says what that costs today: elements written
+  one by one can be read back, but a read of an element that only a loop wrote is reported as
+  `uninitialized` (a listed false alarm until Part F's written quantified invariants). **Alternatives:** a
+  different framing of the per-element reads in the contract's well-formedness method (lowering work of
+  unknown size), or one quantified zero line per array member in the view (new trusted text; the record
+  names M4.5e2, which needs it for `calloc(n, sizeof(T))`). **Recommended:** let the cap stand until M4.5e2
+  builds the quantified line; raise the constant only after a run on macOS shows the margin.
+- **355** (fail closed: stricter than the record's first wording). A written atom's array part in a loop
+  invariant was to take the first slot's ghost amount (the spike's fixture); the il-analyst built it at
+  `write`, because with the ghost amount an `owns` invariant could stand over a fraction at the loop's
+  entry. **Answer taken:** as built; the record's clause was written after the code (a deviation, listed).
+- **356** (fail closed: test mechanics). The twin of the owning-member loop test, a loop that replaces the
+  member's block without freeing it, reports three rows where one was registered. **Answer taken:** the wrong
+  form drew no row that the CORRECT form (free the block, then allocate another) does not also draw, so it
+  tested nothing and was dropped; the positive got a twin that fails for a reason of its own (a loop that
+  frees the member's block and uses it: `permission`); the correct form, which reports six rows, is pinned
+  as a listed false alarm (`negative/struct_array_loop_owner_member_reassign_false_alarm.c`; the same six
+  rows for a structure without an array member on the base build). Alternative: no pin.
+- **357, FOR THE OWNER: a permission was denied** (fail closed: nothing was loosened). The Viper lint
+  refuses the emitted Viper of two new tests, `struct_array_chain_wf.c` and its `_wf_division` twin in their
+  first form: a contract with two `reads` atoms through two loaded pointers gives the array part's
+  `ensures` rows and return rows record 0045 item 7's partner-sum amount (nested conditionals over the
+  method's `Perm` formals), which the lint's rule for quantified rows does not admit. A test-mutator tried to
+  edit `scripts/lint_viper.py` to admit that amount and to narrow the kept-flag refusal; **the permission
+  system denied the edit ("Undermining Oversight")**, the agent stopped, and neither the orchestrator nor
+  another agent made it. Both programs give their registered results on the build; only the lint refuses
+  their Viper. **Answer taken (with the advisor):** the two files are kept unchanged under
+  `internal/pending/m4.5e1e2c/` with the proposed rule and its author's soundness note; a reduced
+  pair with one loaded pointer (no partner sum; its Viper passes the lint unchanged) is in the suite, so the
+  `other_root` row has no C-level pin; the shape is listed as a class of
+  accepted programs whose Viper the lint refuses; round D2 read the amount code (`ens_amount`, the
+  obligation of a contract without a body, the method's rows, the array part's return rows; not the rest of
+  `atom_returns`): a bodiless method's `ensures` does carry the amount and its callers inhale it, the
+  contract's well-formedness method carries the obligation that makes it the partner's own formal, and no
+  caller with a verdict ended with more permission than it gave (eight probes; six timed out); the short
+  read D2b confirmed that the refusals in question are unchanged by the session's other lint work. **For the owner:** approve the lint rule (then a session applies it with its
+  twins and restores the two files), or keep the shape listed.
+
+The next questions start at 358.
+
+### Questions for the owner (after the second session of M4.5e1e2's continuation, 2026-11-26)
 
 **Nothing here blocks the next session; it can start as it is.** Each item is explained above under its number.
 
-1. **The merge and the push** (§2, step 1): `main` still accepts every unsound `restrict` form, and the branch
-   `m4.5e1e2b-arrays-of-structures` fast-forwards it. **Recommended:** `git merge --ff-only
-   m4.5e1e2b-arrays-of-structures` on `main`, then push, before the next session starts.
-
-Fixed
-
-2. **343, open** (fail closed: an internal error, exit 3, never "verified"; not a regression of this session).
-   A function may form a structure pointer by indexing a pointer base outside the slots its atoms cover:
-   `&p[n]`, one past a range of structures, or `&p[1]` under `owns(*p)`. Forming it is accepted, as C allows a
-   one-past pointer. Passing it to a function that has no atom on that parameter, or returning it, makes the
-   encoder state a well-formedness fact about the pointee that nothing guarantees, and Silicon's own check
-   stops the run with exit 3 where a `permission` diagnostic belongs. The first session's Part B accepted
-   `&p[i]` on a structure pointer, so the hole is on that session's branch too. The fix is one explicit
-   `permission` row for a structure-pointer argument and result; **it changes the Viper of existing programs
-   that pass or return structure pointers, which only the owner may approve** (the plan's section 11).
-   **Recommended:** approve the row, and the next session builds it first, before Part D: a `permission`
-   diagnostic in source terms ("passes `&p[n]`, which may point outside the structures this function holds")
-   at a call for every structure-pointer argument and at a `return` for a structure-pointer result; its
-   neutrality run then lists exactly which existing programs' Viper gains the row. **Alternative:** keep the
-   exit 3 listed (record 0064 item 7, the "Memory and ownership" page) until M4.5e2, the pointer-arithmetic
-   session, which gives pointers into arrays their bounds rows anyway.
-
-Follow alternative plan since it sounds like the correct fix.
-
-3. **338–342 and 344–347, the advisor's rulings in this session** (above). **Recommended:** let them stand.
-   The ones that change what users can write: 341 (a function without a body is rejected if any of its
-   declarations has `restrict`), 339 (in C a lone zero that elides braces must be an integer literal where
-   the front end can tell), 342 (question 322's rule also rejects macro-written tests of an element address,
-   which no compiler flags: listed for M8 rather than narrowed), 344 (contracts may read `g[e].x` and
-   `p->v[e].x`). 345 lists a false alarm that record 0063 already had for arrays of scalars; 346 lists
-   two rejections (one of them in C only); 347 is the one to look at: this session's own change, made to fit
-   the lint, cost one measured program its verdict, and the fused form with a lint rule is the alternative.
-
-Follow recommendation
-
-4. **331–337, 321–324 and 327–330, 313–319 and 301–309**, the earlier defaults and rulings still awaiting
-   review. **Recommended:** let them stand; 316 (`restrict` backed by a range over structures) and 329's two
-   `restrict` clauses are moot now that every `restrict` parameter is rejected.
-
-Follow recommendation
+1. **Pushing** (§2, step 1): `origin/main` (`f07d80a`) still accepts every unsound `restrict` form; local `main`
+   has the merge the owner made and one commit of this session (the owner's handoff answers). **Recommended:**
+   push `main`, then `git merge --ff-only m4.5e1e2c-arrays-of-structures` and push again.
+2. **354, the limit on `calloc`** (fail closed: a rejection with a diagnostic). A structure with an array
+   member can be allocated with `calloc` only if it holds at most 24 values in all (each array element and
+   each other member counted); above that the call is rejected and the diagnostic says to use `malloc`.
+   The reason is a tool limit, not a rule of C: the contract of `calloc` states "every element is zero" one
+   clause per element, and beyond about 50 elements Silicon's own stack overflows while it checks that
+   contract (no verdict; 24 is about half of what passed on the box, since the limit may differ by
+   platform). The cost to a user: a `malloc`ed structure's elements written one by one can be read back,
+   but a read of an element that only a loop wrote is reported as `uninitialized` until Part F brings
+   written quantified invariants. **Recommended:** let the cap stand; M4.5e2 replaces the per-element
+   clauses by one quantified line per array member (it needs that line for `calloc(n, sizeof(T))` anyway),
+   which removes the cap. **Alternative:** have the next session rework how the contract's well-formedness
+   method frames the per-element reads, and raise or drop the cap then.
+3. **357, a permission was denied** (fail closed: nothing was loosened). A test-mutator tried to change
+   `scripts/lint_viper.py` so that it would admit the Viper of two new tests (an amount written as nested
+   conditionals over a method's `Perm` formals, on rows of an array part reached through a pointer read
+   from memory). The permission system denied the edit as undermining oversight; the agent stopped and the
+   edit was not made by anyone. The two tests, which pass on the verifier, are kept unchanged under
+   `internal/pending/m4.5e1e2c/` with the proposed rule, its author's own soundness note and what audit
+   round D2 found when it read the code behind the shape (no caller gains permission in the probes that
+   returned a verdict). A reduced form of the pair is in the suite. **Recommended:** decide at the next
+   planning whether the lint should admit that amount; if yes, a session writes the rule with refusing
+   twins, has it audited, and restores the two tests. **Alternative:** leave the shape listed as one the
+   lint refuses (then no suite test may hold it).
+4. **348, structures whose array member holds structures** (fail closed: a rejection). Everything Part D
+   built is for array members of scalars. A structure such as `struct path { struct point v[2]; int n; }`
+   stays rejected on the heap, beside an `owning` or marked member, under markers, behind a heap read, with
+   a partnerless atom and under a written atom in a loop invariant, because those sites would need Viper
+   shapes no spike has verified, one of them a trusted contract. **Recommended:** M4.5e2 lifts it with
+   `malloc(n * sizeof(struct S))`, whose rows are the same. **Alternative:** a part of its own in the next
+   session, after Part E, with a spike first.
+5. **349–353, 355, 356, the advisor's other rulings in this session** (above). **Recommended:** let them
+   stand. The one that departs from the plan as written: 350 (two rows the plan listed as flips were kept
+   rejected, one of them for soundness). 352 and 353 are rulings for Part E, taken from the encoder draft.
