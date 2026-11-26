@@ -968,7 +968,9 @@ every element of it, and a contract may then read `g[i]`
 with an array member name every element with the other members, and `owns(p->a)` and
 `reads(p->a)` the array member alone, after which a contract may read `p->a[i]`
 (xref:memory.adoc#array-members[Array members]). `owns_range` and `reads_range` take a pointer
-parameter and a count that reads no memory, in a function's `requires` and `ensures`
+parameter, to a scalar or to a structure
+(xref:memory.adoc#ranges-of-structures[Ranges of structures]: every member of
+every element), and a count that reads no memory, in a function's `requires` and `ensures`
 (an `ensures` range gives back the `requires` range of the same kind, parameter and
 count), as a conjunct, after a condition that reads no memory and `||`, or as an arm of
 `?:`; one parameter has one range and no other atom

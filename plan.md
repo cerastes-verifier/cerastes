@@ -9,7 +9,7 @@ it was ≤ 4 h from 2026-10-20): M4.1, M4.5a, M5a, …. Each session starts from
 `internal/status.md` updated so the next session can start cold.
 
 This file was trimmed to what is live at the end of M4.4c (owner, 2026-10-26), and is reconciled with the handoff at
-each session's start. The last was M4.5e1e2's planning (2026-11-25); M4.5d2b2b's (2026-11-09) cut the Done table to
+each session's start. The last was the planning of M4.5e1e2's continuation (2026-11-25, after its first session), and the close of that continuation's first session updated M4.5's paragraph and row (2026-11-26); M4.5d2b2b's (2026-11-09) cut the Done table to
 one line per row, and the rows as they were are `git show 2430529:plan.md`. The plans of the finished milestones,
 the superseded text and the appendices are in `git show 1fcc43b:plan.md`. The milestones were renumbered on 2026-10-20
 (the rest of C became M4; generic templates M5, concepts M6, C++ memory M7, inventory M8, evaluation M9); history
@@ -177,7 +177,7 @@ history of `internal/status.md`).
 | Session | Scope | Needs |
 |---|---|---|
 | **M4.5 Pointers** (sessions b1–f3, below) | the memory model for C (records 0028–0030) | M4.5a, S5 (done) |
-| **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (contracts on `strlen`/`memcpy`/`memcmp`/`strcmp`, and their verified implementations `vlibc_strlen`, `vlibc_memcpy`, `vlibc_memcmp`, `vlibc_strcmp`, record 0048; the rule that verifies vlibc's own `src/`, 0048 item 5), `main(argc, argv)`; `const` objects as cells held below `write` after their initializer, lifting record 0040 item 2's contract rules across `const` (owner, 2026-10-30, handoff question 78) | M4.5e2, M4.5f3 |
+| **M4.6 Chars and strings** | string literals as read-only arrays, `char` buffers, vlibc's `<string.h>` (contracts on `strlen`/`memcpy`/`memcmp`/`strcmp`, and their verified implementations `vlibc_strlen`, `vlibc_memcpy`, `vlibc_memcmp`, `vlibc_strcmp`, record 0048; the rule that verifies vlibc's own `src/`, 0048 item 5), `main(argc, argv)`; what a library declaration with `restrict` parameters (`memcpy`) needs, since M4.5e1e2 rejects every `restrict` parameter (question 332); `const` objects as cells held below `write` after their initializer, lifting record 0040 item 2's contract rules across `const` (owner, 2026-10-30, handoff question 78) | M4.5e2, M4.5f3 |
 | **M4.7 Function pointers** | contracts on function types, calls through pointers ("the pointer satisfies the type") | M4.5b1b |
 | **M4.8 C parity close-out** | the VeriFast C differential set, the M4 mutation run, the Memory and ownership page complete, M4's acceptance, the deferred list for M8; the cost of aliasing `reads`/`live` parameters (handoff question 66: fixed here), with the false alarm of written atoms on moved pointers (question 79) and the cost of two written `owns_block` sites through loads (question 189); what M4.5d2b2c's long-running tier could not carry (question 196), the `static` cache's cover (with question 194), automatic closure sites for borrowed structures in loops (question 201); M4.5d2b2c's pinned loop false alarms (questions 212, 215, 216) and question 196's two programs, past 1800 s; M4.5d2b2d's older exit 3 (a permission atom read through a block site's cell before the block's own rows, question 222) and its pinned loop false alarms (record 0058 item 4, "Limits"); `forall` outside a positive position, which M4.5e1c leaves rejected and M4.8 must handle (owner, 2026-11-23, question 249): a nested `forall`, `!forall` and `exists`, and a `forall` as an operand of `==` or arithmetic, in a `?:` condition, in an atom's guard, in a measure, under `old` or in a `do … while (0)` invariant, on the left of `||` (question 255), and in a loop invariant or a `check` under `||` or in a `?:` arm (question 262) (record 0061 item 1) | all |
 
@@ -199,13 +199,22 @@ alarm, not unsoundness, and is fixed in e1f with question 242's row order (S45 (
 in full** (`.claude/plans/m4-5e1e2-arrays-of-structures.md`, 2026-11-25; record 0064). Its planning sized it at
 4,700–8,450 `src/` lines in six parts (e1e1 landed 4,944), so it runs under **the 12-hour rule** (owner, question
 310): at each commit the next part starts unless the remaining work would pass twelve hours, and the parts not
-begun run from the same plan in a second session, with no second planning. Nothing is cut to hold a session short.
+begun run in a further session. Nothing is cut to hold a session short. **Its first session (2026-11-25) closed
+at split point 1 with Parts A and B**, and its audits found C's `restrict` accepted unsoundly. **The continuation
+has a plan of its own** (`.claude/plans/m4-5e1e2b-arrays-of-structures.md`, written the same day at the owner's
+request, in place of "no second planning"): the owner had `restrict` rejected altogether (question 326; a model of
+it is an M8 entry), and the plan runs that first, then Parts C1 and C2 (the first plan's Part C in two), D, E and
+F from record 0064 as revised, under the same 12-hour rule, in two or three more sessions. **The continuation's
+first session (2026-11-26) landed Parts R, C1 and C2** (every `restrict` parameter rejected; ranges over
+structures in contracts; arrays of structures as globals, `static` locals and members) **and closed at the plan's
+split point after Part C2**; Parts D, E and F run next from the same plan, started with `M4.5e1e2 continuation,
+from Part D (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`.
 vlibc's and vlibm's implementations are named `vlibc_<name>` and `vlibm_<name>`, declared beside the standard names with
 the same contracts; neither library replaces a standard name (owner, 2026-11-04, question 128, record 0048).
 
 | Session | Scope | Needs |
 |---|---|---|
-| **M4.5e1e2 Arrays of structures and arrays of arrays** (planned in full; two sessions likely) | in the plan's order: arrays of structures in code (`v[i].x`, `p[i].x`, element copies, loops) and question 304's C++ `{0}` rejection; ranges over structures in contracts, global arrays and members of structures; what e1e1 left for a structure with an array member (heap storage, an `owning` or marked member beside one, markers, heap-read contract places, partnerless and written atoms: questions 292–294, 306); arrays of arrays (`int m[2][3]`, array-of-rows parameters `int a[][3]`, `v[i].a[j]`); `forall` and `pure` applications over structure members, member arrays and contract-position global arrays; the tutorial section "Arrays in aggregates" (`.claude/plans/m4-5e1e2-arrays-of-structures.md`) | M4.5e1e1 |
+| **M4.5e1e2 Arrays of structures and arrays of arrays, Parts D, E and F** (planned in full, `.claude/plans/m4-5e1e2b-arrays-of-structures.md`; **landed so far:** Parts A and B in its first session, 2026-11-25 (leaf paths and the traps closed, automatic local arrays of structures in code, question 304's rejection as the compilers measure it), and **Parts R, C1 and C2 in the continuation's first session, 2026-11-26** (every `restrict` parameter rejected, question 326, with the address tests of question 322 and the lone zero of question 325 where the IL tells it; `owns_range` and `reads_range` over structures with element reads `p[e].x` in contracts; arrays of structures as globals, `static` locals and members of structures, with the contract reads `g[e].x` and `p->v[e].x`; the tutorial section "Arrays in aggregates"); started with `M4.5e1e2 continuation, from Part D (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`) | in the plan's order: **Part D**, what e1e1 left for a structure with an array member (heap storage, an `owning` or marked member beside one, markers, heap-read contract places, partnerless and written atoms: questions 292–294, 306); **Part E**, arrays of arrays (`int m[2][3]`, array-of-rows parameters `int a[][3]` and `int (*a)[3]`, question 320, and the typedef'd spellings, `v[i].a[j]`, depth 3) with the tutorial's matrix example; **Part F**, `forall` and `pure` applications over structure members, member arrays and contract-position global arrays; question 343's `permission` row first, if the owner approves it (handoff §8) | M4.5e1e1 |
 | **M4.5e1f Range call rows** | the minimum read amount over a range at a call (question 238: a false alarm today, fail closed; the fix is the encoder's first tagged `inhale`, which e1c's spike S45 (r) showed the pinned Silicon takes) and `owns_range`'s row order D (question 242); one set of Viper flips over e1b's range calls; a short session, any time after e1c | M4.5e1c (its spike) |
 | **M4.5e2 Pointer arithmetic** | `p + i`, `p - q`, comparisons within one object, `malloc(n * sizeof(T))` and `calloc(n, sizeof(T))` (for a structure `T`: after M4.5e1e2), `realloc` (from M4.5d2a, question 120); relational comparisons and `p - q` under `pointer-comparison`; `owning(n)` beyond parameters; atoms on one element (`owns(p[i])`), range atoms written in loop invariants (questions 236, 237) and ranges on part of a global array or of an array member; from M4.5e1d: the `must_init` filler whose invariant applies a function over the range still being filled (question 287: exit 3 today, fail closed); from M4.5e1c (record 0061): `cerastes_old` in loop invariants (cut 1, question 260, its Part D), the `forall` index and base forms, memory-reading arguments, the multi-class false alarm (question 253), question 255's multi-class guard that reads memory and arithmetic over two classes, question 259's narrowings and question 261's arithmetic over a non-first class's read in loops and checks | M4.5e1a, M4.5e1b, M4.5d2a |
 | **M4.5f1 Predicates** | predicate bodies encoded (0011 item 4 lifted), `fold`/`unfold`, non-recursive predicates, pure functions over predicates | M4.5c2b, M4.5d2b2b, M4.5e1d |
@@ -391,6 +400,18 @@ Criteria, in order: readable to C++ programmers; unambiguous matching from requi
     241, beside `[static N]`'s question 230); `int a[0]` and `int a[const 3]` parameters are accepted (the compilers are
     silent); a local array shorter than `int a[4]`'s bound passed to it warns at no front-end tier (GCC's C only at
     `-O2`, `-Wstringop-overflow=`) and is accepted; `int a[][3]` is M4.5e1e2's.
+  - **A model of `restrict`** (owner, 2026-11-25, question 326). cerastes rejects every `restrict` parameter since
+    M4.5e1e2's continuation (record 0064 item 19): the earlier acceptance, "the contract owns the object", enumerated
+    the routes by which a function reaches the object under another name, and three audit reads each found a route
+    it missed. A model checks C23 6.7.3.1 itself (every access based on the parameter inside its atom, every other
+    access outside it), with a soundness argument in `internal/soundness/`. With it: `-Wrestrict` (GCC flags
+    `f(a, a)`); `restrict` in the type of a cast or of a compound literal, the one form still accepted (it promises
+    nothing by C23 6.7.3.1).
+  - **From M4.5e1e2's continuation** (record 0064 items 5 and 16): the lone zero that the IL cannot tell from a
+    literal (probe P84 (a): `{(0)}`, `{__extension__ 0}`, designated and nested zeros are accepted although clang
+    reports them; question 339); question 322's rule rejects a truth test of an element address that a macro
+    writes (`assert(&a[1] != NULL)`) and, in C, `&a[1] == (int *)0`, which no compiler flags (question 342); the
+    address tests without an index (`&s.x == NULL`, `if (&x)`) are accepted although the compilers warn.
   - **`ubuntu-24.04-clang18`** (owner, 2026-11-09, handoff question 169): EDG emulating clang 18 differs on eight
     tests (record 0053 item 11). The CI profile stays at `dispatch` as the record of what that emulation changes, and is
     revisited here.

@@ -1,0 +1,280 @@
+// expect: verified
+// S48 (i), record 0064 item 15 (markers; question 294): a pointer to struct SA { int n; int a[4]; } marked ref_to_uninit: the requires atom claims no flag of the cell or of the array leaf (the type range stays under the flag), the ensures atom keeps them by old(d) ==> d (one quantifier per array leaf), the body writes p->a[1]; the caller initialized every element, passes &s (no flag rows at the call) and reads s.a[2] and s.n back (the kept flags). a pointer to struct SA marked must_init: no flag claimed by the requires atom, every flag set at the return (the array leaf's flag quantifier is the FLAGS row), the body writes n and a[0..3]; the caller's struct has no flag set, passes &s and reads s.a[2] and s.n back. Verifies. Time recorded.
+// (hand-written spike fixture of record 0064 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+
+// cerastes:trusted-contract allocation of a local of type struct SA (record 0063 item 6): a one-slot block whose members are blocks; the cell member n of length 1 uninitialized with full permission, the array member a of length 4 with each element uninitialized, each quantified permission its own
+method alloc_struct_0_SA() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)
+  ensures len(member(r, 1)) == 4
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 1), j).v_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 1), j).d_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 4)) ==> (!loc(member(r, 1), j).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+// wr(struct SA *p [[ref_to_uninit]]): requires owns(*p) (no flag claimed: the array leaf's flag quantifier is absent, the range under the flag stays), ensures owns(*p) with the kept-flag quantifier old(d) ==> d per leaf; the body writes p->a[1] = 7
+method f_wr(p: Ref, amt_0: Perm)
+  requires none < amt_0 && amt_0 < write
+  requires ((p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))) && (((p != null) && (offset_of(p) < len(block_of(p)))) ==> ((len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)))
+  requires p != null
+  requires offset_of(p) < len(block_of(p))
+  requires (len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)
+  requires acc(loc(member(p, 0), 0).v_int)
+  requires acc(loc(member(p, 0), 0).d_int)
+  requires loc(member(p, 0), 0).d_int ==> (((-2147483648) <= loc(member(p, 0), 0).v_int) && (loc(member(p, 0), 0).v_int <= 2147483647))
+  requires forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).v_int)
+  requires forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).d_int)
+  requires forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(p, 1), k).d_int ==> (((-2147483648) <= loc(member(p, 1), k).v_int) && (loc(member(p, 1), k).v_int <= 2147483647)))
+  requires acc(lvloc(block_of(p)).lv, amt_0)
+  ensures ((p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))) && (((p != null) && (offset_of(p) < len(block_of(p)))) ==> ((len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)))
+  ensures p != null
+  ensures offset_of(p) < len(block_of(p))
+  ensures (len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)
+  ensures acc(loc(member(p, 0), 0).v_int)
+  ensures acc(loc(member(p, 0), 0).d_int)
+  ensures old(loc(member(p, 0), 0).d_int) ==> loc(member(p, 0), 0).d_int
+  ensures loc(member(p, 0), 0).d_int ==> (((-2147483648) <= loc(member(p, 0), 0).v_int) && (loc(member(p, 0), 0).v_int <= 2147483647))
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).v_int)
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).d_int)
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (old(loc(member(p, 1), k).d_int) ==> loc(member(p, 1), k).d_int)
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(p, 1), k).d_int ==> (((-2147483648) <= loc(member(p, 1), k).v_int) && (loc(member(p, 1), k).v_int <= 2147483647)))
+  ensures acc(lvloc(block_of(p)).lv, amt_0)
+{
+  var v_a: Ref
+  var tw: Ref
+  assert p != null
+  v_a := loc(member(p, 1), 0)
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 7
+  tw.d_int := true
+  assert p != null
+  assert ((p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))) && (((p != null) && (offset_of(p) < len(block_of(p)))) ==> ((len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)))
+  assert offset_of(p) < len(block_of(p))
+  assert perm(loc(member(p, 0), 0).v_int) == write
+  assert perm(loc(member(p, 0), 0).d_int) == write
+  assert old(loc(member(p, 0), 0).d_int) ==> loc(member(p, 0), 0).d_int //KEPT
+  assert loc(member(p, 0), 0).d_int ==> (((-2147483648) <= loc(member(p, 0), 0).v_int) && (loc(member(p, 0), 0).v_int <= 2147483647))
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).v_int) //MARKED
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).d_int) //MARKED
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (old(loc(member(p, 1), k).d_int) ==> loc(member(p, 1), k).d_int) //KEPT
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(p, 1), k).d_int ==> (((-2147483648) <= loc(member(p, 1), k).v_int) && (loc(member(p, 1), k).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(p)).lv) >= amt_0 //LIVE
+}
+// init(struct SA *p [[must_init]]): requires owns(*p) with no flag claimed, ensures owns(*p) with every flag set (plain flag and range lines, one flag quantifier for the array leaf); the body writes n and a[0..3]
+method f_fill(p: Ref, amt_0: Perm)
+  requires none < amt_0 && amt_0 < write
+  requires ((p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))) && (((p != null) && (offset_of(p) < len(block_of(p)))) ==> ((len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)))
+  requires p != null
+  requires offset_of(p) < len(block_of(p))
+  requires (len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)
+  requires acc(loc(member(p, 0), 0).v_int)
+  requires acc(loc(member(p, 0), 0).d_int)
+  requires loc(member(p, 0), 0).d_int ==> (((-2147483648) <= loc(member(p, 0), 0).v_int) && (loc(member(p, 0), 0).v_int <= 2147483647))
+  requires forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).v_int)
+  requires forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).d_int)
+  requires forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(p, 1), k).d_int ==> (((-2147483648) <= loc(member(p, 1), k).v_int) && (loc(member(p, 1), k).v_int <= 2147483647)))
+  requires acc(lvloc(block_of(p)).lv, amt_0)
+  ensures ((p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))) && (((p != null) && (offset_of(p) < len(block_of(p)))) ==> ((len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)))
+  ensures p != null
+  ensures offset_of(p) < len(block_of(p))
+  ensures (len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)
+  ensures acc(loc(member(p, 0), 0).v_int)
+  ensures acc(loc(member(p, 0), 0).d_int)
+  ensures loc(member(p, 0), 0).d_int
+  ensures (((-2147483648) <= loc(member(p, 0), 0).v_int) && (loc(member(p, 0), 0).v_int <= 2147483647))
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).v_int)
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).d_int)
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> loc(member(p, 1), k).d_int
+  ensures forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (((-2147483648) <= loc(member(p, 1), k).v_int) && (loc(member(p, 1), k).v_int <= 2147483647))
+  ensures acc(lvloc(block_of(p)).lv, amt_0)
+{
+  var v_a: Ref
+  var tw: Ref
+  assert p != null
+  tw := loc(member(p, 0), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write))
+  tw.v_int := 1
+  tw.d_int := true
+  assert p != null
+  v_a := loc(member(p, 1), 0)
+  assert !((offset_of(v_a) + 0 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 0)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 10
+  tw.d_int := true
+  assert p != null
+  v_a := loc(member(p, 1), 0)
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 11
+  tw.d_int := true
+  assert p != null
+  v_a := loc(member(p, 1), 0)
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 2)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 12
+  tw.d_int := true
+  assert p != null
+  v_a := loc(member(p, 1), 0)
+  assert !((offset_of(v_a) + 3 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 3)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 3)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 13
+  tw.d_int := true
+  assert p != null
+  assert ((p == null) || (((p == loc(block_of(p), offset_of(p))) && (0 <= offset_of(p))) && (offset_of(p) <= len(block_of(p))))) && (((p != null) && (offset_of(p) < len(block_of(p)))) ==> ((len(member(p, 0)) == 1) && (len(member(p, 1)) == 4)))
+  assert offset_of(p) < len(block_of(p))
+  assert perm(loc(member(p, 0), 0).v_int) == write
+  assert perm(loc(member(p, 0), 0).d_int) == write
+  assert loc(member(p, 0), 0).d_int //FLAGS
+  assert loc(member(p, 0), 0).d_int ==> (((-2147483648) <= loc(member(p, 0), 0).v_int) && (loc(member(p, 0), 0).v_int <= 2147483647))
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).v_int) //MARKED
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> acc(loc(member(p, 1), k).d_int) //MARKED
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> loc(member(p, 1), k).d_int //FLAGS
+  assert forall k: Int :: { loc(member(p, 1), k) } (((0 <= k) && (k < 4))) ==> (loc(member(p, 1), k).d_int ==> (((-2147483648) <= loc(member(p, 1), k).v_int) && (loc(member(p, 1), k).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(p)).lv) >= amt_0 //LIVE
+}
+method f_use_ref()
+{
+  var v_s: Ref
+  var v_a: Ref
+  var tw: Ref
+  var tr: Ref
+  var a_0: Perm
+  var v_x: Int
+  var v_y: Int
+  v_s := alloc_struct_0_SA()
+  assert v_s != null
+  tw := loc(member(v_s, 0), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write))
+  tw.v_int := 5
+  tw.d_int := true
+  v_a := loc(member(v_s, 1), 0)
+  assert !((offset_of(v_a) + 0 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 0)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 1
+  tw.d_int := true
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 1)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 2
+  tw.d_int := true
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 2)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 3
+  tw.d_int := true
+  assert !((offset_of(v_a) + 3 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 3)) //BOUND
+  tw := loc(block_of(v_a), offset_of(v_a) + 3)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 4
+  tw.d_int := true
+  assert v_s != null
+  assert perm(lvloc(block_of(v_s)).lv) > none
+  a_0 := perm(lvloc(block_of(v_s)).lv) / 2
+  assert none < a_0
+  assert a_0 < write
+  assert ((v_s == null) || (((v_s == loc(block_of(v_s), offset_of(v_s))) && (0 <= offset_of(v_s))) && (offset_of(v_s) <= len(block_of(v_s))))) && (((v_s != null) && (offset_of(v_s) < len(block_of(v_s)))) ==> ((len(member(v_s, 0)) == 1) && (len(member(v_s, 1)) == 4)))
+  assert offset_of(v_s) < len(block_of(v_s))
+  assert perm(loc(member(v_s, 0), 0).v_int) == write //MARKED
+  assert perm(loc(member(v_s, 0), 0).d_int) == write //MARKED
+  assert loc(member(v_s, 0), 0).d_int ==> (((-2147483648) <= loc(member(v_s, 0), 0).v_int) && (loc(member(v_s, 0), 0).v_int <= 2147483647))
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> (loc(block_of(v_a), k).d_int ==> (((-2147483648) <= loc(block_of(v_a), k).v_int) && (loc(block_of(v_a), k).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(v_s)).lv) >= a_0 //LIVEROW
+  f_wr(v_s, a_0)
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  tr := loc(block_of(v_a), offset_of(v_a) + 2)
+  assert perm(tr.v_int) > none //PERM
+  assert tr.d_int //INIT
+  v_x := tr.v_int
+  assert v_s != null
+  tr := loc(member(v_s, 0), 0)
+  assert perm(tr.v_int) > none //PERM
+  assert tr.d_int //INIT
+  v_y := tr.v_int
+  assert !((perm(loc(member(v_s, 0), 0).v_int) != write) || (perm(loc(member(v_s, 0), 0).d_int) != write)) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  assert perm(lvloc(block_of(v_s)).lv) == write //LIVE
+  exhale (acc(loc(member(v_s, 0), 0).v_int) && acc(loc(member(v_s, 0), 0).d_int))
+  exhale forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).v_int)
+  exhale forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).d_int)
+  exhale acc(lvloc(block_of(v_s)).lv)
+}
+method f_use_must()
+{
+  var v_s: Ref
+  var v_a: Ref
+  var tw: Ref
+  var tr: Ref
+  var a_1: Perm
+  var v_x: Int
+  var v_y: Int
+  v_s := alloc_struct_0_SA()
+  v_a := loc(member(v_s, 1), 0)
+  assert v_s != null
+  assert perm(lvloc(block_of(v_s)).lv) > none
+  a_1 := perm(lvloc(block_of(v_s)).lv) / 2
+  assert none < a_1
+  assert a_1 < write
+  assert ((v_s == null) || (((v_s == loc(block_of(v_s), offset_of(v_s))) && (0 <= offset_of(v_s))) && (offset_of(v_s) <= len(block_of(v_s))))) && (((v_s != null) && (offset_of(v_s) < len(block_of(v_s)))) ==> ((len(member(v_s, 0)) == 1) && (len(member(v_s, 1)) == 4)))
+  assert offset_of(v_s) < len(block_of(v_s))
+  assert perm(loc(member(v_s, 0), 0).v_int) == write //MARKED
+  assert perm(loc(member(v_s, 0), 0).d_int) == write //MARKED
+  assert loc(member(v_s, 0), 0).d_int ==> (((-2147483648) <= loc(member(v_s, 0), 0).v_int) && (loc(member(v_s, 0), 0).v_int <= 2147483647))
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> (loc(block_of(v_a), k).d_int ==> (((-2147483648) <= loc(block_of(v_a), k).v_int) && (loc(block_of(v_a), k).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(v_s)).lv) >= a_1 //LIVEROW
+  f_fill(v_s, a_1)
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  tr := loc(block_of(v_a), offset_of(v_a) + 2)
+  assert perm(tr.v_int) > none //PERM
+  assert tr.d_int //INIT
+  v_x := tr.v_int
+  assert v_s != null
+  tr := loc(member(v_s, 0), 0)
+  assert perm(tr.v_int) > none //PERM
+  assert tr.d_int //INIT
+  v_y := tr.v_int
+  assert !((perm(loc(member(v_s, 0), 0).v_int) != write) || (perm(loc(member(v_s, 0), 0).d_int) != write)) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).v_int) //MARKED
+  assert forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).d_int) //MARKED
+  assert perm(lvloc(block_of(v_s)).lv) == write //LIVE
+  exhale (acc(loc(member(v_s, 0), 0).v_int) && acc(loc(member(v_s, 0), 0).d_int))
+  exhale forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).v_int)
+  exhale forall k: Int :: { loc(block_of(v_a), k) } (((0 <= k) && (k < 4))) ==> acc(loc(block_of(v_a), k).d_int)
+  exhale acc(lvloc(block_of(v_s)).lv)
+}
+

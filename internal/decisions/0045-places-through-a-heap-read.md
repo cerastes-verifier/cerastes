@@ -225,7 +225,7 @@ rejected every such place, naming this session (11 pins). Without them a `T**` c
       parameter, and every root that can hold a `T*` is already a hazard by its type; `live(*pp)` removes the `lifetime`
       stop that c1's audit-2 S1 alias path relied on, and `restrict_hazard`'s parameter loop rejects it from `pp`'s type
       alone, before any atom (audit N9; VIR types carry no qualifiers, so `const int **` is a hazard too); the walk over
-      atom places matters for globals and the result. `restrict_backed` still needs `owns(*p)` on the formal itself.
+      atom places matters for globals and the result. `restrict_backed` still needs `owns(*p)` on the formal itself. **(Withdrawn by record 0064 item 19 as rewritten on 2026-11-26, M4.5e1e2's continuation, question 326: every `restrict` parameter is rejected, and this clause's code is removed.)**
 
 14. **The lint** (`lint_viper.py`): contract `acc`s are not pinned (no rule). The ghost `Ref` locals of items 6, 10 and
     12 are assigned once, from `null` or a framed read, at method entry, right before their loop or at the top of an

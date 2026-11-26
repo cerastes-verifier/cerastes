@@ -262,8 +262,8 @@ CERASTES_DIAG(c99_designator, error,
               "an array designator \"[%s]\" in a C++ initializer is a C99 feature that clang warns about by default "
               "(-Wc99-designator) and GCC rejects: write the elements in order (decision 0059)")
 CERASTES_DIAG(array_address_null_test, error,
-              "the address of the array \"%s\" is never null, so %s is always true or always false (-Wpointer-bool-conversion, "
-              "-Wtautological-pointer-compare, -Waddress): test something else (decision 0059)")
+              "the address %s is never null, so %s is always true or always false (-Wpointer-bool-conversion, "
+              "-Wtautological-pointer-compare, -Waddress): test something else (decisions 0059 and 0064)")
 // An array parameter (decision 0060 item 15): the shapes clang and GCC warn about by default or at -Wall are rejected like errors.
 CERASTES_DIAG(sizeof_array_argument, error,
               "\"sizeof\" of the array parameter \"%s\" is the size of a pointer, not of the array (-Wsizeof-array-argument, "

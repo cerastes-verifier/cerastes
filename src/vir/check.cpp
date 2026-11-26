@@ -356,6 +356,16 @@ private:
 
     // Decision 0043 item 2: a struct of the program is a non-empty list of uniquely named members, each a bool, an integer or an enumeration, an
     // accepted pointer or a nested struct that does not contain the struct itself by value.
+    // Decision 0064 item 4 (trap 5): the structure a member holds by value, through any number of array dimensions (`struct T a[2][3]` holds `struct T`), or null
+    static const StructType* held_struct(const Type& t)
+    {
+        const Type* x {&t};
+        for (int depth {0}; x->is_array() && x->element != nullptr && depth < 64; ++depth)
+        {
+            x = x->element;
+        }
+        return x->is_struct() ? x->struct_type : nullptr;
+    }
     bool contains_by_value(const StructType& from, const StructType* target, int depth) const
     {
         if (depth > 64)
@@ -364,11 +374,12 @@ private:
         }
         for (const StructMember& m : from.members)
         {
-            if (!m.type.is_struct() || m.type.struct_type == nullptr)
+            const StructType* inner {held_struct(m.type)};
+            if (inner == nullptr)
             {
                 continue;
             }
-            if (m.type.struct_type == target || contains_by_value(*m.type.struct_type, target, depth + 1))
+            if (inner == target || contains_by_value(*inner, target, depth + 1))
             {
                 return true;
             }
@@ -382,9 +393,9 @@ private:
         for (const StructMember& m : from.members)
         {
             const StructType* next {nullptr};
-            if (m.type.is_struct())
+            if (held_struct(m.type) != nullptr)
             {
-                next = m.type.struct_type;
+                next = held_struct(m.type); // by value, or by value in an array (decision 0064 item 4, trap 5)
             }
             else if (m.owning && m.type.is_ptr() && m.type.pointee != nullptr && m.type.pointee->is_struct())
             {
@@ -455,10 +466,16 @@ private:
             }
             else if (m.type.is_array())
             {
-                // decision 0063 items 2 and 3 (M4.5e1e1 part C): an array member is one dimension of at least one element of a scalar (the block `member(X, k)` of that length)
-                if (!array_local_type(m.type))
+                // decision 0063 items 2 and 3 (M4.5e1e1 part C): an array member is one dimension of at least one element of a scalar (the block `member(X, k)` of that length);
+                // decision 0064 items 1 and 2 (Part C2): or of verified structures with no array member and no `owning` or `ref_to_uninit` member (local_array_type's rule)
+                if (!local_array_type(m.type))
                 {
-                    err(m.loc, "the member '" + m.name + "' of " + name + " is " + array_reason(m.type));
+                    err(m.loc, "the member '" + m.name + "' of " + name + " is " + local_array_reason(m.type));
+                }
+                else if (const StructType* inner {held_struct(m.type)};
+                         inner != nullptr && (inner == &st || contains_by_value(*inner, &st, 0)))
+                {
+                    err(m.loc, "the member '" + m.name + "' of " + name + " contains the struct itself by value");
                 }
             }
             else if (!scalar_type(m.type))
@@ -544,6 +561,41 @@ private:
                " (decision 0059 items 1 and 2: the element is a bool, an integer, an enumeration or a pointer to an object type)";
     }
 
+    // Decision 0064 items 1 and 2 (Part B): the type of an AUTOMATIC array local, array_local_type's or one whose element is a verified structure.  (array_local_type itself
+    // stays the one of members and globals: Part C.)  The element structure has no `owning` or `ref_to_uninit` member at any depth (M4.8) and no array member at any depth
+    // (a depth-2 leaf path: Part E).
+    bool local_array_type(const Type& t) const
+    {
+        if (array_local_type(t))
+        {
+            return true;
+        }
+        if (!t.is_array() || t.element == nullptr || t.count == 0U || !t.element->is_struct() ||
+            t.element->struct_type == nullptr || structs_.count(t.element->struct_type) == 0U)
+        {
+            return false;
+        }
+        return !struct_has_marked(*t.element->struct_type) && !struct_has_array(*t.element->struct_type);
+    }
+    std::string local_array_reason(const Type& t) const
+    {
+        if (t.is_array() && t.element != nullptr && t.count != 0U && t.element->is_struct() &&
+            t.element->struct_type != nullptr && structs_.count(t.element->struct_type) != 0U)
+        {
+            if (struct_has_marked(*t.element->struct_type))
+            {
+                return "an array of " + t.element->str() +
+                       ", whose elements hold an `owning` or `ref_to_uninit` member (decision 0064 item 2: M4.8)";
+            }
+            if (struct_has_array(*t.element->struct_type))
+            {
+                return "an array of " + t.element->str() +
+                       ", whose elements hold an array member (decision 0064 item 2, depth 2: M4.5e1e2 part E)";
+            }
+        }
+        return array_reason(t);
+    }
+
     // `allow_ptr`: a pointer type counts (locals and expressions); parameters, results, named constants and the like pass false.
     bool value_type(const Type& t, bool allow_ptr = false) const
     {
@@ -596,9 +648,10 @@ private:
         else if (g.type.is_array())
         {
             // decision 0063 items 2 and 3 (M4.5e1e1 part B): a global or `static` array of scalars is the block `GB_g()` of N slots; `owning` is refused on it
-            if (!array_local_type(g.type))
+            // decision 0064 items 1, 2 and 9 (Part C2): or an array of verified structures (local_array_type's rule)
+            if (!local_array_type(g.type))
             {
-                err(g.loc, name + " is " + array_reason(g.type));
+                err(g.loc, name + " is " + local_array_reason(g.type));
             }
             if (g.owning || g.ref_to_uninit)
             {
@@ -651,9 +704,9 @@ private:
                 // decision 0063 item 9 (part C): an array leaf of a struct global has the listed prefix `elems` (at most N entries, each a scalar initial value of the element type) and
                 // a `rest` that is zero or unknown; the leaf's own kind mirrors the rest (Unknown iff the rest is unknown)
                 const std::string ln {"the member '" + leaves[k].text + "' of the global '" + g.c_name + "'"};
-                if (!array_local_type(leaves[k].type))
+                if (!local_array_type(leaves[k].type))
                 {
-                    err(g.loc, ln + " is " + array_reason(leaves[k].type));
+                    err(g.loc, ln + " is " + local_array_reason(leaves[k].type));
                     continue;
                 }
                 if (l.elems.size() > static_cast<size_t>(leaves[k].count))
@@ -671,7 +724,13 @@ private:
                 {
                     const GlobalLeaf& el {l.elems[i]};
                     const std::string en {"the element " + std::to_string(i) + " of " + ln};
-                    if (!el.elems.empty() || el.rest != ArrayRest::Zero)
+                    if (leaves[k].element.is_struct())
+                    {
+                        // decision 0064 item 9 (Part C2): an element that is a structure has one initial value per leaf of the structure
+                        struct_element_values(en, g.loc, leaves[k].element, el, l.rest);
+                        continue;
+                    }
+                    if (!el.elems.empty() || el.rest != ArrayRest::Zero || !el.leaves.empty())
                     {
                         err(g.loc, en + " carries array initial values (an array of arrays is M4.5e1e2's)");
                     }
@@ -727,7 +786,13 @@ private:
         {
             const GlobalLeaf& l {g.elems[i]};
             const std::string en {"the element " + std::to_string(i) + " of the global '" + g.c_name + "'"};
-            if (!l.elems.empty() || l.rest != ArrayRest::Zero)
+            if (g.type.element->is_struct())
+            {
+                // decision 0064 item 9 (Part C2): an element that is a structure has one initial value per leaf of the structure
+                struct_element_values(en, g.loc, *g.type.element, l, g.rest);
+                continue;
+            }
+            if (!l.elems.empty() || l.rest != ArrayRest::Zero || !l.leaves.empty())
             {
                 err(g.loc, en + " carries array initial values (an array of arrays is M4.5e1e2's)");
             }
@@ -740,6 +805,52 @@ private:
                              : " has an unknown initial value although the rest of the array is zero (decision 0063 item 9)"));
             }
             global_value(en, l.loc.known() ? l.loc : g.loc, *g.type.element, l.kind, l.init, l.value, l.target);
+        }
+    }
+
+    // The initial values of one element of an array global of STRUCTURES (decision 0064 item 9, Part C2): `el.leaves` has one entry per leaf of the element structure in
+    // struct_object_leaves order, each a scalar value of the leaf's type with no array values of its own, known against a zero rest and unknown against an unknown rest (the element's
+    // own scalar fields are unused)
+    void struct_element_values(const std::string& en, const SrcLoc& loc, const Type& element, const GlobalLeaf& el,
+                               ArrayRest rest)
+    {
+        if (element.struct_type == nullptr || structs_.count(element.struct_type) == 0U)
+        {
+            err(loc, en + " is a structure that is not in the program");
+            return;
+        }
+        if (!el.elems.empty() || el.rest != ArrayRest::Zero || el.init != nullptr || el.target != nullptr)
+        {
+            err(loc, en + " carries values of its own beside its leaves (decision 0064 item 9)");
+        }
+        const std::vector<StructLeaf> leaves {struct_object_leaves(*element.struct_type)};
+        if (el.leaves.size() != leaves.size())
+        {
+            err(loc, en + " has " + std::to_string(el.leaves.size()) + " initial values for the " +
+                         std::to_string(leaves.size()) + " leaves of " + element.str() + " (decision 0064 item 9)");
+            return;
+        }
+        for (size_t i {0U}; i < leaves.size(); ++i)
+        {
+            const GlobalLeaf& gl {el.leaves[i]};
+            const std::string ln {"the leaf '" + leaves[i].text + "' of " + en};
+            if (leaves[i].array || leaves[i].aggregate_element || !gl.elems.empty() || gl.rest != ArrayRest::Zero ||
+                !gl.leaves.empty())
+            {
+                err(loc,
+                    ln +
+                        " is an array or carries array initial values (an element with an array member is M4.5e1e2 part E)");
+                continue;
+            }
+            if ((gl.kind == GlobalInit::Unknown) != (rest == ArrayRest::Unknown))
+            {
+                err(loc,
+                    ln +
+                        (rest == ArrayRest::Unknown
+                             ? " has a known initial value although the rest of the array is not known (decision 0064 item 9)"
+                             : " has an unknown initial value although the rest of the array is zero (decision 0064 item 9)"));
+            }
+            global_value(ln, gl.loc.known() ? gl.loc : loc, leaves[i].type, gl.kind, gl.init, gl.value, gl.target);
         }
     }
 
@@ -892,6 +1003,8 @@ private:
         ok_members_.clear();
         array_addr_ok_.clear();
         contract_elem_ok_.clear();
+        contract_struct_elem_ok_.clear();
+        loop_struct_elem_ok_.clear();
         struct_pos_.clear();
         field_base_.clear();
         literal_stores_.clear();
@@ -1067,6 +1180,12 @@ private:
         if (f.pure)
         {
             pure_contract_rules(f);
+            if (holds_struct_range(f))
+            {
+                err(f.loc,
+                    "the `pure` function '" + f.c_name +
+                        "' reads a range of structures (decision 0064 item 7: the rows of a `pure` function over structures are M4.5e1e2 part F)");
+            }
         }
         if (f.noreturn && !f.ensures_.empty())
         {
@@ -1242,8 +1361,8 @@ private:
         }
     }
 
-    // Decision 0037 items 5, 6 and 2: the atoms of the contract stand in allowed positions, are numbered, and pair up; `restrict` is backed by
-    // an `owns` that the `ensures` returns.
+    // Decision 0037 items 5 and 6: the atoms of the contract stand in allowed positions, are numbered, and pair up; a parameter that carries the flag `restrict` is refused (decision 0064
+    // item 19).
     static void collect_atoms(const Expr* e, std::set<const Expr*>& all)
     {
         if (e == nullptr)
@@ -1261,6 +1380,55 @@ private:
         for (const Expr* x : e->args)
         {
             collect_atoms(x, all);
+        }
+    }
+
+    // Decision 0064 item 7, Part C1: the pairing rows of a range over structures with the other atoms of its function (a cell, a structure atom, a range of any element type, per pair of
+    // leaf paths of one field, Form P) are built in the calls' and the returns' rows.  What stays refused is an `owns_block` atom of the same function that holds a cell of one of the
+    // range's leaf fields: the rows of a heap block beside a range over structures are Part D's (question 292).
+    static std::vector<Type> held_leaf_types(const AtomSite& s)
+    {
+        std::vector<Type> out;
+        if (s.atom == nullptr || s.atom->atom == AtomKind::Live || s.atom->a == nullptr || !s.atom->a->type.is_ptr() ||
+            s.atom->a->type.pointee == nullptr)
+        {
+            return out;
+        }
+        for (const LeafPath& l : object_leaf_paths(*s.atom->a->type.pointee))
+        {
+            out.push_back(l.type);
+        }
+        return out;
+    }
+    void struct_range_neighbours(const Function& f, const std::vector<AtomSite>& sites,
+                                 const std::vector<AtomSite>& block_sites)
+    {
+        // each `owns_block` atom is reported once, however many range atoms (one per clause list) share a leaf type with it
+        for (const AtomSite& o : block_sites)
+        {
+            bool shares {false};
+            const std::vector<Type> theirs {held_leaf_types(o)};
+            for (const AtomSite& a : sites)
+            {
+                if (shares || !is_range_atom(a.atom->atom) || a.atom->a == nullptr || !a.atom->a->type.is_ptr() ||
+                    a.atom->a->type.pointee == nullptr || !a.atom->a->type.pointee->is_struct())
+                {
+                    continue;
+                }
+                for (const Type& m : held_leaf_types(a))
+                {
+                    for (const Type& t : theirs)
+                    {
+                        shares = shares || t == m;
+                    }
+                }
+            }
+            if (shares)
+            {
+                err(o.atom->loc,
+                    "an `owns_block` atom beside a range over structures in '" + f.c_name +
+                        "' that holds a cell of one of the same leaf fields (decision 0064 item 7: a heap block beside such a range is M4.5e1e2 part D, not yet lifted)");
+            }
         }
     }
 
@@ -1339,6 +1507,7 @@ private:
         // decision 0047 item 4: no ghost amount, no partner
         const std::vector<AtomSite> block_sites {contract_block_atoms(f)};
         range_sites(f, sites, block_sites);
+        struct_range_neighbours(f, sites, block_sites);
         std::set<const Expr*> placed;
         for (const AtomSite& s : sites)
         {
@@ -1426,6 +1595,13 @@ private:
                     err(a.loc,
                         "an `ensures` atom without a `requires` atom on a place decision 0052 item 2 does not allow");
                 }
+                else if (a.atom != AtomKind::Live && a.a != nullptr &&
+                         (member_array_base(a.a) || pointee_has_array(a.a->type)))
+                {
+                    // decision 0064 item 4 (a backstop gap closed in part A): the array parts of a structure have no output amount (lowering's array-part guards report an internal error)
+                    err(a.loc,
+                        "an `ensures` atom without a `requires` atom on a structure with an array member or on an array member (decision 0063 item 7: M4.5e1e2, Part D)");
+                }
                 else if (f.body == nullptr && atom_place(a).root != kResultSiteKey)
                 {
                     // item 2a: a bodiless contract is trusted; a partnerless atom on anything but the result gives the
@@ -1497,14 +1673,14 @@ private:
                                      " (decision 0041 item 12)");
             }
         }
-        // `restrict` (item 2): backed by an `owns` that the `ensures` returns.
+        // decision 0064 item 19 (question 326), the backstop: cerastes does not model `restrict`, and the encoder refuses a parameter that carries it at the C line before a program
+        // reaches this point.  A program that arrives here with the flag set is refused, so no code path can verify one.
         for (size_t k {0U}; k < f.params.size(); ++k)
         {
-            if (f.params[k].is_restrict && !restrict_backed(f, static_cast<int>(k)))
+            if (f.params[k].is_restrict)
             {
-                err(f.params[k].loc,
-                    "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
-                        "' is `restrict` without `owns(*p)` or `owns_range(p, n)` in its `requires` and `ensures` (decision 0037 item 2, record 0060 item 14)");
+                err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
+                                         "' is `restrict`, which cerastes does not model (decision 0064 item 19)");
             }
         }
         init_markers(f, sites, block_sites);
@@ -1540,7 +1716,7 @@ private:
     }
 
     // Record 0060 item 3, the operands of a range atom (the encoder reports each first with its own message; this is the backstop): the base is a bare pointer parameter to a
-    // bool, an integer, an enumeration or a pointer (a structure is e1e's), the count an integer expression (not a bool, an enumeration, a pointer or a float) that reads no memory
+    // bool, an integer, an enumeration or a pointer (a structure is M4.5e1e2's, Part C), the count an integer expression (not a bool, an enumeration, a pointer or a float) that reads no memory
     // and names no result.  The atom is no implicit one and has no marker.
     void range_atom_operands(const Expr& e, Ctx ctx)
     {
@@ -1581,10 +1757,21 @@ private:
             return;
         }
         if (e.a->kind != Expr::Kind::Formal || !e.a->type.is_ptr() || !accepted_pointer(e.a->type) ||
-            e.a->type.pointee == nullptr || e.a->type.pointee->is_struct())
+            e.a->type.pointee == nullptr)
         {
             err(e.loc,
-                "a range permission atom of something other than a pointer parameter to a bool, an integer, an enumeration or a pointer (record 0060 item 3; other bases: M4.5e2, structures: M4.5e1e)");
+                "a range permission atom of something other than a pointer parameter to a bool, an integer, an enumeration, a pointer or a structure (record 0060 item 3, decision 0064 item 7; other bases: M4.5e2)");
+        }
+        else if (e.a->type.pointee->is_struct())
+        {
+            // decision 0064 item 7 (Part C1): a range over verified structures, per leaf path.  An element with an array member (arrays of arrays: Part E) or with an `owning` or
+            // `ref_to_uninit` member (Part D) has no rows yet
+            if (e.a->type.pointee->struct_type == nullptr || struct_has_array(*e.a->type.pointee->struct_type) ||
+                struct_has_marked(*e.a->type.pointee->struct_type))
+            {
+                err(e.loc,
+                    "a range permission atom over structures whose element holds an array member or an `owning` or `ref_to_uninit` member (decision 0064 item 7: M4.5e1e2 parts D and E)");
+            }
         }
         if (!e.b->type.is_int() || e.b->type.is_bool() || is_enum(e.b->type))
         {
@@ -2683,9 +2870,9 @@ private:
         else if (v.type.is_array())
         {
             // Decision 0059 item 2: an automatic array local is a block of `count` slots of a scalar or accepted-pointer element, always a cell.
-            if (!array_local_type(v.type))
+            if (!local_array_type(v.type))
             {
-                err(loc, "variable '" + v.name + "' is " + array_reason(v.type));
+                err(loc, "variable '" + v.name + "' is " + local_array_reason(v.type));
             }
             if (!v.address_taken)
             {
@@ -2922,7 +3109,9 @@ private:
                 loop_atom_sites(s);
                 for (const Clause& c : s.measure)
                 {
+                    in_loop_measure_ = true;
                     measure(c, Ctx::Annot, "decreases", /*memory_ok=*/true);
+                    in_loop_measure_ = false;
                 }
                 targets_.push_back(Target {s.jump_id, true});
                 scoped(s.body);
@@ -3242,6 +3431,13 @@ private:
                 {
                     err(s.loc, "an array copy between two array members of different types: " + s.expr->type.str() +
                                    " into " + s.addr->type.str() + " (decision 0063 item 13)");
+                    break;
+                }
+                if (s.addr->type.pointee != nullptr && s.addr->type.pointee->element != nullptr &&
+                    s.addr->type.pointee->element->is_struct())
+                {
+                    err(s.loc,
+                        "an array copy of a member that is an array of structures (decision 0064 item 12: the copy of such a member is leaf stores per element, Part C2's slice 3, not yet lifted)");
                     break;
                 }
                 array_addr_ok_.insert(s.addr);
@@ -3564,9 +3760,9 @@ private:
                             "the address of the array '" + e.var->name +
                                 "' outside an element address (decision 0059 item 10: the decay of an array is Part D)");
                     }
-                    else if (!array_local_type(e.var->type))
+                    else if (!local_array_type(e.var->type))
                     {
-                        err(e.loc, "the address of '" + e.var->name + "', which is " + array_reason(e.var->type));
+                        err(e.loc, "the address of '" + e.var->name + "', which is " + local_array_reason(e.var->type));
                     }
                     else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type)
                     {
@@ -3614,7 +3810,7 @@ private:
                       (e.a->a == nullptr || e.a->a->kind != Expr::Kind::ForallArg))))
                 {
                     err(e.loc,
-                        "a read in the body of a quantifier that is not `p[e]` or `*p` of a pointer argument (record 0061 item 4: members and globals are e1e's and 0041 item 12's)");
+                        "a read in the body of a quantifier that is not `p[e]` or `*p` of a pointer argument (record 0061 item 4: members and globals under a binder are M4.5e1e2's, Part F, and 0041 item 12's)");
                     break;
                 }
                 if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
@@ -3623,6 +3819,33 @@ private:
                     if (e.a != nullptr && e.a->kind == Expr::Kind::ElemAddr)
                     {
                         contract_elem_ok_.insert(e.a); // record 0060 item 5: `p[e]` read in a contract
+                    }
+                    if (const Expr* el {contract_struct_element(e.a)}; el != nullptr)
+                    {
+                        // decision 0064 item 7 (Part C1): `p[e].x` of a pointer parameter to structures, read as the leaf of the element's slot
+                        contract_elem_ok_.insert(el);
+                        contract_struct_elem_ok_.insert(el);
+                    }
+                }
+                else if (ctx == Ctx::Annot && (in_invariant_ || in_loop_measure_))
+                {
+                    // decision 0064 item 10 (Part C1): `p[e].x` of a pointer VARIABLE to structures in a loop invariant or measure (a parameter's local copy; the loop's places frame it by
+                    // the slot of the pointer's current value).  A global array's or an array member's element is C2's, `p[e].q[i]` and `*p[e].q` are refused where they stand.
+                    if (through_element_pointer(e.a))
+                    {
+                        err(e.loc,
+                            "a read through a pointer loaded from a member of an element of a pointer to structures in a loop invariant or measure (decision 0064 item 10: the range holds the member, not its pointee)");
+                        break;
+                    }
+                    // Only a parameter's own local copy whose function holds a range over structures on that parameter in its `requires` (the encoder's predicate, `struct_range_carried`): a
+                    // pointer with only a structure atom is the encoder's rejection ("write `p->x`"), and this is its backstop.
+                    if (const Expr* el {member_chain_root(e.a)};
+                        e.a != nullptr && e.a->kind == Expr::Kind::MemberAddr && el != nullptr &&
+                        el->kind == Expr::Kind::ElemAddr && el->a != nullptr && el->a->kind == Expr::Kind::Local &&
+                        el->a->var != nullptr && el->a->var->is_param_copy && fn_ != nullptr &&
+                        holds_struct_range_on(*fn_, el->a->var->param_index))
+                    {
+                        loop_struct_elem_ok_.insert(el);
                     }
                 }
                 if (e.a != nullptr && shared_addrs_.count(e.a) != 0U)
@@ -3655,6 +3878,8 @@ private:
                     // record 0060 item 5: the element `p[e]` of a pointer parameter (its ElemAddr is checked where it stands) is rooted at that parameter
                     const Expr* root {e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr
                                           ? (member_array_base(e.a->a) ? place_root(e.a->a) : e.a->a)
+                                      : contract_struct_element(e.a) != nullptr
+                                          ? contract_struct_root(contract_struct_element(e.a))
                                           : place_root(e.a)};
                     if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal &&
                         root->kind != Expr::Kind::GlobalAddr && root->kind != Expr::Kind::ForallArg &&
@@ -3781,6 +4006,15 @@ private:
                     }
                     array_addr_ok_.insert(e.a);
                 }
+                // decision 0064 item 4 (a backstop gap closed in part A): a written `owns(*q)` or `reads(*q)` of a loop invariant on a structure with an array member has no rows yet (its
+                // array parts are a written atom's: M4.5e1e2 Part D; lowering reports an internal error through its guarded leaf walk)
+                if (in_invariant_ && !member_array_atom && (e.atom == AtomKind::Owns || e.atom == AtomKind::Reads) &&
+                    pointee_has_array(e.a->type))
+                {
+                    err(e.loc,
+                        "a permission atom on a structure with an array member in a loop invariant (decision 0064 item 4: a written atom on such a structure is M4.5e1e2's, Part D)");
+                    break;
+                }
                 if (!sub(e.a))
                 {
                     break;
@@ -3836,6 +4070,12 @@ private:
                         err(e.loc,
                             "a permission atom on an array member of a place reached through a heap read (decision 0063 item 7, question 306: M4.5e1e2)");
                     }
+                    else if (stepped && !member_array_atom && pointee_has_array(e.a->type))
+                    {
+                        // decision 0064 item 4 (a backstop gap closed in part A): `owns(*p->q)` of a structure with an array member behind a load: no array-part site looks at the load
+                        err(e.loc,
+                            "a permission atom on a structure with an array member of a place reached through a heap read (decision 0063 item 7, question 306: M4.5e1e2, Part D)");
+                    }
                     else if (member && e.atom == AtomKind::Live)
                     {
                         err(e.loc,
@@ -3886,7 +4126,10 @@ private:
                 if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
                 {
                     // decision 0045 item 2: under loads and pointer leaves too (`p->q->x`)
-                    const Expr* root {place_root(&e)};
+                    const Expr* sel {contract_struct_element(&e)};
+                    const Expr* root {sel != nullptr && contract_struct_elem_ok_.count(sel) != 0U
+                                          ? contract_struct_root(sel)
+                                          : place_root(&e)};
                     if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
                     {
@@ -4087,13 +4330,39 @@ private:
                 }
                 if (!array_base)
                 {
-                    // Decision 0059 item 10: any accepted pointer is a base (`p[i]`, `&p[i]`); a pointer to a structure is e1e's, and the type is the pointer's own.
-                    if (!e.a->type.is_ptr() || !accepted_pointer(e.a->type) || e.a->type.pointee == nullptr ||
-                        e.a->type.pointee->is_struct())
+                    // Decision 0059 item 10: any accepted pointer is a base (`p[i]`, `&p[i]`); a pointer to a structure is M4.5e1e2's (Part B), and the type is the pointer's own.
+                    if (!e.a->type.is_ptr() || !accepted_pointer(e.a->type) || e.a->type.pointee == nullptr)
                     {
                         err(e.loc,
-                            "the address of an element of anything but a local array or a pointer to a bool, an integer, an enumeration or a pointer (decision 0059 item 10; structures: M4.5e1e)");
+                            "the address of an element of anything but a local array or a pointer to a bool, an integer, an enumeration, a structure or a pointer (decision 0059 item 10, decision 0064 item 5)");
                         break;
+                    }
+                    if (e.a->type.pointee->is_struct())
+                    {
+                        // decision 0064 item 5 (Part B): `p[i]` of a pointer to a verified structure in code; the element of a pointer in a contract is Part C's, and one whose
+                        // structure holds an array member is an array of arrays (Part E)
+                        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && contract_struct_elem_ok_.count(&e) == 0U)
+                        {
+                            err(e.loc,
+                                "the element of a pointer to a structure in a contract other than the read of one of its members, `p[e].x` (decision 0064 item 7)");
+                            break;
+                        }
+                        // a loop invariant or measure reads memory through the loop's places (item 10): `v[e].x` of a named local array is framed by the leaf's place, `p[e].x` through
+                        // a pointer is Part C's (the framing of an element of a pointer's range), refused here until then
+                        if ((in_invariant_ || in_loop_measure_) && loop_struct_elem_ok_.count(&e) == 0U)
+                        {
+                            err(e.loc,
+                                "the element of a pointer to a structure in a loop invariant or measure other than the read of one of its members through a local pointer, `p[e].x` (decision 0064 item 10)");
+                            break;
+                        }
+                        if (e.a->type.pointee->struct_type == nullptr ||
+                            struct_has_array(*e.a->type.pointee->struct_type) ||
+                            struct_has_marked(*e.a->type.pointee->struct_type))
+                        {
+                            err(e.loc,
+                                "the element of a pointer to a structure with an array member or an `owning` or `ref_to_uninit` member (decision 0064 item 2: M4.5e1e2 part E, M4.8)");
+                            break;
+                        }
                     }
                     if (!e.b->type.is_int() || is_enum(e.b->type))
                     {
@@ -4332,6 +4601,58 @@ private:
         }
         return a;
     }
+    // Decision 0064 item 7 (Part C1): the element of a pointer parameter under at least one member step of a pure chain (`p[e].x`, `p[e].t.y`): its `ElemAddr`, or null.
+    static const Expr* contract_struct_element(const Expr* a)
+    {
+        if (a == nullptr || a->kind != Expr::Kind::MemberAddr)
+        {
+            return nullptr;
+        }
+        const Expr* r {member_chain_root(a)};
+        // decision 0064 item 7 (Part C2): the base of the element may also be a global array of structures (`g[e].x`) or an array member of structures (`p->v[e].x`, `r->v[e].x`; its
+        // chain must be pure members over a parameter, a global or the result: the ElemAddr case checks it where it stands)
+        return r != nullptr && r->kind == Expr::Kind::ElemAddr && r->a != nullptr &&
+                       (r->a->kind == Expr::Kind::Formal || global_array_base(r->a) || member_array_base(r->a))
+                   ? r
+                   : nullptr;
+    }
+    // The root object of the element `el` that contract_struct_element found: the parameter or global the array's chain starts at (the ElemAddr's own base for a pointer parameter)
+    static const Expr* contract_struct_root(const Expr* el)
+    {
+        if (el->a->kind == Expr::Kind::Formal || global_array_base(el->a))
+        {
+            return el->a;
+        }
+        return member_chain_root(el->a);
+    }
+    // Decision 0064 item 10 (Part C1): the address `a` is reached through a pointer that was READ from a member of an element of a pointer to structures (`p[e].q[i]`, `*p[e].q`, `p[e].q->x`):
+    // the range holds the leaf `q`, not what it points to, so a loop invariant or measure reading the pointee is refused here rather than left to a framing assert that always fails
+    static bool through_element_pointer(const Expr* a)
+    {
+        while (a != nullptr)
+        {
+            if (a->kind == Expr::Kind::MemberAddr || a->kind == Expr::Kind::ElemAddr)
+            {
+                a = a->a;
+            }
+            else if (a->kind == Expr::Kind::Deref)
+            {
+                const Expr* r {member_chain_root(a->a)};
+                if (a->a != nullptr && a->a->kind == Expr::Kind::MemberAddr && r != nullptr &&
+                    r->kind == Expr::Kind::ElemAddr && r->a != nullptr && r->a->type.is_ptr() &&
+                    r->a->type.pointee != nullptr && r->a->type.pointee->is_struct())
+                {
+                    return true;
+                }
+                a = a->a;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return false;
+    }
     // Whether a struct type has an array member anywhere in its nest (decision 0063 item 4): a struct VALUE of one is part E's.
     static bool struct_has_array(const StructType& st, int depth = 0)
     {
@@ -4345,6 +4666,12 @@ private:
         }
         return false;
     }
+    // Whether `t` is a pointer to a structure that has an array member anywhere in its nest (decision 0064 item 4)
+    static bool pointee_has_array(const Type& t)
+    {
+        return t.is_ptr() && t.pointee != nullptr && t.pointee->is_struct() && t.pointee->struct_type != nullptr &&
+               struct_has_array(*t.pointee->struct_type);
+    }
     // The number of array elements a struct VALUE of this type holds (decision 0063 item 13: the width of the value view's tuple beyond its other leaves): the sum of the counts of
     // the array members of its nest.  A value of more than kMaxByValueArrayElements (vir.h) is M4.5f3's (questions 295, 309).
     static unsigned long long value_array_elems(const StructType& st, int depth = 0)
@@ -4354,12 +4681,36 @@ private:
         {
             if (m.type.is_array())
             {
-                n += m.type.count;
+                // decision 0064 item 4 (trap 4): an array of structures or of arrays stands for `count` elements of the element's width (every leaf of every element is a leaf of
+                // the value); for an array of scalars it is the count, as before
+                n += m.type.count * (m.type.element != nullptr ? value_width(*m.type.element, depth + 1) : 1U);
             }
             else if (depth < 64 && m.type.is_struct() && m.type.struct_type != nullptr)
             {
                 n += value_array_elems(*m.type.struct_type, depth + 1);
             }
+        }
+        return n;
+    }
+    // The number of leaves of a struct VALUE of type `t` (decision 0064 item 4): 1 for a scalar, the product of the counts for an array, the sum over the members for a structure
+    static unsigned long long value_width(const Type& t, int depth)
+    {
+        if (depth > 64)
+        {
+            return 1U;
+        }
+        if (t.is_array())
+        {
+            return t.count * (t.element != nullptr ? value_width(*t.element, depth + 1) : 1U);
+        }
+        if (!t.is_struct() || t.struct_type == nullptr)
+        {
+            return 1U;
+        }
+        unsigned long long n {0U};
+        for (const StructMember& m : t.struct_type->members)
+        {
+            n += value_width(m.type, depth + 1);
         }
         return n;
     }
@@ -4369,8 +4720,7 @@ private:
         for (const StructMember& m : st.members)
         {
             if (m.owning || m.ref_to_uninit ||
-                (depth < 64 && m.type.is_struct() && m.type.struct_type != nullptr &&
-                 struct_has_marked(*m.type.struct_type, depth + 1)))
+                (depth < 64 && held_struct(m.type) != nullptr && struct_has_marked(*held_struct(m.type), depth + 1)))
             {
                 return true;
             }
@@ -4861,6 +5211,35 @@ private:
         }
     }
 
+    // Whether `f`'s contract holds a range atom over structures (decision 0064 item 7, Part C1).  What is not lifted yet for such a function is refused where it appears: a loop in
+    // it (the range places of item 10) and a `pure` function that holds one (Part F).  Its calls and returns are lifted (slice 2a: the call rows of item 8; the pairing rows of item 7
+    // stay refused by `struct_range_neighbours` until 2b).
+    // Whether `f`'s `requires` holds a range atom over structures on its parameter number `param` (the pointer is the formal itself)
+    static bool holds_struct_range_on(const Function& f, int param)
+    {
+        for (const AtomSite& s : contract_atoms(f))
+        {
+            if (!s.in_ensures && s.atom != nullptr && is_range_atom(s.atom->atom) && s.atom->a != nullptr &&
+                s.atom->a->kind == Expr::Kind::Formal && s.atom->a->index == param && s.atom->a->type.is_ptr() &&
+                s.atom->a->type.pointee != nullptr && s.atom->a->type.pointee->is_struct())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool holds_struct_range(const Function& f)
+    {
+        for (const AtomSite& s : contract_atoms(f))
+        {
+            if (s.atom != nullptr && is_range_atom(s.atom->atom) && s.atom->a != nullptr && s.atom->a->type.is_ptr() &&
+                s.atom->a->type.pointee != nullptr && s.atom->a->type.pointee->is_struct())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
     void call(const Expr& e, Ctx ctx)
     {
         if (!seen_effects_.insert(&e).second)
@@ -5272,6 +5651,8 @@ private:
     std::set<const Expr*> seen_effects_;
     // checking a loop invariant clause: a permission atom of a pointer variable is accepted (decision 0040 item 5)
     bool in_invariant_ {false};
+    // a loop's `decreases` (Ctx::Annot, memory read like an invariant's; decision 0064 item 10)
+    bool in_loop_measure_ {false};
     // the invariant of a `do ... while (0)` loop is asserted once like a `check`: an application there takes the check form (owner, question 284)
     bool in_once_invariant_ {false};
     bool in_check_ {false}; // a `check` statement's expression (not C's `assert`): a quantifier may stand there
@@ -5289,6 +5670,10 @@ private:
     std::set<const Expr*> array_addr_ok_;
     // the ElemAddr nodes that are the operand of a Deref in a contract (record 0060 item 5: `p[e]` is a read there, `&p[e]` is not)
     std::set<const Expr*> contract_elem_ok_;
+    // the ElemAddr nodes of a pointer parameter to structures that stand under member steps in the place of a read in a contract (`p[e].x`, decision 0064 item 7)
+    std::set<const Expr*> contract_struct_elem_ok_;
+    // the same in a loop invariant or measure: the ElemAddr nodes of a local pointer to structures under member steps (`p[e].x`, decision 0064 item 10)
+    std::set<const Expr*> loop_struct_elem_ok_;
     std::unordered_set<const StructType*> structs_; // the program's struct types
     // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field
     // operand; decision 0044 item 2)
@@ -5551,6 +5936,67 @@ private:
     // The object a place `*addr` is: `x` for `&x`, `*v` for a pointer variable `v` as written (decision 0039 item 3, audit S9), and `**v`, `***v`, ... when
     // the address is itself a read through `v` (`addr` = `*v`, `**v`: decision 0040, P62 A8); none for any other address (the path-precise check of
     // lowering covers it).
+    // The key path of the element `x` = ElemAddr of a NAMED array (a local, a global, an array member: decision 0059 item 9, 0063 item 11): the array's own key `*base` and the steps
+    // `{-2, c}` (a constant index) or `{-3, id}` (a local index).  Decision 0064 item 11: the same for an element of an array of structures; a pointer base has no key (lowering's
+    // path-precise row decides).  False for anything else.
+    bool elem_key(const Expr* x, int* base, std::vector<int>* path)
+    {
+        while (x != nullptr && x->kind == Expr::Kind::ReportAt)
+        {
+            x = x->a;
+        }
+        if (x == nullptr || x->kind != Expr::Kind::ElemAddr)
+        {
+            return false;
+        }
+        const Expr* b {x->a};
+        const Expr* index {x->b};
+        while (index != nullptr && index->kind == Expr::Kind::ReportAt)
+        {
+            index = index->a;
+        }
+        // decision 0063 item 11: the element of a global or `static` array by name is its own object (`g[0]` and `g[1]` differ), keyed by the global's key
+        const bool global_base {b != nullptr && b->kind == Expr::Kind::GlobalAddr && b->global != nullptr};
+        // decision 0063 item 11 (part C): the element of an array member is its own object, keyed by the member object (the structure's base object and the member path)
+        const bool member_base {b != nullptr && b->kind == Expr::Kind::MemberAddr};
+        if (b == nullptr || index == nullptr ||
+            (!global_base && !member_base && (b->kind != Expr::Kind::AddrOf || b->var == nullptr)))
+        {
+            return false;
+        }
+        std::vector<int> steps;
+        if (index->kind == Expr::Kind::Const && index->type.is_int() && dec::valid(index->value) &&
+            index->value.size() < 9U)
+        {
+            steps = {-2, std::stoi(index->value)};
+        }
+        else if (index->kind == Expr::Kind::Local && index->var != nullptr)
+        {
+            steps = {-3, index->var->id};
+        }
+        else
+        {
+            return false;
+        }
+        if (member_base)
+        {
+            std::vector<int> mpath;
+            const Expr* root {member_root(b, &mpath)};
+            int obj {0};
+            if (mpath.empty() || !object_of_root(root, &obj))
+            {
+                return false;
+            }
+            mpath.insert(mpath.end(), steps.begin(), steps.end());
+            *base = obj;
+            *path = std::move(mpath);
+            return true;
+        }
+        *base = global_base ? kGlobalKeyBase + b->global->id : b->var->id;
+        *path = std::move(steps);
+        return true;
+    }
+
     bool object_of(const Expr* addr, int* key)
     {
         // An element `a[i]` of an array local whose index is a constant or a local read, named as written (decision 0059 item 9): the array's id and the index.  Two
@@ -5563,61 +6009,37 @@ private:
             }
             if (x != nullptr && x->kind == Expr::Kind::ElemAddr)
             {
-                const Expr* base {x->a};
-                const Expr* index {x->b};
-                while (index != nullptr && index->kind == Expr::Kind::ReportAt)
-                {
-                    index = index->a;
-                }
-                // decision 0063 item 11: the element of a global or `static` array by name is its own object (`g[0]` and `g[1]` differ), keyed by the global's key
-                const bool global_base {base != nullptr && base->kind == Expr::Kind::GlobalAddr &&
-                                        base->global != nullptr};
-                // decision 0063 item 11 (part C): the element of an array member is its own object, keyed by the member object (the structure's base object and the member path)
-                const bool member_base {base != nullptr && base->kind == Expr::Kind::MemberAddr};
-                if (base == nullptr || index == nullptr ||
-                    (!global_base && !member_base && (base->kind != Expr::Kind::AddrOf || base->var == nullptr)))
-                {
-                    return false;
-                }
+                int base {0};
                 std::vector<int> path;
-                if (index->kind == Expr::Kind::Const && index->type.is_int() && dec::valid(index->value) &&
-                    index->value.size() < 9U)
-                {
-                    path = {-2, std::stoi(index->value)};
-                }
-                else if (index->kind == Expr::Kind::Local && index->var != nullptr)
-                {
-                    path = {-3, index->var->id};
-                }
-                else
+                if (!elem_key(x, &base, &path))
                 {
                     return false;
                 }
-                if (member_base)
-                {
-                    std::vector<int> mpath;
-                    const Expr* root {member_root(base, &mpath)};
-                    int obj {0};
-                    if (mpath.empty() || !object_of_root(root, &obj))
-                    {
-                        return false;
-                    }
-                    mpath.insert(mpath.end(), path.begin(), path.end());
-                    *key = member_key(obj, mpath, place_text(*x));
-                    return true;
-                }
-                *key =
-                    member_key(global_base ? kGlobalKeyBase + base->global->id : base->var->id, path, place_text(*x));
+                *key = member_key(base, path, place_text(*x));
                 return true;
             }
         }
-        // A member place `&s.x`, `&p->x`, `&s.t.x`: the base object of the root (as below, for the address the MemberAddrs stand on) and the member path.
+        // A member place `&s.x`, `&p->x`, `&s.t.x`: the base object of the root (as below, for the address the MemberAddrs stand on) and the member path.  Decision 0064 item 11: a member
+        // of an element of a named array (`v[i].x`, `v[i].t.x`) is the element's key and the member steps.
         std::vector<int> path;
         const Expr* root {member_root(addr, &path)};
         if (root != addr)
         {
             int base {0};
-            if (path.empty() || !object_of_root(root, &base))
+            if (path.empty())
+            {
+                return false;
+            }
+            if (root != nullptr && root->kind == Expr::Kind::ElemAddr)
+            {
+                std::vector<int> prefix;
+                if (!elem_key(root, &base, &prefix))
+                {
+                    return false;
+                }
+                path.insert(path.begin(), prefix.begin(), prefix.end());
+            }
+            else if (!object_of_root(root, &base))
             {
                 return false;
             }
@@ -5952,7 +6374,18 @@ private:
         std::vector<int> path;
         const Expr* root {member_root(addr, &path)};
         int base {0};
-        if (!object_of_root(root, &base))
+        if (root != nullptr && root->kind == Expr::Kind::ElemAddr)
+        {
+            // decision 0064 items 4 and 11 (audit round 1, issue 9): the destination is an element of a named array of structures, or a member of one (`v[i] = f();`,
+            // `v[i].t = f();`): its leaves are the element's key steps, the member steps and the leaf's own
+            std::vector<int> prefix;
+            if (!elem_key(root, &base, &prefix))
+            {
+                return;
+            }
+            path.insert(path.begin(), prefix.begin(), prefix.end());
+        }
+        else if (!object_of_root(root, &base))
         {
             return;
         }
@@ -5963,10 +6396,14 @@ private:
             leaf_path.insert(leaf_path.end(), l.path.begin(), l.path.end());
             if (l.array)
             {
-                // decision 0063 items 11 and 13: an array leaf is written element by element; an element is its own object, keyed `{leaf path, -2, i}` or `{leaf path, -3, variable}`
+                // decision 0063 items 11 and 13: an array leaf is written element by element; an element is its own object, keyed `{leaf path, -2, i}` or `{leaf path, -3, variable}`.
+                // Decision 0064 items 4 and 11 (audit round 1, issue 9): for an array member of structures or arrays (`aggregate_element`) every object below that member is such an
+                // element, or a leaf of one, keyed by the member's path, an index step and the steps after it (`{leaf path, -2, i, member...}`), so the keys are matched by the prefix: a
+                // store of the structure writes every one of them.  For an array of scalars the key is exactly `{leaf path, -2 or -3, i}`, as before.
                 for (const auto& [mk, key] : member_keys_)
                 {
-                    if (mk.first != base || mk.second.size() != leaf_path.size() + 2U ||
+                    if (mk.first != base || mk.second.size() < leaf_path.size() + 2U ||
+                        (!l.aggregate_element && mk.second.size() != leaf_path.size() + 2U) ||
                         !std::equal(leaf_path.begin(), leaf_path.end(), mk.second.begin()) ||
                         (mk.second[leaf_path.size()] != -2 && mk.second[leaf_path.size()] != -3))
                     {

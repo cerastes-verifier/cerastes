@@ -934,7 +934,9 @@ void define_ranges_lowering()
            f->body = k.blk({});
            k.done(f);
        });
-    rc("range_rej_struct_pointee", "a range permission atom of something other than a pointer parameter",
+    // Part C1 lifts this refusal (the text said "structures: M4.5e1e2"; flipped from `rc`): the contract of one function over structures is accepted
+    lc("range_struct_pointee",
+       "requires(owns_range(sp, n)) with a struct S *sp: accepted, the rows of its one leaf path",
        [=](Kit& k)
        {
            // requires(owns_range(sp, n)) with a struct S *sp
@@ -2301,11 +2303,11 @@ void define_range_loops()
        });
 }
 
-// ---- Part E: markers over a range, and `restrict` backed by a range (record 0060 items 12 and 14) ----
+// ---- Part E: markers over a range (record 0060 item 12) ----
 // `must_init` and `ref_to_uninit` on a parameter whose `requires` atom is `owns_range(p, n)` (decision 0042 items 4-8 over a range): the `requires` atom has no flags conjunct and
 // states the type's range under the flag; `must_init`'s `ensures` atom is the plain one and the flags row at a return is the promise (`postcondition`, "returns without initializing every
 // element of `p[0..3)`, which `cerastes::must_init` on `p` promises"); `ref_to_uninit`'s `ensures` atom keeps a flag that was set (`old(flag) ==> flag`, an `internal` row at the return);
-// a call has no flags row for a marked parameter.  `owns_range(p, n)` unguarded or after `p == NULL ||`, in both lists, backs `restrict`.
+// a call has no flags row for a marked parameter.
 void define_range_markers()
 {
     auto N = [](Kit& k, const char* v)
@@ -2328,10 +2330,6 @@ void define_range_markers()
     auto ROn = [=](Kit& k, Function* f, int p, int n, int amount)
     {
         return k.b.range_atom(AtomKind::OwnsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
-    };
-    auto RRn = [=](Kit& k, Function* f, int p, int n, int amount)
-    {
-        return k.b.range_atom(AtomKind::ReadsRange, fx(k, f, p), fx(k, f, n), amount, k.at());
     };
     auto bat = [](Kit& k, Function* f, int p, const Expr* idx)
     {
@@ -2536,95 +2534,6 @@ void define_range_markers()
        [=](Kit& k)
        {
            k.fail("uninitialized", ref_caller(k, 1)->loc);
-       });
-
-    // ---- `restrict` backed by a range ----
-    // int rg(int *restrict p, int n) requires([p == NULL ||] owns_range(p, n)) ensures([p == NULL ||] owns_range(p, n)) { [check(false);] return 0; }
-    const auto restrict_range = [=](Kit& k, bool guarded, bool vac) -> const Stmt*
-    {
-        Function* f {k.fn("rg", k.i32, {{"p", PI(k)}, {"n", k.i32}})};
-        f->params[0U].is_restrict = true;
-        auto atom = [&](int amount)
-        {
-            const Expr* a {ROn(k, f, 0, 1, amount)};
-            return guarded ? k.lor(k.eq(fx(k, f, 0), k.nul(PI(k))), a) : a;
-        };
-        k.req(f, atom(0));
-        k.ens(f, atom(0));
-        const Stmt* c {vac ? k.chk(k.no()) : nullptr};
-        std::vector<const Stmt*> st;
-        if (c != nullptr)
-        {
-            st.push_back(c);
-        }
-        st.push_back(k.ret(N(k, "0")));
-        f->body = k.blk(std::move(st));
-        k.done(f);
-        return c;
-    };
-    lc("rngm_restrict_range", "int *restrict p backed by owns_range(p, n) in both lists",
-       [=](Kit& k)
-       {
-           restrict_range(k, false, false);
-       });
-    lc("rngm_restrict_range_vacuity", "the same with check(false): it fails",
-       [=](Kit& k)
-       {
-           vac_fail(k, restrict_range(k, false, true));
-       });
-    lc("rngm_restrict_range_null", "the atom after p == NULL ||, in both lists",
-       [=](Kit& k)
-       {
-           restrict_range(k, true, false);
-       });
-    lc("rngm_restrict_range_null_vacuity", "the same with check(false): it fails",
-       [=](Kit& k)
-       {
-           vac_fail(k, restrict_range(k, true, true));
-       });
-    // int rq(int *restrict p, int n, int *q, int m) requires(owns_range(p, n) && reads_range(q, m)) ensures(the same): another parameter of the pointee type has a range atom of its own
-    lc("rngm_restrict_range_other_covered", "another int * parameter covered by a reads_range of its own: accepted",
-       [=](Kit& k)
-       {
-           Function* f {k.fn("rq", k.i32, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}, {"m", k.i32}})};
-           f->params[0U].is_restrict = true;
-           k.req(f, k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)));
-           k.ens(f, k.land(ROn(k, f, 0, 1, 0), RRn(k, f, 2, 3, 1)));
-           f->body = k.blk({k.ret(N(k, "0"))});
-           k.done(f);
-       });
-    rc("rngm_rej_restrict_reads_range", "restrict",
-       [=](Kit& k)
-       {
-           // a reads_range does not back restrict: nothing is owned
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
-           f->params[0U].is_restrict = true;
-           k.req(f, RRn(k, f, 0, 1, 0));
-           k.ens(f, RRn(k, f, 0, 1, 0));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("rngm_rej_restrict_range_guard", "restrict",
-       [=](Kit& k)
-       {
-           // n == 0 || owns_range(p, n): a guard that is not `p == NULL` does not back restrict
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}})};
-           f->params[0U].is_restrict = true;
-           k.req(f, k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), ROn(k, f, 0, 1, 0)));
-           k.ens(f, k.lor(k.eq_c(fx(k, f, 1), k.i32, "0"), ROn(k, f, 0, 1, 0)));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("rngm_rej_restrict_range_other_uncovered", "restrict",
-       [=](Kit& k)
-       {
-           // another int * parameter with no atom of its own could alias the restrict pointer's elements
-           Function* f {k.fn("f", k.vd, {{"p", PI(k)}, {"n", k.i32}, {"q", PI(k)}})};
-           f->params[0U].is_restrict = true;
-           k.req(f, ROn(k, f, 0, 1, 0));
-           k.ens(f, ROn(k, f, 0, 1, 0));
-           f->body = k.blk({});
-           k.done(f);
        });
 }
 

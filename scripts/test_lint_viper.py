@@ -6635,6 +6635,425 @@ class ArrayQuantifierTests(unittest.TestCase):
         self.assertTrue(any("no earlier `label lh_0`" in p for p in self.probs(lines)))
 
 
+class AggregateArrayAllocationTests(unittest.TestCase):
+    """Decision 0064 items 3, 6 and 17: `alloc_arr_<E>` and `zero_arr_<E>` of an array whose element is a structure are trusted, so they are pinned by
+    their clause sets, read from the clauses themselves (the layout is not in the name): one quantifier of length facts with the slot of element `k`
+    as its trigger, then per leaf of the element three (the allocation) or six (the zero fill) quantified rows with the leaf receiver as trigger, each
+    (receiver, field) once.  Each mutant breaks one thing and must be refused with its own reason; the two dangerous ones are a permission the zero
+    fill gives and never took, and a leaf the length facts do not state."""
+
+    SLOT = "loc(block_of(r), k)"
+    ROOT = "((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"
+    LIVE = "(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"
+    ZERO_ROOT = "((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"
+
+    def recv(self, chain):
+        x = self.SLOT
+        for j in chain:
+            x = f"loc(member({x}, {j}), 0)"
+        return x
+
+    def member(self, chain):
+        return f"member({self.recv(chain[:-1])}, {chain[-1]})"
+
+    @staticmethod
+    def q(trigger, body, hi="n", lo="0", k="k"):
+        return f"forall {k}: Int :: {{ {trigger} }} (({lo} <= {k}) && ({k} < {hi})) ==> {body}"
+
+    def lens(self, members, facts=()):
+        parts = [f"(len({self.member(m)}) == 1)" for m in members] + [f"({a} != {b})" for a, b in facts]
+        return self.q(self.SLOT, " && ".join(parts))
+
+    def leaf_rows(self, chain, t="int"):
+        r = self.recv(chain)
+        return [("ensures", self.q(r, f"acc({r}.v_{t})")), ("ensures", self.q(r, f"acc({r}.d_{t})")), ("ensures", self.q(r, f"(!{r}.d_{t})"))]
+
+    def alloc(self, leaves=((0,), (1,)), members=None, facts=(), t="int"):
+        members = members if members is not None else [c for c in leaves]
+        out = [("requires", "1 <= n"), ("ensures", self.ROOT), ("ensures", self.lens(members, facts))]
+        for c in leaves:
+            out += self.leaf_rows(c, t)
+        return out + [("ensures", self.LIVE)]
+
+    def zero(self, leaves=((0,), (1,)), t="int", zero="0"):
+        out = [("requires", self.ZERO_ROOT)]
+        for c in leaves:
+            r = self.recv(c)
+            out += [("requires", self.q(r, f"acc({r}.v_{t})")), ("requires", self.q(r, f"acc({r}.d_{t})")),
+                    ("ensures", self.q(r, f"acc({r}.v_{t})")), ("ensures", self.q(r, f"acc({r}.d_{t})")),
+                    ("ensures", self.q(r, f"({r}.v_{t} == {zero})")), ("ensures", self.q(r, f"{r}.d_{t}"))]
+        return out
+
+    def method(self, name, clauses, header=None, tail="  decreases _", fields=(("int", "Int"),), declare=True):
+        head = header or (f"method {name}(n: Int) returns (r: Ref)" if name.startswith("alloc_arr_") else f"method {name}(r: Ref, n: Int)")
+        body = [Check(f"  {kw} {text}", WF if kw == "requires" else P, "internal") for kw, text in clauses]
+        decls = [x for t, ty in fields for x in (f"field v_{t}: {ty}", f"field d_{t}: Bool")] + ["field lv: Bool"] if declare else []
+        return [*decls, "// cerastes:trusted-contract array allocation", head, *body, tail]
+
+    def probs(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0064 items 3 and 6" in p]
+
+    def refused(self, lines, reason):
+        probs = self.probs(lines)
+        self.assertTrue(any(reason in p for p in probs), (reason, probs))
+
+    def clean(self, lines):
+        self.assertEqual(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    NESTED = dict(leaves=((0, 0), (1,)), members=[(0,), (0, 0), (1,)])
+
+    def nested(self, **kw):
+        a, b = self.recv(()), self.recv((0,))
+        return self.alloc(facts=[(a, b)], **self.NESTED, **kw)
+
+    def test_the_allocation_is_clean_for_each_shape_of_element(self):
+        self.clean(self.method("alloc_arr_P", self.alloc()))
+        self.clean(self.method("alloc_arr_P", self.alloc(leaves=((0,),))))
+        self.clean(self.method("alloc_arr_P", self.alloc(leaves=((0,), (1,), (2,), (3,)))))
+        # a structure member that is itself a structure: its own member blocks and the slot fact of decision 0043 item 4
+        self.clean(self.method("alloc_arr_P", self.nested()))
+        for t, ty in (("bool", "Bool"), ("ptr_int", "Ref")):
+            self.clean(self.method("alloc_arr_P", self.alloc(t=t), fields=((t, ty),)))
+
+    def test_the_order_of_the_clauses_is_not_part_of_the_contract(self):
+        clauses = self.alloc()
+        self.clean(self.method("alloc_arr_P", list(reversed(clauses))))
+
+    def test_the_zero_fill_is_clean_and_agrees_with_its_allocation(self):
+        both = self.method("alloc_arr_P", self.alloc()) + self.method("zero_arr_P", self.zero(), declare=False)
+        self.clean(both)
+        self.clean(self.method("zero_arr_P", self.zero()))
+        self.clean(self.method("alloc_arr_P", self.nested()) + self.method("zero_arr_P", self.zero(leaves=((0, 0), (1,))), declare=False))
+        for t, ty, zero in (("bool", "Bool", "false"), ("ptr_int", "Ref", "null")):
+            self.clean(self.method("zero_arr_P", self.zero(t=t, zero=zero), fields=((t, ty),)))
+
+    def test_every_clause_of_the_allocation_is_needed(self):
+        base = self.alloc()
+        reasons = {0: "a clause is missing", 1: "a clause is missing", 2: "a clause is missing", len(base) - 1: "a clause is missing"}
+        for i, (kw, text) in enumerate(base):
+            with self.subTest(dropped=i):
+                self.refused(self.method("alloc_arr_P", base[:i] + base[i + 1:]), reasons.get(i, "lacks its"))
+
+    def test_a_clause_given_twice_is_refused(self):
+        base = self.alloc()
+        for i, reason in ((0, "twice"), (1, "twice"), (2, "twice"), (3, "twice"), (4, "twice"), (5, "twice"), (len(base) - 1, "twice")):
+            with self.subTest(clause=i):
+                self.refused(self.method("alloc_arr_P", base + [base[i]]), reason)
+
+    def test_the_leaves_are_the_leaves_the_length_facts_state(self):
+        # a leaf with permissions and no member block (a permission to a cell the facts never give a block): the dangerous direction
+        self.refused(self.method("alloc_arr_P", self.alloc(leaves=((0,), (1,)), members=[(0,)])), "are not the leaves")
+        # a member block the facts state and no permission for it
+        self.refused(self.method("alloc_arr_P", self.alloc(leaves=((0,),), members=[(0,), (1,)])), "are not the leaves")
+        # a nested structure's member without its slot fact, and the slot fact alone
+        a, b = self.recv(()), self.recv((0,))
+        self.refused(self.method("alloc_arr_P", self.alloc(**self.NESTED)), "the length facts")
+        self.refused(self.method("alloc_arr_P", self.alloc(facts=[(a, b)])), "the length facts")
+
+    def test_the_length_facts_state_one_slot_each_and_nothing_else(self):
+        for label, lens in (("a count of 4 (an array member: Part E)", self.q(self.SLOT, f"(len({self.member((0,))}) == 4) && (len({self.member((1,))}) == 1)")),
+                            ("a count of 0", self.q(self.SLOT, f"(len({self.member((0,))}) == 0) && (len({self.member((1,))}) == 1)")),
+                            ("a member twice", self.q(self.SLOT, f"(len({self.member((0,))}) == 1) && (len({self.member((0,))}) == 1) && (len({self.member((1,))}) == 1)")),
+                            ("an extra fact", self.q(self.SLOT, f"(len({self.member((0,))}) == 1) && (len({self.member((1,))}) == 1) && (n > 5)")),
+                            ("a member of another block", self.q(self.SLOT, f"(len({self.member((0,))}) == 1) && (len(member(loc(block_of(s), k), 1)) == 1)"))):
+            with self.subTest(mutant=label):
+                clauses = self.alloc()
+                clauses[2] = ("ensures", lens)
+                self.refused(self.method("alloc_arr_P", clauses), "the length facts")
+
+    def test_the_length_facts_stand_in_an_ensures_over_the_slot_only(self):
+        clauses = self.alloc()
+        self.refused(self.method("alloc_arr_P", clauses[:2] + [("requires", clauses[2][1])] + clauses[3:]),
+                     "is not `1 <= n`")  # a `requires` of the allocation is only `1 <= n`
+        # the facts over a range other than the leaves' (the same range in every clause)
+        wide = self.alloc()
+        wide[2] = ("ensures", self.q(self.SLOT, wide[2][1].split("==> ")[1], hi="n + 1"))
+        self.refused(self.method("alloc_arr_P", wide), "is not one of the clauses")
+
+    def test_a_quantified_clause_has_the_range_and_the_binder_of_the_record(self):
+        base = self.alloc()
+        r = self.recv((0,))
+        for label, text, reason in (
+                ("k <= n", self.q(r, f"acc({r}.v_int)").replace("(k < n)", "(k <= n)"), "is not one of the clauses"),
+                ("-1 <= k", self.q(r, f"acc({r}.v_int)").replace("(0 <= k)", "(-1 <= k)"), "is not one of the clauses"),
+                ("a literal count", self.q(r, f"acc({r}.v_int)", hi="3"), "over `0 <= k && k < n`"),
+                ("a binder j", self.q(r, f"acc({r}.v_int)", k="j").replace("loc(block_of(r), k)", "loc(block_of(r), j)"), "binder `k`"),
+                ("a start at 1", self.q(r, f"acc({r}.v_int)", lo="1"), "over `0 <= k && k < n`"),
+                ("no trigger", self.q(r, f"acc({r}.v_int)").replace(f"{{ {r} }} ", ""), "is not one of the clauses"),
+                ("a second binder", self.q(r, f"acc({r}.v_int)").replace("forall k: Int ::", "forall k: Int, j: Int ::"), "is not one of the clauses")):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base[:3] + [("ensures", text)] + base[4:]), reason)
+
+    def test_the_trigger_the_receiver_and_the_cell_are_one_term(self):
+        base = self.alloc()
+        r0, r1 = self.recv((0,)), self.recv((1,))
+        for label, text, reason in (
+                ("an acc of another leaf than the trigger", self.q(r0, f"acc({r1}.v_int)"), "the consequent is not one of the leaf's rows"),
+                ("an acc of the slot's own cell", self.q(r0, "acc(loc(block_of(r), k).v_int)"), "the consequent is not one of the leaf's rows"),
+                ("a trigger rooted at another variable", self.q(r0.replace("block_of(r)", "block_of(s)"), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a trigger with arithmetic", self.q(r0.replace("k)", "k + 1)"), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a trigger with a variable member index", self.q(r0.replace("), 0), 0)", "), j), 0)"), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a trigger that skips the cell step", self.q(self.member((0,)), f"acc({r0}.v_int)"), "the trigger is not the slot"),
+                ("a flag that is not negated", self.q(r0, f"{r0}.d_int"), "the consequent is not one of the leaf's rows"),
+                ("a value row", self.q(r0, f"({r0}.v_int == 0)"), "the consequent is not one of the leaf's rows"),
+                ("a fraction", self.q(r0, f"acc({r0}.v_int, 1 / 2)"), "the consequent is not one of the leaf's rows")):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base[:3] + [("ensures", text)] + base[4:]), reason)
+
+    def test_a_leaf_row_in_the_requires_of_an_allocation_is_refused(self):
+        r0 = self.recv((0,))
+        self.refused(self.method("alloc_arr_P", self.alloc() + [("requires", self.q(r0, f"acc({r0}.v_int)"))]), "is not `1 <= n`")
+
+    def test_each_leaf_has_one_field_suffix_and_it_is_declared(self):
+        base = self.alloc()
+        r0 = self.recv((0,))
+        mixed = base[:4] + [("ensures", self.q(r0, f"acc({r0}.d_long)"))] + base[5:]
+        self.refused(self.method("alloc_arr_P", mixed, fields=(("int", "Int"), ("long", "Int"))), "more than one field suffix")
+        self.refused(self.method("alloc_arr_P", self.alloc(t="long"), fields=(("int", "Int"),)), "is not declared")
+        self.clean(self.method("alloc_arr_P", self.alloc(t="long"), fields=(("long", "Int"),)))
+
+    def test_extra_contract_is_refused(self):
+        base = self.alloc()
+        for label, extra in (("ensures false", ("ensures", "false")), ("an ensures fact", ("ensures", "len(block_of(r)) == 1")),
+                             ("a bigger requires", ("requires", "n < 100")), ("an old", ("ensures", "n == old(n)"))):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base + [extra]), "is not")
+
+    def test_the_wrapper_is_pinned(self):
+        base = self.alloc()
+        for label, kw, reason in (("a body", {"tail": "  decreases _\n{\n}"}, "has a body"),
+                                  ("no decreases _", {"tail": "  decreases"}, "does not end with `decreases _`"),
+                                  ("a wider header", {"header": "method alloc_arr_P(n: Int, m: Int) returns (r: Ref)"}, "its header is not"),
+                                  ("no result", {"header": "method alloc_arr_P(n: Int)"}, "its header is not"),
+                                  ("an Int result", {"header": "method alloc_arr_P(n: Int) returns (r: Int)"}, "its header is not")):
+            with self.subTest(mutant=label):
+                self.refused(self.method("alloc_arr_P", base, **kw), reason)
+        lines = self.method("alloc_arr_P", base)
+        lines.insert(len(lines) - 1, "  assert true")
+        self.refused(lines, "not a `requires` or `ensures` clause")
+
+    def test_a_clause_without_a_member_is_the_scalar_rules(self):
+        # no `member(` in any clause: the scalar rule judges it (and refuses a name whose fields are not declared, decision 0059 item 3)
+        scalar = [c for c in ArrayAllocationTests().alloc_clauses("int")]
+        lines = self.method("alloc_arr_P", scalar)
+        probs = [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0059 item 3" in p]
+        self.assertTrue(any("is not declared" in p for p in probs), probs)
+        self.assertEqual([p for p in probs if "decision 0064" in p], [])
+
+    def test_every_clause_of_the_zero_fill_is_needed(self):
+        base = self.zero(leaves=((0,),))
+        reasons = {0: "the `requires` of the root facts is missing"}
+        for i in range(len(base)):
+            with self.subTest(dropped=i):
+                self.refused(self.method("zero_arr_P", base[:i] + base[i + 1:]), reasons.get(i, "lacks its"))
+
+    def test_the_zero_fill_cannot_give_a_permission_it_did_not_take(self):
+        base = self.zero(leaves=((0,),))
+        r1 = self.recv((1,))
+        # an `ensures acc` of a second leaf with no `requires acc`: it would conjure the permission
+        self.refused(self.method("zero_arr_P", base + [("ensures", self.q(r1, f"acc({r1}.v_int)"))]), "lacks its")
+        # the same with every row of the second leaf in the ensures only
+        more = base + [("ensures", self.q(r1, f"acc({r1}.v_int)")), ("ensures", self.q(r1, f"acc({r1}.d_int)")),
+                       ("ensures", self.q(r1, f"({r1}.v_int == 0)")), ("ensures", self.q(r1, f"{r1}.d_int"))]
+        self.refused(self.method("zero_arr_P", more), "lacks its `requires acc_v`")
+
+    def test_the_zero_literal_follows_the_fields_type(self):
+        for t, ty, zero, wrong in (("int", "Int", "0", "1"), ("bool", "Bool", "false", "true"), ("ptr_int", "Ref", "null", "r")):
+            with self.subTest(t=t):
+                self.refused(self.method("zero_arr_P", self.zero(t=t, zero=wrong), fields=((t, ty),)), "the zero literal")
+        self.refused(self.method("zero_arr_P", self.zero(t="bool", zero="0"), fields=(("bool", "Bool"),)), "the zero literal")
+
+    def test_a_zero_fill_states_the_leaves_of_its_allocation(self):
+        alloc = self.method("alloc_arr_P", self.alloc(leaves=((0,), (1,))))
+        for leaves in (((0,),), ((0,), (1,), (2,)), ((0,), (2,))):
+            with self.subTest(leaves=leaves):
+                probs = [p for p in lv.lint_vpr(*build(alloc + self.method("zero_arr_P", self.zero(leaves=leaves), declare=False)), "t.vpr", "t.vpr.map")
+                         if "not the leaves of" in p]
+                self.assertTrue(any("not the leaves of `alloc_arr_P`" in p for p in probs), probs)
+
+    def test_the_zero_fill_has_its_own_header_and_no_length_facts(self):
+        base = self.zero()
+        self.refused(self.method("zero_arr_P", base, header="method zero_arr_P(r: Ref, n: Int) returns (s: Ref)"), "its header is not")
+        self.refused(self.method("zero_arr_P", base, header="method zero_arr_P(n: Int, r: Ref)"), "its header is not")
+        self.refused(self.method("zero_arr_P", base + [("ensures", self.lens([(0,), (1,)]))]), "the length facts stand in the `ensures` of an allocation only")
+
+
+class LeafRowTests(unittest.TestCase):
+    """Decision 0064 item 17: the rows of a local array of structures in code.  A row over a LEAF has the receiver `loc(member(<chain>, j), 0)` of the
+    canonical chain rooted at the slot `loc(block_of(X), k)` of element `k` (X a variable) for its trigger and for the cell of its `acc`; it is a marked
+    `assert` row (with its expected reason), a range `exhale` or one of item 8's loop conjuncts, and nowhere else (a contract's atom rows and the pure
+    rows of a call are the part that lifts a range atom over structures).  The older rows keep their rules."""
+
+    SLOT = "loc(block_of(v_a), k)"
+
+    def recv(self, chain=(0,), block="block_of(v_a)", k="k"):
+        x = f"loc({block}, {k})"
+        for j in chain:
+            x = f"loc(member({x}, {j}), 0)"
+        return x
+
+    def quant(self, body, chain=(0,), trigger=None, lo="0", hi="3", k="k", block="block_of(v_a)", binders=None):
+        return (f"forall {binders or f'{k}: Int'} :: {{ {trigger or self.recv(chain, block, k)} }} (({lo} <= {k}) && ({k} < {hi})) ==> {body}")
+
+    def acc(self, f="v_int", chain=(0,), amount="", block="block_of(v_a)"):
+        return f"acc({self.recv(chain, block)}.{f}{amount})"
+
+    def method(self, body):
+        return ["method m__1()", "  decreases", "{", "  var v_a: Ref", *body, "}"]
+
+    def row(self, text=None, ident=MARKED, kind="assert"):
+        return Check(f"  {kind} {text or self.quant(self.acc())}", ident, "permission")
+
+    def probs(self, lines, keep=R0059):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if keep in p]
+
+    def refused(self, lines, reason=None):
+        probs = self.probs(lines)
+        self.assertTrue(probs and (reason is None or any(reason in p for p in probs)), (reason, probs))
+
+    def test_marked_rows_and_the_range_exhale_over_leaves_are_clean(self):
+        rows = [self.row(self.quant(self.acc(f, c), c)) for c in ((0,), (1,), (0, 1)) for f in ("v_int", "d_int")]
+        exhales = [f"  exhale {self.quant(self.acc(f, c), c)}" for c in ((0,), (1,)) for f in ("v_int", "d_int")]
+        lines = self.method([*rows, Check("  assert !(perm(lvloc(block_of(v_a)).lv) != write)", A, "lifetime"), *exhales, "  exhale acc(lvloc(block_of(v_a)).lv)"])
+        self.assertEqual(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    def test_a_row_may_carry_an_amount_and_a_heap_free_range(self):
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(amount=", write")))])), [])
+        self.assertEqual(self.probs(self.method([self.row(self.quant(self.acc(), lo="offset_of(t4)", hi="offset_of(t4) + t5"))])), [])
+        for label, kw in (("a heap read in the low bound", {"lo": "loc(t4, 0).v_int"}), ("perm in the high bound", {"hi": "perm(x.v_int)"})):
+            with self.subTest(mutant=label):
+                self.refused(self.method([self.row(self.quant(self.acc(), **kw))]), "not a marked range row")
+        for amount in (", perm(x.v_int)", ", loc(v_a, 0).v_int"):
+            with self.subTest(amount=amount):
+                self.refused(self.method([self.row(self.quant(self.acc(amount=amount)))]), "not a marked range row")
+
+    def test_a_marked_entry_on_a_leaf_row_is_needed_and_enough(self):
+        probs = self.probs(self.method([self.row(ident="assert.failed")]))
+        self.assertTrue(any("has no expected reason" in p for p in probs), probs)
+        self.assertEqual(self.probs(self.method([self.row()])), [])
+
+    def test_a_marked_entry_on_a_leaf_row_that_is_no_acc_is_a_problem(self):
+        flag = self.quant(self.recv() + ".d_int")
+        probs = self.probs(self.method([Check(f"  assert {flag}", MARKED, "permission")]))
+        self.assertTrue(any("carries the expected reason" in p for p in probs), probs)
+
+    def test_the_receiver_is_the_canonical_chain_rooted_at_the_slot(self):
+        r0 = self.recv()
+        for label, text in (
+                ("a cell of another leaf under the trigger", self.quant(self.acc("v_int", (1,)), trigger=r0)),
+                ("the slot as trigger and a leaf cell", self.quant(self.acc(), trigger=self.SLOT)),
+                ("a trigger that stops at the member block", self.quant(self.acc(), trigger=f"member({self.SLOT}, 0)")),
+                ("a variable member index", self.quant(self.acc()).replace("loc(member(loc(block_of(v_a), k), 0), 0)", "loc(member(loc(block_of(v_a), k), j), 0)")),
+                ("an offset in the slot", self.quant(self.acc()).replace("k), 0), 0)", "k + 1), 0), 0)")),
+                ("a block that is not a variable", self.quant(self.acc(block="block_of(f(v_a))"), block="block_of(f(v_a))")),
+                ("two roots", self.quant(self.acc()).replace("loc(member(loc(block_of(v_a), k), 0), 0).", "loc(member(loc(block_of(v_b), k), 0), 0).")),
+                ("a second binder", self.quant(self.acc(), binders="k: Int, j: Int")),
+                ("no trigger", self.quant(self.acc()).replace(f"{{ {r0} }} ", "")),
+                ("a trigger of another term", self.quant(self.acc(), trigger=f"offset_of({r0})"))):
+            with self.subTest(mutant=label):
+                self.refused(self.method([self.row(text)]))
+                self.refused(self.method([f"  exhale {text}"]))
+
+    def test_a_leaf_row_has_exactly_the_shape_of_a_marked_row(self):
+        two = self.quant(self.acc() + " && " + self.acc("d_int"))
+        not_acc = self.quant(self.recv() + ".d_int")
+        reversed_range = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "((k < 3) && (0 <= k))")
+        one_conjunct = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "(k < 3)")
+        extra = self.quant(self.acc()).replace("((0 <= k) && (k < 3))", "(((0 <= k) && (k < 3)) && true)")
+        guarded = f"(x > 0) ==> {self.quant(self.acc())}"
+        for label, text in (("two fields", two), ("not an acc", not_acc), ("range reversed", reversed_range), ("one range conjunct", one_conjunct),
+                            ("an extra antecedent", extra), ("a guard", guarded)):
+            with self.subTest(mutant=label):
+                self.refused(self.method([self.row(text)]))
+
+    def test_the_range_exhale_has_the_shape_too(self):
+        for label, text in (("two fields", self.quant(self.acc() + " && " + self.acc("d_int"))),
+                            ("an amount", self.quant(self.acc(amount=", write"))),
+                            ("a flag", self.quant(self.recv() + ".d_int"))):
+            with self.subTest(mutant=label):
+                self.refused(self.method([f"  exhale {text}"]))
+
+    def test_a_leaf_row_stands_nowhere_else(self):
+        q = self.quant(self.acc())
+        cases = {
+            "a requires": ["method m__2(v_a: Ref)", Check(f"  requires {q}", WF, "internal"), "  decreases", "{", "}"],
+            "an ensures": ["method m__2(v_a: Ref)", Check(f"  ensures {q}", P, "postcondition"), "  decreases", "{", "}"],
+            "a pure assert": self.method([Check(f"  assert {self.quant(self.recv() + '.d_int')}", A, "check")]),
+            "an assert in a conjunction": self.method([Check(f"  assert true && ({q})", A, "check")]),
+            "an inhale": self.method([f"  inhale {q} // cerastes:inhale-ok test"]),
+            "a Bool variable": self.method([f"  var b: Bool := {q}"]),
+        }
+        for label, lines in cases.items():
+            with self.subTest(case=label):
+                self.refused(lines, "`forall` outside the shapes")
+        # the contract's and the pure rows say whose they are
+        self.refused(cases["a requires"], "a row over a leaf of an array of structures")
+        self.refused(cases["a pure assert"], "a row over a leaf of an array of structures")
+
+    # --- item 8's loop conjuncts over a leaf
+    def conjuncts(self, chain=(0,)):
+        cell = self.recv(chain)
+        rng = "((0 <= k) && (k < 3))"
+        return {
+            "acc": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> acc({cell}.v_int)",
+            "acc flag": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> acc({cell}.d_int)",
+            "flags": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && old[lh_0]({cell}.d_int)) ==> {cell}.d_int",
+            "range": f"    invariant forall k: Int :: {{ {cell} }} ({rng} && {cell}.d_int) ==> "
+                     f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))",
+            "values": f"    invariant forall k: Int :: {{ {cell} }} {rng} ==> ({cell}.v_int == old[lh_0]({cell}.v_int))",
+        }
+
+    def loop_lines(self, *invariants, label=True):
+        lines = ["method m__1()", "  decreases", "{", "  var v_a: Ref"]
+        if label:
+            lines.append("  label lh_0")
+        lines += ["  while (true)", *[Check(i, INV, "internal") for i in invariants], "  {", "  }", "}"]
+        return lines
+
+    def test_the_loop_conjuncts_over_a_leaf_are_clean(self):
+        for chain in ((0,), (1,), (0, 1)):
+            for name, inv in self.conjuncts(chain).items():
+                with self.subTest(chain=chain, conjunct=name):
+                    self.assertEqual(self.probs(self.loop_lines(inv)), [])
+        self.assertEqual(self.probs(self.loop_lines(*self.conjuncts().values()), keep=""), [p for p in self.probs(self.loop_lines(*self.conjuncts().values()), keep="`while` loop without")])
+
+    def test_a_loop_conjunct_over_a_leaf_must_keep_its_shape(self):
+        c = self.conjuncts()
+        cell, other = self.recv(), self.recv((1,))
+        mutants = {
+            "acc with an amount": c["acc"].replace(".v_int)", ".v_int, kl)"),
+            "acc of another leaf than the trigger": c["acc"].replace(f"acc({cell}.v_int)", f"acc({other}.v_int)"),
+            "flags of another leaf": c["flags"].replace(f"old[lh_0]({cell}.d_int)", f"old[lh_0]({other}.d_int)"),
+            "flags with another consequent": c["flags"].replace(f"==> {cell}.d_int", f"==> {other}.d_int"),
+            "range of another leaf": c["range"].replace(f"{cell}.v_int", f"{other}.v_int"),
+            "range with a non-literal bound": c["range"].replace("2147483647", "n"),
+            "values of another leaf": c["values"].replace(f"old[lh_0]({cell}.v_int)", f"old[lh_0]({other}.v_int)"),
+            "values against the current state": c["values"].replace(f"old[lh_0]({cell}.v_int)", f"{cell}.v_int"),
+            "an implication to anything": f"    invariant forall k: Int :: {{ {cell} }} ((0 <= k) && (k < 3)) ==> {cell}.v_int > 0",
+            "the slot as trigger": c["acc"].replace(f"{{ {cell} }}", f"{{ {self.SLOT} }}"),
+        }
+        for label, inv in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.loop_lines(inv)), label)
+
+    def test_old_label_over_a_leaf_stands_only_in_two_conjuncts(self):
+        c = self.conjuncts()
+        for name in ("acc", "range"):
+            inv = c[name] + " && old[lh_0](true)"
+            with self.subTest(conjunct=name):
+                self.assertTrue(any("`old[label]` outside" in p for p in self.probs(self.loop_lines(inv))))
+        probs = self.probs(self.loop_lines(c["flags"], label=False))
+        self.assertTrue(any("no earlier `label lh_0`" in p for p in probs), probs)
+
+    def test_the_older_rows_keep_their_rules(self):
+        # the scalar element's marked row and loop conjunct are the old shapes, with the old receiver
+        old = f"forall k: Int :: {{ loc(block_of(v_a), k) }} ((0 <= k) && (k < 3)) ==> acc(loc(block_of(v_a), k).v_int)"
+        self.assertEqual(self.probs(self.method([self.row(old)])), [])
+        # twin: a scalar row whose cell is a leaf cell is neither
+        mixed = f"forall k: Int :: {{ loc(block_of(v_a), k) }} ((0 <= k) && (k < 3)) ==> {self.acc()}"
+        self.refused(self.method([self.row(mixed)]))
+
+
 class QuantifiedLoopHeaderTests(unittest.TestCase):
     """A loop over an array has quantified invariants whose trigger sets `{ loc(b, k) }` stand in the loop header: the rule that every
     `while` has a `decreases` clause (decision 0013 item 5) must not take a trigger's `{` for the body's (it did, as a false positive
@@ -7256,6 +7675,52 @@ class RangeAtomQuantifierTests(unittest.TestCase):
         lines = self.own_min_lines([v, d, self.LIVE])
         lines[-2] = f"  l1 := (((v_n > 0) ? {bad} : {self.LIVE})) / 2"
         self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in self.probs(lines)))
+
+    # --- decision 0064 item 7 (Amounts): the minimum of a `reads_range` over structures, per leaf path's first slot (the il-analyst's slice 2b
+    # emits it: `(n > 0 ? min(v, d of each leaf, the liveness, the caller's amounts) : liveness) / N`)
+    def leaf_perm(self, path, f, t="int", slot=None):
+        cell = slot or self.SLOT
+        for j in path:
+            cell = f"loc(member({cell}, {j}), 0)"
+        return f"perm({cell}.{f}_{t})"
+
+    def test_the_minimum_over_a_range_of_structures_takes_both_permissions_of_each_leaf_of_the_first_slot(self):
+        lp = self.leaf_perm
+        for label, leaves in {
+            "two leaves": [lp([0], "v"), lp([0], "d"), lp([1], "v"), lp([1], "d"), self.LIVE],
+            "a leaf of another type": [lp([0], "v", "bool"), lp([0], "d", "bool"), self.LIVE],
+            "a nested leaf": [lp([0], "v"), lp([0], "d"), lp([1, 1], "v"), lp([1, 1], "d"), self.LIVE],
+            "the caller's own amounts": [lp([0], "v"), lp([0], "d"), self.LIVE, "amt", "amt2"],
+            "one leaf alone": [lp([0], "v"), lp([0], "d"), self.LIVE],
+        }.items():
+            with self.subTest(minimum=label):
+                self.clean(self.own_min_lines(leaves))
+
+    def test_the_minimum_over_a_range_of_structures_takes_nothing_else(self):
+        lp = self.leaf_perm
+        slot2 = "loc(block_of(ra1), offset_of(ra1) + 1)"
+        other_slot = "loc(block_of(v_q), offset_of(v_q))"
+        v0, d0 = lp([0], "v"), lp([0], "d")
+        for label, leaves in {
+            "a leaf without its flag": [v0, lp([1], "v"), lp([1], "d"), self.LIVE],
+            "a leaf without its value": [d0, lp([1], "v"), lp([1], "d"), self.LIVE],
+            "a flag of another type": [v0, lp([0], "d", "bool"), self.LIVE],
+            "no liveness cell": [v0, d0, "amt"],
+            "another liveness cell": [v0, d0, "perm(lvloc(block_of(v_q)).lv)"],
+            "a leaf of the second slot": [v0, d0, lp([1], "v", slot=slot2), lp([1], "d", slot=slot2), self.LIVE],
+            "a leaf of another variable's slot": [v0, d0, lp([1], "v", slot=other_slot), lp([1], "d", slot=other_slot), self.LIVE],
+            "a leaf cell of another variable": [v0, d0, "perm(loc(member(v_q, 1), 0).v_int)", "perm(loc(member(v_q, 1), 0).d_int)", self.LIVE],
+            "a leaf cell that is not under the slot": [v0, d0, "perm(loc(member(v_p, 1), 0).v_int)", "perm(loc(member(v_p, 1), 0).d_int)", self.LIVE],
+            "the slot's own cell beside a leaf": [v0, d0, f"perm({self.SLOT}.v_int)", f"perm({self.SLOT}.d_int)", self.LIVE],
+            "a member that is not a literal": [v0, d0, "perm(loc(member(" + self.SLOT + ", k), 0).v_int)", "perm(loc(member(" + self.SLOT + ", k), 0).d_int)", self.LIVE],
+            "a leaf at another cell of its block": [v0, d0, f"perm(loc(member({self.SLOT}, 1), 1).v_int)", f"perm(loc(member({self.SLOT}, 1), 1).d_int)", self.LIVE],
+            "a Perm local": [v0, d0, self.LIVE, "kl"],
+            "a literal": [v0, d0, self.LIVE, "write"],
+            "a quotient": [v0, d0, self.LIVE, "(amt / 2)"],
+        }.items():
+            with self.subTest(minimum=label):
+                probs = self.probs(self.own_min_lines(leaves))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), probs)
 
     # --- decision 0063 item 8: the amount of a `reads(*p)` or `reads(p->a)` site with array parts (cells, first slots of the array parts, the liveness)
     SITE_LIVE = "perm(lvloc(block_of(v_p)).lv)"
@@ -10460,6 +10925,1070 @@ class ArrayCopyCallTests(unittest.TestCase):
         lines[i + 1] = "  requires true"
         self.assertEqual(self.probs(lines), [])  # refused as a copy by the clause rule instead
         self.assertTrue([p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "not the trusted array copy" in p])
+
+
+class LeafRangeAtomTests(unittest.TestCase):
+    """Decision 0064 items 7 and 17 (Part C1): a range atom over STRUCTURES in a method's `requires` and `ensures`, and the pure rows of a call over it.
+    Per element `k` of the range `offset_of(X) <= k && k < offset_of(X) + n`: the length facts (`len(member(<chain>, j)) == 1` for each member block, a
+    nested structure's own members included) with the slot `loc(block_of(X), k)` for the trigger, and per LEAF PATH, with the receiver `loc(member(<chain>,
+    j), 0)` for the trigger and for the cell, the rows of a scalar range atom (`acc` of the value and of the flag, the flag, the type's range, the flag
+    implication, in an `ensures` `old(flag) ==> flag`).  Each twin changes one thing of a clean fixture; a leaf row with no length facts of its range, or
+    whose member blocks the length facts do not state, is refused (the tie)."""
+
+    def slot(self, x="v_p", k="k"):
+        return f"loc(block_of({x}), {k})"
+
+    def recv(self, chain=(0,), x="v_p", k="k"):
+        r = self.slot(x, k)
+        for j in chain:
+            r = f"loc(member({r}, {j}), 0)"
+        return r
+
+    def member(self, chain, x="v_p", k="k"):
+        r = self.slot(x, k)
+        for j in chain[:-1]:
+            r = f"loc(member({r}, {j}), 0)"
+        return f"member({r}, {chain[-1]})"
+
+    def quant(self, cons, trigger=None, x="v_p", n="v_n", k="k", lo=None, hi=None, extra=None):
+        lo = f"offset_of({x})" if lo is None else lo
+        hi = f"offset_of({x}) + {n}" if hi is None else hi
+        ante = f"(({lo} <= {k}) && ({k} < {hi}))"
+        if extra:
+            ante = f"({ante} && {extra})"
+        return f"forall {k}: Int :: {{ {trigger or self.slot(x, k)} }} {ante} ==> {cons}"
+
+    def lens(self, members=((0,), (1,)), x="v_p", **kw):
+        parts = " && ".join(f"(len({self.member(m, x)}) == 1)" for m in members)
+        return self.quant(f"({parts})", x=x, **kw)
+
+    def leaf(self, cons, chain=(0,), x="v_p", **kw):
+        return self.quant(cons, trigger=self.recv(chain, x), x=x, **kw)
+
+    def rows(self, chain=(0,), x="v_p", old=False, amount=""):
+        r = self.recv(chain, x)
+        rng = f"(((-2147483648) <= {r}.v_int) && ({r}.v_int <= 2147483647))"
+        out = [self.leaf(f"acc({r}.v_int{amount})", chain, x), self.leaf(f"acc({r}.d_int{amount})", chain, x), self.leaf(f"{r}.d_int", chain, x),
+               self.leaf(f"({r}.d_int ==> {rng})", chain, x)]
+        if old:
+            out.append(self.leaf(f"(old({r}.d_int) ==> {r}.d_int)", chain, x))
+        return out
+
+    def atom(self, chains=((0,), (1,)), members=((0,), (1,)), old=False, amount=""):
+        return [self.lens(members), *[row for c in chains for row in self.rows(c, old=old, amount=amount)]]
+
+    def method(self, requires=(), ensures=(), body=(), formals="v_p: Ref, v_n: Int, amt: Perm"):
+        lines = [f"method m__1({formals})", Check("  requires none < amt && amt < write", WF, "internal")]
+        lines += [Check(f"  requires {r}", WF, "internal") for r in requires]
+        lines += [Check(f"  ensures {e}", P, "postcondition") for e in ensures]
+        return lines + ["  decreases", "{", "  var t4: Ref", "  var t5: Int", *body, "}"]
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+                if any(w in p for w in ("`forall`", "quantified", "leaf", "length fact", "member block", "length-facts", "marked range row"))]
+
+    def clean(self, lines):
+        self.assertEqual(self.probs(lines), [])
+        self.assertEqual(lint_vpr_other(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    def refused(self, lines, fragment="`forall` outside the shapes"):
+        probs = self.probs(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    # --- the clean shapes
+    def test_the_rows_of_an_atom_over_structures_are_clean(self):
+        self.clean(self.method(requires=self.atom(), ensures=self.atom(old=True)))
+
+    def test_a_nested_structures_leaf_paths_are_clean(self):
+        members = ((0,), (1,), (1, 0), (1, 1))
+        chains = ((0,), (1, 0), (1, 1))
+        self.clean(self.method(requires=self.atom(chains, members), ensures=self.atom(chains, members, old=True)))
+
+    def test_a_reads_atom_carries_a_perm_formal_as_its_amount(self):
+        self.clean(self.method(requires=self.atom(amount=", amt"), ensures=self.atom(amount=", amt")))
+
+    def test_a_guard_stands_outside_each_row(self):
+        g = "(v_p != null) ==> "
+        self.clean(self.method(requires=[g + r for r in self.atom()], ensures=[g + r for r in self.atom(old=True)]))
+
+    def test_the_pure_rows_of_a_call_over_the_bound_local_are_clean(self):
+        # the rows of a call (`assert`, no map reason): the length facts, the flags and the type's range of each leaf
+        r = self.recv((0,), "t4")
+        rng = f"(((-2147483648) <= {r}.v_int) && ({r}.v_int <= 2147483647))"
+        body = [Check("  assert " + self.lens(x="t4", n="t5"), A, "precondition"),
+                Check("  assert " + self.leaf(f"{r}.d_int", (0,), "t4", n="t5"), A, "uninitialized"),
+                Check("  assert " + self.leaf(f"({r}.d_int ==> {rng})", (0,), "t4", n="t5"), A, "precondition")]
+        self.clean(self.method(body=body))
+
+    # --- a leaf row keeps the shape of a scalar range atom's
+    def test_a_leaf_row_must_keep_its_shape(self):
+        r = self.recv((0,))
+        mutants = {
+            "an extra antecedent": self.leaf(f"acc({r}.v_int)", extra="true"),
+            "a value row": self.leaf(f"({r}.v_int == 0)"),
+            "a flag that implies something else": self.leaf(f"({r}.d_int ==> ({r}.v_int >= 0))"),
+            "a permission with an amount that is no formal": self.leaf(f"acc({r}.v_int, write)"),
+            "a range that does not start at the base": self.leaf(f"acc({r}.v_int)", lo="0"),
+            "a range that starts at another base": self.leaf(f"acc({r}.v_int)", lo="offset_of(v_q)"),
+            "a range that ends at the index": self.leaf(f"acc({r}.v_int)", hi="offset_of(v_p) + k"),
+            "an old in a requires": self.leaf(f"(old({r}.d_int) ==> {r}.d_int)"),
+            "the cell of another leaf": self.leaf(f"acc({self.recv((1,))}.v_int)"),
+            "two fields": self.leaf(f"(acc({r}.v_int) && acc({r}.d_int))"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(requires=[self.lens(), row]), "a row over a leaf of an array of structures")
+
+    def test_a_receiver_must_be_the_canonical_chain_rooted_at_the_slot(self):
+        r = self.recv((0,))
+        ok = self.leaf(f"acc({r}.v_int)")
+        self.assertEqual(self.probs(self.method(requires=[self.lens(), ok])), [])
+        mutants = {
+            "a variable member index": ok.replace("member(loc(block_of(v_p), k), 0)", "member(loc(block_of(v_p), k), j)"),
+            "an offset in the slot": ok.replace("loc(block_of(v_p), k)", "loc(block_of(v_p), k + 1)"),
+            "a trigger that is the slot": self.quant(f"acc({r}.v_int)"),
+            "two roots": ok.replace("acc(loc(member(loc(block_of(v_p), k), 0), 0)", "acc(loc(member(loc(block_of(v_q), k), 0), 0)"),
+            "a block that is not a variable": ok.replace("block_of(v_p)", "block_of(f(v_p))"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method(requires=[self.lens(), row])), label)
+
+    # --- the length facts
+    def test_the_length_facts_must_keep_their_shape(self):
+        base = self.method(requires=[self.lens(), *self.rows((0,))])
+        self.assertEqual(self.probs(base), [])
+        slot = self.slot()
+        mutants = {
+            "a length of 2": self.quant(f"(len({self.member((0,))}) == 2)"),
+            "a length that is not a literal": self.quant(f"(len({self.member((0,))}) == v_n)"),
+            "a member twice": self.lens(((0,), (0,))),
+            "a nested member without its structure's block": self.lens(((0,), (1, 0))),
+            "a fact about the block of the slot": self.quant(f"(len(block_of({slot})) == 1)"),
+            "a member of a variable index": self.quant(f"(len(member({slot}, j)) == 1)"),
+            "a disjunction": self.quant(f"((len({self.member((0,))}) == 1) || (len({self.member((1,))}) == 1))"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method(requires=[row, *self.rows((0,))])), label)
+
+    def test_the_slot_facts_of_a_nested_structure_are_exactly_item_4s_or_none(self):
+        members = ((0,), (1,), (1, 0), (1, 1))
+        a, b = self.recv(()), self.recv((1,))
+        rows = [row for c in ((0,), (1, 0), (1, 1)) for row in self.rows(c)]
+
+        def lens_with(facts):
+            parts = " && ".join([f"(len({self.member(m)}) == 1)" for m in members] + [f"({x} != {y})" for x, y in facts])
+            return self.quant(f"({parts})")
+
+        # the pair of the root and the nested structure is item 4's (the only one here); with it, or with none, the rows are clean
+        self.assertEqual(self.probs(self.method(requires=[lens_with([(a, b)]), *rows])), [])
+        self.assertEqual(self.probs(self.method(requires=[lens_with([]), *rows])), [])
+        for label, facts in (("a pair that is not item 4's", [(self.recv((0,)), b)]), ("the pair twice", [(a, b), (a, b)]),
+                             ("a pair of two leaves", [(a, b), (self.recv((1, 0)), self.recv((1, 1)))])):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method(requires=[lens_with(facts), *rows])), label)
+
+    # --- the tie of the leaves to the length facts
+    def test_a_leaf_needs_the_length_facts_of_its_range(self):
+        self.refused(self.method(requires=self.rows((0,))), "have no length-facts row over the same range")
+        # twin: the same rows with the length facts are clean
+        self.assertEqual(self.probs(self.method(requires=[self.lens(), *self.rows((0,))])), [])
+        # the facts of another range or another clause kind are not these rows' facts
+        self.refused(self.method(requires=[self.lens(n="v_m"), *self.rows((0,))], formals="v_p: Ref, v_n: Int, v_m: Int, amt: Perm"),
+                     "have no length-facts row over the same range")
+        self.refused(self.method(ensures=[self.lens()], requires=self.rows((0,))), "have no length-facts row over the same range")
+
+    def test_the_length_facts_name_the_member_block_of_each_leaf(self):
+        self.refused(self.method(requires=[self.lens(((0,),)), *self.rows((1,))]), "do not state the member block (1,)")
+        members = ((0,), (1,))
+        self.refused(self.method(requires=[self.lens(members), *self.rows((1, 0))]), "do not state the member block (1, 0)")
+        self.assertEqual(self.probs(self.method(requires=[self.lens(((0,), (1,), (1, 0))), *self.rows((1, 0))])), [])
+
+    def test_a_leaf_row_is_still_refused_where_no_range_atom_stands(self):
+        # a flag implication in a statement other than a method's `assert`, `requires` or `ensures`, and an inhale
+        q = self.leaf(f"{self.recv()}.d_int")
+        probs = [p for p in lv.lint_vpr(*build(self.method(body=[f"  inhale {q} // cerastes:inhale-ok test"])), "t.vpr", "t.vpr.map") if "`forall`" in p]
+        self.assertTrue(probs, probs)
+
+
+class PointerToStructureLeafRowTests(unittest.TestCase):
+    """Audit round C1, finding 4: the type-range row of a POINTER-TO-STRUCTURE value in a range atom's rows (the leaf `next` of `struct N {struct N *next;
+    int v;}` under `owns_range(p, n)`, and the element of a scalar range over `struct P **`): the well-formedness of the value, then the guarded
+    well-formedness of its pointee, `v != null && offset_of(v) < len(block_of(v)) ==> len(member(v, 0)) == 1 && ...` (decision 0043 item 8), the row
+    lowering writes (the kept Viper of the audit's g05 and g06).  Each twin changes one thing.  The helpers are LeafRangeAtomTests'."""
+
+    H = LeafRangeAtomTests("test_the_rows_of_an_atom_over_structures_are_clean")
+
+    def __getattr__(self, name):
+        return getattr(self.H, name)
+
+    @staticmethod
+    def wf(v):
+        return (f"(({v} == null) || ((({v} == loc(block_of({v}), offset_of({v}))) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v})))))")
+
+    def ptr_row(self, v, lens=((0,), (1,)), guard=True, wf=True, count=1, root=None):
+        r = root or v
+        facts = " && ".join(f"(len(member({r}, {m[0]})) == {count})" for m in lens)
+        g = f"(({v} != null) && (offset_of({v}) < len(block_of({v}))))" if guard else f"({v} != null)"
+        w = self.wf(v) if wf else f"({v} != null)"
+        return f"({w} && ({g} ==> ({facts})))"
+
+    def atom_with_pointer(self, row_cons):
+        r = self.recv((0,))
+        return [self.lens(), self.leaf(f"acc({r}.v_ptr_struct_1_N)", (0,)), self.leaf(f"acc({r}.d_ptr_struct_1_N)", (0,)), self.leaf(f"{r}.d_ptr_struct_1_N", (0,)),
+                self.leaf(row_cons, (0,)), *self.rows((1,))]
+
+    def v(self):
+        return f"{self.recv((0,))}.v_ptr_struct_1_N"
+
+    def test_the_well_formedness_of_a_pointer_leaf_with_its_pointee_s_facts_is_clean(self):
+        self.clean(self.method(requires=self.atom_with_pointer(self.ptr_row(self.v()))))
+        # one member block: a pointee with one member
+        self.clean(self.method(requires=self.atom_with_pointer(self.ptr_row(self.v(), lens=((0,),)))))
+
+    def test_a_scalar_range_over_pointers_to_structures_is_clean(self):
+        c = self.slot("v_pp")
+        v = f"{c}.v_ptr_struct_0_P"
+        rows = [self.quant(f"acc({v})", x="v_pp"), self.quant(f"acc({c}.d_ptr_struct_0_P)", x="v_pp"), self.quant(f"{c}.d_ptr_struct_0_P", x="v_pp"),
+                self.quant(self.ptr_row(v), x="v_pp")]
+        self.clean(self.method(requires=rows, formals="v_pp: Ref, v_n: Int, amt: Perm"))
+
+    def test_a_pointer_row_without_its_pointee_s_facts_or_guard_is_refused(self):
+        v = self.v()
+        # the length facts of the pointee missing: the guarded conjunct names nothing
+        self.refused(self.method(requires=self.atom_with_pointer(f"({self.wf(v)} && (({v} != null) && (offset_of({v}) < len(block_of({v})))))")))
+        # the guard is the null test only (the facts would hold for a pointer at the end of its block)
+        self.refused(self.method(requires=self.atom_with_pointer(self.ptr_row(v, guard=False))))
+        # the well-formedness replaced by the null test
+        self.refused(self.method(requires=self.atom_with_pointer(self.ptr_row(v, wf=False))))
+        # a count other than 1 for a member block, and facts about the member blocks of another pointer
+        self.refused(self.method(requires=self.atom_with_pointer(self.ptr_row(v, count=2))))
+        self.refused(self.method(requires=self.atom_with_pointer(self.ptr_row(v, root=f"{self.recv((1,))}.v_ptr_struct_1_N"))))
+
+    # The lowering's row as the il-analyst's report 9 gives it (e1e2c2_range_pointer_to_struct_member.vpr line 47: the consequent of the quantifier, with its own
+    # parenthesization, `V` the pointer value read from the leaf's cell): the rule admits exactly it, and each twin changes one atom of the same text.
+    VERBATIM = ("(((V == null) || (((V == loc(block_of(V), offset_of(V))) && (0 <= offset_of(V))) && (offset_of(V) <= len(block_of(V))))) && "
+                "(((V != null) && (offset_of(V) < len(block_of(V)))) ==> ((len(member(V, 0)) == 1) && (len(member(V, 1)) == 1))))")
+
+    def test_the_row_as_lowering_writes_it_is_admitted_and_each_change_of_its_text_is_refused(self):
+        v = self.v()
+        text = self.VERBATIM
+        self.clean(self.method(requires=self.atom_with_pointer(text.replace("V", v))))
+        for old, new in (("offset_of(V) < len(block_of(V))", "offset_of(V) <= len(block_of(V))"),
+                         ("(V == null) ||", "(V != null) ||"),
+                         ("(0 <= offset_of(V))", "(1 <= offset_of(V))"),
+                         ("(len(member(V, 1)) == 1)", "(len(member(V, 1)) == 0)"),
+                         ("(len(member(V, 1)) == 1)", "(len(member(V, 0)) == 1)")):
+            self.assertIn(old, text)
+            self.refused(self.method(requires=self.atom_with_pointer(text.replace(old, new).replace("V", v))))
+
+    def test_a_scalar_range_of_pointers_to_structures_refuses_the_same_twins(self):
+        c = self.slot("v_pp")
+        v = f"{c}.v_ptr_struct_0_P"
+        head = [self.quant(f"acc({v})", x="v_pp"), self.quant(f"acc({c}.d_ptr_struct_0_P)", x="v_pp"), self.quant(f"{c}.d_ptr_struct_0_P", x="v_pp")]
+        for bad in (self.ptr_row(v, guard=False), self.ptr_row(v, count=2), f"({self.wf(v)} && (({v} != null) && (offset_of({v}) < len(block_of({v})))))"):
+            self.refused(self.method(requires=[*head, self.quant(bad, x="v_pp")], formals="v_pp: Ref, v_n: Int, amt: Perm"))
+
+
+class ScopeExitTieTests(unittest.TestCase):
+    """Decision 0064 item 6 (audit round 2, issue 7): every way out of the scope of an array of structures exhales exactly what its allocation gave.  In a
+    method with `v := alloc_arr_<E>(N)`, each run of `exhale forall` rows over `block_of(v)` is the allocation's set of (receiver, field) rows over
+    `0 <= k && k < N`, and a run of marked `assert`s of the same set stands directly before it.  The mutants are the audit's: the exit blanked, an exit over
+    `k < 1` for `k < 2`, a marked row on another field, an allocation of 3 for an array of 2, a leaf dropped, a row twice."""
+
+    ALLOC = AggregateArrayAllocationTests("test_the_wrapper_is_pinned")
+
+    def rows(self, n=3, leaves=((0,), (1,)), drop=(), swap=None, v_hi=None):
+        out = []
+        for c in leaves:
+            for f in ("v_int", "d_int"):
+                if (c, f) in drop:
+                    continue
+                g = f if swap is None or swap[0] != (c, f) else swap[1]
+                r = self.ALLOC.recv(c).replace("block_of(r)", "block_of(v_a)")
+                out.append((f"forall k: Int :: {{ {r} }} ((0 <= k) && (k < {n if v_hi is None else v_hi})) ==> acc({r}.{g})", c, f))
+        return out
+
+    def program(self, alloc_n=3, exit_n=None, marked=None, exits=None, live=True, leaves=((0,), (1,)), extra=(), never=False, lv_exhale=True):
+        h = self.ALLOC
+        decl = h.method("alloc_arr_P", h.alloc(leaves=leaves))
+        exit_rows = exits if exits is not None else self.rows(exit_n or alloc_n, leaves)
+        marked_rows = marked if marked is not None else self.rows(exit_n or alloc_n, leaves)
+        body = ["  var v_a: Ref", f"  v_a := alloc_arr_P({alloc_n})"]
+        if never:
+            body.append(Check("  assert false", A, "missing-return"))
+        for text, _c, _f in marked_rows:
+            body.append(Check(f"  assert {text}", MARKED, "lifetime"))
+        if live:
+            body.append(Check("  assert perm(lvloc(block_of(v_a)).lv) == write", A, "lifetime"))
+        for text, _c, _f in exit_rows:
+            body.append(f"  exhale {text}")
+        body += list(extra)
+        if lv_exhale:
+            body.append("  exhale acc(lvloc(block_of(v_a)).lv)")
+        return [*decl, "method m__1()", "  decreases", "{", *body, "}"]
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0064 item 6" in p]
+
+    def refused(self, lines, fragment):
+        probs = self.probs(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    def test_an_exit_that_is_the_allocations_is_clean(self):
+        self.assertEqual(self.probs(self.program()), [])
+        self.assertEqual(self.probs(self.program(alloc_n=2, leaves=((0,),))), [])
+
+    def test_two_exits_are_each_checked(self):
+        lines = self.program()
+        # a second exit: a copy of the marked rows, the liveness assert and the exhales, then the first exit's rows dropped from the copy
+        start = next(i for i, l in enumerate(lines) if isinstance(l, Check) and l.error_id == MARKED)
+        end = len(lines) - 2
+        exit_lines = lines[start:end]
+        doubled = lines[:end] + [l for l in exit_lines] + lines[end:]
+        self.assertEqual(self.probs(doubled), [])
+        broken = lines[:end] + [l for l in exit_lines if not (isinstance(l, str) and "d_int" in l and "k < 3" in l and "member(loc(block_of(v_a), k), 1)" in l)] + lines[end:]
+        self.refused(broken, "are not the rows of its allocation")
+
+    def test_the_exhales_are_the_allocations(self):
+        self.refused(self.program(exits=[]), "not directly preceded by the exhales of its rows")
+        self.refused(self.program(exits=self.rows(3, drop=[((1,), "d_int")])), "missing")
+        self.refused(self.program(exits=self.rows(3, drop=[((0,), "v_int")])), "missing")
+        self.refused(self.program(exits=self.rows(3, leaves=((0,),))), "missing")
+        self.refused(self.program(exits=self.rows(3, leaves=((0,), (1,), (2,)))), "unexpected")
+
+    def test_an_exit_over_a_shorter_or_longer_range_is_refused(self):
+        self.refused(self.program(alloc_n=3, exits=self.rows(2)), "not the allocation's `0 <= k && k < 3`")
+        self.refused(self.program(alloc_n=2, exits=self.rows(3)), "not the allocation's `0 <= k && k < 2`")
+        # the allocation says 3 for an array of 2: both rows say 2
+        self.refused(self.program(alloc_n=3, exits=self.rows(2), marked=self.rows(2)), "not the allocation's")
+
+    def test_an_exit_on_another_field_is_refused(self):
+        rows = self.rows(3, swap=(((0,), "d_int"), "v_int"))
+        self.refused(self.program(exits=rows), "a (receiver, field) row twice")
+
+    def test_a_marked_row_on_another_field_or_a_missing_one_is_refused(self):
+        self.refused(self.program(marked=self.rows(3, drop=[((0,), "d_int")])), "the lifetime rows before a scope exit")
+        self.refused(self.program(marked=[]), "not directly preceded by its lifetime rows")
+        self.refused(self.program(marked=self.rows(3, swap=(((1,), "v_int"), "d_int"))), "give a (receiver, field) row twice")
+
+    def test_a_method_that_never_leaves_the_scope_is_not_refused(self):
+        self.assertEqual(self.probs(self.program(exits=[], marked=[], live=False, never=True, lv_exhale=False)), [])
+        self.refused(self.program(exits=[], marked=[], live=False, lv_exhale=False), "is never exhaled")
+
+    def test_a_missing_return_assert_false_hides_no_blanked_exit(self):
+        # the emitted non-void methods carry `assert false` (missing-return): the audit's b01x, every exit `exhale forall` blanked, must still be refused,
+        # through the liveness cell's exhale that stands after the run
+        self.refused(self.program(exits=[], never=True), "not directly preceded by the exhales of its rows")
+        self.assertEqual(self.probs(self.program(never=True)), [])
+
+    def emitted(self, tail, **kw):
+        """An emitted method: the program's exit, then `tail` (the lines after it), then `label l_end`."""
+        lines = self.program(**kw)
+        return [*lines[:-1], *tail, "  label l_end", "}"]
+
+    def test_an_emitted_method_with_an_exit_before_each_way_out_is_clean(self):
+        # audit round C1, finding 6: a method with a result: a return's exit and `goto l_end`, then the missing-return path's exit and `assert false`
+        tail = ["  goto l_end", *self.exit_lines(), "  assert false"]
+        self.assertEqual(self.probs(self.emitted(tail)), [])
+        # a method without a result: the exit, the end
+        self.assertEqual(self.probs(self.emitted([])), [])
+        # an array of an inner block: its exit before a `goto l_end` outside the block, and no exit of the array after it
+        self.assertEqual(self.probs(self.emitted(["  goto l_end", "  assert false"])), [])
+
+    def exit_lines(self):
+        lines = self.program()
+        start = next(i for i, l in enumerate(lines) if isinstance(l, Check) and l.error_id == MARKED)
+        return lines[start:len(lines) - 1]
+
+    def test_an_emitted_method_that_drops_every_exit_of_the_array_is_refused_whatever_assert_false_says(self):
+        # the audit's second mutant (every scope-exit `exhale` over the array blanked, the rows and the liveness cell) on a method that ends in the
+        # missing-return `assert false`: the whole-method `assert false` no longer hides it
+        blank = dict(exits=[], marked=[], live=False, lv_exhale=False)
+        self.refused(self.emitted(["  goto l_end", "  assert false"], **blank), "not exhaled before this `goto l_end`")
+        self.refused(self.emitted([], **blank), "not exhaled before the end of the method")
+        self.refused(self.emitted(["  assert false"], **blank), "not exhaled before the end of the method")
+
+    def test_an_emitted_method_refuses_a_way_out_without_its_exit(self):
+        # two returns, the second one's exit blanked; the first return's exit does not serve it
+        first = ["  goto l_end"]
+        second = ["  goto l_end", *self.exit_lines()]
+        self.refused(self.emitted([*first, *first, *self.exit_lines()]), "not exhaled before this `goto l_end`")
+        self.assertEqual(self.probs(self.emitted([*second])), [])
+
+    def test_a_method_that_really_never_leaves_stays_admitted(self):
+        # with no `label l_end` (the hand-written shape): `assert false` and no exit
+        self.assertEqual(self.probs(self.program(exits=[], marked=[], live=False, never=True, lv_exhale=False)), [])
+
+    def test_a_loops_back_edge_rows_are_not_lifetime_rows(self):
+        loop = [Check(f"  assert {text}", MARKED, "permission") for text, _c, _f in self.rows(3, drop=[((0,), "d_int")])]
+        lines = self.program()
+        i = next(i for i, l in enumerate(lines) if l == "  var v_a: Ref") + 2
+        lines[i:i] = [Check("  assert true", A, "check"), *loop, Check("  assert true", A, "check")]
+        self.assertEqual(self.probs(lines), [])
+
+
+class AggregateArrayGlobalGroupTests(unittest.TestCase):
+    """Decision 0064 items 9 and 17 (Part C2): an array of STRUCTURES as a global has, in `program_start`, per leaf path of its element the rows of an
+    array of scalars with the leaf receiver `loc(member(<chain>, j), 0)` as the trigger, after one row of length facts over the slots; the listed values
+    are conjuncts element by element (leaves in declaration order), then per leaf the quantifier of the rest (where the list ends) or the range of an
+    unknown value, last `acc(lvloc(GB_g()).lv)`.  The shape is tests/viper-smoke/memory/s48_e_global.vpr's and s48_e_unknown_fail.vpr's; each twin breaks
+    one thing a trusted row must not."""
+
+    A = ArrayGlobalRowTests
+    GROUP = "the row group of an array global in `program_start`"
+    INT_RANGE = "(((-2147483648) <= {c}.v_int) && ({c}.v_int <= 2147483647))"
+
+    @staticmethod
+    def qq(trig, lo, hi, body, k="k"):
+        return f"forall {k}: Int :: {{ {trig} }} (({lo} <= {k}) && ({k} < {hi})) ==> {body}"
+
+    @staticmethod
+    def cell(slot, leaf):
+        r = slot
+        for j in leaf:
+            r = f"loc(member({r}, {j}), 0)"
+        return r
+
+    @classmethod
+    def agroup(cls, g="GB_g__1", n=3, leaves=((0,), (1,)), types=None, listed=((1, 2), (3, 0)), rest="zero", lv=True, extra_lens=()):
+        """The rows of an array of n structures whose leaves are `leaves` (member paths) of `types` (default int): `listed` is, per element, the value of
+        each leaf; `rest` is the zero rest ("zero"), the range of an unknown value ("unknown") or nothing (None)."""
+        types = types or ["int"] * len(leaves)
+        b = f"{g}()"
+        slot = f"loc({b}, k)"
+        members = sorted({leaf[:i] for leaf in leaves for i in range(1, len(leaf) + 1)})
+        lens = [f"(len(member({cls.slot_of(slot, m[:-1])}, {m[-1]})) == 1)" for m in members]
+        rows = [cls.qq(slot, 0, n, "(" + " && ".join(lens) + ")" if len(lens) > 1 else lens[0])]
+        for leaf, t in zip(leaves, types):
+            c = cls.cell(slot, leaf)
+            rows += [cls.qq(c, 0, n, f"acc({c}.v_{t})"), cls.qq(c, 0, n, f"acc({c}.d_{t})"), cls.qq(c, 0, n, f"{c}.d_{t}")]
+        for e, vals in enumerate(listed):
+            for leaf, t, v in zip(leaves, types, vals):
+                rows.append(f"{cls.cell(f'loc({b}, {e})', leaf)}.v_{t} == {v}")
+        zero = {"int": "0", "bool": "false", "ptr_int": "null"}
+        if rest == "zero":
+            for leaf, t in zip(leaves, types):
+                c = cls.cell(slot, leaf)
+                rows.append(cls.qq(c, len(listed), n, f"{c}.v_{t} == {zero[t]}"))
+        elif rest == "unknown":
+            for leaf, t in zip(leaves, types):
+                c = cls.cell(slot, leaf)
+                rows.append(cls.qq(c, 0, n, cls.INT_RANGE.format(c=c)))
+        if lv:
+            rows.append(f"acc(lvloc({b}).lv)")
+        return rows
+
+    @staticmethod
+    def slot_of(slot, chain):
+        r = slot
+        for j in chain:
+            r = f"loc(member({r}, {j}), 0)"
+        return r
+
+    def fixture(self, rows, facts=None):
+        return self.A("test_the_emitters_group_is_clean").fixture(rows=[*rows, self.A.H_ROW], facts=self.A.facts(3) if facts is None else facts)
+
+    strict = staticmethod(GlobalsTests.strict)
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    def test_the_lowerings_shape_is_clean(self):
+        self.assertEqual(self.strict(self.fixture(self.agroup())), [])
+
+    def test_each_form_of_the_values_is_clean(self):
+        forms = {
+            "a partial list and the zero rest (s48_e_global)": self.agroup(),
+            "every element listed, no rest": self.agroup(listed=((1, 2), (3, 4), (5, 6)), rest=None),
+            "nothing listed, the zero rest from 0": self.agroup(listed=(), rest="zero"),
+            "an unknown value's range per leaf (s48_e_unknown_fail)": self.agroup(listed=(), rest="unknown"),
+            "one leaf": self.agroup(leaves=((0,),), listed=((4,), (5,))),
+            "a bool leaf of unknown value states no value": self.agroup(leaves=((0,),), types=["bool"], listed=(), rest=None),
+            "a nested structure's leaves": self.agroup(leaves=((0,), (1, 0), (1, 1)), listed=((1, 2, 3),)),
+            "a pointer leaf of null and the address of a global": self.agroup(leaves=((0,), (1,)), types=["ptr_int", "int"], listed=(("loc(GB_h__2(), 0)", 2), ("null", 4))),
+        }
+        for what, rows in forms.items():
+            with self.subTest(what):
+                self.assertEqual(self.strict(self.fixture(rows)), [], what)
+
+    def test_a_group_that_breaks_the_rows_of_a_leaf_is_refused(self):
+        g = self.agroup(listed=(), rest="zero", lv=True)  # lens, 2 x 3 rows, 2 rests, lv
+        b = "GB_g__1()"
+        c0, c1 = self.cell(f"loc({b}, k)", (0,)), self.cell(f"loc({b}, k)", (1,))
+        bad = {
+            "a leaf's flags before its flag permission": [g[0], g[1], g[3], g[2], *g[4:]],
+            "a leaf's value permission twice (a (receiver, field) given twice)": [*g[:2], g[1], *g[2:]],
+            "a leaf's flag permission twice": [*g[:3], g[2], *g[3:]],
+            "a leaf's flags missing": [*g[:3], *g[4:]],
+            "the second leaf's rows before the first's": [g[0], *g[4:7], *g[1:4], *g[7:]],
+            "a leaf whose rows the length facts do not give": [g[0], *g[1:7], self.qq(self.cell(f"loc({b}, k)", (2,)), 0, 3, "acc(loc(member(loc(GB_g__1(), k), 2), 0).v_int)"), *g[7:]],
+            "the permission over [1, N)": [g[0], self.qq(c0, 1, 3, f"acc({c0}.v_int)"), *g[2:]],
+            "the permission over [0, N + 1)": [g[0], self.qq(c0, 0, 4, f"acc({c0}.v_int)"), *g[2:]],
+            "the trigger is the slot, not the receiver": [g[0], self.qq(f"loc({b}, k)", 0, 3, f"acc({c0}.v_int)"), *g[2:]],
+            "a flag permission of another field": [*g[:2], g[2].replace("d_int", "d_bool"), *g[3:]],
+            "an amount on a permission": [g[0], g[1].replace("v_int)", "v_int, 1 / 2)"), *g[2:]],
+            "the liveness cell missing": self.agroup(listed=(), rest="zero", lv=False),
+            "the liveness cell twice": [*g, g[-1]],
+            "the length facts missing": g[1:],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                probs = self.strict(self.fixture(rows))
+                self.assertTrue(any(self.GROUP in p or "a second `program_start` row" in p for p in probs), (what, probs))
+
+    def test_the_length_facts_state_a_length_of_1_for_a_scalar_leaf_and_each_member_block_once(self):
+        g = self.agroup()
+        b = "GB_g__1()"
+        slot = f"loc({b}, k)"
+        row = g[0]
+        bad = {
+            "a length of 2 for a scalar leaf": row.replace("(len(member(loc(GB_g__1(), k), 1)) == 1)", "(len(member(loc(GB_g__1(), k), 1)) == 2)"),
+            "a member block twice": row.replace("(len(member(loc(GB_g__1(), k), 1)) == 1)", "(len(member(loc(GB_g__1(), k), 0)) == 1)"),
+            "a chain that is not rooted at the slot": row.replace("member(loc(GB_g__1(), k), 1)", "member(loc(GB_h__2(), k), 1)"),
+            "an antecedent beyond the range": row.replace("(k < 3))", "(k < 3)) && (k != 1)"),
+            "the lengths over [1, N)": row.replace("((0 <= k)", "((1 <= k)"),
+        }
+        for what, text in bad.items():
+            with self.subTest(what):
+                probs = self.strict(self.fixture([text, *g[1:]]))
+                self.assertTrue(probs, what)
+
+    def test_the_values_are_pinned(self):
+        g = self.agroup()  # lens, 6 rows, 4 listed, 2 rests (from 2), lv
+        b = "GB_g__1()"
+        c0, c1 = self.cell(f"loc({b}, k)", (0,)), self.cell(f"loc({b}, k)", (1,))
+        iL = 7  # index of the first listed conjunct
+        bad = {
+            "a leaf with no zero rest": [*g[:-2], g[-1]],
+            "a zero rest that starts early (a cell given a listed value and the rest)": [*g[:-3], self.qq(c0, 1, 3, f"{c0}.v_int == 0"), self.qq(c1, 1, 3, f"{c1}.v_int == 0"), g[-1]],
+            "a zero rest that starts late (a slot without a value)": [*g[:-3], self.qq(c0, 3, 3, f"{c0}.v_int == 0"), self.qq(c1, 3, 3, f"{c1}.v_int == 0"), g[-1]],
+            "a zero rest of another value": [*g[:-3], self.qq(c0, 2, 3, f"{c0}.v_int == 1"), g[-2], g[-1]],
+            "the rests in the other leaf order": [*g[:-3], g[-2], g[-3], g[-1]],
+            "a leaf's rest twice": [*g[:-3], g[-3], g[-3], g[-2], g[-1]],
+            "the rests of the two leaves starting at different places": [*g[:-3], g[-3], self.qq(c1, 1, 3, f"{c1}.v_int == 0"), g[-1]],
+            "an element with only some of its leaves listed, then a quantifier": [*g[:iL + 3], *g[-3:]],
+            "an element with only some of its leaves listed, no quantifier": [*g[:iL + 3], g[-1]],
+            "a listed leaf out of order": [*g[:iL], g[iL + 1], g[iL], *g[iL + 2:]],
+            "a listed element out of order": [*g[:iL], g[iL + 2], g[iL + 3], g[iL], g[iL + 1], *g[iL + 4:]],
+            "a listed element twice": [*g[:iL + 4], g[iL], g[iL + 1], *g[iL + 4:]],
+            "a conjunct after the quantifiers": [*g[:-1], g[iL], g[-1]],
+            "a listed value that is not a literal": [*g[:iL], "loc(member(loc(GB_g__1(), 0), 0), 0).v_int == loc(member(loc(GB_g__1(), 1), 0), 0).v_int", *g[iL + 1:]],
+            "a listed value that is a range": [*g[:iL], "((0 <= loc(member(loc(GB_g__1(), 0), 0), 0).v_int) && (loc(member(loc(GB_g__1(), 0), 0), 0).v_int <= 9))", *g[iL + 1:]],
+            "an element at or past the count": self.agroup(listed=((1, 2), (3, 4), (5, 6), (7, 8)), rest=None),
+            "an unknown range beside a listed value": [*self.agroup(listed=((1, 2),), rest=None)[:-1], *self.agroup(listed=(), rest="unknown")[-3:-1], g[-1]],
+            "an unlisted array with no rest": self.agroup(listed=(), rest=None),
+            "a rest that is the address of a global": [*g[:-3], self.qq(c0, 2, 3, f"{c0}.v_int == loc(GB_h__2(), 0)"), g[-2], g[-1]],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                self.some(self.fixture(rows), self.GROUP)
+
+    def test_the_count_of_the_rows_is_the_count_of_the_facts(self):
+        # N differs between the facts (4) and the rows (3): the facts row is the first of the three places they are pinned
+        self.some(self.fixture(self.agroup(), facts=self.A.facts(4)), "its first `ensures` row must be the global facts")
+        self.some(self.fixture(self.agroup(n=4, listed=((1, 2),)), facts=self.A.facts(3)), "its first `ensures` row must be the global facts")
+
+    def test_a_duplicate_group_is_refused(self):
+        self.some(self.fixture([*self.agroup(), *self.agroup(listed=((9, 9),))]), "a second `program_start` row for `GB_g__1`")
+
+
+class AggregateMemberAllocationTests(unittest.TestCase):
+    """Decision 0064 items 3 and 17 (Part C2): `alloc_struct_<n>_<tag>` of a structure whose member is an array of structures states `len(member(X, k)) == N`,
+    then the length facts of the member's slots over `0 <= j && j < N`, then, per leaf of the element in declaration order, the three quantified rows (the value
+    permission, the flag permission, every flag false) with the leaf receiver `loc(member(<chain>, i), 0)` rooted at the slot as trigger; each (receiver,
+    field) once.  The shape is tests/viper-smoke/memory/s48_f_member.vpr's (struct T { struct P v[2]; int n; }, the cell n a clause of its own as the
+    allocation of 0063 writes it)."""
+
+    A = ArrayStructAllocationTests
+    ROOT = A.ROOT
+    LIVE = A.LIVE
+    N_CELL = "ensures (((len(member(r, 1)) == 1) && acc(loc(member(r, 1), 0).v_int)) && acc(loc(member(r, 1), 0).d_int)) && (!loc(member(r, 1), 0).d_int)"
+
+    @staticmethod
+    def rows(x="r", k=0, n=2, leaves=((0,), (1,)), types=None, lens=None):
+        types = types or ["int"] * len(leaves)
+        b = f"member({x}, {k})"
+        slot = f"loc({b}, j)"
+        members = sorted({leaf[:i] for leaf in leaves for i in range(1, len(leaf) + 1)})
+        parts = [f"(len(member({AggregateArrayGlobalGroupTests.slot_of(slot, m[:-1])}, {m[-1]})) == 1)" for m in members]
+        out = [f"ensures len({b}) == {n}",
+               "ensures " + AggregateArrayGlobalGroupTests.qq(slot, 0, n, lens or ("(" + " && ".join(parts) + ")" if len(parts) > 1 else parts[0]), k="j")]
+        for leaf, t in zip(leaves, types):
+            c = AggregateArrayGlobalGroupTests.cell(slot, leaf)
+            q = lambda body: "ensures " + AggregateArrayGlobalGroupTests.qq(c, 0, n, body, k="j")  # noqa: E731
+            out += [q(f"acc({c}.v_{t})"), q(f"acc({c}.d_{t})"), q(f"(!{c}.d_{t})")]
+        return out
+
+    def problems(self, ensures, name="alloc_struct_0_T"):
+        return self.A("test_a_structure_with_an_array_member_is_clean").problems(ensures, name)
+
+    def test_the_lowerings_shape_is_clean(self):
+        self.assertEqual(self.problems([self.ROOT, *self.rows(), self.N_CELL, self.LIVE]), [])
+
+    def test_each_form_is_clean(self):
+        # the array member second, one leaf, a nested structure's leaves
+        cell0 = self.N_CELL.replace("member(r, 1)", "member(r, 0)")
+        self.assertEqual(self.problems([self.ROOT, cell0, *self.rows(k=1), self.LIVE]), [])
+        self.assertEqual(self.problems([self.ROOT, *self.rows(leaves=((0,),)), self.N_CELL, self.LIVE]), [])
+        self.assertEqual(self.problems([self.ROOT, *self.rows(leaves=((0,), (1, 0), (1, 1))), self.N_CELL, self.LIVE]), [])
+
+    def test_each_departure_is_refused(self):
+        base = self.rows()
+        len_, lens, v0, d0, n0, v1, d1, n1 = base
+        bad = {
+            "the length without the length facts and the rows": [len_],
+            "the length facts without the rows": [len_, lens],
+            "a leaf with only its value permission": [len_, lens, v0, v1, d1, n1],
+            "a leaf's rows in another order": [len_, lens, d0, v0, n0, v1, d1, n1],
+            "the first leaf's rows twice (a (receiver, field) given twice)": [len_, lens, v0, d0, n0, v0, d0, n0, v1, d1, n1],
+            "the second leaf's rows missing": [len_, lens, v0, d0, n0],
+            "the leaves in another order": [len_, lens, v1, d1, n1, v0, d0, n0],
+            "a flag that is not negated": [len_, lens, v0, d0, n0.replace("(!", "(").replace(".d_int)", ".d_int)", 1), v1, d1, n1],
+            "a row over another count": [len_, lens, v0.replace("(j < 2)", "(j < 3)"), d0, n0, v1, d1, n1],
+            "a row over [1, N)": [len_, lens, v0.replace("(0 <= j)", "(1 <= j)"), d0, n0, v1, d1, n1],
+            "a trigger that is the slot": [len_, lens, v0.replace("{ loc(member(loc(member(r, 0), j), 0), 0) }", "{ loc(member(r, 0), j) }"), d0, n0, v1, d1, n1],
+            "a length of 2 for a scalar leaf": [len_, lens.replace("(len(member(loc(member(r, 0), j), 1)) == 1)", "(len(member(loc(member(r, 0), j), 1)) == 2)"), v0, d0, n0, v1, d1, n1],
+            "a leaf whose member block the length facts do not state": [len_, lens.replace(" && (len(member(loc(member(r, 0), j), 1)) == 1)", ""), v0, d0, n0, v1, d1, n1],
+            "an amount on a permission": [len_, lens, v0.replace("v_int)", "v_int, 1 / 2)"), d0, n0, v1, d1, n1],
+            "an undeclared suffix": [len_, lens, *[x.replace("_int", "_long") for x in (v0, d0, n0)], v1, d1, n1],
+            "the length facts over another block": [len_, lens.replace("{ loc(member(r, 0), j) }", "{ loc(member(r, 1), j) }"), v0, d0, n0, v1, d1, n1],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                probs = self.problems([self.ROOT, *rows, self.N_CELL, self.LIVE])
+                self.assertTrue(any("is not the trusted struct allocation" in p for p in probs), (what, probs))
+
+
+class AggregateBlockTermRowTests(unittest.TestCase):
+    """Decision 0064 items 3, 7 and 17 (Part C2): the rows of an `owns(g)` or `reads(g)` of an array of structures in a method's contract over a block term
+    (`GB_g()`, a bound-free line): the length facts over the slots, then per leaf the rows of an array atom with the leaf receiver as trigger and cell; a leaf
+    row needs the length-facts row of its range in the same clause kind to state its member block.  The shape is tests/viper-smoke/memory/s48_e_global.vpr's
+    `f_setg`."""
+
+    A = AggregateArrayGlobalGroupTests
+    B = BlockTermRowTests
+    INT = "(((-2147483648) <= {c}.v_int) && ({c}.v_int <= 2147483647))"
+
+    def clause_rows(self, kw, n=3, leaves=((0,), (1,)), amount=None, lens_leaves=None, g="GB_g__1"):
+        b = f"{g}()"
+        slot = f"loc({b}, k)"
+        members = sorted({leaf[:i] for leaf in (lens_leaves or leaves) for i in range(1, len(leaf) + 1)})
+        parts = [f"(len(member({self.A.slot_of(slot, m[:-1])}, {m[-1]})) == 1)" for m in members]
+        texts = [self.A.qq(slot, 0, n, "(" + " && ".join(parts) + ")" if len(parts) > 1 else parts[0])]
+        am = f", {amount}" if amount else ""
+        for leaf in leaves:
+            c = self.A.cell(slot, leaf)
+            texts += [self.A.qq(c, 0, n, f"acc({c}.v_int{am})"), self.A.qq(c, 0, n, f"acc({c}.d_int{am})"), self.A.qq(c, 0, n, f"{c}.d_int"),
+                      self.A.qq(c, 0, n, self.INT.format(c=c))]
+            if kw == "ensures":
+                texts.append(self.A.qq(c, 0, n, f"(old({c}.d_int) ==> {c}.d_int)"))
+        return [Check(f"  {kw} " + t, WF if kw == "requires" else P, "internal") for t in texts]
+
+    def fixture(self, req=None, ens=None, facts=None):
+        facts = ArrayGlobalRowTests.facts(3) if facts is None else facts
+        req = self.clause_rows("requires") if req is None else req
+        ens = self.clause_rows("ensures") if ens is None else ens
+        base = ArrayGlobalRowTests("test_the_emitters_group_is_clean").fixture(rows=[*AggregateArrayGlobalGroupTests.agroup(), ArrayGlobalRowTests.H_ROW], facts=facts)
+        method = ["method f_arr__3(amt_0: Perm)", Check("  requires " + facts, WF, "internal"), Check("  requires (none < amt_0) && (amt_0 < write)", WF, "internal"),
+                  *req, Check("  requires acc(lvloc(GB_g__1()).lv, amt_0)", WF, "internal"), *ens,
+                  Check("  ensures acc(lvloc(GB_g__1()).lv, amt_0)", P, "internal"), "  decreases", "{", "}"]
+        return base + method
+
+    strict = staticmethod(GlobalsTests.strict)
+
+    def some(self, lines, fragment):
+        probs = self.strict(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    def test_an_owns_of_an_array_of_structures_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+
+    def test_a_reads_with_an_amount_and_a_nested_leaf_are_clean(self):
+        req = self.clause_rows("requires", amount="amt_0")
+        ens = self.clause_rows("ensures", amount="amt_0")
+        self.assertEqual(self.strict(self.fixture(req=req, ens=ens)), [])
+
+    def test_a_leaf_row_without_the_length_facts_is_refused(self):
+        req = self.clause_rows("requires")[1:]
+        self.some(self.fixture(req=req), "have no length-facts row over the same range")
+
+    def test_a_leaf_the_length_facts_do_not_state_is_refused(self):
+        req = self.clause_rows("requires", leaves=((0,), (1,)), lens_leaves=((0,),))
+        self.some(self.fixture(req=req), "do not state the member block")
+
+    def test_a_nested_leaf_needs_the_nested_structures_block(self):
+        req = self.clause_rows("requires", leaves=((0,), (1, 0)), lens_leaves=((0,), (1,)))  # member (1,) stated, (1, 0) is not
+        self.some(self.fixture(req=req), "do not state the member block")
+
+    def test_a_length_other_than_1_in_the_length_facts_is_refused(self):
+        req = self.clause_rows("requires")
+        req[0] = Check(req[0].text.replace("(len(member(loc(GB_g__1(), k), 1)) == 1)", "(len(member(loc(GB_g__1(), k), 1)) == 2)"), WF, "internal")
+        self.assertTrue(self.strict(self.fixture(req=req)))
+
+    def test_a_row_over_another_count_is_refused(self):
+        req = self.clause_rows("requires")
+        req = [Check(r.text.replace("(k < 3)", "(k < 2)"), WF, "internal") for r in req]
+        self.some(self.fixture(req=req), "the count 2 is not the `len(GB_g__1()) == 3` of the facts")
+
+    def test_a_leaf_receiver_that_is_not_rooted_at_the_slot_is_refused(self):
+        req = self.clause_rows("requires")
+        req[1] = Check(req[1].text.replace("loc(member(loc(GB_g__1(), k), 0), 0)", "loc(member(loc(GB_h__2(), k), 0), 0)"), WF, "internal")
+        self.assertTrue(self.strict(self.fixture(req=req)))
+
+    def test_a_permission_amount_that_is_not_a_perm_formal_is_refused(self):
+        req = self.clause_rows("requires", amount="1 / 2")
+        self.some(self.fixture(req=req), "the amount of an `acc` is a `Perm` formal of the method")
+
+    def test_an_ensures_flag_implication_over_a_leaf_is_clean_and_a_requires_one_is_refused(self):
+        req = self.clause_rows("requires")
+        req.append(Check("  requires " + self.A.qq(self.A.cell("loc(GB_g__1(), k)", (0,)), 0, 3, "(old(loc(member(loc(GB_g__1(), k), 0), 0).d_int) ==> loc(member(loc(GB_g__1(), k), 0), 0).d_int)"), WF, "internal"))
+        self.some(self.fixture(req=req), "`old` in a `requires`")
+
+
+class AggregateStructGlobalMemberTests(unittest.TestCase):
+    """Decision 0064 items 3, 9 and 17 (Part C2): a structure global whose member is an array of structures: the group of the member is over
+    `member(loc(GB_g(), 0), k)` (the length facts of its slots first, then the rows per leaf of the element), without the liveness row (the structure's
+    cell row has it), as StructGlobalArrayLeafTests' groups of an array member of scalars.  The shape of the group is AggregateArrayGlobalGroupTests'."""
+
+    S = StructGlobalArrayLeafTests
+    AG = AggregateArrayGlobalGroupTests
+
+    @classmethod
+    def group(cls, n=3, **kw):
+        return [r.replace("GB_g__1()", cls.S.B) for r in cls.AG.agroup(g="GB_g__1", n=n, lv=False, **kw)]
+
+    def fixture(self, rows=None, facts=None):
+        rows = [self.S.cell_row(), *self.group(), ArrayGlobalRowTests.H_ROW] if rows is None else rows
+        return self.S("test_the_lowerings_shape_is_clean").fixture(rows=rows, facts=self.S.facts(n=3) if facts is None else facts)
+
+    strict = staticmethod(GlobalsTests.strict)
+
+    def test_the_array_member_of_structures_is_clean(self):
+        self.assertEqual(self.strict(self.fixture()), [])
+        for what, kw in {"a full list": dict(listed=((1, 2), (3, 4), (5, 6)), rest=None), "an unknown value": dict(listed=(), rest="unknown")}.items():
+            with self.subTest(what):
+                self.assertEqual(self.strict(self.fixture(rows=[self.S.cell_row(), *self.group(**kw), ArrayGlobalRowTests.H_ROW])), [])
+
+    def test_a_group_that_breaks_the_order_is_refused(self):
+        g = self.group()
+        cell = self.S.cell_row()
+        bad = {
+            "the group before the structure's cell row": [*g, cell],
+            "the liveness row in the group (the cell row has it)": [cell, *g, f"acc(lvloc({self.S.G}()).lv)"],
+            "a leaf's flags before its flag permission": [cell, g[0], g[1], g[3], g[2], *g[4:]],
+            "a zero rest that starts early": [cell, *g[:-2], self.AG.qq(self.AG.cell(f"loc({self.S.B}, k)", (0,)), 1, 3, f"loc(member(loc({self.S.B}, k), 0), 0).v_int == 0"), g[-1]],
+        }
+        for what, rows in bad.items():
+            with self.subTest(what):
+                self.assertTrue(self.strict(self.fixture(rows=[*rows, ArrayGlobalRowTests.H_ROW])), what)
+
+    def test_the_facts_state_the_count_of_the_member(self):
+        probs = self.strict(self.fixture(facts=self.S.facts(n=4)))
+        self.assertTrue(any("its first `ensures` row must be the global facts" in p for p in probs), probs)
+
+
+class PartC2LoweringShapeTests(unittest.TestCase):
+    """Decision 0064 items 3, 7, 9 and 17, the lint adjustment on the real output of Part C2's lowering (the self-test's Viper, build j3d): the length
+    facts of an array of structures are a clause of their own (a structure global's member: before the structure's cell row, its row group after it); the
+    well-formedness row of a pointer to a structure with an array member of structures, alone and as a conjunct of an `f__wf` obligation's prior; a
+    pointer to the decay of an array global of structures; the minimum of a call's amount over the leaves of an array part of structures.  Each twin
+    changes one thing the rule reads."""
+
+    H = LeafRangeAtomTests("test_the_rows_of_an_atom_over_structures_are_clean")
+    V = "p_b__0"
+
+    @classmethod
+    def wf(cls, v=None, n=2, nk=None, guard=None, wf=True, lenfact=True, lo=0, base=None, count=1):
+        v = v or cls.V
+        nk = n if nk is None else nk
+        w = (f"(({v} == null) || ((({v} == loc(block_of({v}), offset_of({v}))) && (0 <= offset_of({v}))) && (offset_of({v}) <= len(block_of({v})))))"
+             if wf else f"({v} != null)")
+        g = guard or f"(({v} != null) && (offset_of({v}) < len(block_of({v}))))"
+        b = base or f"member({v}, 0)"
+        elem = f"(len(member(loc({b}, k), 0)) == 1) && (len(member(loc({b}, k), 1)) == {count})"
+        q = f"(forall k: Int :: {{ loc({b}, k) }} (({lo} <= k) && (k < {nk})) ==> ({elem}))"
+        facts = [f"(len(member({v}, 0)) == {n})"] if lenfact else []
+        facts += [q, f"(len(member({v}, 1)) == 1)"]
+        inner = facts[0]
+        for f in facts[1:]:
+            inner = f"({inner} && {f})"
+        return f"{w} && ({g} ==> ({inner}))"
+
+    def clean(self, lines):
+        self.H.assertEqual(self.probs(lines), [])
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "`forall`" in p]
+
+    def method(self, requires=(), body=()):
+        return self.H.method(requires=requires, body=body, formals=f"{self.V}: Ref")
+
+    def test_the_row_of_a_pointer_to_a_structure_with_an_array_member_is_clean(self):
+        self.clean(self.method(requires=[self.wf()]))
+        self.assertEqual(lv.struct_wf_member_array_row(self.wf()), "")
+
+    def test_each_change_of_the_row_is_refused(self):
+        other = "p_a__1"
+        mutants = {
+            "the array's count differs from its quantifier's": self.wf(n=2, nk=3),
+            "no length fact for the array member itself": self.wf(lenfact=False),
+            "the quantifier starts at 1": self.wf(lo=1),
+            "the guard is the null test only": self.wf(guard=f"({self.V} != null)"),
+            "the well-formedness is the null test": self.wf(wf=False),
+            "the quantifier is over another pointer's member": self.wf(base=f"member({other}, 0)"),
+            "an element member block whose length is 2": self.wf(count=2),
+        }
+        for what, row in mutants.items():
+            with self.subTest(what):
+                self.assertNotEqual(lv.struct_wf_member_array_row(row), "", what)
+                self.assertTrue(self.probs(self.method(requires=[row])), what)
+
+    def test_the_row_as_a_conjunct_of_an_obligation_s_prior(self):
+        row = self.wf()
+        self.assertEqual(lv.struct_wf_prior_problem(f"((({self.V} != null) && ({row})) && (m > 0)) ==> (m <= 5)"), "")
+        # a quantifier beside the row, a heap read in the prior or in the conclusion
+        self.assertTrue(lv.struct_wf_prior_problem(f"((({row}) && (forall j: Int :: {{ f(j) }} (0 <= j) ==> (f(j) == 0))) && (m > 0)) ==> (m <= 5)"))
+        self.assertTrue(lv.struct_wf_prior_problem(f"(({row}) && (loc({self.V}, 0).v_int > 0)) ==> (m <= 5)"))
+        self.assertTrue(lv.struct_wf_prior_problem(f"({row}) ==> (loc({self.V}, 0).v_int > 0)"))
+        # a prior with no such row is judged as before
+        self.assertIsNone(lv.struct_wf_prior_problem("(m > 0) ==> (m <= 5)"))
+
+    def test_the_quantifier_of_the_prior_s_split_row(self):
+        v, b = self.V, f"member({self.V}, 0)"
+        g = f"(({v} != null) && (offset_of({v}) < len(block_of({v}))))"
+        q = f"forall k: Int :: {{ loc({b}, k) }} ((0 <= k) && (k < 2)) ==> ((len(member(loc({b}, k), 0)) == 1) && (len(member(loc({b}, k), 1)) == 1))"
+        self.assertTrue(lv._is_struct_lens_quantifier(f"{g} ==> ({q})"))
+        self.assertFalse(lv._is_struct_lens_quantifier(f"({v} != null) ==> ({q})"))
+        self.assertFalse(lv._is_struct_lens_quantifier(f"p_a__1 != null ==> ({q})"))
+        self.assertFalse(lv._is_struct_lens_quantifier(q))
+        # the bound starts at 1; the quantifier is over another pointer's member under this pointer's guard
+        self.assertFalse(lv._is_struct_lens_quantifier(f"{g} ==> ({q.replace('(0 <= k)', '(1 <= k)')})"))
+        self.assertFalse(lv._is_struct_lens_quantifier(f"{g} ==> ({q.replace(b, 'member(p_a__1, 0)')})"))
+
+    # --- a structure global's member array: the length facts are a clause of their own, the group follows the structure's cell row
+    def test_a_detached_length_facts_clause_of_a_structure_global_member(self):
+        sg = AggregateStructGlobalMemberTests
+        cell = sg.S.cell_row()
+        g = sg.group()
+        fixture = lambda rows: sg("test_the_array_member_of_structures_is_clean").fixture(rows=[*rows, ArrayGlobalRowTests.H_ROW])  # noqa: E731
+        self.assertEqual(sg.strict(fixture([g[0], cell, *g[1:]])), [])
+        bad = {
+            "the length facts with no group after the cell row": ([g[0], cell], "are not followed by its row group"),
+            "the group's leaves out of order": ([g[0], cell, g[2], g[1], *g[3:]], "the row group of an array global"),
+            "the length facts twice": ([g[0], g[0], cell, *g[1:]], "are not followed by its row group"),
+        }
+        for what, (rows, frag) in bad.items():
+            with self.subTest(what):
+                probs = sg.strict(fixture(rows))
+                self.assertTrue(any(frag in p for p in probs), (what, probs))
+
+    # --- the minimum of a structure site's amount over the leaves of an array part of structures (e1e2c2_member_reads_call)
+    @staticmethod
+    def minimum(leaves):
+        out = leaves[0]
+        for x in leaves[1:]:
+            out = f"(({out} < {x}) ? {out} : {x})"
+        return out
+
+    def test_the_minimum_over_the_leaves_of_an_array_part_of_structures(self):
+        cell = "loc(member(v_t__0, 1), 0)"
+        slot = "loc(block_of(t__5), offset_of(t__5))"
+        leaf = lambda j: f"loc(member({slot}, {j}), 0)"  # noqa: E731
+        perms = lambda c: [f"perm({c}.v_int)", f"perm({c}.d_int)"]  # noqa: E731
+        live = "perm(lvloc(block_of(v_t__0)).lv)"
+        good = [*perms(cell), *perms(leaf(0)), *perms(leaf(1)), live]
+        roots = {"t__5": "v_t__0"}
+        self.assertTrue(lv._site_amount_inner(self.minimum(good), frozenset(), roots))
+        bad = {
+            "a leaf of a slot whose base is tied to another variable": (good, {"t__5": "v_u__1"}),
+            "a leaf of a slot whose base the method does not assign from the structure": (good, {}),
+            "the value permission of a slot leaf without its flag": ([*perms(cell), f"perm({leaf(0)}.v_int)", live], roots),
+            "a leaf of the slot of another base": ([*good, *perms(f"loc(member(loc(block_of(t__7), offset_of(t__7)), 0), 0)")], roots),
+        }
+        for what, (leaves, slots) in bad.items():
+            with self.subTest(what):
+                self.assertFalse(lv._site_amount_inner(self.minimum(leaves), frozenset(), slots), what)
+
+    def test_the_length_facts_of_two_arrays_of_structures_come_before_both_groups(self):
+        # declared.vpr, values.vpr: every array of structures' length facts follow the global facts, then each array's rows per leaf
+        ag, a = AggregateArrayGlobalGroupTests, ArrayGlobalRowTests
+        g, h = ag.agroup(g="GB_g__1", n=3), ag.agroup(g="GB_h__2", n=2, listed=((1, 2),))
+        facts = " && ".join(f"((len({x}()) == {c}) && (lvloc({x}()) == loc({x}(), (-2))))" for x, c in (("GB_g__1", 3), ("GB_h__2", 2)))
+        fixture = lambda rows: a("test_the_emitters_group_is_clean").fixture(rows=rows, facts=facts)  # noqa: E731
+        self.assertEqual(ag.strict(fixture([g[0], h[0], *g[1:], *h[1:]])), [])
+        self.assertEqual(ag.strict(fixture([*g, *h])), [])
+        bad = {
+            "the second array's length facts with no group": ([g[0], h[0], *g[1:]], "are not followed by its row group"),
+            "a length facts clause twice": ([g[0], g[0], h[0], *g[1:], *h[1:]], "are not followed by its row group"),
+            "a group whose leaf rows break the order": ([g[0], h[0], *g[1:], h[2], h[1], *h[3:]], "the row group of an array global"),
+        }
+        for what, (rows, frag) in bad.items():
+            with self.subTest(what):
+                probs = ag.strict(fixture(rows))
+                self.assertTrue(any(frag in p for p in probs), (what, probs))
+
+    # --- struct P *pg = g
+    def test_a_pointer_to_the_decay_of_an_array_of_structures(self):
+        ag = AggregateArrayGlobalGroupTests
+        ptr = lambda suffix: GlobalsTests.row("GB_h__2", suffix, f"(loc(GB_h__2(), 0).v_{suffix} == loc(GB_g__1(), 0))")  # noqa: E731
+
+        def fixture(suffix):
+            lines = ArrayGlobalRowTests("test_the_emitters_group_is_clean").fixture(rows=[*ag.agroup(), ptr(suffix)], facts=ArrayGlobalRowTests.facts(3))
+            lines[0:0] = [f"field v_{suffix}: Ref", f"field d_{suffix}: Bool"]
+            return lines
+
+        self.assertEqual(ag.strict(fixture("ptr_struct_0_P")), [])
+        probs = ag.strict(fixture("ptr_int"))
+        self.assertTrue(any("not a pointer to a struct" in p for p in probs), probs)
+
+    def test_one_pointer_field_points_at_arrays_of_structures_of_one_shape(self):
+        ag, a = AggregateArrayGlobalGroupTests, ArrayGlobalRowTests
+        g = ag.agroup(g="GB_g__1", n=3)
+        h = ag.agroup(g="GB_h__2", n=2, leaves=((0,),), listed=((1,),))
+        ptr = lambda name, target: GlobalsTests.row(name, "ptr_struct_0_P", f"(loc({name}(), 0).v_ptr_struct_0_P == loc({target}(), 0))")  # noqa: E731
+        facts = " && ".join(f"((len({x}()) == {c}) && (lvloc({x}()) == loc({x}(), (-2))))" for x, c in (("GB_g__1", 3), ("GB_h__2", 2), ("GB_p__3", 1), ("GB_q__4", 1)))
+
+        def fixture(second):
+            lines = a("test_the_emitters_group_is_clean").fixture(rows=[*g, *h, ptr("GB_p__3", "GB_g__1"), ptr("GB_q__4", second)], facts=facts,
+                                                                 names=["GB_g__1", "GB_h__2", "GB_p__3", "GB_q__4"])
+            lines[0:0] = ["field v_ptr_struct_0_P: Ref", "field d_ptr_struct_0_P: Bool"]
+            return lines
+
+        self.assertEqual(ag.strict(fixture("GB_g__1")), [])
+        probs = ag.strict(fixture("GB_h__2"))
+        self.assertTrue(any("two different shapes" in p for p in probs), probs)
+
+
+class NestedLengthQuantifierTests(unittest.TestCase):
+    """Audit round C2, finding 1 (decision 0064 item 3, the bullet "A length quantifier under another quantifier"): the length facts of a pointer
+    leaf's pointee under a range's own `forall k` hold the pointee's array member of structures as a quantifier over its elements whose binder is the
+    first of k1, k2, ... that the slot expression does not mention.  The lint admits exactly that row, and refuses an inner quantifier that reuses a name
+    its slot mentions (the capture the audit found: Silicon's duplicate-identifier check was the only thing that stopped it), a binder from 1, a count
+    that is not the length fact's, and a quantifier over another pointer's member.  The helpers are PointerToStructureLeafRowTests'."""
+
+    H = PointerToStructureLeafRowTests("test_the_well_formedness_of_a_pointer_leaf_with_its_pointee_s_facts_is_clean")
+
+    def __getattr__(self, name):
+        return getattr(self.H, name)
+
+    # the consequent of the k07 row (il-analyst-report-11 (d)), V the pointer value read from the slot's cell, B the binder and W the quantifier's base
+    ROW = ("(((V == null) || (((V == loc(block_of(V), offset_of(V))) && (0 <= offset_of(V))) && (offset_of(V) <= len(block_of(V))))) && "
+           "(((V != null) && (offset_of(V) < len(block_of(V)))) ==> (((len(member(V, 0)) == 2) && (forall B: Int :: { loc(member(W, 0), B) } "
+           "((0 <= B) && (B < 2)) ==> ((len(member(loc(member(W, 0), B), 0)) == 1) && (len(member(loc(member(W, 0), B), 1)) == 1)))) && "
+           "(len(member(V, 1)) == 1))))")
+
+    def text(self, v, b="k1", base=None, lo="0", count="2", bound="2"):
+        t = self.ROW.replace("B", b)
+        t = t.replace("(0 <= " + b + ")", f"({lo} <= {b})").replace("== 2)", f"== {count})", 1).replace(f"({b} < 2)", f"({b} < {bound})")
+        return t.replace("W", base or v).replace("V", v)
+
+    def rows(self, text, v):
+        c = self.slot("v_pp")
+        head = [self.quant(f"acc({v})", x="v_pp"), self.quant(f"acc({c}.d_ptr_struct_0_T)", x="v_pp"), self.quant(f"{c}.d_ptr_struct_0_T", x="v_pp")]
+        return self.method(requires=[*head, self.quant(text, x="v_pp")], formals="v_pp: Ref, v_n: Int, amt: Perm")
+
+    def v(self):
+        return f"{self.slot('v_pp')}.v_ptr_struct_0_T"
+
+    def test_the_row_as_lowering_writes_it_is_clean(self):
+        v = self.v()
+        self.clean(self.rows(self.text(v), v))
+        # any name the slot does not mention is admitted (k2 as well as k1): the rule is the freshness, not the spelling
+        self.clean(self.rows(self.text(v, b="k2"), v))
+
+    def test_an_inner_binder_that_reuses_the_outer_name_is_refused(self):
+        v = self.v()
+        self.refused(self.rows(self.text(v, b="k"), v))
+        # the reason is the capture, not another shape: the same text with the binder renamed is clean (above), and the rule says why
+        slot = lv._squash(v)
+        reuse = lv.struct_lens_conjuncts_problem(lv._flatten_and(
+            f"(len(member({slot}, 0)) == 2) && (forall k: Int :: {{ loc(member({slot}, 0), k) }} ((0 <= k) && (k < 2)) ==> "
+            f"(len(member(loc(member({slot}, 0), k), 0)) == 1)) && (len(member({slot}, 1)) == 1)"), slot)
+        self.assertIn("occurs in its slot expression", reuse or "")
+
+    def test_an_inner_binder_that_its_slot_expression_mentions_is_refused(self):
+        slot = lv._squash("loc(block_of(v_pp), k1).v_ptr_struct_0_T")
+        why = lv.struct_lens_conjuncts_problem(
+            lv._flatten_and(f"(len(member({slot}, 0)) == 2) && (forall k1: Int :: {{ loc(member({slot}, 0), k1) }} ((0 <= k1) && (k1 < 2)) ==> "
+                            f"(len(member(loc(member({slot}, 0), k1), 0)) == 1)) && (len(member({slot}, 1)) == 1)"), slot)
+        self.assertIn("occurs in its slot expression", why or "")
+        fresh = lv.struct_lens_conjuncts_problem(
+            lv._flatten_and(f"(len(member({slot}, 0)) == 2) && (forall k2: Int :: {{ loc(member({slot}, 0), k2) }} ((0 <= k2) && (k2 < 2)) ==> "
+                            f"(len(member(loc(member({slot}, 0), k2), 0)) == 1)) && (len(member({slot}, 1)) == 1)"), slot)
+        self.assertIsNone(fresh)
+
+    def test_a_binder_from_one_a_count_that_differs_and_another_pointer_s_member_are_refused(self):
+        v = self.v()
+        self.refused(self.rows(self.text(v, lo="1"), v))
+        self.refused(self.rows(self.text(v, count="3"), v))
+        self.refused(self.rows(self.text(v, bound="3"), v))
+        self.refused(self.rows(self.text(v, base=f"{self.slot('v_pp')}.v_ptr_struct_0_U"), v))
+
+    def test_the_row_of_a_leaf_of_an_array_member_under_a_member_binder_is_clean(self):
+        v = "loc(member(loc(member(v_p, 0), k), 0), 0).v_ptr_struct_0_T"
+        cons = self.text(v, base=v)
+        row = (f"forall k: Int :: {{ loc(member(loc(member(v_p, 0), k), 0), 0) }} ((0 <= k) && (k < 2)) ==> {cons}")
+        q = lv.parse_block_leaf_row(row)
+        self.assertIsNotNone(q)
+        self.assertTrue(lv._block_type_range(q["cons"], q["recv"], "ptr_struct_0_T") or lv._std_type_range(q["raw"], q["recv"], "ptr_struct_0_T"))
+        bad = row.replace("k1", "k")
+        qb = lv.parse_block_leaf_row(bad)
+        self.assertFalse(lv._std_type_range(qb["raw"], qb["recv"], "ptr_struct_0_T"))
+
+
+
+class RealOutputNestedLengthTests(unittest.TestCase):
+    """Audit round C2, finding 1, the rows of the kept Viper of tests/memory/struct_pointer_array_member.c and global_array_struct_folded.c as lowering
+    writes them (verbatim, `lint_viper` over the 102 programs the session kept): the check of a stored pointer value, the leaf of a member array of
+    pointers (a block row), a loop's conjunct of the same leaf, and the well-formedness row of a global structure's address (a term root).  Each is
+    admitted as written, and each twin changes one thing: the length quantifier's binder reuses the outer binder's name (the capture), its bound starts at 1,
+    its count differs from the length fact, or the row is about another pointer than the one the guard names."""
+
+    STORE = '(v_init_0__2 != null) ==> (!((!(perm(lvloc(block_of(v_init_0__2)).lv) > none)) || (!(((v_init_0__2 == null) || (((v_init_0__2 == loc(block_of(v_init_0__2), offset_of(v_init_0__2))) && (0 <= offset_of(v_init_0__2))) && (offset_of(v_init_0__2) <= len(block_of(v_init_0__2))))) && (((v_init_0__2 != null) && (offset_of(v_init_0__2) < len(block_of(v_init_0__2)))) ==> (((len(member(v_init_0__2, 0)) == 2) && (forall k: Int :: { loc(member(v_init_0__2, 0), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(member(v_init_0__2, 0), k), 0)) == 1) && (len(member(loc(member(v_init_0__2, 0), k), 1)) == 1)))) && (len(member(v_init_0__2, 1)) == 1)))))))'
+    BLOCK = 'forall k: Int :: { loc(member(p_p__0, 0), k) } ((0 <= k) && (k < 2)) ==> (((loc(member(p_p__0, 0), k).v_ptr_struct_1_T == null) || (((loc(member(p_p__0, 0), k).v_ptr_struct_1_T == loc(block_of(loc(member(p_p__0, 0), k).v_ptr_struct_1_T), offset_of(loc(member(p_p__0, 0), k).v_ptr_struct_1_T))) && (0 <= offset_of(loc(member(p_p__0, 0), k).v_ptr_struct_1_T))) && (offset_of(loc(member(p_p__0, 0), k).v_ptr_struct_1_T) <= len(block_of(loc(member(p_p__0, 0), k).v_ptr_struct_1_T))))) && (((loc(member(p_p__0, 0), k).v_ptr_struct_1_T != null) && (offset_of(loc(member(p_p__0, 0), k).v_ptr_struct_1_T) < len(block_of(loc(member(p_p__0, 0), k).v_ptr_struct_1_T)))) ==> (((len(member(loc(member(p_p__0, 0), k).v_ptr_struct_1_T, 0)) == 2) && (forall k1: Int :: { loc(member(loc(member(p_p__0, 0), k).v_ptr_struct_1_T, 0), k1) } ((0 <= k1) && (k1 < 2)) ==> ((len(member(loc(member(loc(member(p_p__0, 0), k).v_ptr_struct_1_T, 0), k1), 0)) == 1) && (len(member(loc(member(loc(member(p_p__0, 0), k).v_ptr_struct_1_T, 0), k1), 1)) == 1)))) && (len(member(loc(member(p_p__0, 0), k).v_ptr_struct_1_T, 1)) == 1))))'
+    LOOP = 'forall k: Int :: { loc(block_of(v_a__1), k) } (((0 <= k) && (k < 2)) && loc(block_of(v_a__1), k).d_ptr_struct_1_T) ==> (((loc(block_of(v_a__1), k).v_ptr_struct_1_T == null) || (((loc(block_of(v_a__1), k).v_ptr_struct_1_T == loc(block_of(loc(block_of(v_a__1), k).v_ptr_struct_1_T), offset_of(loc(block_of(v_a__1), k).v_ptr_struct_1_T))) && (0 <= offset_of(loc(block_of(v_a__1), k).v_ptr_struct_1_T))) && (offset_of(loc(block_of(v_a__1), k).v_ptr_struct_1_T) <= len(block_of(loc(block_of(v_a__1), k).v_ptr_struct_1_T))))) && (((loc(block_of(v_a__1), k).v_ptr_struct_1_T != null) && (offset_of(loc(block_of(v_a__1), k).v_ptr_struct_1_T) < len(block_of(loc(block_of(v_a__1), k).v_ptr_struct_1_T)))) ==> (((len(member(loc(block_of(v_a__1), k).v_ptr_struct_1_T, 0)) == 2) && (forall k1: Int :: { loc(member(loc(block_of(v_a__1), k).v_ptr_struct_1_T, 0), k1) } ((0 <= k1) && (k1 < 2)) ==> ((len(member(loc(member(loc(block_of(v_a__1), k).v_ptr_struct_1_T, 0), k1), 0)) == 1) && (len(member(loc(member(loc(block_of(v_a__1), k).v_ptr_struct_1_T, 0), k1), 1)) == 1)))) && (len(member(loc(block_of(v_a__1), k).v_ptr_struct_1_T, 1)) == 1))))'
+    TERM = '((loc(GB_gt__0(), 0) == null) || (((loc(GB_gt__0(), 0) == loc(block_of(loc(GB_gt__0(), 0)), offset_of(loc(GB_gt__0(), 0)))) && (0 <= offset_of(loc(GB_gt__0(), 0)))) && (offset_of(loc(GB_gt__0(), 0)) <= len(block_of(loc(GB_gt__0(), 0)))))) && (((loc(GB_gt__0(), 0) != null) && (offset_of(loc(GB_gt__0(), 0)) < len(block_of(loc(GB_gt__0(), 0))))) ==> ((((len(member(loc(GB_gt__0(), 0), 0)) == 1) && (len(member(loc(GB_gt__0(), 0), 1)) == 2)) && (forall k: Int :: { loc(member(loc(GB_gt__0(), 0), 1), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(member(loc(GB_gt__0(), 0), 1), k), 0)) == 1) && (len(member(loc(member(loc(GB_gt__0(), 0), 1), k), 1)) == 1)))) && (len(member(loc(GB_gt__0(), 0), 2)) == 1)))'
+
+    def store_problem(self, text):
+        return lv.wf_store_assert_problem(text)
+
+    def test_the_check_of_a_stored_pointer_value_is_admitted_exactly(self):
+        self.assertEqual(self.store_problem(self.STORE), "")
+        self.assertNotEqual(self.store_problem(self.STORE.replace("(0 <= k)", "(1 <= k)")), "")
+        self.assertNotEqual(self.store_problem(self.STORE.replace("(len(member(v_init_0__2, 0)) == 2)", "(len(member(v_init_0__2, 0)) == 3)")), "")
+        self.assertNotEqual(self.store_problem(self.STORE.replace("(v_init_0__2 != null) ==>", "(v_other != null) ==>", 1)), "")
+        # the guard and the liveness are another pointer's, the row is v_init's: refused for the row's own pointer
+        other = self.STORE.replace("(v_init_0__2 != null) ==>", "(v_other != null) ==>", 1).replace("block_of(v_init_0__2)).lv", "block_of(v_other)).lv", 1)
+        self.assertIn("not `v_other`", self.store_problem(other) or "")
+        # the liveness disjunct is the value's own block
+        self.assertIsNone(self.store_problem(self.STORE.replace("perm(lvloc(block_of(v_init_0__2)).lv)", "perm(lvloc(block_of(v_other)).lv)")))
+
+    def test_the_term_root_row_is_admitted_exactly(self):
+        self.assertEqual(lv.struct_wf_member_array_row(self.TERM), "")
+        for old, new in (("(0 <= k)", "(1 <= k)"), ("(len(member(loc(GB_gt__0(), 0), 1)) == 2)", "(len(member(loc(GB_gt__0(), 0), 1)) == 3)"),
+                         ("(k < 2)", "(k < 3)")):
+            self.assertIn(old, self.TERM)
+            self.assertNotEqual(lv.struct_wf_member_array_row(self.TERM.replace(old, new)), "")
+
+    def test_the_leaf_of_a_member_array_of_pointers_as_a_block_row_and_a_loop_conjunct(self):
+        q = lv.parse_block_row(self.BLOCK)
+        self.assertIsNotNone(q)
+        args = (None, q, set(), {}, {"p_p__0"}, {"member(p_p__0,0)": {2}}, frozenset())
+        self.assertIsNone(lv.block_row_problem("requires", *args))
+        bad = lv.parse_block_row(self.BLOCK.replace("k1", "k"))
+        self.assertIsNotNone(lv.block_row_problem("requires", None, bad, set(), {}, {"p_p__0"}, {"member(p_p__0,0)": {2}}, frozenset()))
+        self.assertIsNotNone(lv.block_row_problem("requires", None, lv.parse_block_row(self.BLOCK.replace("(k1 < 2)", "(k1 < 3)")), set(), {}, {"p_p__0"},
+                                                  {"member(p_p__0,0)": {2}}, frozenset()))
+        qq = lv.parse_range_quantifier_full(self.LOOP)
+        self.assertEqual(lv._loop_conjunct(qq)[0], "range")
+        self.assertIsNone(lv._loop_conjunct(lv.parse_range_quantifier_full(self.LOOP.replace("k1", "k"))))
+        self.assertIsNone(lv._loop_conjunct(lv.parse_range_quantifier_full(self.LOOP.replace("(0 <= k1)", "(1 <= k1)"))))
 
 
 if __name__ == "__main__":

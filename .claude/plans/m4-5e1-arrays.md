@@ -22,7 +22,9 @@ tests and docs).
 **Trimmed a fourth time at M4.5e1e's planning (2026-11-25).** e1d is done (record 0062). e1e does not fit one
 session and is two (question 290): **e1e1** has a plan of its own, `.claude/plans/m4-5e1e1-arrays-of-scalars.md`,
 planned in full as e1b, e1c and e1d were, and **e1e2** was planned in full after it (2026-11-25):
-`.claude/plans/m4-5e1e2-arrays-of-structures.md`, sized at 4,700–8,450 lines and run under the 12-hour rule (question 310). **The
+`.claude/plans/m4-5e1e2-arrays-of-structures.md`, sized at 4,700–8,450 lines and run under the 12-hour rule (question 310);
+its first session built Parts A and B, and what is left runs from `.claude/plans/m4-5e1e2b-arrays-of-structures.md`
+(written 2026-11-25, with `restrict` rejected first: question 326). **The
 text before this trim is `git show 68384d1:.claude/plans/m4-5e1-arrays.md`**: its section 7 is e1e's sketch
 (decided and proposed, P82 and S47, the known pins) and its section 9 e1e's inputs.
 
@@ -83,7 +85,7 @@ runs while a fix is queued; no Claude trailer; commits stay local.
 | **e1c Quantifiers** | `cerastes_forall` (question 226), triggers, `old` under a binder, max, the fill loop, the full `carrays.c` port, the tutorial chapter; the spike for e1f (`cerastes_old` in loop invariants cut to M4.5e2) | e1b | landed 3,514 (estimate 1,500–2,200) | **done** (record 0061) |
 | **e1d Pure functions and the exact sum** | read `pure` functions as Viper functions with their contracts and definition checks, self-recursion with `decreases`, calls of `pure` functions in checks, contracts and loop invariants, the exact sum (question 227) | e1c | landed 3,654 (estimate 3,350–5,000), in 11.5 hours | **done** (record 0062) |
 | **e1e1 Arrays of scalars in structures and static storage** | global and `static` arrays, array members, array compound literals, 0024 item 6 lifted for array types of scalars; structure values with array members (question 291, its Part E) | e1b | 2,340–4,475 for Parts A–D, 600–1,050 more for Part E (three surveys at `68384d1`) | **planned in full**: `.claude/plans/m4-5e1e1-arrays-of-scalars.md` |
-| **e1e2 Arrays of structures and arrays of arrays** | arrays of structures, ranges and `forall` over them, 2-D arrays, `int a[][3]`; what e1e1 cuts or moves | e1e1 | 4,700–8,450 with what e1e1 left (1,700–3,100 was the estimate without it) | **planned in full:** `.claude/plans/m4-5e1e2-arrays-of-structures.md` |
+| **e1e2 Arrays of structures and arrays of arrays** | arrays of structures, ranges and `forall` over them, 2-D arrays, `int a[][3]`; what e1e1 cuts or moves | e1e1 | 4,700–8,450 with what e1e1 left (1,700–3,100 was the estimate without it) | **Parts A and B done** (2026-11-25; landed 2,387 against 1,400–2,400); **the rest planned in full:** `.claude/plans/m4-5e1e2b-arrays-of-structures.md` (3,700–6,700 more) |
 | **e1f Range call rows** | the minimum read amount over a range at a call (question 238) and `owns_range`'s row order D (question 242); one set of Viper flips over e1b's range calls | e1c (its spike S45 (r)) | 150–400 | **planned after e1c**, from the spike (section 10) |
 
 The estimates are insertions without self-tests; each sub-session's own planning measures them again. Each
@@ -93,7 +95,8 @@ S))`); it may run before e1e and e1f.
 
 **No sub-session plans again after its spikes.** The owner had e1b, e1c, e1d and e1e1 each planned in full, with
 a decision table per probe and spike in place of the second planning this plan first foresaw; e1e2 was planned in
-full the same way after e1e1, from what e1e1 built.
+full the same way after e1e1, from what e1e1 built, and once more for its continuation, at the owner's request,
+after its first session revised the record and found `restrict` unsound.
 
 ## 2. Rules for every sub-session
 
@@ -176,7 +179,8 @@ cut; what was built is record 0062 and `internal/status.md`'s entry). The sketch
 ## 7. M4.5e1e — Arrays in aggregates and storage (two sessions: e1e1, record 0063, planned in full; e1e2)
 
 **e1e1's plan is `.claude/plans/m4-5e1e1-arrays-of-scalars.md`** (written 2026-11-25); **e1e2's plan is
-`.claude/plans/m4-5e1e2-arrays-of-structures.md`** (written 2026-11-25, after e1e1; e1e1's section 14 was its start). The sketch that stood here (decided and proposed, P82 and S47, the known pins) is section 7
+`.claude/plans/m4-5e1e2-arrays-of-structures.md`** (written 2026-11-25, after e1e1; e1e1's section 14 was its start),
+**continued by `.claude/plans/m4-5e1e2b-arrays-of-structures.md`** (Parts C to F and the `restrict` rejection). The sketch that stood here (decided and proposed, P82 and S47, the known pins) is section 7
 of `git show 68384d1:.claude/plans/m4-5e1-arrays.md`. Against the sketch:
 - **the cut is by element type, not "aggregates; storage"** (question 233's seam): e1e1 takes every array of
   scalars (globals, `static` locals, members, literals, computed types), which needs one extension of e1a's and

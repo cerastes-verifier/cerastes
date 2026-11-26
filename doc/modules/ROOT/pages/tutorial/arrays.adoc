@@ -186,12 +186,56 @@ arrays_sum_offbyone.c:21: note: this is the postcondition
 xref:memory.adoc#array-values[A value computed from an array] lists what `cerastes verify` does not compute by itself,
 and xref:annotations.adoc#pure-functions[Pure functions] the rules for a pure function's body and contract.
 
+== Arrays in aggregates
+
+An array may hold structures, and a contract speaks of a range of them as it does of a
+range of integers. Here are three points, a function that clears the `y` of each, and one
+that adds up their `x`:
+
+[source,c]
+----
+include::example$tutorial/aggregates_points.c[tag=source]
+----
+
+[source,console]
+----
+aggregates_points.c: verified (3 functions; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+`cerastes_owns_range(p, n)` gives `clear_y` every member of each of the `n` points, so the
+loop may write `p[i].y`; `sum_x` only reads, and asks for `cerastes_reads_range(p, n)`. The
+caller holds its local array `v` and lends it to each in turn. `sum_x` returns a `long long`
+and states bounds for the sum that follow from `n` alone; saying what the sum is would take
+a function over the range, as in <<_the_exact_sum,The exact sum>> above, and such a function
+cannot read a member of a structure yet.
+
+Ownership is of objects, whatever pointer reaches them. A function that owns the range and
+also owns one member of one of its elements asks for that member twice:
+
+[source,c]
+----
+include::example$tutorial/aggregates_points_alias.c[tag=source]
+----
+
+[source,console]
+----
+aggregates_points_alias.c:31: error: permission: passes `v[0..3)` and `v[0].y` to `clear_y`, which may be one object, once to own it
+----
+
+Passing a pointer to another object, a separate `int`, verifies.
+xref:memory.adoc#ranges-of-structures[Ranges of structures] has the rules, and
+xref:memory.adoc#arrays-of-structures[Arrays of structures] what a local array of
+structures can do.
+
 == What is next
 
 A loop that changes an array in place, such as adding one to every element, needs to speak
 of each element's value on entry to the function inside its invariant (`cerastes_old` in a
 loop invariant). That, pointer arithmetic (`p + i`), and a quantifier inside another are not
-supported yet; nor are arrays of structures and arrays of arrays. Arrays of scalars in
+supported yet; nor are arrays of arrays, or a quantifier over a member of a structure. An
+array of structures may also be a global or a member of a structure
+(xref:memory.adoc#global-arrays[Global arrays], xref:memory.adoc#array-members[Array
+members]). Arrays of scalars in
 global and `static` storage and as members of structures are on
 xref:memory.adoc#global-arrays[Global arrays] and xref:memory.adoc#array-members[Array
 members]. xref:memory.adoc#quantifiers[Facts about every element] has the details of

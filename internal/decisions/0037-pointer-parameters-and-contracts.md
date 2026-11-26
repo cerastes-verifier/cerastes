@@ -53,7 +53,13 @@ contracts, call sites, ghost amounts), in `internal/il-inventory.md`, "M4.5b1b".
    permissions belong to cells, not to pointers' provenance, so without the last condition a contract that lets `q ==
    p` lets `q` use `p`'s permission (`void f(int *restrict p, int *q) requires(owns(*p) && p == q)` writing `*p` and
    `*q` verified). Parameters of another pointee type never reach `p`'s cell (0028 item 1). So an access to `*p`'s
-   object through a pointer not based on `p` cannot verify, which is what C23 6.7.3.1 forbids. `restrict` stays rejected
+   object through a pointer not based on `p` cannot verify, which is what C23 6.7.3.1 forbids. **(Amended by record
+   0064 item 19, M4.5e1e2, 2026-11-25: this sentence is false and is withdrawn. The conditions above constrain the
+   other parameters only; a body can reach `*p`'s object by a name of static storage, through a callee's
+   permissions or through a pointer a callee hands back, and audit round 1 of M4.5e1e2 verified such programs.
+   Record 0064 item 19 rejected `restrict` in those functions, and, as rewritten on 2026-11-26 in M4.5e1e2's
+   continuation (question 326, the owner: "Reject restrict"), withdraws this item's acceptance altogether: every
+   `restrict` parameter is rejected, with a diagnostic that says to drop the keyword.)** `restrict` stays rejected
    on a local, on a result, on a parameter with only `reads` or `live`, beside a same-typed pointer parameter without an
    atom of its own, and on a pointee (`int *restrict *`). It is C only (`__restrict` in C is the same qualifier and is
    treated alike): EDG, clang++ and g++ refuse `restrict` in C++20 (P58; `__restrict` there is rejected), and the encoder reads the qualifier

@@ -11,7 +11,8 @@ pointers to such pointers (<<pointers-to-pointers>>): in local variables, as
 parameters and as results, with contracts that say which objects
 a function may read or write (<<contracts>>), in loops (<<loops>>) and across
 jumps (<<leaving>>); arrays of scalars as locals, globals, `static` locals,
-structure members and C compound literals (<<arrays>>, <<array-members>>); global and `static` local variables
+structure members and C compound literals (<<arrays>>, <<array-members>>), and arrays of structures as
+locals, globals, `static` locals and structure members (<<arrays-of-structures>>); global and `static` local variables
 (<<globals>>, <<static-locals>>); and memory from `malloc`, `calloc` and `free` (<<heap>>).
 <<not-yet>> lists what is still rejected.
 
@@ -257,13 +258,29 @@ A few more rules:
   it back in its `ensures` keeps the object. If that object is a local variable
   of the caller, the caller cannot end its lifetime: the closing brace of the
   variable's block is reported as xref:error-messages.adoc#_lifetime[`lifetime`].
-* In C, a `restrict` pointer parameter is accepted when the contract owns its
-  object and gives it back: owning it already means that nothing else reaches
-  the object during the call, which is what `restrict` promises. It is rejected
-  when another parameter, or a global the contract names, could hold a pointer
-  of the same type (a pointer to a pointer, a structure with a pointer member,
-  a pointer global): a pointer read from there is not based on the `restrict`
-  one, and the compilers may assume it never reaches the same object.
+* A `restrict` pointer parameter is rejected (`unsupported_annotation`, reported
+  at the head of the function's definition, in a message that names each such
+  parameter; in pass:[C++], where compilers spell the keyword `+__restrict+`, as
+  a type, `unsupported_type`): cerastes does not model `restrict`. The keyword promises that an
+  object modified through the parameter is reached only through pointers based
+  on it, and a compiler may reorder accesses on that promise. Owning the object does not keep the
+  promise, because ownership belongs to the object and not to the pointer: a
+  function may hold the permission it needs and still reach the same object by
+  another name (a global, a second parameter, a pointer that a called function
+  hands back), and C leaves such a function undefined although each of its
+  accesses is one its contract allows. Drop the keyword to verify the
+  function: for a program with defined behaviour `restrict` changes what a
+  compiler may assume, not what the program does. The proof is then of the
+  program without the keyword, so the program that is compiled must not have it
+  either: hiding it from cerastes alone proves nothing about the compiled one. A function that the file
+  only declares (no body) is rejected the same way where cerastes first reads
+  its signature: at the first call of it in the file, or, for some signatures
+  (a pointer to a structure among them), at the declaration itself whether or
+  not it is called. A declaration that is neither called nor read in that way
+  is not reported; nothing is verified against it. One declaration with the keyword is enough, whatever the
+  function's other declarations say. `restrict` written only on a declaration, before or after the
+  definition, of a function that the file defines without it is accepted: C
+  attaches the promise to the definition, and that definition makes none.
 * The address of a parameter may be taken (`int *q = &a;`): the parameter is
   then an object in memory, like a local.
 * A contract may own an object on one path and only read it on another
@@ -527,6 +544,28 @@ it was, so a check that the source changed fails:
 include::example$memory/struct_array_copy_error.c[tag=source]
 ----
 
+A member may also be an array of structures (`struct path { struct point v[2];
+int n; };`). Its elements' members are reached as those of any array of
+structures (`t.v[i].x`, `p->v[i].x`, <<arrays-of-structures>>), its initializer
+takes one list per element (`+{{{1, 2}, {3}}, 5}+`, with zero for what a list
+leaves out), `cerastes_owns(*p)` holds every member of every element with the
+other members, `cerastes_owns(p->v)` the array member alone, and a contract
+may then read `p->v[i].x`. Passing a pointer to the structure and a pointer to
+one of its elements to a function that owns both (`f(&t, &t.v[1])`) is reported
+at the call, as for any object named twice. For a global structure `gt`,
+`cerastes_owns(gt.v)` and `cerastes_reads(gt.v)` likewise name the array
+member alone. Such a structure is copied whole when the members of its
+elements number at most 7 in all, and passed and returned by value when those
+members and the elements of its other array members number at most 7
+together. Not supported yet, each rejected with a diagnostic: reading an
+element of a structure passed by value in a contract (`t.v[1].y` of a
+parameter `struct path t`), in C passing an element of a global structure's
+array member by value (`f(gt.v[1])`; copy it to a local first), and
+`cerastes_old(gt.v[1].x)` for a global structure. Each such structure that
+one function holds as a local adds much to the time its proof takes, and a
+function that holds a global structure with such a member and calls another
+function that holds it may run into the time limit.
+
 A structure with an array member cannot yet be allocated with `malloc`, have an
 `owning` or marked member besides, or be
 the object of `ref_to_uninit` or `must_init`; a contract cannot yet name part of
@@ -537,7 +576,7 @@ has no `requires` partner, put `cerastes::owning` on a pointer to one, or name o
 in a loop invariant's atom.
 
 Not supported yet, each rejected with a diagnostic: unions, bit-fields, arrays of
-structures and of arrays as members, `const`, `volatile` and `_Atomic` members, anonymous members, members
+arrays as members, `const`, `volatile` and `_Atomic` members, anonymous members, members
 that are `void *` or pointers to functions, `packed` structures, structures
 from system headers (such as `FILE`), structures defined inside a function, and
 in pass:[C++] every class feature beyond a C structure (member functions,
@@ -574,8 +613,9 @@ zero (`false`, a null pointer) for the rest, as C says, so `table[2]` above is
 element to zero. Without an initializer no element has a value until it is
 written. An index that is a
 constant outside the array (`a[4]` of `int a[4]`), a truth test of an array
-(`if (a)`) and, in C, a list longer than its array are rejected, as the
-compilers warn about them (xref:verifying.adoc#_shapes_the_compilers_warn_about[Shapes
+(`if (a)`) or of the address of an element (`if (&a[1])`, `&a[1] == NULL`: the
+address is never null) and, in C, a list longer than its array are rejected, as
+the compilers warn about them (xref:verifying.adoc#_shapes_the_compilers_warn_about[Shapes
 the compilers warn about]).
 
 `&a[i]` is a pointer to one element, and a function that owns one object
@@ -621,6 +661,65 @@ and the element has a value.
 ----
 include::example$memory/array_loop_sum.c[tag=source]
 ----
+
+[#arrays-of-structures]
+=== Arrays of structures
+
+The elements of a local array may be structures (`struct point v[3];`, of a
+structure <<structures,Structures>> describes whose members are scalars or
+nested structures). Each element is a structure object of its own, and each
+member of each element is an object: `v[0].x` and `v[1].x` are two objects, and
+so are `v[i].x` and `v[i].y`.
+
+`v[i].x` and, through a nested member, `v[i].t.x` are read and written like
+`a[i]`: the index is checked first
+(xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`]: the index of
+`v[i]` may be outside `v`), then the member like any member (a read needs
+it to have a value, xref:error-messages.adoc#_uninitialized[`uninitialized`]).
+`p[i].x` indexes any pointer to a structure with the checks of `p[i]` and then
+the member's, and `v` used as a value is a pointer to its first element
+(`struct point *p = v;`).
+
+A braced initializer holds one braced list per element, each read like a
+structure's own initializer: `struct point v[3] = {{1, 2}, {3, 4}};`. Elements
+the list does not reach and members an element's list leaves out are zero, and
+`{}` sets every member of every element to zero. Without an initializer no
+member of any element has a value until it is written. A list that leaves out
+the inner braces (`{1, 2, 3, 4}`) is rejected, as the compilers warn about it;
+xref:verifying.adoc#_shapes_the_compilers_warn_about[Shapes the compilers warn
+about] has the exact rule for `+{0}+`.
+
+An element as a whole is a structure value. It can be copied out and in (`t =
+v[i];`, `v[i] = t;`, `v[i] = v[j];`, `struct point t = v[i];`) and passed by
+value (`f(v[i])`), with the checks of a structure copy after the index's own:
+every member of the source must have a value. `&v[i]` is a pointer to one
+structure, which a function that owns one structure can take
+(`cerastes_owns(*p)`), and `&v[i].x` is a pointer to one member. A function
+that keeps the element it was given is reported when the array's block ends
+(xref:error-messages.adoc#_lifetime[`lifetime`]), as for any object.
+
+In a loop, every member of every element is carried like the other objects in
+memory (<<loops>>). A write to a member of an element (`v[i].x = 0;`) can reach
+every member of the same type in the function's arrays of structures and
+structure locals, so the loop does not keep by itself what was known about
+`v[k].y` when `x` and `y` are both `int`; a member of another type is not
+reached. A loop invariant or measure may read a member of an element of a local
+array (`v[i].x`, `v[i].t.x`), with the checks code has: the index is inside the
+array and the member has a value. Two accesses to the same member of the same element in one expression,
+one of them a write, are rejected or reported as
+xref:error-messages.adoc#_unsequenced[`unsequenced`] as for the elements of any
+array (<<expressions>>).
+
+Not supported yet, each rejected with a diagnostic: a structure value stored
+into an element (`v[i] = f();`, `v[i] = (struct point){1, 2};`: copy from a
+structure local instead); an element structure with
+an array member or with an owning or marked member; an array of structures
+declared through a `typedef` of the array type;
+`cerastes::uninit`, `cerastes::owning` and `cerastes::ref_to_uninit` on an
+array of structures; `p[i].x` through a pointer in a loop invariant or measure
+of a function whose contract holds no range on `p` (<<ranges-of-structures>>);
+and a truth test or a comparison with `NULL` of `&v[i]`, `&v[i].x` or `&p[i]`
+(`array_address_null_test`: the address is never null, and GCC warns).
 
 [#ranges]
 === Ranges in contracts
@@ -711,8 +810,72 @@ element that had one. A function that gives the elements their values in a loop
 says which ones the loop has written with an invariant over every element
 (<<quantifiers>>), and its `must_init` then holds; without one it is reported as not kept.
 `cerastes::owning(n)` on a parameter is `p == NULL || cerastes_owns_range(p, n)`
-(xref:annotations.adoc#_owning_parameters[Owning parameters]), and `restrict` on a
-parameter is accepted when its contract owns its range, as for one object.
+(xref:annotations.adoc#_owning_parameters[Owning parameters]).
+
+[#ranges-of-structures]
+==== Ranges of structures
+
+`cerastes_owns_range(p, n)` and `cerastes_reads_range(p, n)` also take a pointer
+parameter to a structure. The function then holds every member of each of the
+`n` elements `p[0]` to `p[n - 1]` (for a structure inside the element, its
+members in turn), and a caller passes an array of structures:
+
+[source,c]
+----
+include::example$memory/array_of_structs.c[tag=source]
+----
+
+The contract may read a member of an element (`p[0].x`, `p[i].t.y`), also under
+`cerastes_old` and in a `decreases`, where the element lies in a range the
+contract holds; a read of an element outside it is reported in the contract as
+xref:error-messages.adoc#_permission[`permission`], as for a range of integers.
+At a call the caller must hold every member of every element it passes. An
+array one element too short is reported at the call ("calls `fill`, which needs
+to own `v[0..3)`, without owning it"), and so is a member that a called
+function kept, where the message names the member ("... (the member `x` of
+every element)").
+
+A range of structures and another pointer may not name the same object twice.
+A function that owns the range and also owns one member of one element, a
+whole element, or a second range that overlaps the first asks for the same
+object two times, and the call is reported:
+
+[source,c]
+----
+include::example$memory/array_of_structs_alias_error.c[tag=source]
+----
+
+[source,console]
+----
+array_of_structs_alias_error.c:25: error: permission: passes `v[0..3)` and `v[1].x` to `tally`, which may be one object, once to own it
+----
+
+A loop in such a function carries each member of every element of the range as
+it carries a range of integers, and its invariant and measure may read
+`p[i].x`. A write to a member reaches every member of that type in the ranges
+and structures the function holds, so the loop does not keep by itself what
+was known about another `int` member; a member of another type is kept.
+`cerastes::owning(n)` and the markers of <<initialization>> apply to a range of
+structures member by member: `cerastes::must_init` promises every member of
+every element a value on return, and the message names the member a path
+leaves out ("returns without initializing the member `y` of every element of
+`p[0..n)`, which `cerastes::must_init` on `p` promises").
+
+Not supported yet, each rejected with a diagnostic unless said otherwise: a
+range of structures that have an array member or an owning or marked member; a
+range on part of an array (`cerastes_owns_range(&v[1], n)`) and an atom on one
+element (`cerastes_owns(p[1])`, `cerastes_owns(p[1].x)`); `&p[i]` in a
+contract; a read through a pointer member of an element in a contract or a
+loop invariant (`*p[0].q`, `p[0].q->x`). Two known limits: a function marked
+`cerastes::must_init` that gives the elements their values in a loop is
+reported as not keeping its promise, because a loop cannot say yet which
+members it has written; and a pointer to an element that the contract does not
+cover, `&p[n]` one past the range or `&p[1]` under `cerastes_owns(*p)`, may be
+formed, but passing it to a function that neither owns nor reads what it
+points to, or returning it, stops `cerastes verify` with an internal error
+instead of a diagnostic. Nothing is reported as verified in either case. A
+function that reads two ranges of the same structure type and has a loop is
+slow to verify, and may run into the time limit.
 
 [#array-parameters]
 === Array parameters
@@ -803,11 +966,9 @@ Not supported yet, each rejected with a diagnostic: designators in an array's
 initializer (`{[2] = 5}`: the front end keeps only the index's computed value,
 which cerastes cannot check as written); an element of the initializer that reads,
 writes or takes the address of the array itself; arrays of more than one
-dimension, of structures, and of owning pointers; `const`, `static` and global
-arrays; arrays as members and in compound literals; a variable length; a bound
-that names a `const` variable (`const int n = 4; int a[n];`); one element as a
+dimension and of owning pointers; `const` arrays; a variable length; one element as a
 contract's object (`cerastes_owns(p[i])`), a range of elements in a loop invariant, a
-range whose pointer is not a parameter, a range of structures; pointer arithmetic
+range whose pointer is not a parameter; pointer arithmetic
 (`p + 1`); and in a `forall`, an index other than `i`, `i + c` and `i - c`, arithmetic on reads
 of two arrays or two offsets (and, in loops and checks, on the second of two reads), a pointer
 argument other than a parameter (in a contract) or a pointer variable, local array or global
@@ -952,9 +1113,17 @@ A contract cannot yet name
 part of a global array or one of its elements (`cerastes_owns_range(table, n)`,
 `&table[2]`), take its address plus an offset (`table + i`), or pass it to a
 quantifier or a `pure` function (a loop invariant and a `check` can). A `const`
-global array, a global initialized with `&table[2]` and an array of structures
+global array and a global initialized with `&table[2]`
 are not supported yet; a global array declared without a bound or a braced
 initializer (`int table[];`) is rejected, as the compilers warn about it.
+
+A global or `static` local array may hold structures (`+static struct point grid[3] = {{1, 2}, {3}};+`). Each element takes a list of its own, and what the lists
+leave out is zero, as for any object with static storage, so `grid[1].y` and
+every member of `grid[2]` are 0 here; where the initial values of a global are
+not known (<<globals>>), none of its elements' members is. `cerastes_owns(grid)`
+and `cerastes_reads(grid)` name every member of every element, a contract may
+then read `grid[i].x`, and `main` and the loops of a function that holds the
+array carry it member by member, as they carry a local array of structures.
 
 Globals of other files (`extern int count;` with no definition here) are not
 supported yet, nor is a structure global initialized with the address of another
@@ -1954,8 +2123,10 @@ These are rejected with a diagnostic, never approximated
   loop);
 * globals defined in another file, `volatile`, `_Atomic`, `const` structure,
   `const` array and thread-local globals, and `static const` locals;
-* arrays of structures and arrays of arrays, as objects, members or types
-  (`struct point pts[4]`, `int m[2][3]`, `sizeof(int[2][3])`); a structure with an
+* arrays of arrays (`int m[2][3]`, `sizeof(int[2][3])`), an array of structures
+  named through a `typedef` or as a type (`sizeof(struct point[3])`), and an element
+  structure with an array member or an owning or marked member
+  (<<arrays-of-structures>>); a structure with an
   array member that is allocated with `malloc`, that also has an `owning` or marked
   member, or whose pointer is marked `ref_to_uninit` or `must_init`; part of a
   global array or of an array member in a contract (`cerastes_owns_range(table,
@@ -2033,13 +2204,15 @@ These are rejected with a diagnostic, never approximated
   allocator; `cerastes_owns_vlibc_block` is the spelling for vlibc's), and
   `vlibc_malloc`, `vlibc_calloc` and `cerastes_owns_vlibc_block` in pass:[C++]
   (<<vlibc-allocator,vlibc's allocator>>);
-* `restrict` except on a C parameter whose contract owns its object;
 * `void *` other than an allocation's result converted at once to `T *` and
   the argument of `free` (<<heap>>), and pointers to unions, to functions and to
   structures that are not supported;
-* `restrict` beside a parameter or global that can hold a pointer of the same
-  type (a pointer to a pointer, a structure with a pointer member, a pointer
-  global), and on a pointer to a structure;
+* `restrict`: on a parameter it is rejected because cerastes does not model the
+  promise it makes, and dropping the keyword does not change a program with
+  defined behaviour (<<contracts,Pointer parameters and contracts>>); on a
+  local, a global, a member, a result or the object a pointer points to it is
+  rejected as a type; in the type of a cast or of a compound literal it is
+  accepted and promises nothing;
 * conversions between pointer types other than adding `const` to the object
   pointed to, comparisons of order and arithmetic on pointers.
 

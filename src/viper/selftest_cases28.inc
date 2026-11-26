@@ -18,11 +18,12 @@ void define_arrays_rejected_until_part_b()
         return k.prog.array_of(k.i32, 3U);
     };
     // ---- the node `ElemAddr`, in every position the accepted shapes do not cover (the pointer-based and array-based element places are lowering cases) ----
-    rc("arr_rej_elem_addr_over_struct_pointer", "structures: M4.5e1e",
+    rc("arr_rej_elem_addr_over_struct_pointer", "an array member or an `owning`",
        [=](Kit& k)
        {
-           // sp[1] of a `struct S *sp`
-           StructType* S {k.strukt("S", {{"x", k.i32}})};
+           // sp[1] of a `struct S *sp` whose structure holds an array member (decision 0064 Part B: the element of a pointer to a structure is accepted, one with an array member is Part E's;
+           // flipped from "structures: M4.5e1e")
+           StructType* S {k.strukt("S", {{"x", k.i32}, {"a", k.prog.array_of(k.i32, 2U)}})};
            Function* f {k.fn("f", k.vd, {{"sp", k.ptr(k.st(S))}})};
            f->body = k.blk({k.es(k.b.elem_addr(k.pv(f, 0), N(k, "1"), k.at()))});
            k.done(f);
@@ -99,12 +100,13 @@ void define_arrays_rejected_until_part_b()
            // struct S { int a[0]; }; (an array member is accepted from M4.5e1e1 part C: one dimension of at least one element)
            k.strukt("S", {{"a", k.prog.array_of(k.i32, 0U)}});
        });
-    rc("arr_rej_array_global_of_structs", "decision 0059 items 1 and 2",
+    rc("arr_rej_array_global_of_structs_missing_leaves", "has 0 initial values for the 1 leaves",
        [=](Kit& k)
        {
-           // struct T { int x; }; struct T g[3]; (M4.5e1e2)
+           // struct T { int x; }; struct T g[3] = {...}; with a listed element that has no value for its leaf (the global array of structures is accepted from M4.5e1e2 part C2)
            StructType* T {k.strukt("T", {{"x", k.i32}})};
-           k.prog.add_global("g", k.prog.array_of(k.st(T), 3U), k.at(), nullptr);
+           Global* g {k.prog.add_global("g", k.prog.array_of(k.st(T), 3U), k.at(), nullptr)};
+           g->elems.push_back(GlobalLeaf {});
        });
     rc("arr_rej_array_zero_length", "of no elements",
        [=](Kit& k)

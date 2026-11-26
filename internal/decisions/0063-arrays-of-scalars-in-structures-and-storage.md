@@ -40,6 +40,10 @@
     one), 285 (a test slow on the box only because of what it must refute goes to `tests/long/` with a short twin).
   - Questions settled with the advisor in this session: 301–303, 305–309 (`internal/handoff.md` §8); 304 is open for
     the owner.
+- **Amended by 0064** (M4.5e1e2's first session, 2026-11-25): item 6's rule for `{0}` and brace elision is
+  replaced by the measured rule of both compilers, designated lists included (record 0064 item 16; question 304
+  answered by it); item 4's leaf views gain leaf paths with index steps and the `aggregate_element` flag (0064
+  item 4). The other items 0064 amends (1, 2, 5, 7 to 10, 13 to 15) are built by its continuation.
 - **Milestone:** M4.5e1e1.
 - **Amends:** 0012 item 11 (the lint); 0024 item 6 (array types of scalars); 0028 items 5 and 16 (as built for
   arrays); 0041 items 2, 4, 5, 10 and 12; 0043 items 2, 3, 4, 6, 7, 8, 9, 11 and 13; 0044 items 2, 3, 4, 7 and 8;
