@@ -89,7 +89,14 @@ ending past fourteen. So Part E was not begun. Parts E and F run from the same p
     amendment lines in records 0040, 0045, 0047, 0052, 0054, 0055, 0058 and 0063.
 - **On `main`, before the branch: `493a923`**, the owner's inline handoff answers, committed verbatim.
 
-**Not done** (the next session's, from the same plan; nothing was cut): Part E (arrays of arrays,
+**Not done.** **From Part D, a cut in part** (the plan's cut 4, "a written atom … on a structure with an
+array member", taken for two forms without having been put to the advisor as a question; the advisor accepted
+it afterwards on question 348's ground: no fixture, fail closed): of record 0064 item 15's written atoms only
+`owns(*p)` and `owns(p->a)` on a pointer variable are built; **a written `reads(*p)` or `reads(p->a)` and a
+written atom whose pointer is read through memory stay rejected** (the spike's fixture S48 (k) covered
+neither; the orchestrator's briefing to the last il-analyst said to keep them refused), each with a
+diagnostic and a pin row, the record and the page naming M4.5e2. **The next session's, from the same plan:**
+Part E (arrays of arrays,
 array-of-rows parameters in the three spellings and the typedef'd ones, `v[i].a[j]`, depth 3, the tutorial's
 matrix example) and Part F (quantifiers and `pure` applications over members). Each is still rejected with a
 diagnostic and a pin that names its part. **An encoder draft of Part E exists on the branch
@@ -166,7 +173,8 @@ for coverage; reports `build/m4.5e1e2c/auditor-report-{D1,D2,D2b}.md`, probes un
   The diagnostic says what the way round costs today: after `malloc`, elements written one by one can be
   read back, a read of an element that only a loop wrote is `uninitialized` (a listed false alarm until
   Part F). Alternatives: another framing in the contract's well-formedness method, or one quantified zero
-  line per array member (new trusted text; the record names M4.5e2).
+  line per array member (new trusted text; the record names M4.5e2). **On macOS** the test at the cap (24
+  values) verifies in 5 s in both modes; where the edge lies there was not measured.
 - **For the owner: 357, a permission was denied.** The Viper lint refuses the Viper of two new tests (a
   contract with two `reads` atoms through two loaded pointers: the array part's rows carry record 0045 item
   7's partner-sum amount). A test-mutator's edit of `scripts/lint_viper.py` to admit that amount was
@@ -185,7 +193,8 @@ for coverage; reports `build/m4.5e1e2c/auditor-report-{D1,D2,D2b}.md`, probes un
   marked parameter with no atom stays rejected by 0042 item 4); 351 (`calloc`'s zero values one clause per
   element); 352 and 353 (Part E's: a `const` row parameter stays rejected; whole copies of Part E's structure
   types cell by cell with the limit of 7 counting cells); 355 (written atoms at `write`, stricter than the
-  record's first wording); 356 (the owning-member reassignment: the correct form is pinned as a listed false
+  record's first wording; **with it, accepted at the close: only `owns` forms on a pointer variable are
+  built, written `reads` forms and atoms through a loaded pointer stay rejected**); 356 (the owning-member reassignment: the correct form is pinned as a listed false
   alarm, the wrong form dropped, the positive given another twin); the split point.
 - **Settled by the orchestrator inside the plan's rules, listed for review:** the owner's uncommitted handoff
   answers committed on `main` (advisor agreed); two interim joined proofs and two audit rounds for one part;
@@ -212,6 +221,10 @@ Viper or map changed (below), and `rejections.py --base` shows no existing row m
 - **Part E's encoder half was drafted ahead** (the plan allows work ahead on a snapshot ref), in a second
   source-only worktree, before the split-point decision; work ahead was stopped on the advisor's word when
   the sum showed Part E would not fit. The draft is on a branch of its own, unproved and unaudited.
+- **A cut taken without the question being asked first** (above, "Not done"): written `reads` atoms and
+  written atoms through a loaded pointer on a structure with an array member were left rejected by the
+  orchestrator's briefing; the plan's rule is that a cut is taken on an audit finding with the advisor. It
+  was reported to the advisor at the close, who accepted it (logged with question 355, handoff §8).
 - **Record text written after its code, twice:** written atoms "as built" at `write` (question 355), and the
   loop place's gate; each in the strict direction, each written before the final joined proof.
 - **Flips A (D) not made:** `struct_array_reject_annotations.c` L37 and L39 (question 350).
@@ -222,8 +235,11 @@ Viper or map changed (below), and `rejections.py --base` shows no existing row m
   il-analysts' and edg-backends' single-file probes (the route probes, the audit probes re-run on later
   builds, 82 + 49 probes of the Part E draft, the `calloc` measurements, eight base confirmations); the
   auditors' probes (about 100, 79 and the short read's); native compiles and header checks of new tests on
-  the Mac; the 348 pin measured on the frozen build; one run by the orchestrator on the frozen base (audit
-  D1's exit 3) and two lint runs over the final build's output; docs builds beyond the preflight's one.
+  the Mac; the 348 pin measured on the frozen build; **by the orchestrator:** one run on the frozen base (audit
+  D1's exit 3); the composed snapshots built in lane `audit` (`e1e2c-d-a1`, `-a1z11`, `-j7`, `-j8`) and two
+  runs of the VIR self-test there to give the test-mutators the emitted text (at `-a1` and `-a1z11`); two
+  lint runs over the final build's output in lane `edg`; the `calloc` cap's test on the Mac (both modes); a
+  build check, the format check and three docs builds on the Mac.
 - Not done from the plan's section 10: no tutorial text (none was owed by Part D); `annotations.adoc` and
   `verifying.adoc` unchanged (no statement there changed with Part D; checked by search).
 - The state log's hand-written times before 15:20 UTC run up to nine minutes ahead of the clock in places.
@@ -293,7 +309,7 @@ other users' load, 40 to 75, for parts of the session, so times are upper bounds
   false-alarm pin (69 s per mode alone; 139 s for the call at box load 40 to 75). Nothing over 120 s per
   mode.
 - **Test counts against the plan's cap of 160:** 129 were used at the start; this session adds 85 test files
-  and 2 doc examples (the plan's 35 for Part D; 8 seq and `f__wf` pin files; 4 for question 348; 11 for the
+  and 2 doc examples (the plan's 35 for Part D; 8 seq and `f__wf` pin files; 3 for question 348; 11 for the
   loop column; 3 for the `calloc` cap; 5 audit-D1-derived; 15 audit-D2-derived; 5 others: a two-array
   `calloc` pair, a vacuity twin, an owning-global pair, counted with the groups as the test-mutators' report
   11 lists them) and removes 3 retired pins: 214 used, the excess over 160 audit- and question-derived
@@ -310,7 +326,7 @@ other users' load, 40 to 75, for parts of the session, so times are upper bounds
   (the orchestrator's; the `calloc` cap rests on a stack depth measured on Linux):
   `struct_array_heap_calloc_cap.c` (24 values) verifies on the Mac in 5 s in both modes.
 - **`CERASTES_LONG=1 CERASTES_JOBS=32 scripts/check.sh` on the box** (`~/cerastes-s8/p-ubuntu-26.04`):
-  **green, exit 0, run once**, on Commit 4 `86442ce`, the last commit that touches anything but `internal/handoff.md`, `internal/status.md` and `plan.md`: 18:17:06 to 19:14:55 UTC (58 minutes; the box under other users' load, 18 to 128). Tests: 17,488 passed, 0 failed, 10 skipped; native-ok runs clang 3,277, GCC 3,277. The Viper lint: 7,104 files clean; the VIR self-test 2,814 passed, 0 failed, its output clean in the lint (2,814 files); the walker oracle 136 goldens, 0 failed; the docs and `check_doc_examples --html` (27 files, 0 problems); the EDG and vlibc trees clean; `check.sh: all green`, `long tier: ran`. The log is `build/m4.5e1e2c/check-c4-86442ce.log` (and `check-e1e2c-c4.log` in the lane).
+  **green, exit 0, run once**, on Commit 4 `86442ce`, the last commit that touches anything but `internal/` and `plan.md`: 18:17:06 to 19:14:55 UTC (58 minutes; the box under other users' load, 18 to 128). Tests: 17,488 passed, 0 failed, 10 skipped; native-ok runs clang 3,277, GCC 3,277. The Viper lint: 7,104 files clean; the VIR self-test 2,814 passed, 0 failed, its output clean in the lint (2,814 files); the walker oracle 136 goldens, 0 failed; the docs and `check_doc_examples --html` (27 files, 0 problems); the EDG and vlibc trees clean; `check.sh: all green`, `long tier: ran`. The log is `build/m4.5e1e2c/check-c4-86442ce.log` (and `check-e1e2c-c4.log` in the lane).
 - `src/` and `include/` against the base, without the self-test cases: `encode.cpp` +233 −57, `check.cpp`
   +180 −21, `lower.cpp` +1,638 −106 (2,051 insertions; the plan: 800 to 1,500); self-test cases +1,647 −57.
 - Hours per step: Step 0 done at 0 h 15; the encoder half proved at 0 h 36; the lowering's first slice at

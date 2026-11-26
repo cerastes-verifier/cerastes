@@ -2,7 +2,7 @@
 
 - **Status:** accepted for the items built so far: **item 15 (Part D) by the continuation's second session
   (2026-11-26: the leftovers of a structure with an array member, for array members of scalars; two audit
-  rounds and a short read, below);** those of the continuation's first session (2026-11-26:
+  rounds and a short read, below; the full check green at its Commit 4 `86442ce`);** those of the continuation's first session (2026-11-26:
   Parts R, C1 and C2, named below: items 5, 16 and 19 as amended, items 7 to 9, and the range, global and
   member parts of items 10 and 12, with item 17's rules through Part C2; the full check green at its Commit 3
   `46f34fb`), and those its first session built (2026-11-25, M4.5e1e2: items 2 to 6 and 10 to 12
@@ -192,8 +192,8 @@
     (the il-analyst's replay stands alone).
 - **Milestone:** M4.5e1e2.
 - **Amends:** 0012 item 11 (the lint); 0024 item 6 (array types of aggregates); 0028 items 2 and 16 (as built); 0043
-items 6, 7, 9 and 11; 0044 items 2–5 and 8; 0045 items 1 and 12; 0047 items 2, 4, 6 and 8; 0052 item 2; 0055
-items 2, 3 and 5; 0058 item 4; 0059 items 1–4, 6, 8 and 9; 0060 items 1, 3–5, 8, 9, 11–13 and 15; 0061 items 1, 3
+items 6, 7, 9 and 11; 0040 item 5; 0044 items 2–5 and 8; 0045 items 1 and 12; 0047 items 2, 4, 6, 8 and 10;
+0052 item 2; 0054 items 5 and 6; 0055 items 2, 3, 5 and 7; 0058 item 4; 0059 items 1–4, 6, 8 and 9; 0060 items 1, 3–5, 8, 9, 11–13 and 15; 0061 items 1, 3
 and 6; 0062 item 4; 0063 items 1, 2, 4–10 and 13–15; and, their `restrict` clauses withdrawn by item 19: 0037
 item 2, 0040 item 3, 0043 item 10, 0044 item 11, 0045 item 13, 0047 item 4, 0052 item 6 (d), 0054 item 2 and 0060
 item 14.
@@ -828,7 +828,8 @@ doc example holds.
       int n;` is 25 and rejected). Measured through the driver on the box, both modes agreeing: an array
       alone verifies up to 50 elements (78 s) and gets no verdict from 52; `a[24]` with 24 cells verifies
       (57 s), `a[32]` twice does not; the cap is about half the largest passing count, since the limit is
-      a stack depth that another platform may reach earlier. A structure with no array leaf has no cap
+      a stack depth that another platform may reach earlier (on macOS the test at the cap verifies in 5 s
+      in both modes: one probe; the edge there was not measured). A structure with no array leaf has no cap
       (unchanged: 100 cells verify, slowly), and `malloc` and `free` have none (no value clause). The
       diagnostic says to allocate with `malloc` and write the elements, and says what that costs today: a
       read of an element that only a LOOP wrote is reported as `uninitialized` (the listed false alarm of

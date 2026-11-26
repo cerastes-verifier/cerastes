@@ -37,7 +37,7 @@ M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its p
   loops and named by `owns` atoms written in loop invariants (record 0064 item 15). The closing commits
   after it change only `internal/` and `plan.md`. Two audit rounds and a short read of the fixes (a fresh
   Fable auditor each) found no wrong program that verifies; what they did not read is in the status entry,
-  "Audits". **The full check (`CERASTES_LONG=1`, on the box, run once): green at Commit 4 `86442ce`** (17,488 tests passed, 0 failed, 10 skipped; the VIR self-test 2,814 cases; 58 minutes on a loaded box), the last commit that touches anything but `internal/handoff.md`, `internal/status.md` and `plan.md`.
+  "Audits". **The full check (`CERASTES_LONG=1`, on the box, run once): green at Commit 4 `86442ce`** (17,488 tests passed, 0 failed, 10 skipped; the VIR self-test 2,814 cases; 58 minutes on a loaded box), the last commit that touches anything but `internal/` and `plan.md`.
 - **What is left of M4.5e1e2: Parts E and F,** from the same plan, without a new planning (question 310's
   12-hour rule; the session closed at the plan's split point after Commit 4 because Part E, with its audit
   and the close-out, would have ended past fourteen hours). **Part E:** arrays of arrays, array-of-rows
@@ -1780,7 +1780,9 @@ numbered from 338):
   element and each other member counted; about half the largest passing count); `malloc` has no limit. The
   diagnostic says to use `malloc` and write the elements, and says what that costs today: elements written
   one by one can be read back, but a read of an element that only a loop wrote is reported as
-  `uninitialized` (a listed false alarm until Part F's written quantified invariants). **Alternatives:** a
+  `uninitialized` (a listed false alarm until Part F's written quantified invariants). On macOS the test
+  at the cap verifies in 5 s in both modes (one probe; where the edge lies there was not measured).
+  **Alternatives:** a
   different framing of the per-element reads in the contract's well-formedness method (lowering work of
   unknown size), or one quantified zero line per array member in the view (new trusted text; the record
   names M4.5e2, which needs it for `calloc(n, sizeof(T))`). **Recommended:** let the cap stand until M4.5e2
@@ -1789,6 +1791,12 @@ numbered from 338):
   invariant was to take the first slot's ghost amount (the spike's fixture); the il-analyst built it at
   `write`, because with the ghost amount an `owns` invariant could stand over a fraction at the loop's
   entry. **Answer taken:** as built; the record's clause was written after the code (a deviation, listed).
+  **With it, a cut in part that was not asked first** (the plan's cut 4; reported to the advisor at the
+  close, who accepted it on question 348's ground: no fixture, fail closed): only `owns(*p)` and
+  `owns(p->a)` on a pointer variable are built; a written `reads(*p)` or `reads(p->a)` and a written atom
+  whose pointer is read through memory stay rejected (the spike's fixture covered neither), each with a
+  diagnostic and a pin row; the record names M4.5e2. Alternative: build them in the next session, each
+  with a fixture put through Silicon first.
 - **356** (fail closed: test mechanics). The twin of the owning-member loop test, a loop that replaces the
   member's block without freeing it, reports three rows where one was registered. **Answer taken:** the wrong
   form drew no row that the CORRECT form (free the block, then allocate another) does not also draw, so it
@@ -1856,5 +1864,8 @@ The next questions start at 358.
    `malloc(n * sizeof(struct S))`, whose rows are the same. **Alternative:** a part of its own in the next
    session, after Part E, with a spike first.
 5. **349–353, 355, 356, the advisor's other rulings in this session** (above). **Recommended:** let them
-   stand. The one that departs from the plan as written: 350 (two rows the plan listed as flips were kept
-   rejected, one of them for soundness). 352 and 353 are rulings for Part E, taken from the encoder draft.
+   stand. The ones that depart from the plan as written: 350 (two rows the plan listed as flips were kept
+   rejected, one of them for soundness), and 355's second half: of the atoms a loop invariant may write on
+   a structure with an array member only the `owns` forms on a pointer variable were built; written `reads`
+   forms and atoms through a pointer read from memory stay rejected (fail closed; M4.5e2), a cut the
+   orchestrator took in a briefing and the advisor accepted only afterwards. 352 and 353 are rulings for Part E, taken from the encoder draft.
