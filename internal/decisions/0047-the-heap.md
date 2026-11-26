@@ -401,3 +401,5 @@ Three facts shape this record (the planning surveys; P72 confirms them):
   stands behind them until a user links vlibc's. *(Amended by 0048 item 3, 2026-11-04: the platform's allocator stands
   behind `malloc`'s contract for good; vlibc's verified allocator is `vlibc_malloc`, which a program calls by that name.
   Item 2's shapes are read per allocator, and a block freed by the other allocator is `invalid-free` (0048 item 4).)*
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): items 2, 4, 6, 8 and 10 — `malloc`, `calloc`, `free` and `owns_block` take a structure with array members of scalars (0064 item 15; question 292): the typed view and the block site state the member lengths and hold each array leaf by quantified permissions and flags; `calloc`'s view has one zero clause per element and is accepted only up to 24 value clauses for such a structure (question 354); `free`'s rows are per array part (`invalid-free`); a held block's array part is a place of a loop, in programs where such a block can exist (the gate `array_block_possible`). A structure whose array member holds structures or arrays stays rejected (question 348).*

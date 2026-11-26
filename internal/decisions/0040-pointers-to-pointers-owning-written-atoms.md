@@ -328,3 +328,5 @@ P8 (written atoms on Silicon), P62 (the IL of this record's shapes) and S30 (Sil
   `owning`, a read of `*result` or an atom in an invariant.
 
 *2026-11-12, amended by 0060 (M4.5e1b): item 3 — `owning(n)` on a parameter (0060 item 13), merged with an explicit `owns_range(p, n)` of the same count.*
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): item 5 — a written atom in a loop invariant may be `owns(*p)` or `owns(p->a)` on a structure with an array member of scalars (0064 item 15, as built: one entry per array leaf, at `write`).*

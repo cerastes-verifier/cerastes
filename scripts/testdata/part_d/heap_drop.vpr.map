@@ -1,0 +1,33 @@
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+38	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+38	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+39	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+39	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+45	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `free`
+46	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `free`
+51	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `drop`
+52	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the contract of `drop`
+60	assert.failed	internal	t.c	20	3	frees the pointer, which may not point to an allocation
+61	assert.failed	invalid-free	t.c	20	3	frees the pointer, which may already be freed or may not be an allocation (a local, a global or a member)
+62	assert.failed	invalid-free	t.c	20	3	frees the pointer, which may not be the start of an allocation
+63	assert.failed	internal	t.c	20	3	the liveness cell of a block is at slot -2
+64	assert.failed	invalid-free	t.c	20	3	frees the pointer while a pointer to it may still be in use elsewhere
+65	assert.failed	internal	t.c	20	3	the lengths of a block
+66	assert.failed	invalid-free	t.c	20	3	frees the pointer without owning all of it: `n` is not owned here
+67	assert.failed	internal	t.c	20	3	the range of the value under its flag
+72	assert.failed[insufficient.permission]	invalid-free	t.c	20	3	frees the pointer without owning all of it: `a` is not owned here
+78	assert.failed[insufficient.permission]	invalid-free	t.c	20	3	frees the pointer without owning all of it: `a` is not owned here
+83	assert.failed	internal	t.c	20	3	the range of the value under its flag
+84	call.precondition	internal	t.c	20	3	internal check: Silicon's own check of the precondition of `free`
+86	assert.failed	leak	t.c	24	3	`drop` may return while it still owns an allocation that its `ensures` does not hand back
+91	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `free (well-formedness)`
+99	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `drop (well-formedness)`

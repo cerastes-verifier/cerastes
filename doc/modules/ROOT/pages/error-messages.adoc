@@ -875,7 +875,10 @@ function owns entirely. It is reported at the call of `free`:
 * an allocation already freed (a _double free_);
 * the address of a local or global variable, or of a structure's member (the
   member of an allocated structure is not the allocation, even when it is the
-  first member and has the same address);
+  first member and has the same address; an array member `p->data` and its
+  elements are not either);
+* an allocated structure one of whose array elements a called function kept
+  (the function no longer owns all of it);
 * an object the function only borrows (its contract `owns` it, or `owns_block`
   it in both its `requires` and its `ensures`, so it must give it back);
 * an allocation that a function it called may still hold a pointer to, or part

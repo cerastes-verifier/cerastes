@@ -1426,23 +1426,6 @@ void define_member_arrays()
            Function* mk {k.fn("mk", k.st(S))};
            k.trusted(mk);
        });
-    rc("marr_rej_array_and_owning_member", "has an array member and an `owning` or `ref_to_uninit` member",
-       [=](Kit& k)
-       {
-           // struct R { int a[4]; int *q [[cerastes::owning]]; }; (question 293: M4.5e1e2)
-           StructType* R {k.strukt("R", {{"a", k.prog.array_of(k.i32, 4U)}, {"q", k.ptr(k.i32)}})};
-           R->members[1].owning = true;
-       });
-    rc("marr_rej_marker_on_a_struct_pointer_with_an_array_member", "points to a struct with an array member",
-       [=](Kit& k)
-       {
-           // void f(struct S *p [[cerastes::must_init]]) (question 294: M4.5e1e2)
-           StructType* S {SA(k)};
-           Function* f {k.fn("f", k.vd, {{"p", PS(k, S)}})};
-           f->params[0].init = InitMarker::MustInit;
-           f->body = k.blk({});
-           k.done(f);
-       });
     rc("marr_rej_live_of_a_member_array", "or a `live` of one",
        [=](Kit& k)
        {
@@ -1460,18 +1443,6 @@ void define_member_arrays()
            StructType* S {SA(k)};
            Function* f {k.fn("f", k.vd, {{"p", PS(k, S)}})};
            k.req(f, k.b.range_atom(AtomKind::OwnsRange, k.mem(FPs(k, f, 0), 1), N(k, "2"), 0, k.at()));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("marr_rej_member_array_element_through_a_load", "reached by members alone",
-       [=](Kit& k)
-       {
-           // struct R { struct S *q; }; requires(r->q->a[1] == 0): the member array of an object reached through a heap read (question 306: M4.5e1e2)
-           StructType* S {SA(k)};
-           StructType* R {k.strukt("R", {{"q", k.ptr(k.st(S))}})};
-           Function* f {k.fn("f", k.vd, {{"r", PS(k, R)}})};
-           const Expr* loaded {k.deref(k.mem(FPs(k, f, 0), 0))};
-           k.req(f, k.eq(k.deref(k.b.elem_addr(k.mem(loaded, 1), N(k, "1"), k.at())), N(k, "0")));
            f->body = k.blk({});
            k.done(f);
        });

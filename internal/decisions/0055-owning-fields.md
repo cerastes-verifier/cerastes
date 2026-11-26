@@ -393,3 +393,5 @@ keeps raw storage out of the profile. cerastes checks raw storage (0047).
 - P4417R0's `[[owner]]` positions each have a cerastes spelling (item 8).
 - **Left for M4.5d2b2c:** `cerastes::not_invalidating`, `--strict-owner`, `ref_to_uninit` on a field, and this
   session's cuts 1 and 2 if taken. Recursive owning fields are M4.5f2's.
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): items 2, 3, 5 and 7 — an `owning` member may stand beside an array member of scalars, and an owner (a parameter, a result, a local, a global, a member) may point at a structure with one (0064 item 15; question 293): owner sites pass over the array leaf, which is never an owner, the closure of an atom holds the array leaf's lines, and the loop carriers take the block's array parts. An element structure or an array member of aggregates beside or under an owner stays rejected (M4.8; question 348).*

@@ -462,3 +462,5 @@ Written block invariants and owners in memory use the same carriers.
   `[[owner]]` mapping).
 
 *2026-11-11, amended by 0059 (M4.5e1a): items 3 and 6 — `holds_token` and the three `leak_exemption` terms gain `offset_of(p) == 0`, and item 3(e)'s flag clause is restated on `hb_w`'s cell, defensively: no assignment the encoder writes hands an owner an interior pointer (0059 item 10).*
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): items 5 and 6 — an owning global, `static` local or address-taken local may point at a structure with an array member of scalars; its deep atom and its loop carriers hold the block's array parts (0064 item 15, "Owners in loops").*

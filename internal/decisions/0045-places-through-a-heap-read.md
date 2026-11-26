@@ -259,3 +259,5 @@ rejected every such place, naming this session (11 pins). Without them a `T**` c
   object at the amount it received.
 - Programs accepted before c2b keep their Viper: none has a place through a load in a contract or a written atom, P69's
   invariant shapes keep their chains, and every new row is emitted only for load-rooted places.
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): items 1 and 12 — a place reached through a heap read may be a structure with an array member of scalars: the atom takes the array leaf's quantified lines with the loaded pointer as their receiver, and a contract may read `p->q->a[e]` (0064 item 15; question 306). A written `owns(*p)` or `owns(p->a)` in a loop invariant on such a structure has one entry per array leaf at `write`; a written `reads` form and a pointer read through memory stay rejected. A structure whose array member holds structures or arrays stays rejected at these places (question 348).*

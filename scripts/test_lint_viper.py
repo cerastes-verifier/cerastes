@@ -11991,5 +11991,1111 @@ class RealOutputNestedLengthTests(unittest.TestCase):
         self.assertIsNone(lv._loop_conjunct(lv.parse_range_quantifier_full(self.LOOP.replace("(0 <= k1)", "(1 <= k1)"))))
 
 
+class PartDHeapViewTests(unittest.TestCase):
+    """Decision 0064 item 15 (Part D, heap storage, M4.5e1e2c): the typed views of `malloc`, `calloc` and `free` for a structure with an array member of
+    scalars, `struct SA { int n; int a[4]; }`, are TRUSTED contracts (a quantifier in a bodyless method is an assumption), so their text is pinned as
+    `HeapViewTests` pins a cell structure's: each (receiver, field) pair once, the count of each array leaf the member's `len`, `malloc` and `free` claim
+    no flag, `calloc` sets every flag and zeroes every element, one clause per element with a literal index.  Fixtures: the VIR
+    self-test's text (scripts/testdata/heap_views and part_d; regenerated from refs/tmp/e1e2c-d-j6 on 2026-11-26, byte-identical to the first copies), the emitter's text for VIR cases, not `cerastes verify`'s; the `calloc`
+    zero clauses are marked in lint_viper.py as to be confirmed against the emitted text.  Each mutation of a fixture changes one thing and must be
+    reported once by `lint_views`."""
+
+    DATA = HeapViewTests.DATA
+    PART_D = Path(__file__).resolve().parent / "testdata" / "part_d"
+    K = "{ loc(member(res, 1), k) } ((0 <= k) && (k < 4)) ==> "
+    R1 = "(forall k: Int :: " + K + "acc(loc(member(res, 1), k).v_int))"
+    R2 = "(forall k: Int :: " + K + "acc(loc(member(res, 1), k).d_int))"
+    R3 = ("(forall k: Int :: " + K + "(loc(member(res, 1), k).d_int ==> (((-2147483648) <= loc(member(res, 1), k).v_int) && "
+          "(loc(member(res, 1), k).v_int <= 2147483647))))")
+    FLAGS = "(forall k: Int :: " + K + "loc(member(res, 1), k).d_int)"
+
+    def text(self, name):
+        return (self.DATA / f"{name}.vpr").read_text()
+
+    def one(self, text, fragment=None):
+        probs = HeapViewTests.problems(text)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("is not the trusted typed view of decision 0047", probs[0])
+        if fragment:
+            self.assertIn(fragment, probs[0])
+
+    def sub(self, name, old, new, count=1):
+        text = self.text(name)
+        self.assertEqual(text.count(old), count, (name, old[:60], text.count(old)))
+        return text.replace(old, new)
+
+    def last_clause(self, name, extra):
+        """`extra` as one more conjunct inside the block part of the view (before the clause's closing parenthesis)."""
+        lines = self.text(name).split("\n")
+        k = max(i for i, l in enumerate(lines) if l.startswith("  ensures ") or l.startswith("  requires "))
+        lines[k] = lines[k][:-1] + " && " + extra + ")"
+        return "\n".join(lines)
+
+    def element_clause(self, text, j):
+        start = text.index(f" && ((((!(res == null)) && (loc(member(res, 0), 0) == loc(member(res, 1), {j})))")
+        marker = f"loc(member(res, 1), {j}).v_int : 0)) == 0)"
+        end = text.index(marker, start) + len(marker)
+        return text[start:end]
+
+    def test_the_array_views_are_clean_and_are_the_ones_the_lowering_wrote(self):
+        for name in ("malloc_struct_array", "free_struct_array", "calloc_struct_array"):
+            with self.subTest(name=name):
+                self.assertEqual(HeapViewTests.problems(self.text(name)), [])
+                self.assertEqual(self.text(name).count("typed view: one "), 1)
+
+    def test_the_mutation_battery_of_the_cell_views_covers_the_array_views(self):
+        for name in ("malloc_struct_array", "free_struct_array", "calloc_struct_array"):
+            kw = "requires" if name.startswith("free") else "ensures"
+            with self.subTest(name=name, what="extra clause"):
+                self.one(self.sub(name, "  decreases _", f"  {kw} false\n  decreases _"))
+            with self.subTest(name=name, what="extra conjunct"):
+                self.one(self.last_clause(name, "false"))
+            with self.subTest(name=name, what="no decreases _"):
+                self.one(self.sub(name, "  decreases _", "  decreases"))
+
+    def test_each_array_row_is_needed_once(self):
+        for name, root in (("malloc_struct_array", "res"), ("free_struct_array", "p_ptr__0")):
+            r1, r2, r3 = (x.replace("res", root) for x in (self.R1, self.R2, self.R3))
+            with self.subTest(name=name, what="a pair twice (the value permission)"):
+                self.one(self.sub(name, r1, r1 + " && " + r1))
+            with self.subTest(name=name, what="a pair twice (the flag permission)"):
+                self.one(self.sub(name, r2, r2 + " && " + r2))
+            with self.subTest(name=name, what="the range row twice"):
+                self.one(self.sub(name, r3, r3 + " && " + r3))
+            with self.subTest(name=name, what="the value permission dropped"):
+                self.one(self.sub(name, " && " + r1, ""))
+            with self.subTest(name=name, what="the flag permission dropped"):
+                self.one(self.sub(name, " && " + r2, ""))
+            with self.subTest(name=name, what="the range row dropped"):
+                self.one(self.sub(name, " && " + r3, ""))
+            with self.subTest(name=name, what="the first two rows swapped"):
+                self.one(self.text(name).replace(r1, "@A").replace(r2, r1).replace("@A", r2))
+
+    def test_the_count_of_an_array_leaf_is_the_members_len(self):
+        for name, root in (("malloc_struct_array", "res"), ("free_struct_array", "p_ptr__0")):
+            k = self.K.replace("res", root)
+            with self.subTest(name=name, what="one row's bound is 5"):
+                self.one(self.text(name).replace("(k < 4)", "(k < 5)", 1), "array leaf")
+            with self.subTest(name=name, what="every bound is 3 and the len says 4"):
+                self.one(self.sub(name, "(k < 4)", "(k < 3)", 3), "array leaf")
+            with self.subTest(name=name, what="the len says 5 and the rows say 4"):
+                self.one(self.sub(name, f"(len(member({root}, 1)) == 4)", f"(len(member({root}, 1)) == 5)", 2), "array leaf")
+            with self.subTest(name=name, what="the first clause's len differs from the block part's"):
+                text = self.text(name)
+                head, sep, tail = text.partition(f"(len(member({root}, 1)) == 4)")
+                self.one(head + sep.replace("4", "5") + tail, "its first clause")
+            with self.subTest(name=name, what="the range starts at 1"):
+                self.one(self.text(name).replace("((0 <= k) && (k < 4))", "((1 <= k) && (k < 4))", 1), "array leaf")
+            with self.subTest(name=name, what="the trigger is another block"):
+                self.one(self.text(name).replace(k.split(" }")[0] + " }", f"{{ loc(member({root}, 0), k) }}", 1), "array leaf")
+            with self.subTest(name=name, what="the rows are over the other member's block"):
+                text = self.text(name).replace(f"loc(member({root}, 1), k)", f"loc(member({root}, 0), k)")
+                self.one(text)
+
+    def test_a_plain_cell_of_the_array_beside_its_rows_is_reported(self):
+        for name, root in (("malloc_struct_array", "res"), ("free_struct_array", "p_ptr__0")):
+            with self.subTest(name=name):
+                self.one(self.last_clause(name, f"acc(loc(member({root}, 1), 0).v_int)"), "the block part is not exactly")
+
+    def test_the_range_is_the_range_of_the_field_type(self):
+        for name, root in (("malloc_struct_array", "res"), ("free_struct_array", "p_ptr__0")):
+            with self.subTest(name=name):
+                text = self.text(name)
+                head, sep, tail = text.rpartition("<= 2147483647")
+                self.one(head + "<= 2147483648" + tail, "not the range of its field")
+
+    def test_malloc_and_free_claim_no_flag_and_no_value(self):
+        flags = self.FLAGS
+        self.one(self.last_clause("malloc_struct_array", flags), "the block part is not exactly")
+        self.one(self.last_clause("malloc_struct_array", "loc(member(res, 0), 0).d_int"), "the block part is not exactly")
+        self.one(self.last_clause("malloc_struct_array", "(loc(member(res, 1), 0).v_int == 0)"), "the block part is not exactly")
+        self.one(self.last_clause("free_struct_array", flags.replace("res", "p_ptr__0")), "the block part is not exactly")
+
+    def test_a_calloc_view_sets_every_flag_and_zeroes_every_element_once(self):
+        name = "calloc_struct_array"
+        text = self.text(name)
+        self.assertIn(self.FLAGS, text)
+        with self.subTest(what="the array flags dropped"):
+            self.one(self.sub(name, " && " + self.FLAGS, ""), "the block part is not exactly")
+        with self.subTest(what="the cell's flag dropped"):
+            self.one(self.sub(name, " && loc(member(res, 0), 0).d_int)", ")"), "the block part is not exactly")
+        with self.subTest(what="the cell's zero dropped"):
+            self.one(self.sub(name, " && (loc(member(res, 0), 0).v_int == 0)", ""), "the block part is not exactly")
+        with self.subTest(what="the cell's zero is 1"):
+            self.one(self.sub(name, "(loc(member(res, 0), 0).v_int == 0)", "(loc(member(res, 0), 0).v_int == 1)"), "the block part is not exactly")
+        for j in range(4):
+            clause = self.element_clause(text, j)
+            with self.subTest(what=f"element {j} dropped"):
+                self.one(text.replace(clause, "", 1), "the block part is not exactly")
+            with self.subTest(what=f"element {j} twice (a pair given twice)"):
+                self.one(text.replace(clause, clause + clause, 1), "the block part is not exactly")
+            with self.subTest(what=f"element {j} is 1"):
+                self.one(text.replace(clause, clause.replace("== 0)", "== 1)"), 1), "the block part is not exactly")
+            with self.subTest(what=f"element {j} is read at another index"):
+                self.one(text.replace(clause, clause.replace(f"member(res, 1), {j})", "member(res, 1), 7)"), 1), "the block part is not exactly")
+        extra = self.element_clause(text, 3).replace("), 3)", "), 4)")
+        with self.subTest(what="an element past the count"):
+            self.one(text.replace(self.element_clause(text, 3), self.element_clause(text, 3) + extra, 1), "the block part is not exactly")
+        with self.subTest(what="one quantified zero in place of the element clauses"):
+            quant = " && (forall k: Int :: " + self.K + "(loc(member(res, 1), k).v_int == 0))"
+            replaced = text
+            for j in range(4):
+                replaced = replaced.replace(self.element_clause(text, j), "", 1)
+            head, sep, tail = replaced.partition("\n  decreases _")
+            self.one(head[:-1] + quant + ")" + sep + tail, "the block part is not exactly")
+
+    def test_a_calloc_view_of_an_array_of_bool_that_is_not_the_emitted_text_is_refused(self):
+        # the shapes this test once pinned as not pinned (an array of `bool`, two array leaves) are pinned now, by the emitted text (`PartDViewsTests`); a
+        # calloc view of a bool array built from the int view by text substitution (the zeros still `== 0`) is not that text
+        text = self.text("calloc_struct_array")
+        for a, b in ((" && " + self.R3, ""), ("member(res, 1), k).v_int", "member(res, 1), k).v_bool"), ("member(res, 1), k).d_int", "member(res, 1), k).d_bool")):
+            self.assertIn(a, text)
+            text = text.replace(a, b)
+        text = text.replace("field v_int: Int\n", "field v_int: Int\nfield v_bool: Bool\n").replace("field d_int: Bool\n", "field d_int: Bool\nfield d_bool: Bool\n")
+        self.one(text)
+
+    def test_an_array_leaf_states_its_count_and_a_cell_does_not(self):
+        with self.subTest(what="a cell member with a count other than 1"):
+            text = self.text("malloc_struct_array").replace("(len(member(res, 0)) == 1)", "(len(member(res, 0)) == 2)")
+            self.one(text)
+        with self.subTest(what="an undeclared field suffix of the rows"):
+            text = self.text("malloc_struct_array").replace("field d_int: Bool\n", "")
+            self.one(text, "is not declared")
+
+    def test_the_pin_is_exact_and_an_untagged_clause_is_not_a_view(self):
+        text = self.text("malloc_struct_array")
+        untagged = text.replace("; typed view: one struct SA, decision 0047", "; a user routine").replace("vlibc: malloc returns NULL or one new block", "a user routine")
+        bad = untagged.replace("acc(loc(member(res, 1), k).v_int))", "(loc(member(res, 1), k).v_int == 7))", 1)
+        self.assertNotEqual(bad, untagged)
+        probs = lint_vpr_other(bad, None, "t.vpr")
+        self.assertTrue(any("outside the shapes of decision 0059" in x for x in probs), probs)
+        # the tagged one with the same wrong row is the view rule's, and the quantified rows of an accepted view are not reported twice
+        tagged_bad = text.replace("acc(loc(member(res, 1), k).v_int))", "(loc(member(res, 1), k).v_int == 7))", 1)
+        probs = lint_vpr_other(tagged_bad, None, "t.vpr")
+        self.assertTrue(any("is not the trusted typed view" in x for x in probs), probs)
+        self.assertEqual([x for x in lint_vpr_other(text, None, "t.vpr") if "no position map" not in x], [])
+
+
+class PartDViewsTests(unittest.TestCase):
+    """Decision 0064 item 15 (question 354 (c), M4.5e1e2c): the typed views of `malloc`, `calloc` and `free` that nothing covered, as `cerastes verify` emitted them
+    (scripts/testdata/heap_views/{malloc,free,calloc}_struct_{two,bool,enum,ptr,innerarr}.vpr, emitted by `cerastes verify` from build/m4.5e1e2c/views, regenerated at
+    refs/tmp/e1e2c-d-j6 and byte-identical): two array leaves (`int a[4]; int b[3]; int n;`), an array of `bool`, of an enumeration, of `int *`, and an array inside a by-value
+    structure.  A `calloc` view's per-element zero clause chains the tests of every cell of the element's field suffix and then the range of EVERY array leaf of
+    that suffix, in member order; its zero is `0`, `false` or `null` by the kind.  Each mutation changes one thing and must be reported once by `lint_views`."""
+
+    DATA = HeapViewTests.DATA
+    KINDS = {"two": ("int", 0, 4, "0"), "bool": ("bool", 0, 4, "false"), "enum": ("enum_1_enum_x20E", 0, 4, "0"), "ptr": ("ptr_int", 0, 4, "null")}
+
+    def text(self, name):
+        return (self.DATA / f"{name}.vpr").read_text()
+
+    def one(self, text, fragment=None):
+        probs = HeapViewTests.problems(text)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("is not the trusted typed view of decision 0047", probs[0])
+        if fragment:
+            self.assertIn(fragment, probs[0])
+
+    def clause(self, text, blk, j, suffix, zero):
+        """The zero clause of element `j` of the array leaf `blk` (` && (...)`, as the view writes it)."""
+        p = text.index(f"? loc(member(res, {blk}), {j}).v_{suffix}")
+        start = text.rindex(" && ((((!(res == null)) &&", 0, p)
+        end = text.index(f" == {zero})", p) + len(f" == {zero})")
+        found = text[start:end]
+        return found
+
+    def test_the_emitted_views_are_clean(self):
+        for kind in ("two", "bool", "enum", "ptr", "innerarr"):
+            for routine in ("malloc", "free", "calloc"):
+                with self.subTest(kind=kind, routine=routine):
+                    self.assertEqual(HeapViewTests.problems(self.text(f"{routine}_struct_{kind}")), [])
+
+    def test_a_calloc_view_holds_one_zero_clause_per_element_once_and_zero_of_its_kind(self):
+        for kind, (suffix, blk, n, zero) in self.KINDS.items():
+            name = f"calloc_struct_{kind}"
+            text = self.text(name)
+            for j in range(n):
+                c = self.clause(text, blk, j, suffix, zero)
+                with self.subTest(kind=kind, what=f"element {j} dropped"):
+                    self.one(text.replace(c, "", 1), "the block part is not exactly")
+                with self.subTest(kind=kind, what=f"element {j} twice"):
+                    self.one(text.replace(c, c + c, 1), "the block part is not exactly")
+                wrong = {"0": "1", "false": "true", "null": "loc(member(res, 0), 0).v_ptr_int"}[zero]
+                with self.subTest(kind=kind, what=f"element {j} is {wrong}"):
+                    self.one(text.replace(c, c[:-len(f" == {zero})")] + f" == {wrong})", 1), "the block part is not exactly")
+                with self.subTest(kind=kind, what=f"element {j} read at another index"):
+                    self.one(text.replace(c, c.replace(f"member(res, {blk}), {j})", f"member(res, {blk}), 7)"), 1), "the block part is not exactly")
+
+    def test_the_two_arrays_chain_the_ranges_of_both(self):
+        text = self.text("calloc_struct_two")
+        c = self.clause(text, 1, 0, "int", "0")  # an element of b: the cell test, then a's range, then its own
+        self.assertIn("block_of(loc(member(res, 0), 0))", c)
+        with self.subTest(what="b's element forgets a's range"):
+            bad = c.replace("(((!(res == null)) && (((block_of(loc(member(res, 1), 0)) == block_of(loc(member(res, 0), 0))) && "
+                            "(offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 1), 0)))) && (offset_of(loc(member(res, 1), 0)) < "
+                            "(offset_of(loc(member(res, 0), 0)) + 4)))) ? loc(member(res, 1), 0).v_int : ", "(")
+            self.assertNotEqual(bad, c)
+            self.one(text.replace(c, bad, 1), "the block part is not exactly")
+        for label, old, new in (("a's count in a range is 5", "(offset_of(loc(member(res, 0), 0)) + 4)", "(offset_of(loc(member(res, 0), 0)) + 5)"),
+                                ("b's count in its range is 4", "(offset_of(loc(member(res, 1), 0)) + 3)", "(offset_of(loc(member(res, 1), 0)) + 4)")):
+            with self.subTest(what=label):
+                self.assertIn(old, c)
+                self.one(text.replace(c, c.replace(old, new, 1), 1), "the block part is not exactly")
+        with self.subTest(what="b's rows dropped"):
+            row = " && (forall k: Int :: { loc(member(res, 1), k) } ((0 <= k) && (k < 3)) ==> acc(loc(member(res, 1), k).v_int))"
+            self.assertIn(row, text)
+            self.one(text.replace(row, "", 1))
+        with self.subTest(what="the flag rows of the arrays swapped"):
+            f0 = "(forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> loc(member(res, 0), k).d_int)"
+            f1 = "(forall k: Int :: { loc(member(res, 1), k) } ((0 <= k) && (k < 3)) ==> loc(member(res, 1), k).d_int)"
+            self.assertEqual((text.count(f0), text.count(f1)), (1, 1))
+            self.one(text.replace(f0, "@A").replace(f1, f0).replace("@A", f1))
+
+    def test_the_rows_of_an_array_of_each_kind(self):
+        for kind, mutations in (("bool", (("the flag row (a bool has no range row)", " && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(res, 0), k).d_bool))", "", "array leaf"),
+                                          ("a range row a bool does not have", "acc(loc(member(res, 0), k).d_bool))", "acc(loc(member(res, 0), k).d_bool)) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> (loc(member(res, 0), k).d_bool ==> (0 <= loc(member(res, 0), k).v_bool)))", None))),
+                                ("enum", (("a range that excludes 0", "((0 <= loc(member(res, 0), k).v_enum_1_enum_x20E)", "((1 <= loc(member(res, 0), k).v_enum_1_enum_x20E)", "array leaf"),)),
+                                ("ptr", (("a range that is no well-formedness", "((loc(member(res, 0), k).v_ptr_int == null) || ", "((loc(member(res, 0), k).v_ptr_int != null) || ", "array leaf"),))):
+            for routine in ("malloc", "free", "calloc"):
+                text = self.text(f"{routine}_struct_{kind}")
+                for label, old, new, fragment in mutations:
+                    if routine == "free":
+                        old, new = old.replace("res", "p_ptr__0"), new.replace("res", "p_ptr__0")
+                    self.assertIn(old, text, (kind, routine, label))
+                    with self.subTest(kind=kind, routine=routine, what=label):
+                        bad = text.replace(old, new, 1)
+                        self.assertNotEqual(bad, text)
+                        probs = HeapViewTests.problems(bad)
+                        self.assertTrue(probs, label)
+                        self.assertTrue(all("is not the trusted typed view of decision 0047" in x for x in probs), probs)
+        # an array of POINTERS TO STRUCTURES is still no pinned shape
+        text = self.text("malloc_struct_ptr").replace("v_ptr_int", "v_ptr_struct_0_S").replace("d_ptr_int", "d_ptr_struct_0_S")
+        text = text.replace("field v_ptr_struct_0_S: Ref\n", "field v_ptr_struct_0_S: Ref\n") 
+        probs = HeapViewTests.problems(text)
+        self.assertTrue(probs and "pointers to structures is not a pinned view shape" in probs[0], probs)
+
+
+class PartDBlockClauseTests(unittest.TestCase):
+    """Decision 0064 item 15 (Part D): an `owns_block` site written as one conjunction (`requires`/`ensures` of a method), and a block term rooted at one
+    pointer load.  Whole-program fixtures from the VIR self-test (scripts/testdata/part_d, with their maps, regenerated from refs/tmp/e1e2c-d-j6 on 2026-11-26, byte-identical)."""
+
+    PART_D = PartDHeapViewTests.PART_D
+
+    def pair(self, name):
+        return (self.PART_D / f"{name}.vpr").read_text(), (self.PART_D / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return lint_vpr_other(text, map_text, "t.vpr", "t.vpr.map")
+
+    def edit_line(self, text, pick, old, new, count=0):
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if pick(l))
+        self.assertIn(old, lines[k])
+        lines[k] = lines[k].replace(old, new, count) if count else lines[k].replace(old, new)
+        return "\n".join(lines)
+
+    def test_the_real_outputs_are_clean(self):
+        for name in ("heap_owns_block_contract", "heap_drop", "load_array_read"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def shapes(self, probs):
+        return [x for x in probs if "outside the shapes of decision 0059" in x]
+
+    def test_the_quantified_conjuncts_of_an_owns_block_clause_are_rows_over_its_own_block(self):
+        text, mp = self.pair("heap_owns_block_contract")
+        is_req = lambda l: l.startswith("  requires ") and "p_p__0 != null) && ((p_p__0 == null)" in l and "forall" in l  # noqa: E731
+        for label, old, new in (("a bound of 5 for a len of 4", "(k < 4)", "(k < 5)"),
+                                ("a range from 1", "((0 <= k) && (k < 4))", "((1 <= k) && (k < 4))"),
+                                ("a value fact that is no row", "acc(loc(member(p_p__0, 1), k).v_int))", "(loc(member(p_p__0, 1), k).v_int == 7))"),
+                                ("a trigger that is not the slot", "{ loc(member(p_p__0, 1), k) }", "{ block_of(loc(member(p_p__0, 1), k)) }"),
+                                ("another pointer's block", "member(p_p__0, 1), k", "member(q, 1), k")):
+            with self.subTest(label=label):
+                probs = self.shapes(self.problems(self.edit_line(text, is_req, old, new, 1), mp))
+                self.assertTrue(probs, label)
+
+    def test_a_block_term_rooted_at_one_pointer_load(self):
+        text, mp = self.pair("load_array_read")
+        load = "loc(member(p_p__0, 0), 0).v_ptr_struct_0_SA"
+        is_row = lambda l: l.startswith("  requires forall k: Int :: { loc(member(" + load)  # noqa: E731
+        self.assertEqual(self.problems(text, mp), [])
+        for label, old, new in (("a bound of 5 for a len of 4", "(k < 4)", "(k < 5)"),
+                                ("a load of a cell that is not on a canonical chain", load, "loc(block_of(p_p__0), 0).v_ptr_struct_0_SA"),
+                                ("a load of an integer field", load, "loc(member(p_p__0, 0), 0).v_int"),
+                                ("a load of a load", load, "loc(member(" + load + ", 0), 0).v_ptr_struct_0_SA")):
+            with self.subTest(label=label):
+                probs = self.shapes(self.problems(self.edit_line(text, is_row, old, new), mp))
+                self.assertTrue(probs, label)
+
+    def test_a_local_bound_to_a_slot_of_a_block_reached_through_a_load_is_no_bound_local(self):
+        text, _mp = self.pair("load_array_read")
+        src0 = lv.split_source(text)
+        decls0 = lv.declarations(src0)
+        use = next(d for d in decls0 if d.kind == "method" and d.name.startswith("f_f__0") and not d.name.endswith("__wf"))
+        lines = text.split("\n")
+        k = next(i for i in range(use.line, use.end_line + 1) if lines[i - 1].strip() == "{")
+        lines[k:k] = ["  var t__99: Ref", "  t__99 := loc(member(loc(member(p_p__0, 0), 0).v_ptr_struct_0_SA, 1), 0)"]
+        src = lv.split_source("\n".join(lines))
+        decls = lv.declarations(src)
+        use = next(d for d in decls if d.kind == "method" and d.name.startswith("f_f__0") and not d.name.endswith("__wf"))
+        out = lv.bound_locals(src, use, decls, set(), {}, lv.struct_array_counts(src, decls))
+        self.assertIn("t__99", out)
+        self.assertEqual(out["t__99"][0], set())
+        self.assertIn("neither `GB_g()`", out["t__99"][1])
+
+    def test_a_kept_flag_over_a_block_reached_through_a_load_has_no_rule_yet(self):
+        text, mp = self.pair("load_array_read")
+        cell = "loc(member(loc(member(p_p__0, 0), 0).v_ptr_struct_0_SA, 1), k)"
+        is_flag = lambda l: l.startswith("  ensures forall k: Int ::") and l.endswith(f"{cell}.d_int") and "acc(" not in l  # noqa: E731
+        edited = self.edit_line(text, is_flag, f"==> {cell}.d_int", f"==> (old({cell}.d_int) ==> {cell}.d_int)")
+        probs = [x for x in self.problems(edited, mp) if "has no rule yet" in x]
+        self.assertTrue(probs)
+
+
+    def test_load_root_and_block_term(self):
+        roots = {"p"}
+        cell = "loc(member(p,0),0)"
+        ok = f"member({cell}.v_ptr_struct_0_S,1)"
+        self.assertEqual(lv.block_term(ok, set(), roots, loads=True), ("member", f"{cell}.v_ptr_struct_0_S", (1,)))
+        # only the rows of a contract read a load (`bound_locals` roots chains at a Viper variable, never at an expression)
+        self.assertIsNone(lv.block_term(ok, set(), roots))
+        for bad in (f"member(loc(block_of(p),0).v_ptr_struct_0_S,1)", f"member({cell}.v_int,1)", f"member({cell}.v_ptr_int,1)",
+                    f"member(loc(member(q,0),0).v_ptr_struct_0_S,1)", f"member({cell}.v_ptr_struct_0_S.v_ptr_struct_0_S,1)",
+                    f"member(loc(member({cell}.v_ptr_struct_0_S,0),0).v_ptr_struct_0_S,1)"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(lv.block_term(bad, set(), roots, loads=True))
+        # the root cell itself holds the pointer (a `T **` formal's `*pp`, a global's cell `loc(GB_g(), 0)`): a load with no member step
+        self.assertEqual(lv.load_root("member(loc(GB_g(),0).v_ptr_struct_0_S,1)", {"loc(GB_g(),0)"}),
+                         ("loc(GB_g(),0).v_ptr_struct_0_S", "member(LOAD,1)"))
+        self.assertIsNone(lv.load_root("member(loc(GB_h(),0).v_ptr_struct_0_S,1)", {"loc(GB_g(),0)"}))
+
+
+class PartDEmittedOutputTests(unittest.TestCase):
+    """The first output of `cerastes verify` for Part D (the interim joined proof, snapshot refs/tmp/e1e2c-d-j5, M4.5e1e2c), as emitted: the typed views
+    of `struct S { int a[4]; int n; }` (the array member first: `scripts/testdata/heap_views/*_struct_array_first.vpr`) and three whole programs with
+    their maps (`scripts/testdata/part_d/emitted_*`): an owning member beside an array member (an owner closure under a guard that names a loaded
+    pointer, the quantified rows of the pointee's block), an owning global of `struct S *` (the global's cell atom with the block of its pointer
+    under `!(L == null) ==>`) and an owning parameter (the guard `!(((P == null) ? 1 : 0) != 0)`).  Each is clean as emitted and each twin changes one
+    thing."""
+
+    DATA = HeapViewTests.DATA
+    PART_D = PartDHeapViewTests.PART_D
+
+    def pair(self, name):
+        return (self.PART_D / f"{name}.vpr").read_text(), (self.PART_D / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return lint_vpr_other(text, map_text, "t.vpr", "t.vpr.map")
+
+    def shapes(self, probs):
+        return [x for x in probs if "outside the shapes of decision 0059" in x]
+
+    def edit_line(self, text, pick, old, new, count=0):
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if pick(l))
+        self.assertIn(old, lines[k])
+        lines[k] = lines[k].replace(old, new, count) if count else lines[k].replace(old, new)
+        return "\n".join(lines)
+
+    def test_the_emitted_views_with_the_array_member_first_are_clean_and_pinned(self):
+        for name in ("malloc_struct_array_first", "free_struct_array_first", "calloc_struct_array_first"):
+            text = (self.DATA / f"{name}.vpr").read_text()
+            with self.subTest(name=name, what="clean"):
+                self.assertEqual(HeapViewTests.problems(text), [])
+            kw = "requires" if name.startswith("free") else "ensures"
+            lines = text.split("\n")
+            k = max(i for i, l in enumerate(lines) if l.startswith(f"  {kw} "))
+            with self.subTest(name=name, what="an extra conjunct"):
+                bad = list(lines)
+                bad[k] = bad[k][:-1] + " && false)"
+                probs = HeapViewTests.problems("\n".join(bad))
+                self.assertEqual(len(probs), 1, probs)
+            with self.subTest(name=name, what="the array's count in its rows is 5"):
+                probs = HeapViewTests.problems(text.replace("(k < 4)", "(k < 5)", 1))
+                self.assertEqual(len(probs), 1, probs)
+        calloc = (self.DATA / "calloc_struct_array_first.vpr").read_text()
+        with self.subTest(what="calloc: an element's zero is 1"):
+            self.assertIn("== 0)", calloc)
+            head, sep, tail = calloc.rpartition("== 0)")
+            probs = HeapViewTests.problems(head + "== 1)" + tail)
+            self.assertEqual(len(probs), 1, probs)
+
+    def test_the_emitted_programs_are_clean(self):
+        for name in ("emitted_owner_global", "emitted_owner_beside", "emitted_owner_member"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_a_guard_that_names_another_pointer_than_its_block_part_is_refused(self):
+        text, mp = self.pair("emitted_owner_beside")
+        pick = lambda l: l.startswith("  requires (!(((p_b__0 == null) ? 1 : 0) != 0)) ==> ")  # noqa: E731
+        bad = self.edit_line(text, pick, "!(((p_b__0 == null) ? 1 : 0) != 0)", "!(((p_x == null) ? 1 : 0) != 0)", 1)
+        self.assertTrue(self.shapes(self.problems(bad, mp)))
+
+    def test_a_quantified_conjunct_of_a_nested_owner_closure_is_a_row_over_the_loaded_pointers_block(self):
+        text, mp = self.pair("emitted_owner_global")
+        pick = lambda l: l.startswith("  requires ((((((((loc(GB_g__0(), 0) != null)") and "forall" in l  # noqa: E731
+        for label, old, new in (("a bound of 5 for a count of 4", "(k < 4)", "(k < 5)"),
+                                ("a value fact that is no row", "acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int)", "(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int == 7)"),
+                                ("the rows of another global's pointer", "member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k", "member(loc(GB_h__0(), 0).v_ptr_struct_0_S, 0), k")):
+            with self.subTest(label=label):
+                self.assertTrue(self.shapes(self.problems(self.edit_line(text, pick, old, new, 1), mp)), label)
+
+    def test_a_guard_of_an_assert_row_may_read_a_pointer_but_not_a_scalar_or_a_flag(self):
+        text, mp = self.pair("emitted_owner_global")
+        pick = lambda l: l.startswith("  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (forall k: Int :: { loc(block_of(t__13), k) }")  # noqa: E731
+        guard = "(!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null))"
+        for label, extra in (("a scalar value", "loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int == 0"),
+                             ("a flag", "loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int")):
+            with self.subTest(label=label):
+                bad = self.edit_line(text, pick, guard, f"({guard} && {extra})", 1)
+                self.assertTrue([x for x in self.problems(bad, mp) if "reads the heap" in x], label)
+
+    def test_a_guard_of_an_assert_row_holds_only_the_canonical_null_test_of_a_canonical_load(self):
+        # audit round D1, finding 4: the row of the owner member's array part (emitted_owner_member, the flag row of line 210) with a guard that hides its
+        # obligation behind a pointer read that is no null test
+        text, mp = self.pair("emitted_owner_member")
+        pick = lambda l: l.startswith("  assert ((!(((v_b__0 == null) ? 1 : 0) != 0)) && ") and "==> (forall k: Int :: { loc(block_of(t__10), k) }" in l  # noqa: E731
+        load = "loc(member(v_b__0, 0), 0).v_ptr_struct_0_S"
+        guard_end = "== null))) ==> "
+        self.assertEqual(self.problems(text, mp), [])
+
+        def with_extra(extra):
+            def edit(line):
+                head, sep, tail = line.partition(guard_end)
+                self.assertEqual(sep, guard_end)
+                return head + "== null)) && " + extra + ") ==> " + tail
+            return "\n".join(edit(l) if pick(l) else l for l in text.split("\n"))
+        for label, extra in (("the auditor's mutant: offset_of of the load below 0", f"(offset_of({load}) < 0)"),
+                             ("block_of of the load compared", f"(block_of({load}) == block_of(t__10))"),
+                             ("the load compared with another pointer", f"({load} == t__10)"),
+                             ("the load in an arithmetic term", f"(({load} == null) || (offset_of(t__10) + 1 > 0 && {load} != t__10))"),
+                             ("a scalar read", "(loc(member(v_b__0, 1), 0).v_int < 0)"),
+                             ("a flag read", "loc(member(v_b__0, 1), 0).d_int"),
+                             ("a null test of a load of a non-canonical cell", "(!(loc(block_of(v_b__0), 0).v_ptr_struct_0_S == null))"),
+                             ("a null test of a load inside a load", f"(!(loc(member({load}, 0), 0).v_ptr_struct_0_S == null))")):
+            with self.subTest(label=label):
+                probs = self.problems(with_extra(extra), mp)
+                self.assertTrue([x for x in probs if "reads the heap" in x], (label, probs))
+        # twins: the canonical null tests, in both spellings, conjoined with heap-free terms, stay clean
+        for label, extra in (("L != null", f"({load} != null)"), ("!(L == null)", f"(!({load} == null))"),
+                             ("a heap-free term", "(v_b__0 != null)")):
+            with self.subTest(label=label):
+                self.assertEqual([x for x in self.problems(with_extra(extra), mp) if "reads the heap" in x], [], label)
+
+
+class PartDLoopPlaceTests(unittest.TestCase):
+    """Decision 0064 item 15 (Part D, M4.5e1e2c): a heap block's array part as a loop place (il-analyst, lower.cpp `HeapArr`).  Its text, from the VIR
+    self-test of the audit snapshot (refs/tmp/e1e2c-d-a1: scripts/testdata/part_d/loop_heap_{fill,only_array,param_block}, regenerated from
+    refs/tmp/e1e2c-d-j6, byte-identical): the part's FIRST slot is bound to a local `t`, its permissions are snapshotted once at the loop's entry in the `Perm`
+    locals `kav` (value) and `kad` (flag), and under the part's guard `g ==> `
+
+      * the permission conjuncts `forall k :: { loc(block_of(t), k) } offset_of(t) <= k && k < offset_of(t) + N ==> acc(loc(block_of(t), k).f, K)`;
+      * the flag conjunct with the antecedent `kad > none`, the range conjunct with `kav > none && kad > none`, the value conjunct with `kav > none`
+        and, where a write can reach the field, `kav < write`;
+      * the entry and back-edge marked rows, the same permission rows as `assert`s at the same amounts, in `if (g) { }`.
+
+    `amount_snapshots` reads the locals (assigned ONCE, `perm(X.f)`); `_loop_conjunct` ties each amount to the row's own base X and field, and refuses a
+    heap-part conjunct that is not under a guard.  The value-less liveness place of a structure with no cell (`loop_heap_only_array`) is the older shape
+    (the liveness and the token with their snapshots) and needs no rule of its own: its twins below are the older rules refusing."""
+
+    PART_D = PartDHeapViewTests.PART_D
+    KAV, KAD = "kav_h0_0__0", "kad_h0_0__0"
+
+    def pair(self, name):
+        return (self.PART_D / f"{name}.vpr").read_text(), (self.PART_D / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [x for x in lint_vpr_other(text, map_text, "t.vpr", "t.vpr.map")]
+
+    def quantified_invariant(self, n):
+        """The predicate of the n-th (1-based) quantified loop `invariant` line: the five conjuncts of the part, in the order the lowering writes them."""
+        seen = [0]
+
+        def pick(line):
+            if line.lstrip().startswith("invariant") and "forall" in line:
+                seen[0] += 1
+                return seen[0] == n
+            return False
+        return pick
+
+    def edit(self, text, pick, edit):
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if pick(l))
+        before = lines[k]
+        lines[k] = edit(before)
+        self.assertNotEqual(lines[k], before)
+        return "\n".join(lines)
+
+    def refused_as_a_conjunct(self, probs):
+        return [x for x in probs if "not one of decision 0059 item 8's four conjuncts" in x]
+
+    def refused_as_a_row(self, probs):
+        return [x for x in probs if "snapshot `perm(...)` of another place or another field" in x]
+
+    def test_the_fixtures_are_clean(self):
+        for name in ("loop_heap_fill", "loop_heap_only_array", "loop_heap_param_block"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_amount_snapshots_reads_the_locals_assigned_once_from_a_perm_of_a_variable(self):
+        text, _mp = self.pair("loop_heap_fill")
+
+        def snapshots(src_text):
+            src = lv.split_source(src_text)
+            decls = lv.declarations(src)
+            d = next(x for x in decls if x.kind == "method" and x.name.startswith("f_f__") and not x.name.endswith("__wf"))
+            return lv.amount_snapshots(src, d)
+        got = snapshots(text)
+        self.assertEqual(got[self.KAV], ("t__1", "v_int"))
+        self.assertEqual(got[self.KAD], ("t__1", "d_int"))
+        # the liveness and token snapshots read a cell that is not a variable (`lvloc(...)`, `loc(...)`) and are no amounts of this rule
+        self.assertNotIn("kl_h0_m0__0", got)
+        self.assertNotIn("kt_h0__0", got)
+        twice = text.replace(f"    {self.KAV} := perm(t__1.v_int)\n", f"    {self.KAV} := perm(t__1.v_int)\n    {self.KAV} := perm(t__1.v_int)\n", 1)
+        self.assertNotIn(self.KAV, snapshots(twice))
+        self.assertIn(self.KAD, snapshots(twice))
+        other = text.replace(f"{self.KAV} := perm(t__1.v_int)", f"{self.KAV} := write", 1)
+        self.assertNotIn(self.KAV, snapshots(other))
+        in_condition = text.replace(f"{self.KAV} := perm(t__1.v_int)", f"{self.KAV} := (t__1 != null) ? perm(t__1.v_int) : none", 1)
+        self.assertNotIn(self.KAV, snapshots(in_condition))
+
+    def test_the_permission_conjunct_is_at_the_snapshot_of_its_own_first_slot_and_field(self):
+        text, mp = self.pair("loop_heap_fill")
+        for label, n, edit in (("the value row at the flag's amount", 1, lambda l: l.replace(self.KAV, self.KAD)),
+                               ("the flag row at the value's amount", 2, lambda l: l.replace(self.KAD, self.KAV)),
+                               ("an amount `write`", 1, lambda l: l.replace(self.KAV, "write")),
+                               ("an amount that is a quotient", 1, lambda l: l.replace(self.KAV, "1 / 2")),
+                               ("an amount that is the liveness snapshot", 1, lambda l: l.replace(self.KAV, "kl_h0_m0__0")),
+                               ("a range from the slot after the first", 1, lambda l: l.replace("(offset_of(t__1) <= k)", "((offset_of(t__1) + 1) <= k)")),
+                               ("a range that does not run from the base's offset", 1, lambda l: l.replace("(offset_of(t__1) <= k)", "(0 <= k)"))):
+            with self.subTest(label=label):
+                bad = self.edit(text, self.quantified_invariant(n), edit)
+                self.assertTrue(self.refused_as_a_conjunct(self.problems(bad, mp)), label)
+
+    def test_a_snapshot_of_another_place_or_field_is_no_amount_of_the_part(self):
+        text, mp = self.pair("loop_heap_fill")
+        for label, old, new in (("the value's snapshot reads the flag", f"{self.KAV} := perm(t__1.v_int)", f"{self.KAV} := perm(t__1.d_int)"),
+                                ("the flag's snapshot reads the value", f"{self.KAD} := perm(t__1.d_int)", f"{self.KAD} := perm(t__1.v_int)"),
+                                ("the value's snapshot reads another base", f"{self.KAV} := perm(t__1.v_int)", f"{self.KAV} := perm(t__2.v_int)")):
+            with self.subTest(label=label):
+                probs = self.problems(text.replace(old, new, 1), mp)
+                self.assertTrue(self.refused_as_a_conjunct(probs) and self.refused_as_a_row(probs), (label, probs))
+
+    def test_a_snapshot_assigned_twice_or_inside_the_loop_is_no_amount(self):
+        text, mp = self.pair("loop_heap_fill")
+        twice = text.replace(f"    {self.KAV} := perm(t__1.v_int)\n", f"    {self.KAV} := perm(t__1.v_int)\n    {self.KAV} := perm(t__1.v_int)\n", 1)
+        self.assertTrue(self.refused_as_a_conjunct(self.problems(twice, mp)))
+        in_body = text.replace("      assert v_p__0 != null\n      assert !((v_i__1 < 0)", f"      {self.KAV} := write\n      assert v_p__0 != null\n      assert !((v_i__1 < 0)", 1)
+        self.assertNotEqual(in_body, text)
+        self.assertTrue(any("is assigned inside the loop" in x for x in self.problems(in_body, mp)))
+
+    def test_the_antecedents_of_the_flag_range_and_value_conjuncts_name_the_snapshots_of_their_own_fields(self):
+        text, mp = self.pair("loop_heap_fill")
+        kav, kad = self.KAV, self.KAD
+        for label, n, edit in (("flags: the value's amount", 3, lambda l: l.replace(f"({kad} > none)", f"({kav} > none)")),
+                               ("flags: the comparison turned", 3, lambda l: l.replace(f"({kad} > none)", f"({kad} < none)")),
+                               ("flags: none on the left", 3, lambda l: l.replace(f"({kad} > none)", f"(none < {kad})")),
+                               ("range: the two amounts swapped", 4, lambda l: l.replace(f"({kav} > none)", "@X").replace(f"({kad} > none)", f"({kav} > none)").replace("@X", f"({kad} > none)")),
+                               ("range: the flag's amount dropped", 4, lambda l: l.replace(f" && ({kad} > none)", "")),
+                               ("range: the value's amount twice", 4, lambda l: l.replace(f"({kad} > none)", f"({kav} > none)")),
+                               ("values: the flag's amount below write", 5, lambda l: l.replace(f"({kav} < write)", f"({kad} < write)")),
+                               ("values: below write alone", 5, lambda l: l.replace(f"(({kav} > none) && ({kav} < write))", f"({kav} < write)")),
+                               ("values: the flag's amount held", 5, lambda l: l.replace(f"(({kav} > none) && ({kav} < write))", f"({kad} > none)")),
+                               ("values: `<= write`", 5, lambda l: l.replace(f"({kav} < write)", f"({kav} <= write)"))):
+            with self.subTest(label=label):
+                bad = self.edit(text, self.quantified_invariant(n), edit)
+                self.assertTrue(self.refused_as_a_conjunct(self.problems(bad, mp)), label)
+
+    def test_a_flag_conjunct_without_its_antecedent_and_a_value_conjunct_for_an_unreached_field_stay_clean(self):
+        # the older loop conjuncts of decision 0059 item 8 (a range place of a local array) have no amount antecedent: a heap part's flag conjunct
+        # without `kad > none` is that shape (a stronger invariant, which Silicon checks), and no rule here ties its presence.  The value conjunct with
+        # `kav > none` and no `kav < write` is NOT the older shape: it is the lowering's own form for a field that no write reaches (`h.reach` false in
+        # lower.cpp), so the rule itself accepts it (the `[">"]` form of `_loop_conjunct`)
+        text, mp = self.pair("loop_heap_fill")
+        flags = self.edit(text, self.quantified_invariant(3), lambda l: l.replace(f" && ({self.KAD} > none)", ""))
+        self.assertEqual(self.problems(flags, mp), [])
+        values = self.edit(text, self.quantified_invariant(5), lambda l: l.replace(f"(({self.KAV} > none) && ({self.KAV} < write))", f"({self.KAV} > none)"))
+        self.assertEqual(self.problems(values, mp), [])
+
+    def test_a_conjunct_of_a_part_stands_under_a_guard(self):
+        text, mp = self.pair("loop_heap_fill")
+        for label, n in (("permission", 1), ("flags", 3), ("range", 4), ("values", 5)):
+            with self.subTest(label=label):
+                bad = self.edit(text, self.quantified_invariant(n), lambda l: l.replace("(v_p__0 != null) ==> ", "", 1))
+                self.assertTrue(self.refused_as_a_conjunct(self.problems(bad, mp)), label)
+
+    def test_the_guard_of_a_conjunct_reads_no_heap_and_no_quantifier(self):
+        text, mp = self.pair("loop_heap_fill")
+        for label, guard in (("a permission", "perm(t__1.v_int) > none"), ("an accessibility", "acc(t__1.v_int)"),
+                             ("a quantifier", "(forall j: Int :: true)")):
+            with self.subTest(label=label):
+                bad = self.edit(text, self.quantified_invariant(1), lambda l: l.replace("(v_p__0 != null) ==> ", f"({guard}) ==> ", 1))
+                self.assertTrue(self.refused_as_a_conjunct(self.problems(bad, mp)), label)
+
+    def test_the_entry_and_back_edge_rows_are_marked_rows_at_the_amounts_of_their_own_part(self):
+        text, mp = self.pair("loop_heap_fill")
+        rows = [l for l in text.split("\n") if l.lstrip().startswith("assert forall") and self.KAV in l]
+        self.assertEqual(len(rows), 2)  # the entry row and the back edge's
+        for label, old, new in (("the value row at the flag's amount", f".v_int, {self.KAV})", f".v_int, {self.KAD})"),
+                                ("the flag row at the value's amount", f".d_int, {self.KAD})", f".d_int, {self.KAV})")):
+            lines = text.split("\n")
+            for i, l in enumerate(lines):
+                if l.lstrip().startswith("assert forall") and old in l:
+                    with self.subTest(label=label, line=i + 1):
+                        bad = list(lines)
+                        bad[i] = l.replace(old, new)
+                        self.assertTrue(self.refused_as_a_row(self.problems("\n".join(bad), mp)), label)
+        # a row at the amount of a snapshot of ANOTHER base
+        with self.subTest(label="a row over another base"):
+            lines = text.split("\n")
+            i = next(i for i, l in enumerate(lines) if l.lstrip().startswith("assert forall") and self.KAV in l)
+            lines[i] = lines[i].replace("block_of(t__1)", "block_of(t__2)").replace("offset_of(t__1)", "offset_of(t__2)")
+            self.assertTrue(self.refused_as_a_row(self.problems("\n".join(lines), mp)))
+        # a marked row needs the map's expected reason (decision 0059 item 7)
+        for i, l in enumerate(text.split("\n"), start=1):
+            if l.lstrip().startswith("assert forall") and self.KAV in l:
+                lines = mp.split("\n")
+                k = next(j for j, e in enumerate(lines) if e.split("\t")[0] == str(i))
+                self.assertIn("insufficient.permission", lines[k])
+                lines[k] = lines[k].replace("assert.failed[insufficient.permission]", "assert.failed", 1)
+                with self.subTest(label="no expected reason", line=i):
+                    self.assertTrue([x for x in self.problems(text, "\n".join(lines)) if "has no expected reason" in x])
+
+    def test_a_snapshot_amount_of_a_row_stands_only_where_the_amount_is_the_rows_own(self):
+        # the rule reads ONLY a bare local that `amount_snapshots` knows: a `Perm` formal, a literal and an expression keep the older rules (0060 item 11)
+        row = ("assert forall k: Int :: { loc(block_of(t__1), k) } ((offset_of(t__1) <= k) && (k < (offset_of(t__1) + 4))) ==> "
+               "acc(loc(block_of(t__1), k).v_int, AMOUNT)")
+        text, mp = self.pair("loop_heap_fill")
+        lines = text.split("\n")
+        i = next(i for i, l in enumerate(lines) if l.lstrip().startswith("assert forall") and self.KAV in l)
+        for amount in ("write", "1 / 2", f"({self.KAV} / 2)"):
+            with self.subTest(amount=amount):
+                bad = list(lines)
+                bad[i] = "    " + row.replace("AMOUNT", amount)
+                self.assertEqual(self.refused_as_a_row(self.problems("\n".join(bad), mp)), [])
+
+    def test_the_value_less_liveness_place_is_the_older_shape_and_the_older_rules_judge_it(self):
+        text, mp = self.pair("loop_heap_only_array")
+        self.assertEqual(self.problems(text, mp), [])
+        live = "acc(lvloc(block_of(v_p__0)).lv, kl_h0__0)"
+        # a snapshot that is arithmetic is refused (decision 0038 item 9)
+        bad = text.replace("kl_h0__0 := perm(lvloc(block_of(v_p__0)).lv)", "kl_h0__0 := perm(lvloc(block_of(v_p__0)).lv) + write", 1)
+        self.assertTrue([x for x in self.problems(bad, mp) if "a snapshot is `perm(...)`" in x])
+        # the snapshot assigned in the body is a havocked amount
+        bad = text.replace("      assert v_p__0 != null\n      assert !((v_i__1 < 0)", "      kl_h0__0 := write\n      assert v_p__0 != null\n      assert !((v_i__1 < 0)", 1)
+        self.assertNotEqual(bad, text)
+        self.assertTrue([x for x in self.problems(bad, mp) if "is assigned inside the loop" in x])
+        # `wildcard` is never an amount
+        bad = text.replace(live, "acc(lvloc(block_of(v_p__0)).lv, wildcard)", 1)
+        self.assertNotEqual(bad, text)
+        self.assertTrue([x for x in self.problems(bad, mp) if "wildcard" in x])
+        # a token read outside its places (`tok` in a statement that is no row)
+        bad = text.replace("    label lh_0\n", "    exhale loc(block_of(v_p__0), (-1)).tok\n    label lh_0\n", 1)
+        self.assertNotEqual(bad, text)
+        self.assertTrue([x for x in self.problems(bad, mp) if "tok" in x])
+        # UNVALIDATED (no rule): that the liveness invariant's amount is the snapshot of its own cell; Silicon checks the invariant itself
+
+    def test_a_parameter_block_snapshots_at_the_top_of_the_method_and_is_clean(self):
+        text, mp = self.pair("loop_heap_param_block")
+        self.assertEqual(self.problems(text, mp), [])
+        # no enclosing `if` is needed for the snapshots (the base is a parameter's member): the guard on the conjuncts is the rule
+        bad = self.edit(text, self.quantified_invariant(2), lambda l: l.replace("(v_p__0 != null) ==> ", "", 1))
+        self.assertTrue(self.refused_as_a_conjunct(self.problems(bad, mp)))
+
+
+class PartDLoopCarrierTests(unittest.TestCase):
+    """Decision 0064 item 15 (Part D, M4.5e1e2c, il-analyst-D3's carriers, snapshot refs/tmp/e1e2c-d-z11): the array part of a block that a loop carries as an owner
+    or as a written `owns_block` site, at FULL permission and with no amount snapshot (unlike a heap array place, `PartDLoopPlaceTests`).  Fixtures, the
+    VIR self-test's text of z11 (regenerated from refs/tmp/e1e2c-d-j6, byte-identical) (scripts/testdata/part_d/loop_owner_{written,global,member,unmentioned}): `loop_owner_written` is an owning local's array part
+    under `v != null ==>`; `loop_owner_global` an owning global's under the null test of its load and a ghost pointer `abp_*`, with the flag snapshot `wea_*`;
+    `loop_owner_member` and `loop_owner_unmentioned` an owning member's closure in an `owns(*r)` clause and an owning local named by no invariant.  The rules:
+      * an `invariant G ==> forall k :: { loc(member(X, j), k) } 0 <= k && k < N ==> C` is a row of `block_row_problem` over the block `member(X, j)`, X a Ref local,
+        formal or result, with a count N that some `len(member(X, j)) == N` of the method states (a ghost `abp` takes its loaded pointer's counts: the pure conjunct
+        `E == abp`), no amount on `acc`; a guard reads the heap only by a canonical null test of a canonical load;
+      * a `wea_<...>` Bool local is `true` and, once, a quantifier over the flags of one block; every row under `wea` in its guard is the flag of that very block with
+        that count, in an invariant (the block term) and in an ending row (the bound local's block);
+      * the ending rows `if (!(G ==> (forall ...))) { assert false }` are judged as the `assert` of the same text, and a marked row over a bound local stands under the
+        `if (G) {` that binds the local;
+      * an `owns(*r)` clause that holds, as conjuncts of their own, the block clauses of the pointers its closure reaches is read by `block_clause_problem`."""
+
+    PART_D = PartDHeapViewTests.PART_D
+
+    def pair(self, name):
+        return (self.PART_D / f"{name}.vpr").read_text(), (self.PART_D / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return lint_vpr_other(text, map_text, "t.vpr", "t.vpr.map")
+
+    def edit_lines(self, text, pick, edit):
+        lines = text.split("\n")
+        hit = [i for i, l in enumerate(lines) if pick(l)]
+        self.assertTrue(hit, "no line")
+        for i in hit:
+            before = lines[i]
+            lines[i] = edit(before)
+            self.assertNotEqual(lines[i], before)
+        return "\n".join(lines)
+
+    def test_the_fixtures_are_clean(self):
+        for name in ("loop_owner_written", "loop_owner_global", "loop_owner_member", "loop_owner_unmentioned"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def invariant_row(self, text, f):
+        """The first quantified `invariant` over `member(v_q__0, 1)` of `loop_owner_written`: the value permission."""
+        return self.edit_lines(text, lambda l: l.lstrip().startswith("invariant") and "acc(loc(member(v_q__0, 1), k).v_int)" in l, f)
+
+    def test_a_carrier_row_is_over_the_block_and_the_count_the_methods_facts_state(self):
+        text, mp = self.pair("loop_owner_written")
+        for label, f in (("another block of the structure", lambda l: l.replace("member(v_q__0, 1)", "member(v_q__0, 0)")),
+                         ("another count", lambda l: l.replace("(k < 4)", "(k < 5)")),
+                         ("a range from 1", lambda l: l.replace("(0 <= k)", "(1 <= k)")),
+                         ("another variable, with no facts", lambda l: l.replace("member(v_q__0, 1)", "member(t__1, 1)")),
+                         ("an amount on the permission", lambda l: l.replace(".v_int))", ".v_int, write))")),
+                         ("a consequent that is no row", lambda l: l.replace("acc(loc(member(v_q__0, 1), k).v_int)", "(loc(member(v_q__0, 1), k).v_int == 0)"))):
+            with self.subTest(label=label):
+                probs = self.problems(self.invariant_row(text, f), mp)
+                self.assertTrue([x for x in probs if "outside the shapes of decision 0059" in x], (label, probs))
+
+    def test_the_guard_of_a_carrier_row_reads_the_heap_only_by_a_null_test(self):
+        text, mp = self.pair("loop_owner_written")
+        for label, guard in (("a scalar read", "(v_q__0 != null) && (loc(member(v_q__0, 0), 0).v_int > 0)"),
+                             ("an offset of a load", "(v_q__0 != null) && (offset_of(loc(member(v_q__0, 0), 0).v_ptr_struct_0_S) < 0)")):
+            with self.subTest(label=label):
+                bad = self.invariant_row(text, lambda l: l.replace("invariant (v_q__0 != null) ==>", f"invariant ({guard}) ==>", 1))
+                probs = self.problems(bad, mp)
+                self.assertTrue([x for x in probs if "reads the heap" in x], (label, probs))
+
+    def test_a_marked_row_over_a_bound_local_stands_under_the_guard_that_binds_it(self):
+        text, mp = self.pair("loop_owner_written")
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if l.lstrip().startswith("assert forall") and "block_of(t__1)" in l)
+        self.assertEqual(lines[k - 1].strip(), "if (v_q__0 != null) {")
+        bad = list(lines)
+        bad[k - 1] = lines[k - 1].replace("if (v_q__0 != null) {", "if (true) {")
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue([x for x in probs if "stands outside the `if (v_q__0!=null)`" in x], probs)
+        # twin: the row under the guard that binds the local is clean (the fixture), and so is a heap array place's row, whose local is bound unguarded
+        self.assertEqual(self.problems(text, mp), [])
+        self.assertEqual(self.problems(*PartDLoopPlaceTests.pair(PartDLoopPlaceTests(), "loop_heap_param_block")), [])
+
+    def test_a_flag_snapshot_ties_its_rows_to_its_own_block_and_count(self):
+        text, mp = self.pair("loop_owner_global")
+        wea = "wea_0_0__0"
+        inv = lambda l: l.lstrip().startswith("invariant") and wea in l and "forall" in l  # noqa: E731
+        ending = lambda l: l.lstrip().startswith("if (!(") and wea in l and "forall" in l  # noqa: E731
+        for label, bad in (("an invariant over another receiver", self.edit_lines(text, inv, lambda l: l.replace("member(abp_0__0, 1)", "member(abp_0__0, 0)").replace("(k < 4)", "(k < 1)"))),
+                           ("an invariant of the right block at another count", self.edit_lines(text, inv, lambda l: l.replace("(k < 4)", "(k < 3)"))),
+                           ("a snapshot of another count", self.edit_lines(text, lambda l: l.strip().startswith(f"{wea} := forall"), lambda l: l.replace("(k < 4)", "(k < 1)"))),
+                           ("a snapshot that is no flag quantifier", self.edit_lines(text, lambda l: l.strip().startswith(f"{wea} := forall"), lambda l: l.replace(".d_int", ".v_int"))),
+                           ("a snapshot that is no declared Bool", text.replace(f"  var {wea}: Bool\n", "", 1)),
+                           ("an ending row over another bound block", self.edit_lines(text, lambda l: l.strip().startswith("t__13 := loc(member(abp_0__0, 1), 0)"), lambda l: l.replace("member(abp_0__0, 1)", "member(abp_0__0, 0)"))),
+                           ("an acc row under the snapshot", self.edit_lines(text, lambda l: l.lstrip().startswith("invariant") and "acc(loc(member(abp_0__0, 1), k).v_int)" in l, lambda l: l.replace("==> (forall", f"&& {wea} ==> (forall", 1) if False else l.replace("invariant (", f"invariant ({wea} && ", 1)))):
+            with self.subTest(label=label):
+                self.assertNotEqual(bad, text)
+                self.assertTrue(self.problems(bad, mp), label)
+        # the ending row's `assert false` is needed on the next line
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if ending(l))
+        self.assertEqual(lines[k + 1].strip(), "assert false")
+        bad = list(lines)
+        bad[k + 1] = "      assert true"
+        self.assertTrue([x for x in self.problems("\n".join(bad), mp) if "`assert false` on the next line" in x])
+        self.assertEqual(self.problems(text, mp), [])
+
+    def test_an_owns_clause_with_a_closure_is_read_through_its_nested_block_clauses(self):
+        text, mp = self.pair("loop_owner_member")
+        is_req = lambda l: l.startswith("  requires ") and "forall" in l and "p_r__0" in l  # noqa: E731
+        for label, old, new in (("a bound of 5 for a count of 4", "(k < 4)", "(k < 5)"),
+                                ("a value fact that is no row", "acc(loc(member(loc(member(p_r__0, 0), 0).v_ptr_struct_0_SA, 1), k).v_int)", "(loc(member(loc(member(p_r__0, 0), 0).v_ptr_struct_0_SA, 1), k).v_int == 7)"),
+                                ("the rows of another pointer", "member(loc(member(p_r__0, 0), 0).v_ptr_struct_0_SA, 1), k", "member(q, 1), k")):
+            with self.subTest(label=label):
+                bad = self.edit_lines(text, is_req, lambda l: l.replace(old, new))
+                self.assertTrue([x for x in self.problems(bad, mp) if "outside the shapes of decision 0059" in x], label)
+
+
+
+class PartDWrittenPartTests(unittest.TestCase):
+    """Decision 0064 item 15, step B (il-analyst-D4, M4.5e1e2c): a written `owns(*p)` or `owns(p->a)` in a loop invariant.  Fixtures (scripts/testdata/part_d):
+    `written_owns_cell_less` and `written_owns_moved` (the VIR self-test's text of refs/tmp/e1e2c-d-j7, cases e1e2d_loop_written_owns_*), `emitted_chain_loop` (the
+    emitted Viper of tests/memory/struct_array_chain_loop.c, c23) and `emitted_written_kept`, `emitted_written_twice` (the encoder's Viper of two probes:
+    a moved pointer whose loop writes nothing, so that the part's values are kept, and `owns(*p) && owns(p->a)`).  The text of a written part, per slot:
+
+      * the invariants `G ==> forall k :: { loc(member(X, j), k) } 0 <= k && k < N ==> C`, X a Ref local, with C the permission `acc(F.v_t)`, `acc(F.d_t)`
+        (full: no amount), the flag, `F.d_t ==> range` and, where no write reaches the field, `F.v_t == old[L](F.v_t)`; G holds the atom's own guard and the
+        disjointness terms of the places beside it;
+      * the entry and back-edge rows over the same block: a marked `assert` of each `acc` (under `if (g) {` ... `}` where the atom has a guard) and the ending
+        rows `if (!(g ==> forall ... flag)) { assert false }`, the same for the range.
+
+    The rules (`written_part_row_problem`, `written_part_kept_problem`): each row is a row `carrier_row_problem` accepts, a marked row the `acc` and an ending row
+    the flag or the range, and its block, count, field and own guard are those of an invariant of the same method; the row stands under no disjointness term.
+    `lint_abp_ghosts` reads the two assignments of the ghost pointer `abp_*`."""
+
+    PART_D = PartDHeapViewTests.PART_D
+    BLOCK = "member(v_p__0, 0)"
+
+    def pair(self, name):
+        return (self.PART_D / f"{name}.vpr").read_text(), (self.PART_D / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return lint_vpr_other(text, map_text, "t.vpr", "t.vpr.map")
+
+    def lines_of(self, text, pick):
+        return [i for i, l in enumerate(text.split("\n")) if pick(l)]
+
+    def edit(self, text, pick, f, only=None):
+        lines = text.split("\n")
+        hit = [i for i, l in enumerate(lines) if pick(l)]
+        self.assertTrue(hit, "no line")
+        for i in (hit if only is None else [hit[only]]):
+            before = lines[i]
+            lines[i] = f(before)
+            self.assertNotEqual(lines[i], before)
+        return "\n".join(lines)
+
+    def row(self, field):
+        """A marked row over the block of the `emitted_written_kept` fixture: the `acc` of `field` (an `assert`, 2 or 4 spaces)."""
+        return lambda l: l.lstrip().startswith("assert forall") and f"acc(loc({self.BLOCK}, k).{field})" in l
+
+    def invariant(self, field):
+        return lambda l: l.lstrip().startswith("invariant forall") and f"acc(loc({self.BLOCK}, k).{field})" in l
+
+    def ending(self, flag):
+        return lambda l: l.lstrip().startswith("if (!(") and "forall" in l and (re.search(r"\.d_int\)+ \{$", l) is not None if flag else "v_int <= 2147483647" in l)
+
+    def refused(self, probs, text):
+        return [x for x in probs if text in x]
+
+    def test_the_fixtures_are_clean(self):
+        for name in ("written_owns_cell_less", "written_owns_moved", "emitted_chain_loop", "emitted_written_kept", "emitted_written_twice"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_a_marked_row_is_over_the_block_the_count_and_the_field_of_an_invariant(self):
+        text, mp = self.pair("emitted_written_kept")
+        for label, f, why in (
+                ("another block of the structure", lambda l: l.replace(self.BLOCK, "member(v_p__0, 1)").replace("(k < 4)", "(k < 1)"), "no loop invariant of the method states"),
+                ("the formal's block, not the written atom's pointer", lambda l: l.replace("v_p__0", "p_p__0"), "no loop invariant of the method states"),
+                ("another field type", lambda l: l.replace(".v_int)", ".v_bool)"), "no loop invariant of the method states"),
+                ("another count, with no length fact", lambda l: l.replace("(k < 4)", "(k < 5)"), "states no `len("),
+                ("a range from 1", lambda l: l.replace("(0 <= k)", "(1 <= k)"), "the range starts at 1"),
+                ("an amount `write`", lambda l: l.replace(".v_int)", ".v_int, write)"), "has an amount"),
+                ("an amount that is a ghost local", lambda l: l.replace(".v_int)", ".v_int, kv_x)"), "has an amount"),
+                ("two fields in one row", lambda l: l.replace("acc(loc(member(v_p__0, 0), k).v_int)", "acc(loc(member(v_p__0, 0), k).v_int) && acc(loc(member(v_p__0, 0), k).d_int)"), "the consequent is not")):
+            for which in (0, -1):  # the entry row and the back-edge row
+                with self.subTest(label=label, which=which):
+                    bad = self.edit(text, self.row("v_int"), f, only=which)
+                    self.assertTrue(self.refused(self.problems(bad, mp), why), (label, self.problems(bad, mp)))
+
+    def test_the_count_is_the_invariants_not_just_a_length_fact(self):
+        text, _mp = self.pair("emitted_written_kept")
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if l.strip() == "v_p__0 := p_p__0")
+        lines.insert(k + 1, "  assert len(member(v_p__0, 0)) == 5")
+        text = "\n".join(lines)
+        entry = self.edit(text, self.row("v_int"), lambda l: l.replace("(k < 4)", "(k < 5)"), only=0)
+        no_map = lambda text: [x for x in self.problems(text, "") if "map entry" not in x and "position map" not in x]  # noqa: E731
+        probs = no_map(entry)
+        self.assertTrue(self.refused(probs, "no loop invariant of the method states"), probs)
+        self.assertFalse(self.refused(probs, "states no `len("), "the method does state a count of 5: the row's count is the invariant's, 4")
+        # twin: the same row at the invariant's count is clean
+        self.assertEqual(no_map(text), [])
+
+    def test_a_branch_of_the_program_around_the_rows_is_not_the_atoms_guard(self):
+        # an unguarded atom whose loop stands in a branch of the program: the block that holds the rows holds other statements too, so it is no guard
+        text, _mp = self.pair("emitted_written_kept")
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if self.row("v_int")(l))
+        ends = [i for i, l in enumerate(lines) if i > k and self.ending(False)(l)]
+        e = ends[0] + 2
+        self.assertEqual((lines[e - 1].strip(), lines[e].strip()), ("assert false", "}"))
+        wrapped = lines[:k] + ["  if (v_n__1 > 0) {"] + lines[k:e + 1] + ["  }"] + lines[e + 1:]
+        no_map = lambda t: [x for x in self.problems(t, "") if "map entry" not in x and "position map" not in x]  # noqa: E731
+        self.assertEqual(no_map("\n".join(wrapped)), [])
+        # twin: the same branch holding nothing but the two marked rows is read as the part's guard, which the invariants do not have
+        only_rows = lines[:k] + ["  if (v_n__1 > 0) {"] + lines[k:k + 2] + ["  }"] + lines[k + 2:]
+        self.assertTrue(self.refused(no_map("\n".join(only_rows)), "atom's own guard"))
+
+    def test_a_row_without_its_invariant_is_refused(self):
+        text, mp = self.pair("emitted_written_kept")
+        lines = [l for l in text.split("\n") if not self.invariant("v_int")(l)]
+        probs = self.problems("\n".join(lines), mp)
+        self.assertTrue(self.refused(probs, "no loop invariant of the method states `acc` of `member(v_p__0,0)`"), probs)
+
+    def test_a_marked_row_is_an_acc_and_an_ending_row_the_flag_or_the_range(self):
+        text, mp = self.pair("emitted_written_kept")
+        as_flag = self.edit(text, self.row("v_int"), lambda l: l.replace("acc(loc(member(v_p__0, 0), k).v_int)", "loc(member(v_p__0, 0), k).d_int"), only=0)
+        self.assertTrue(self.refused(self.problems(as_flag, mp), "a marked row is an `acc` of one field"))
+        as_acc = self.edit(text, self.ending(True), lambda l: l.replace("==> loc(member(v_p__0, 0), k).d_int", "==> acc(loc(member(v_p__0, 0), k).v_int)"), only=0)
+        self.assertTrue(self.refused(self.problems(as_acc, mp), "an ending row"))
+        other_range = self.edit(text, self.ending(False), lambda l: l.replace("(k < 4)", "(k < 5)"), only=0)
+        self.assertTrue(self.refused(self.problems(other_range, mp), "states no `len("))
+
+    GUARD = "!(((v_p__0 == null) ? 1 : 0) != 0)"
+
+    def test_a_guarded_atom_has_its_rows_under_its_guard(self):
+        # `emitted_written_guarded`: the encoder's text of `p == NULL || cerastes_owns(*p)` in a loop invariant (a `!`-led guard of the atom): the marked rows stand in
+        # ONE `if (g) {` block, the ending rows under `g ==> `
+        text, mp = self.pair("emitted_written_guarded")
+        self.assertEqual(self.problems(text, mp), [])
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if self.row("v_int")(l))
+        self.assertEqual((lines[k - 1].strip(), lines[k + 2].strip()), (f"if ({self.GUARD}) {{", "}"))
+        no_map = lambda t: [x for x in self.problems(t, "") if "map entry" not in x and "position map" not in x]  # noqa: E731
+        self.assertEqual(no_map(text), [])
+        for label, bad, why in (
+                ("a row with no guard where the lowering guards it", "\n".join(lines[:k - 1] + lines[k:k + 2] + lines[k + 3:]), "atom's own guard"),
+                ("a row under another guard", text.replace(f"if ({self.GUARD}) {{", "if (v_n__1 != null) {", 1), "atom's own guard"),
+                ("a row under a guard of a scalar read", text.replace(f"if ({self.GUARD}) {{", "if (loc(member(v_p__0, 1), 0).v_int > 0) {", 1), "reads the heap"),
+                ("a row under one of the disjointness terms", text.replace(f"if ({self.GUARD}) {{", "if (!((block_of(v_p__0) == block_of(v_n__1)) && (v_n__1 > 0))) {", 1), "disjointness term"),
+                ("a row under a permission", text.replace(f"if ({self.GUARD}) {{", "if (perm(v_p__0.v_int) > none) {", 1), "reads the heap"),
+                ("a row under the guard and another conjunct", text.replace(f"if ({self.GUARD}) {{", f"if (({self.GUARD}) && (v_n__1 > 0)) {{", 1), "atom's own guard")):
+            with self.subTest(label=label):
+                self.assertTrue(self.refused(no_map(bad), why), (label, no_map(bad)))
+        # the `!`-led guard of the atom is its own guard, not a disjointness term: an ending row that drops it is refused as well
+        ending = self.edit(text, self.ending(True), lambda l: l.replace(f"(!(((v_p__0 == null) ? 1 : 0) != 0)) ==> (forall", "(true) ==> (forall"), only=0)
+        self.assertNotEqual(ending, text)
+        self.assertTrue(self.refused(no_map(ending), "atom's own guard"), no_map(ending))
+        # twin: the invariants unguarded and the rows guarded
+        invs = "\n".join(l.replace(f"invariant ({self.GUARD}) ==> ", "invariant ") for l in text.split("\n"))
+        self.assertNotEqual(invs, text)
+        self.assertTrue(self.refused(no_map(invs), "atom's own guard"), "rows guarded, invariants not")
+
+    def test_the_values_kept_of_a_guarded_atom_are_under_its_guard(self):
+        text, mp = self.pair("emitted_written_guarded_kept")
+        self.assertEqual(self.problems(text, mp), [])
+        kept = lambda l: "old[lh_0]" in l and l.lstrip().startswith("invariant")  # noqa: E731
+        self.assertTrue(self.lines_of(text, kept))
+        unguarded = self.edit(text, kept, lambda l: l.replace(f"({self.GUARD}) ==> ", "", 1))
+        self.assertTrue(self.refused(self.problems(unguarded, mp), "keeps are those of a part it holds"))
+
+    def test_the_values_kept_are_the_values_of_a_part_the_loop_holds(self):
+        text, mp = self.pair("emitted_written_kept")
+        kept = lambda l: "old[lh_0]" in l and l.lstrip().startswith("invariant")  # noqa: E731
+        for label, f, why in (
+                ("a label no earlier `label` defines", lambda l: l.replace("lh_0", "lh_9"), "names a label that no earlier"),
+                ("another slot on the right", lambda l: l.replace("old[lh_0](loc(member(v_p__0, 0), k).v_int)", "old[lh_0](loc(member(v_p__0, 0), 0).v_int)"), "outside item 8"),
+                ("the flag kept", lambda l: l.replace(".v_int == old[lh_0](loc(member(v_p__0, 0), k).v_int)", ".d_int == old[lh_0](loc(member(v_p__0, 0), k).d_int)"), "outside item 8"),
+                ("another count", lambda l: l.replace("(k < 4)", "(k < 5)"), "states no `len("),
+                ("another block", lambda l: l.replace("member(v_p__0, 0)", "member(p_p__0, 0)"), "keeps are those of a part it holds"),
+                ("a flag snapshot in its guard", lambda l: l.replace("invariant forall", "invariant wea_0_0__0 ==> forall", 1), "stands under no flag snapshot")):
+            with self.subTest(label=label):
+                bad = self.edit(text, kept, f)
+                self.assertTrue(self.refused(self.problems(bad, mp), why), (label, self.problems(bad, mp)))
+        # a loop that holds no `acc` of that field over the block keeps nothing
+        no_acc = "\n".join(l for l in text.split("\n") if not self.invariant("v_int")(l))
+        self.assertTrue(self.refused(self.problems(no_acc, mp), "keeps are those of a part it holds"))
+
+    def test_the_map_entries_of_the_rows(self):
+        text, mp = self.pair("emitted_written_kept")
+        lines = text.split("\n")
+        marked = next(i for i, l in enumerate(lines, 1) if self.row("v_int")(l))
+        flag_row = next(i for i, l in enumerate(lines, 1) if self.ending(True)(l))
+        entry = next(l for l in mp.split("\n") if l.startswith(f"{marked}\t"))
+        self.assertIn("[insufficient.permission]", entry)
+        # the reason on a row that is no marked `acc`
+        moved = mp.replace(entry, entry.replace(f"{marked}\t", f"{flag_row}\t", 1))
+        self.assertTrue(self.refused(self.problems(text, moved), "carries the expected reason `insufficient.permission`"))
+        # a marked row whose entry has no reason
+        bare = mp.replace(entry, entry.replace("[insufficient.permission]", "", 1))
+        self.assertTrue(self.refused(self.problems(text, bare), "has no expected reason"))
+
+    def test_the_ghost_pointer_is_taken_in_two_shapes_only(self):
+        # the entry (`!(E == null) && E != null`) in `loop_owner_global` (the VIR self-test's text), and with the back edge (`G && (X != null)`) in
+        # `emitted_owner_reassigned` (the encoder's text of a loop that frees an owning global's block and takes another)
+        for name in ("loop_owner_global", "emitted_owner_reassigned"):
+            text, mp = self.pair(name)
+            lines = text.split("\n")
+            sites = [i for i, l in enumerate(lines) if l.strip().startswith("abp_") and ":=" in l]
+            self.assertTrue(sites, name)
+            self.assertEqual(self.problems(text, mp), [], name)
+            for k in sites:
+                ind = lambda i: lines[i][:len(lines[i]) - len(lines[i].lstrip())]  # noqa: E731
+                for label, edit_at, new, why in (
+                        ("null", k, "abp_0__0 := null", "`abp_0__0` is assigned"),
+                        ("a heap read", k, "abp_0__0 := loc(member(v_q__0, 1), 0).v_ptr_struct_0_S", "`abp_0__0` is assigned"),
+                        ("outside an `if`", k - 1, "if (true) {", "`abp_0__0`"),
+                        ("outside any `if` (the line before is no condition)", k - 1, "var unrelated: Int", "outside a single-statement `if (C)"),
+                        ("under a guard that does not name the pointer", k - 1, "if (true && (null != null)) {", "`abp_0__0`"),
+                        ("under a guard that is not a Bool local", k - 1, "if ((v_n__1 > 0) && (v_i__1 != null)) {", "`abp_0__0`")):
+                    with self.subTest(name=name, site=k, label=label):
+                        bad = list(lines)
+                        bad[edit_at] = ind(edit_at) + new
+                        self.assertTrue(self.refused(self.problems("\n".join(bad), mp), why), (name, label))
+            undeclared = "\n".join(l for l in lines if l.strip() != "var abp_0__0: Ref")
+            self.assertNotEqual(undeclared, text, name)
+            self.assertTrue(self.refused(self.problems(undeclared, mp), "is no declared `Ref` local"), name)
+
+
+    LOADED = "member(loc(member(v_p__0, 1), 0).v_ptr_struct_0_S, 0)"
+
+    def loaded_block(self, text, rows, invariants, ending):
+        """`emitted_written_guarded_kept` with its written part over the block `LOADED` (reached through a heap read) instead of `member(v_p__0, 0)`, in the
+        rows (the marked rows, `rows`), the invariants (`invariants`) and the ending rows (`ending`), the length fact of the loaded block stated first."""
+        lines = text.split("\n")
+        first = next(i for i, l in enumerate(lines) if "len(member(v_p__0, 0)) == 4" in l and l.startswith("  assert "))
+        out = lines[:first] + [f"  assert len({self.LOADED}) == 4"] + lines[first:]
+        for i, l in enumerate(out):
+            t = l.lstrip()
+            hit = ("forall k" in l and self.BLOCK in l) or (t.startswith("t__") and f"loc({self.BLOCK}, 0)" in l)
+            if hit and ((t.startswith("assert forall") and rows) or (t.startswith("invariant") and invariants) or (t.startswith("if (!(") and ending)
+                        or (t.startswith("t__") and rows)):
+                out[i] = l.replace(self.BLOCK, self.LOADED)
+        return "\n".join(out)
+
+    def test_a_written_part_is_over_a_block_of_a_variable_never_one_reached_through_a_heap_read(self):
+        # the auditor's round D2b finding 2 (mutants gk_k12, gk_k12b, gk_k13): the rules read `member(X, j)`, X a variable; a block through a heap read stands
+        # in a contract clause (`block_row_problem`), never in a loop's invariant, a marked row, an ending row or the values kept
+        text, mp = self.pair("emitted_written_guarded_kept")
+        self.assertEqual(self.problems(text, mp), [])
+        why = "reached through a heap read"
+        for label, rows, invariants, ending in (("the rows, the ending rows and the invariants (gk_k12)", True, True, True),
+                                                ("the invariants alone (gk_k12b)", False, True, False),
+                                                ("the marked rows alone", True, False, False),
+                                                ("the ending rows alone", False, False, True)):
+            with self.subTest(label=label):
+                bad = self.loaded_block(text, rows, invariants, ending)
+                self.assertNotEqual(bad, text)
+                self.assertTrue(self.refused(self.problems(bad, mp), why), label)
+
+    def test_the_ghost_pointer_is_tied_to_the_sites_own_pointer_and_guard(self):
+        # the auditor's round D2b finding 3 (mutants or_a1, or_a1b, or_a5, or_a5b, or_a11): the ghost `abp_*` is the pointer the invariant `G ==> E == abp_*` names
+        text, mp = self.pair("emitted_owner_reassigned")
+        lines = text.split("\n")
+        k = next(i for i, l in enumerate(lines) if l.strip() == "abp_0__0 := t__13")
+        self.assertEqual(lines[k - 1].strip(), "if (t__14 && (t__13 != null)) {")
+        ind = lines[k][:len(lines[k]) - len(lines[k].lstrip())]
+
+        def variant(cond, rhs):
+            bad = list(lines)
+            bad[k - 1] = lines[k - 1][:len(lines[k - 1]) - len(lines[k - 1].lstrip())] + cond
+            bad[k] = ind + f"abp_0__0 := {rhs}"
+            return "\n".join(bad)
+
+        for label, bad, why in (
+                ("another Ref local, the freed pointer (or_a1)", variant("if (t__14 && (t__6 != null)) {", "t__6"), "is not (assigned once from) the pointer"),
+                ("another Ref local, the entry's copy of E (or_a1b)", variant("if (t__14 && (t__1 != null)) {", "t__1"), "is not (assigned once from) the pointer"),
+                ("another Bool as the guard (or_a5)", variant("if (t__2 && (t__13 != null)) {", "t__13"), "is not the one local assigned"),
+                ("a flag snapshot as the guard (or_a5b)", variant("if (wea_0_0__0 && (t__13 != null)) {", "t__13"), "is not the one local assigned")):
+            with self.subTest(label=label):
+                self.assertTrue(self.refused(self.problems(bad, mp), why), label)
+        # no invariant names the pointer: the ghost is tied to nothing
+        no_tie = "\n".join(l for l in lines if not (l.lstrip().startswith("invariant") and l.rstrip().endswith("== abp_0__0)")))
+        self.assertNotEqual(no_tie, text)
+        gone = no_tie.split("\n")
+        for pick, where in ((lambda l: l.strip().startswith("abp_0__0 := (kv_GB_g__0__0 > none)"), "the entry"), (lambda l: l.strip() == "abp_0__0 := t__13", "the back edge")):
+            site = next(i for i, l in enumerate(gone) if pick(l))
+            with self.subTest(site=where):
+                self.assertTrue(any(f"t.vpr:{site + 1}:" in x and "no loop invariant" in x for x in self.problems(no_tie, mp)), where)
+        # the entry: the Perm local of one global guarding a read of another (or_a11)
+        e = next(i for i, l in enumerate(lines) if l.strip().startswith("abp_0__0 := (kv_GB_g__0__0 > none)"))
+        other = list(lines)
+        other[e - 1] = lines[e - 1].replace("loc(GB_g__0(), 0)", "loc(GB_h__1(), 0)")
+        other[e] = lines[e].replace("loc(GB_g__0(), 0)", "loc(GB_h__1(), 0)")
+        decl = next(i for i, l in enumerate(other) if l.strip() == "unique function GB_g__0(): Block")
+        other.insert(decl + 1, "  unique function GB_h__1(): Block")
+        self.assertTrue(self.refused(self.problems("\n".join(other), mp), "which is not the one snapshot"))
+
+
 if __name__ == "__main__":
     unittest.main()

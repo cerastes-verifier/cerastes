@@ -1872,6 +1872,10 @@ int main(int argc, char** argv)
     define_audit_c1_cases();
     define_audit_c1_site_cases();
     define_audit_c2c_binder_cases();
+    define_part_d_load_cases();
+    define_part_d_heap_cases();
+    define_part_d_reject_cases();
+    define_part_d_marker_cases();
     define_array_of_structures_lowering();
     define_array_of_structures_loops();
     define_array_of_structures_pairs_and_copies();

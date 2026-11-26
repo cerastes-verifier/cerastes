@@ -1,6 +1,8 @@
 # 0064 — Arrays of structures and arrays of arrays (M4.5e1e2)
 
-- **Status:** accepted for the items built so far: those of the continuation's first session (2026-11-26:
+- **Status:** accepted for the items built so far: **item 15 (Part D) by the continuation's second session
+  (2026-11-26: the leftovers of a structure with an array member, for array members of scalars; two audit
+  rounds and a short read, below);** those of the continuation's first session (2026-11-26:
   Parts R, C1 and C2, named below: items 5, 16 and 19 as amended, items 7 to 9, and the range, global and
   member parts of items 10 and 12, with item 17's rules through Part C2; the full check green at its Commit 3
   `46f34fb`), and those its first session built (2026-11-25, M4.5e1e2: items 2 to 6 and 10 to 12
@@ -16,7 +18,9 @@
   consequences. **The continuation's first session built Part R (its Commit 1) and Part C1 (its Commit 2:
   items 7 and 8 and the range parts of 10 for a pointer parameter's range over structures, with round R's
   fixes) and Part C2 (its Commit 3: item 9, the global and member parts of items 7, 10 and 12, with round
-  C1's code fixes); Parts D, E and F stay "decided, built by the next session".** Written before code
+  C1's code fixes). The continuation's second session built Part D (its Commit 4: item 15, with the fixes
+  of audit rounds D1 and D2) and closed at the plan's split point; Parts E and F (items 13 and 14, with
+  item 12's clause for Part E's structure values) stay "decided, built by the next session".** Written before code
   (invariant 6) from section 7 of the plan
   (`.claude/plans/m4-5e1e2-arrays-of-structures.md`, written at a session that only planned and executed without
   re-planning). Revised by P83's and S48's decision tables (the plan's section 6; `internal/il-inventory.md`,
@@ -85,7 +89,59 @@
     part early), **341** (a function without a body is rejected if ANY of its declarations has the qualifier,
     item 19), **342** (item 5's rule is over-strict on a family no compiler flags, listed) and **344** (the
     contract reads `g[e].x` and `p->v[e].x` are built in Part C2, item 7); **343** (a structure pointer formed
-    outside what the function's atoms cover, passed on or returned: an exit 3, item 7) is open for the owner.
+    outside what the function's atoms cover, passed on or returned: an exit 3, item 7) went to the owner,
+    **who answered it on 2026-11-26, inline in the handoff: "Follow alternative plan since it sounds like
+    the correct fix."** The alternative: the exit 3 stays listed until M4.5e2, the pointer-arithmetic
+    session, which gives pointers into arrays their bounds rows; no row is built in M4.5e1e2. The owner let
+    338 to 342 and 344 to 347, and the earlier defaults and rulings, stand ("Follow recommendation").
+  - Questions of the continuation's second session (2026-11-26, Part D; `internal/handoff.md` §8), each
+    settled with the advisor: **348** (item 15 and the plan's Part D table were written before Part C2
+    and speak of an array member of scalars: a structure whose array member has AGGREGATE elements stays
+    rejected at Part D's six positions, item 15's last clause; fail closed, for the owner's review);
+    **349** (a `must_init` filler that misses an element is `postcondition`, item 15); **350** (0052 item 2a
+    stands: two rows the plan listed as flips stay rejected, item 15); **351** and **354** (`calloc`'s zero
+    values one clause per element, and the cap of 24 values that followed from it: for the owner, item 15);
+    **352** and **353** (Part E's: a `const` row parameter stays rejected, item 13; whole copies of Part E's
+    structure types cell by cell, item 12); **355** (written atoms at `write`, item 15); **356** (test
+    mechanics: the owning-member reassignment's false alarm is pinned by its correct form); **357** (a lint
+    edit that would have admitted record 0045 item 7's partner-sum amount on an array part reached through
+    a heap read was DENIED by the permission system; two tests of that shape are set aside under
+    `internal/pending/m4.5e1e2c/` for the owner; item 17).
+  - **Audit round D1** (a fresh Fable auditor on `b193add01de6`: Part D's encoder half and the lowering's
+    heap, marker, partnerless and heap-read columns, with a heap block's array part as a loop place;
+    `build/m4.5e1e2c/auditor-report-D1.md`; about 100 probes): no wrong program verifies and no blocking
+    finding; every stop for what was not yet built held. Should-fix, all taken: 1, four tests failing at
+    that snapshot (parts not yet built); 2, this record said the written atom was built before it was; 3,
+    no C-level test of the loop place; 4, a lint relaxation that hid an obligation (item 17); 5, three of
+    question 348's backstops without a case. Notes in item 15; one exit 3 not of this record (a recursive
+    function with a heap-read atom and no tie; the same on the base build). It read `check.cpp`'s diff in
+    full, `encode.cpp`'s changed lines and, in `lower.cpp`, the loop place, its gate, `block_cells` and half
+    of `block_conj`; `block_rows` and its sinks, the marked, output and heap-read parts of `atom`,
+    `call_atoms` and `atom_returns` and `contract_read`'s block loop it judged by probes only.
+  - **Audit round D2** (a fresh Fable auditor on the final source `fc484b966ee6`;
+    `build/m4.5e1e2c/auditor-report-D2.md`; 79 probes): no wrong program verified in any probe with a
+    verdict, no blocking finding, no crash. It read every added line of `lower.cpp` in its diff (the loop
+    carriers, written atoms), the `check.cpp`, `encode.cpp` and lint diffs in full. Should-fix: 2, a
+    memory-reading guard on a written atom's array part was lowered to a constant (fail closed; now
+    rejected, item 15); 3, a written `owns(c->a)` on a scalar member of a structure with an aggregate array
+    member was accepted (now rejected, item 15); 4, this record's and the page's sentence about flags
+    across a loop (corrected); 5, the refused written forms printed the checker's generic tag (the encoder
+    rejects them itself now); 6, rules without a C-level test (15 files added). It also read the amount
+    code behind question 357's shape: a method without a body does carry the partner-sum amount, its
+    well-formedness method carries the obligation that makes it the partner's own formal, and no caller
+    with a verdict gained permission (eight probes; six timed out). Not read: the self-test cases beyond
+    names, `atom_returns` beyond the array-part rows.
+  - **The short read D2b** (a fresh Fable auditor on `55f83710ea48`, which is Commit 4's `src/`;
+    `build/m4.5e1e2c/auditor-report-D2b.md`): both diffs since round D2's snapshot read in full (the fixes
+    in `src/`; the lint rules written after that snapshot): no blocking finding; every form the fixes mean
+    to reject is rejected but one family that is accepted by design of the shared predicate (a guard that
+    reads an address-taken local by name: item 15 says what is built); the lint's kept-flag and amount
+    refusals are unchanged (the denied relaxation did not come back); two places where the new lint rules
+    admitted too much were tightened afterwards (item 17).
+  - **What no auditor read** (Part D): the self-test cases beyond their names; `atom_returns` beyond the
+    array-part rows; the functions round D1 judged by probes only (above); the two lint tightenings made
+    after the short read, the lint self-test's diff and its fixtures. The auditors ran tests through
+    `cerastes verify` in C23 for the most part; probes without a verdict are not checks.
   - **Audit round R** (a fresh Fable auditor on the joined snapshot of Part R, `c263b457938f`; `build/m4.5e1e2b/
     auditor-report-R.md`): no wrong program verifies and no blocking finding; should-fix 1, a called function
     without a body whose declarations disagree on `restrict` is accepted (item 19, question 341); 2, item 5's
@@ -213,6 +269,7 @@ doc example holds.
    | Construct | Lifted by |
    |---|---|
    | an array or a range whose element structure has an `owning` or marked member; an array of owning pointers; `owning`, `ref_to_uninit` or `uninit` on an array of aggregates; a structure value stored into an element (`v[i] = f();`, `v[i] = (struct P){1, 2};`: question 333, item 12) | M4.8 |
+   | at item 15's six positions, a structure whose array member has aggregate elements (`struct T { struct P v[2]; int n; }`, a matrix member): heap storage and `owns_block`, an `owning` or marked member beside that member, `ref_to_uninit` or `must_init` on a pointer to it, a place reached through a heap read, an `ensures` atom with no `requires` partner, a written atom in a loop invariant (question 348) | M4.5e2 (the owner may place it elsewhere) |
    | `malloc(n * sizeof(struct S))`, `calloc(n, sizeof(struct S))`, `realloc`; a range on part of an array (`owns_range(&v[1], n)`, `owns_range(g, n)`, `owns_range(p->v, n)`, a row `m[i]` as a range's base in a contract); an atom on one element (`owns(p[i])`, `owns(v[i].x)`); `&p[i]`, `&p[i].x` and `&m[i][j]` in a contract; a range whose base is not a pointer parameter; a range atom in a loop invariant; `p + i` | M4.5e2 |
    | under a binder: a second index (`p[i].a[j]`, `m[i][j]`), a row `m[r]` or `&v[1]` as the pointer argument; a memory-reading argument (`p->q->a`) | M4.5e2 |
    | a `forall` inside a `forall`; the positions 0061 item 1 leaves to M4.8 | M4.8 |
@@ -501,7 +558,8 @@ doc example holds.
        both). The nested twins are the slow ones (48–85 s at load 3–11, the positive 43.5 s): Part C's tests
        of them are timed under the test budget's rule 3.
      - **Listed limit, fail closed: an exit 3** (audit round 1, note 13, called it a false alarm; question 343,
-       open for the owner). A structure pointer formed by indexing a pointer base outside the slots that the
+       answered by the owner on 2026-11-26: it stays listed until M4.5e2, which gives pointers into arrays
+       their bounds rows; nothing is built for it in M4.5e1e2). A structure pointer formed by indexing a pointer base outside the slots that the
        function's atoms show to hold structures cannot be shown `WF_S` (the length facts of a range cover its
        slots only; `owns(*p)` covers `p`'s own slot): `&p[n]` one past a range, `&p[i]` with `i` only known to
        be in `[0, n]`, and `&p[1]` under `owns(*p)`. Forming it is accepted. **Passing it to a function with no
@@ -519,7 +577,7 @@ doc example holds.
        structure. The fix is one explicit `WF_S` row (`permission`) for a structure-pointer argument and
        result; written for every such value it changes the Viper of existing programs, which is the owner's
        to approve, and written only for functions that hold a range it would leave the older form as it is.
-       So nothing is built here; the harness cannot pin an exit 3, and the planned pin
+       So nothing is built here (the owner's answer to question 343: M4.5e2); the harness cannot pin an exit 3, and the planned pin
        `range_struct_past_end_false_alarm.c` did not land. Probes: `build/m4.5e1e2b/q343/`.
      - **Listed, from Part C1's lowering:** a `must_init` filler over a range of structures that fills WITH A
        LOOP fails its flag rows at the return (the loop's automatic conjuncts do not say which flags it set;
@@ -689,6 +747,22 @@ doc example holds.
     the copy `v[i] = v[j]` of `struct W { int a[4]; int n; }` elements verified in 34.5 s and 35.2 s on the
     box, over the spike's 30 s line: it is built (question 323), and Part E's tests of it are timed under the
     test budget's rule 3.
+    **Decided for Part E, not yet built** (question 353, settled with the advisor on 2026-11-26 from the
+    encoder draft that was written ahead of Part E; the draft is unproved and unaudited). A whole-structure
+    copy, a by-value parameter or result and a compound literal of a structure with a MATRIX member, or
+    with a member array of structures whose elements have an array leaf, is written cell by cell: every
+    cell is read into a temporary before the first store (so a self-copy needs no guard), no `ArrayCopy` of
+    a nested leaf is written, and **the limit of 7 counts cells** of such members (`struct T { struct W
+    v[2]; }` with `W { int a[4]; int n; }` is 10 cells and rejected as a whole copy; M4.5f3), pinned at 7
+    and 8 for the copy, the parameter, the result and the literal; whether a scalar array member beside
+    the matrix counts is stated by the session that builds it, from the code. The element copy `v[i] =
+    v[j]` of an element with a scalar array leaf keeps this item's guarded `ArrayCopy`. **The encoder's
+    order of cells and the lowering's value view must be ONE enumeration** (depth first, members in
+    declaration order, every array's elements in index order, a matrix row major): at the base
+    `vir.cpp`'s value view leaves a matrix member unexpanded and gives an element structure's array leaf
+    two cells with one (path, element) key, and the draft's encoder walks its own list; until there is one
+    definition, `check.cpp` refuses a structure value of depth 2 or more. Tested by a structure passed by
+    value with a distinct value per cell, each read back, and a swapped twin.
 13. **Arrays of arrays** (amends 0060 item 15, 0063 item 14). A row is an array object in its own block; a
     matrix's leaf path has two index steps, and so has an array member of an element structure (`v[i].a[j]`).
     - **Array-of-rows parameters.** `T a[][M]`, `T a[N][M]` and `T (*a)[M]` declare a parameter of type pointer
@@ -706,7 +780,10 @@ doc example holds.
       verified file, its bound checked where it is written; one from a system header stays rejected). A
       reader that did not peel would reject, never misread. A qualified row (`const row *a`) reaches the
       encoder as a fresh array of `const int` with no typeref above it, the shape of `const int (*)[N]`,
-      and follows the rule that spelling has. A pointer to an array as a local, a member, a result or under `&` stays M8's (item 1).
+      and follows the rule that spelling has. **That rule is rejection** (question 352, settled with the
+      advisor on 2026-11-26): `const int a[][3]`, `const int (*a)[3]` and `const row *a` are rejected as
+      `const` arrays (item 2 tests the `const` rule first; M4.6), stricter than one dimension, where `const
+      int *p` is accepted; a pin row for each spelling comes with Part E. A pointer to an array as a local, a member, a result or under `&` stays M8's (item 1).
       Such a parameter is accepted with `owns_range(a, n)` or `reads_range(a, n)` over `n` rows (item 7), `a[i][j]`
       in code and in contracts, and a row `a[i]` used as a pointer. The outer bound of `T a[N][M]` is checked as
       written and is no promise (0060 item 15); the inner bound is part of the type. A matrix passed to such a
@@ -737,7 +814,51 @@ doc example holds.
       `calloc(1, sizeof(struct S))` and `free` take a structure with array members: the typed view's `ensures`
       and `owns_block` state the member lengths and hold each array leaf by its quantified permissions and
       flags (`calloc`: every element zero and set; `malloc`: the flags unknown, as 0047 item 8); `free`'s rows
-      are per leaf (`invalid-free`); the leak check reads the block's token as before.
+      are per leaf (`invalid-free`); the leak check reads the block's token as before. **`calloc`'s zero
+      values, as built** (question 351, settled with the advisor; fail closed): the view's `ensures` holds
+      one value clause per ELEMENT of an array leaf (`r->a[0] == 0`, …, `r->a[N-1] == 0`, each index a
+      literal, each once), since VIR has no quantifier over a member array's elements outside a `pure`
+      function's `forall`; each clause is a contract read framed by the view's own block site, and the flags
+      are set by the block site's quantified line. **The cap** (question 354, settled with the advisor
+      the same day, after the first run: `calloc` of a structure with `int a[64]` got no verdict, Silicon's
+      own stack overflowing in the view's `__wf` method, a JVM stack depth and not a time; fail closed):
+      `calloc` of a structure that has an array leaf is rejected at the call (`unsupported_expression`) when
+      its view would write more than **24 value clauses**, counting one per cell leaf and one per element
+      of every array leaf, by-value members included (`int a[23]; int n;` is 24 and accepted, `int a[24];
+      int n;` is 25 and rejected). Measured through the driver on the box, both modes agreeing: an array
+      alone verifies up to 50 elements (78 s) and gets no verdict from 52; `a[24]` with 24 cells verifies
+      (57 s), `a[32]` twice does not; the cap is about half the largest passing count, since the limit is
+      a stack depth that another platform may reach earlier. A structure with no array leaf has no cap
+      (unchanged: 100 cells verify, slowly), and `malloc` and `free` have none (no value clause). The
+      diagnostic says to allocate with `malloc` and write the elements, and says what that costs today: a
+      read of an element that only a LOOP wrote is reported as `uninitialized` (the listed false alarm of
+      the next clause; measured), so a structure over the cap can be filled by a loop but its elements read
+      back only after straight-line writes or, from Part F, under a written quantified invariant. **For
+      the owner** (it sits inside question 292's scope): the alternatives are a different framing of the
+      per-element reads in `f__wf`, or the quantified zero line per array leaf (new trusted text;
+      M4.5e2's, with `calloc(n, sizeof(T))`).
+    - **A heap block's array part in a loop** (amends 0047 item 10; written on 2026-11-26 with the code,
+      before Part D's final joined proof). The array leaf of a block the loop holds through a pointer is a
+      place of the loop beside the block's cell places: bound to a local before the loop, with ghost
+      amounts taken from its first slot (value and flag), marked entry rows, guarded permission conjuncts,
+      the flags kept, the type range, the values kept where the loop cannot write the field or the amount
+      is below `write`, and marked back-edge rows written before the cells' rows (so a loop that gives the
+      block away is reported at the array's row). A structure with no cell leaf gets a value-less place
+      for its liveness and token. **The place exists only in a program where a token-carrying block of
+      such a structure can exist** (the gate `array_block_possible`): some function of the unit has an
+      `owns_block` site (a typed view's `ensures` is one), the implicit atom of an `owning` parameter, or
+      an `owning` local, global or member, whose pointee is the structure or holds it by value at any
+      depth. A block with a token enters a function only through a call of a function whose `ensures` has a
+      block site, through the function's own contract, or through an owner it holds, and before Part D no
+      such site was accepted for a structure with an array member; so every program accepted before keeps
+      its Viper byte for byte (the first build wrote the place for every pointer to such a structure and
+      changed three existing self-test cases; the gate restored them). Where the gate is false a missing
+      place is a false `permission`, never a proof. **Listed false alarms:** after a loop that fills the
+      elements of a `malloc`ed structure, the array part's flags are the loop entry's, so a read of an
+      element after the loop is `uninitialized` (as for a local array; a written quantified invariant is
+      Part F's); a loop over the elements of a structure that a callee gave by a partnerless `owns(*r)` is
+      `permission` (no place for a given structure in a function that is not a heap function; the same
+      for a structure without an array member, older than this record).
     - **An `owning` or marked member beside an array member** (293; amends 0055 items 2, 3 and 5, 0058 item 4).
       The structure is accepted. An array leaf of scalars is never an owner (arrays of owning pointers are
       M4.8's), so every owner site walks the cell leaves and passes over an array leaf; the closure of an atom
@@ -745,15 +866,112 @@ doc example holds.
     - **Markers on a pointer to such a structure** (294; amends 0042, 0058 item 4). `ref_to_uninit`: the
       `requires` site claims no flag of an array leaf either, and the kept-flag row is one quantifier per array
       leaf (`old(flag) ==> flag`, where 0058 item 4 keeps it for a cell). `must_init`: every element's flag is
-      set at the return (`uninitialized`).
+      set at the return; a filler that leaves an element unwritten is `postcondition` at its closing brace,
+      the category 0042 item 5 gives `must_init`'s flag row ("returns without initializing …"), and a
+      caller's read of an element nobody wrote is `uninitialized` (question 349, settled with the advisor:
+      this item's first wording said `uninitialized` for the filler).
     - **Contract places through a heap read** (306; amends 0045 item 1). A load-rooted place whose structure has
       an array member takes 0045's rows with the array leaf's lines keyed by the loaded pointer; `p->q->a[e]`
       is an element read through that place.
     - **An `ensures` atom with no `requires` partner** (amends 0052 item 2) on a structure with an array member:
       covered or given per leaf, an array leaf by its quantified lines and, where 0052 gives an output amount,
-      one amount for the site.
+      one amount for the site. **0052 item 2a stands unchanged** (question 350): in a function without a body
+      such an atom is accepted only on the result or a place reached through it, never on a formal (`void
+      give(struct S *p) ensures(owns(p->a));` stays rejected: a second write chunk on cells the caller
+      already holds would make its state impossible and everything after the call would verify). The
+      continuation plan's Flips A (D) listed that row of `struct_array_reject_annotations.c` (L37) as
+      retired; it is not, and neither is a row that an older rule still rejects once Part D's gate is open
+      (L39, a marked parameter with no atom: 0042 item 4).
     - **A written atom in a loop invariant** on such a structure place (amends 0045 item 12, 0040 item 5): the
-      array leaf's conjuncts are a range place's, its amount the first slot's (0060 item 6). S48 (k) verified it (the array leaf's ghost amounts are `Perm` locals taken from the first slot before the loop), so it is built.
+      array leaf's conjuncts are a range place's. (This item's first wording gave it the first slot's
+      amount, 0060 item 6, as the fixture S48 (k) verified it, with `Perm` locals taken from the first slot
+      before the loop; the amount as built is `write`, below.) **As built** (the continuation's second session, Part D's last step; written here before the
+      final joined proof): `owns(*p)` and `owns(p->a)` written in a loop invariant, `p` a pointer variable
+      whose address is not taken and, for the member form, one member step; one entry per array leaf beside
+      the cells' entries (never a cell entry holding an array type: that walk crashed behind `check.cpp`'s
+      refusal on the base, exit 139, and is now an explicit stop with its cases), with the NOTAUTO guards,
+      the marked entry and back-edge rows, the range place's conjuncts, the pair rows against the other
+      written entries and the splits; a structure with no cell leaf gets an entry that carries the basic row
+      and the liveness. **The amount is `write`, not the first slot's ghost amount of the S48 (k) fixture:**
+      the fixture's `Perm` local would let an `owns` invariant stand over a fraction at the loop's entry;
+      with `write` the entry row asks for the whole array (stricter than this item's first wording, never
+      weaker). **Still refused, each rejected by the encoder at the atom's line with its own text**
+      (`unsupported_annotation`; M4.5e2; `check.cpp` repeats each): a written `reads(*p)` and `reads(p->a)`
+      (S48 (k) did not cover a written `reads` atom, and none was put through Silicon); a written atom whose
+      pointer is read through memory, is a global pointer, an address-taken local or a by-value nest
+      (`owns(*r->q)`, `owns(w->s.a)`); **a written atom on such a structure whose guard reads memory**
+      (`r->z > 0 ? owns(*c) : true`: audit round D2, finding 2, found that the array part's guard was lowered
+      to a constant there, fail closed, a false `permission` or more demanded than written; a guard that
+      reads no memory, `p == NULL || owns(*p)`, is accepted). **What "reads memory" means as built** (the
+      short read after round D2, finding 1): a dereference, a member or element read through a pointer, a
+      global, a `static` local, an atom or an application; **a guard that reads an address-taken LOCAL by
+      its name** (`int x = 1; int *px = &x;` … `x > 0 ? owns(*c) : true`) is not counted, is accepted, and
+      is lowered as a real read of the local's cell, framed by the loop's own place for it, not as a
+      constant (four probes under Silicon behave: a guard the body flips to false loses the part and the
+      writes fail; a guard kept true keeps it). The shared predicate `vir::reads_heap` decides all three
+      layers and was left as it is (changing it reaches other rules of other records and wants its own
+      read); the lint refuses the Viper of such a program (no test holds one; handoff §3); and a written atom on the structure or on ANY
+      array member of a structure that has an aggregate-element array member (question 348; a written atom
+      on one of its scalar cells, `owns(p->n)`, is accepted as it was before this record: audit round D2,
+      finding 3). At the snapshot the two audit rounds read, the first two were refused by `check.cpp` alone
+      (the generic `unsupported_expression`), and the last two forms were accepted or mis-lowered as said;
+      the fixes landed with the commit and were read again (the short read D2b, in this record's header). **Listed false alarms** (fail closed): a loop
+      invariant that READS an element of a moved written atom's array, or of a `calloc`ed block the loop
+      holds (`p->a[0]` in the invariant), is `permission` ("this loop invariant reads `p->a[0]`, which this
+      loop does not hold").
+    - **Owners in loops** (amends 0055 item 7, 0054 items 5 and 6; built with Part D's loop column). The
+      carriers of an owner's block across a loop (the written `owns_block` sites, the full-owner carriers of
+      an owning local, global and member, and a marked closure's kept-flag row) take the block's array parts
+      with the cells: full-permission quantified conjuncts per array leaf, marked entry and back-edge rows
+      over a bound local, and for a marked closure a per-part snapshot of the flags; a site whose pointer
+      is read through memory names its array parts by a ghost pointer, taken again at the back edge when
+      the loop may write the pointer (a loop that frees and reallocates an owning global's block). **Flags
+      across the loop** (corrected after audit round D2, finding 4): a written site keeps its block's flags
+      through a snapshot taken at the loop's start, as a checked invariant, so a read after a loop in which
+      the owner held its block throughout verifies; the full-owner carrier of an owner the loop does not
+      name states no flags, and a block the loop itself gives the owner (an owner that may be null when the
+      loop starts; a block freed and allocated again) has none to keep: a read of such a block's element or
+      cell after the loop is `uninitialized` until it is written again (a listed false alarm that the
+      structure without an array member has too; confirmed on the base build). **Listed false alarm:** a loop that reassigns an owning
+      MEMBER's block (`free(r->q); r->q = calloc(…)`) reports `leak` and `permission` rows where a correct
+      program has none (it predates this record for a structure without an array member: the same six rows
+      on the base build). **Also listed, each fail closed** (audit rounds D1 and D2): a marked member's block
+      freed and allocated again in a loop (eight rows); two owning globals swapped in a loop (`leak` at the
+      store); a callee with a load-rooted atom, or over an owning member, called in a loop (`permission`:
+      "needs to own `*r->q`"); under a written `owns(c->a)` alone, with the pointer moved by the loop, the
+      address of an element passed to a callee is `lifetime` (the member atom carries no liveness; element
+      reads and writes are accepted); `owns(r->a)` on the result of a function without a body is rejected
+      with 0052 item 2a's message although 2a allows a place reached through the result (over-strict); the
+      member atom is printed `&p->a` in some messages where the source says `p->a`. **No verdict in the
+      time limit (exit 3, never a proof), measured by audit round D2:** two guarded written atoms whose
+      guard the loop flips; two owning or two marked members swapped in a loop; a caller of a bodiless
+      function with two `reads` atoms through two loaded pointers, in five of the shapes tried.
+    - **Array members of scalars only** (question 348, settled with the advisor on 2026-11-26, before Part
+      D's code; fail closed). This item, the continuation plan's Part D table and the spike's rows (h), (i),
+      (k) and (l) were written before Part C2 and are about a member that is an array of SCALARS (`struct SA
+      { int n; int a[4]; }`). Since Part C2 a structure may hold a member that is an array of structures, and
+      from Part E one that is an array of arrays; every gate of Part D tests "has an array member" whatever
+      the element, so lifting it as written would admit them at sites whose Viper no fixture has verified,
+      one of them a TRUSTED contract (the typed view of `malloc` and `calloc` holding one quantifier per leaf
+      of every element under a token). **Rule:** at each of this item's six positions a structure with an
+      array member whose element is a structure or an array, at any depth of its by-value nest, stays
+      rejected: `malloc`, `calloc`, `free` and `owns_block` of it; an `owning` or `ref_to_uninit` member
+      beside such a member; `ref_to_uninit` or `must_init` on a pointer to it, and `owning` on one; a place
+      of it reached through a heap read, `p->q->v[e].x` included; an `ensures` atom on it with no `requires`
+      partner; a written atom in a loop invariant on it or on any array member of it (a written atom on one
+      of its scalar cells is accepted, as before this record). The encoder rejects each at the C line with a
+      message that names this item; `check.cpp` refuses each (the backstop); and **lowering stops with an
+      internal error for an aggregate element at each of these sites that would otherwise take the general
+      leaf path Part C2 built** (the array parts of `atom`, `call_atoms` and `atom_returns` under a marker,
+      for an output site and for a load-rooted site; `contract_read`'s structure-element branch for a
+      load-rooted base; the block's array parts), each pinned by a self-test case. Everything Part C2
+      accepts for such a structure is unchanged (`owns(*p)`, `owns(p->v)`, locals, globals, values, the
+      automatic loop places). The alternative, the general leaf path at these six positions now, needs
+      fixtures for four shape families first (per-leaf quantifiers inside `owns_block` and consumed by
+      `free`, with the typed view over them; marked per-leaf rows and the kept-flag quantifier per leaf
+      path; a written atom and a partnerless amount per leaf of an element structure) and was not what the
+      plan sized; it is listed for M4.5e2, which builds `malloc(n * sizeof(struct S))` and with it the same
+      rows under a token, unless the owner places it elsewhere.
 16. **Brace elision under `{0}`: the measured rule** (the owner's answer to question 304, "Follow the rejection
     like the compiler warning"; question 321, the advisor's ruling by the plan's P83 (h) row, "the measured set
     is the rule"; amends 0043 item 6, 0063 item 6). The planning worded the rejection as "C++'s `{0}` over a
@@ -877,6 +1095,29 @@ doc example holds.
       NOT check again and which tests pin instead (item 11; `tests/memory/range_struct_wf.c` and
       `negative/range_struct_wf_division.c` for the ghosts: one per leaf path and slot, a `reads_range`'s
       post value tied to its pre value and an `owns_range`'s not).
+    - **As built through Part D** (the continuation's Commit 4; the test-mutators' reports 2 to 12 of that
+      session say what each rule does not check): the typed views of `malloc`, `calloc` and `free` for a
+      structure with array members, rebuilt and compared clause by clause (an array leaf's three quantified
+      rows over its own block at the count of its `len` fact; `calloc`'s zero values as one contract read
+      per element, literal indexes, each once; several array leaves; arrays of `bool`, enumerations and
+      pointers); `owns_block` clauses with array quantifiers, also nested under a guarded pointer leaf; a
+      block term rooted at one pointer load in a `requires` or an `ensures`; a heap block's array part as a
+      loop place (the amount a snapshot of its own first slot and field; the flag and value antecedents);
+      the owner and written-site carriers (full-permission rows at the count of a length fact of the same
+      method, their entry rows under the binding guard, the `wea_` flag snapshots); written atoms in a loop
+      invariant (rows tied to an invariant of the same method by block, count, field and guard; no amount;
+      the values-kept conjunct; never over a block reached through a heap read; the ghost pointer's two
+      assignments tied to the site's own cell, pointer and guard). **Narrowed after audit round D1,
+      finding 4:** an `assert` row's guard may read the heap only by the canonical null test of a canonical
+      load. **Not admitted, by a decision that is the owner's** (question 357): a quantified row whose
+      amount is 0045 item 7's partner sum (nested conditionals over `Perm` formals), which a contract with
+      two atoms of one kind through two loaded pointers gives an array part; an edit that would have
+      admitted it was denied by the permission system, the refusal stands unchanged, and the two tests of
+      that shape are under `internal/pending/m4.5e1e2c/`. **Accepted shapes the lint refuses, none held by
+      a test:** that one; two owning globals of such structures in one loop; an owning global of a
+      structure holding such a structure by value; a written atom under a guard that reads an
+      address-taken local. **No backstop:** a written atom's guard lowered to a constant would pass the
+      lint (the checker's refusal and the lowering's internal error stand there instead).
 18. **Categories and tags:** none new. **Facts:** P83, S48.
 19. **`restrict`: every `restrict` parameter is rejected** (question 326, the owner, 2026-11-25: "Reject
     restrict"; this item was rewritten on 2026-11-26, before the code of the continuation's Part R; amends 0037

@@ -1,0 +1,150 @@
+32	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+32	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+38	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+38	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+43	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f`
+44	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f`
+45	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f`
+46	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+47	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+48	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+49	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+50	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+51	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+52	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+53	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+54	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+55	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+56	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+57	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+58	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+59	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+60	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+61	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+62	not.wellformed	internal	t.c	9	3	internal check: well-formedness of the contract of `f`
+63	not.wellformed	internal	t.c	19	3	internal check: well-formedness of the contract of `f`
+64	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f`
+64	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the postcondition of `f`
+65	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+65	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+66	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+66	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+67	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+67	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+68	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+68	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+69	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+69	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+70	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+70	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+71	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+71	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+72	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+72	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+73	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+73	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+74	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+74	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+75	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+75	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+76	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+76	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+77	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+77	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+78	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+78	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+79	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+79	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+80	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+80	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+81	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+81	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+82	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `f`
+82	postcondition.violated	internal	t.c	12	3	internal check: Silicon's own check of the postcondition of `f`
+97	assert.failed	lifetime	t.c	36	3	uses `p` after the object it points to may have ended
+100	assert.failed[insufficient.permission]	permission	t.c	21	3	enters this loop without owning `p->a`, which its invariant needs
+101	assert.failed[insufficient.permission]	permission	t.c	21	3	enters this loop without owning `p->a`, which its invariant needs
+103	assert.failed	permission	t.c	21	3	enters this loop without owning `p->a`, which its invariant needs
+106	assert.failed	permission	t.c	21	3	enters this loop without owning `p->a`, which its invariant needs
+114	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+115	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+116	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+117	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+118	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+119	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+120	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+121	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+122	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+123	assert.failed	permission	t.c	21	3	enters this loop without owning `p->n`, which its invariant needs
+126	invariant.not.established	internal	t.c	55	3	internal check: automatic range invariant of `i`
+126	invariant.not.preserved	internal	t.c	55	3	internal check: automatic range invariant of `i`
+127	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+127	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+128	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+128	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+129	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+129	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+130	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+130	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+131	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+131	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+132	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+132	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+133	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+133	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+134	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+134	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+135	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+135	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+136	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+136	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+137	invariant.not.established	invariant-entry	t.c	50	3	this loop invariant may not hold on entry
+137	invariant.not.preserved	invariant-preserved	t.c	50	3	this loop invariant may not be preserved by an iteration
+138	invariant.not.established	overflow	t.c	53	3	signed `int` subtraction may overflow
+138	invariant.not.preserved	overflow	t.c	53	3	signed `int` subtraction may overflow
+139	termination.failed	termination	t.c	54	3	the measure of this loop may not decrease, or may not be bounded below by zero
+141	assert.failed	null-dereference	t.c	26	3	dereferences `p`, which may be null
+143	assert.failed	permission	t.c	26	3	writes `p->n` without owning it: the object it points to may have ended
+146	assert.failed	null-dereference	t.c	32	3	dereferences `p`, which may be null
+147	assert.failed	out-of-bounds	t.c	32	3	writes `p->a[1]`, whose index may be outside `p->a`
+149	assert.failed	permission	t.c	32	3	writes `p->a[1]` without owning it: the object it points to may have ended
+152	assert.failed	overflow	t.c	33	3	signed `int` addition may overflow
+154	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+155	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+156	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+157	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+158	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+159	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+160	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+161	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+162	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+163	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+164	assert.failed[insufficient.permission]	permission	t.c	35	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+165	assert.failed[insufficient.permission]	permission	t.c	35	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+167	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+170	assert.failed	permission	t.c	35	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+175	assert.failed	permission	t.c	58	3	returns `*p` without holding it	t.c:12:this is the postcondition
+177	assert.failed	internal	t.c	58	3	internal check: WF of a pointer parameter
+178	assert.failed	permission	t.c	58	3	returns without owning `*p`, which its contract promises	t.c:12:this is the postcondition
+179	assert.failed	permission	t.c	58	3	returns without owning `*p`, which its contract promises	t.c:12:this is the postcondition
+180	assert.failed	permission	t.c	58	3	returns without owning `*p`, which its contract promises	t.c:12:this is the postcondition
+181	assert.failed	permission	t.c	58	3	returns without owning `*p`, which its contract promises	t.c:12:this is the postcondition
+182	assert.failed	permission	t.c	58	3	returns without owning `*p`, which its contract promises	t.c:12:this is the postcondition
+183	assert.failed	permission	t.c	58	3	returns without owning `*p`, which its contract promises	t.c:12:this is the postcondition
+185	assert.failed[insufficient.permission]	permission	t.c	58	3	returns without owning `p->a`, which its contract promises	t.c:12:this is the postcondition
+186	assert.failed[insufficient.permission]	permission	t.c	58	3	returns without owning `p->a`, which its contract promises	t.c:12:this is the postcondition
+187	assert.failed	permission	t.c	58	3	returns without owning `p->a`, which its contract promises	t.c:12:this is the postcondition
+188	assert.failed	permission	t.c	58	3	returns without owning `p->a`, which its contract promises	t.c:12:this is the postcondition
+194	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f (well-formedness)`
+195	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f (well-formedness)`
+196	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f (well-formedness)`

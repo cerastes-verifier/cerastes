@@ -1,0 +1,196 @@
+34	not.wellformed	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+34	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+35	not.wellformed	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+35	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+36	not.wellformed	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+36	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+37	not.wellformed	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+37	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+38	not.wellformed	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+38	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+39	not.wellformed	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+39	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+40	not.wellformed	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+40	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+46	not.wellformed	internal	tests/memory/struct_array_owner_global.c	14	34	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+46	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	14	34	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+47	not.wellformed	internal	tests/memory/struct_array_owner_global.c	14	34	internal check: well-formedness of the trusted contract of program_start for `g`
+47	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	14	34	internal check: Silicon's own check of the trusted contract of program_start for `g`
+52	not.wellformed	internal	tests/memory/struct_array_owner_global.c	16	6	internal check: well-formedness of the contract of `init`
+53	not.wellformed	internal	tests/memory/struct_array_owner_global.c	16	6	internal check: well-formedness of the contract of `init`
+54	not.wellformed	internal	tests/memory/struct_array_owner_global.c	17	5	internal check: well-formedness of the contract of `init`
+55	not.wellformed	internal	tests/memory/struct_array_owner_global.c	18	5	internal check: well-formedness of the contract of `init`
+55	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	18	5	internal check: Silicon's own check of the postcondition of `init`
+76	assert.failed	internal	tests/memory/struct_array_owner_global.c	16	6	internal check: a block and a place the contract of `init` owns are different
+79	assert.failed	null-dereference	tests/memory/struct_array_owner_global.c	20	8	dereferences `&g`, which may be null
+80	assert.failed	permission	tests/memory/struct_array_owner_global.c	20	8	reads `g` without owning it: `init` needs `reads(g)` or `owns(g)` in its contract
+81	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	20	8	`g` may be read here before it is given a value
+83	assert.failed	internal	tests/memory/struct_array_owner_global.c	20	7	frees `g`, which may not point to an allocation
+84	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	20	7	frees `g`, which may already be freed or may not be an allocation (a local, a global or a member)
+85	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	20	7	frees `g`, which may not be the start of an allocation
+86	assert.failed	internal	tests/memory/struct_array_owner_global.c	20	7	the liveness cell of a block is at slot -2
+87	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	20	7	frees `g` while a pointer to it may still be in use elsewhere
+88	assert.failed	internal	tests/memory/struct_array_owner_global.c	20	7	the lengths of a block
+89	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	20	7	frees `g` without owning all of it: `g->n` is not owned here
+90	assert.failed	internal	tests/memory/struct_array_owner_global.c	20	7	the range of the value under its flag
+95	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_global.c	20	7	frees `g` without owning all of it: `g->a` is not owned here
+101	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_global.c	20	7	frees `g` without owning all of it: `g->a` is not owned here
+106	assert.failed	internal	tests/memory/struct_array_owner_global.c	20	7	the range of the value under its flag
+107	call.precondition	internal	tests/memory/struct_array_owner_global.c	20	7	internal check: Silicon's own check of the precondition of `free`
+109	call.precondition	internal	tests/memory/struct_array_owner_global.c	21	25	internal check: Silicon's own check of the precondition of `calloc`
+111	assert.failed	lifetime	tests/memory/struct_array_owner_global.c	21	25	uses the pointer after the object it points to may have ended
+113	assert.failed	null-dereference	tests/memory/struct_array_owner_global.c	21	5	dereferences `&g`, which may be null
+114	assert.failed	permission	tests/memory/struct_array_owner_global.c	21	5	writes `g` without owning it: `init` needs `owns(g)` in its contract
+117	assert.failed	leak	tests/memory/struct_array_owner_global.c	21	5	assigning to owning `g` still holds its block
+120	assert.failed	permission	tests/memory/struct_array_owner_global.c	21	5	owning `g` receives a pointer that is not the start of a block the function holds
+125	assert.failed	null-dereference	tests/memory/struct_array_owner_global.c	22	7	dereferences `&g`, which may be null
+126	assert.failed	permission	tests/memory/struct_array_owner_global.c	22	7	reads `g` without owning it: `init` needs `reads(g)` or `owns(g)` in its contract
+127	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	22	7	`g` may be read here before it is given a value
+129	assert.failed	lifetime	tests/memory/struct_array_owner_global.c	22	7	uses `g` after the object it points to may have ended
+131	assert.failed	null-dereference	tests/memory/struct_array_owner_global.c	23	5	dereferences `&g`, which may be null
+132	assert.failed	permission	tests/memory/struct_array_owner_global.c	23	5	reads `g` without owning it: `init` needs `reads(g)` or `owns(g)` in its contract
+133	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	23	5	`g` may be read here before it is given a value
+135	assert.failed	null-dereference	tests/memory/struct_array_owner_global.c	23	13	dereferences `g`, which may be null
+136	assert.failed	out-of-bounds	tests/memory/struct_array_owner_global.c	23	13	writes `g->a[1]`, whose index may be outside `g->a`
+138	assert.failed	permission	tests/memory/struct_array_owner_global.c	23	13	writes `g->a[1]` without owning it: the object it points to may have ended
+142	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning `g`, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+143	assert.failed	internal	tests/memory/struct_array_owner_global.c	25	1	internal check: WF of a pointer parameter
+144	assert.failed	internal	tests/memory/struct_array_owner_global.c	25	1	internal check: a pointer parameter points into its block
+145	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning `g`, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+146	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning `g`, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+147	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning `g`, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+148	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning `g`, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+149	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning `g`, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+150	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns while owning global `g` does not hold its block: set it to `NULL` after freeing it	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+151	assert.failed	internal	tests/memory/struct_array_owner_global.c	25	1	returns without owning the whole allocation `g` points to, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+152	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns while owning global `g` does not hold its block: set it to `NULL` after freeing it	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+153	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns while owning global `g` does not hold its block: set it to `NULL` after freeing it	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+154	assert.failed	internal	tests/memory/struct_array_owner_global.c	25	1	the liveness cell of a block is at slot -2	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+155	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns while owning global `g` does not hold its block: set it to `NULL` after freeing it	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+156	assert.failed	internal	tests/memory/struct_array_owner_global.c	25	1	the lengths of a block	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+157	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns while owning global `g` does not hold its block: set it to `NULL` after freeing it	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+158	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	25	1	returns `g->n` without a value, but its contract promises the whole allocation with its contents	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+159	assert.failed	internal	tests/memory/struct_array_owner_global.c	25	1	the range of the value under its flag	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+164	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning the whole allocation `g` points to, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+170	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_global.c	25	1	returns without owning the whole allocation `g` points to, which its contract promises	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+175	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	25	1	returns `g->a` without a value, but its contract promises the whole allocation with its contents	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+179	assert.failed	internal	tests/memory/struct_array_owner_global.c	25	1	the range of the value under its flag	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+180	assert.failed	permission	tests/memory/struct_array_owner_global.c	25	1	returns `g` as an owned allocation and `g` as an owned place, but they may be the same object	tests/memory/struct_array_owner_global.c:18:this is the postcondition
+182	assert.failed	leak	tests/memory/struct_array_owner_global.c	25	1	`init` may return while it still owns an allocation that its `ensures` does not hand back
+187	not.wellformed	internal	tests/memory/struct_array_owner_global.c	27	6	internal check: well-formedness of the contract of `destroy`
+188	not.wellformed	internal	tests/memory/struct_array_owner_global.c	27	6	internal check: well-formedness of the contract of `destroy`
+189	not.wellformed	internal	tests/memory/struct_array_owner_global.c	28	5	internal check: well-formedness of the contract of `destroy`
+200	assert.failed	internal	tests/memory/struct_array_owner_global.c	27	6	internal check: a block and a place the contract of `destroy` owns are different
+203	assert.failed	null-dereference	tests/memory/struct_array_owner_global.c	30	8	dereferences `&g`, which may be null
+204	assert.failed	permission	tests/memory/struct_array_owner_global.c	30	8	reads `g` without owning it: `destroy` needs `reads(g)` or `owns(g)` in its contract
+205	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	30	8	`g` may be read here before it is given a value
+207	assert.failed	internal	tests/memory/struct_array_owner_global.c	30	7	frees `g`, which may not point to an allocation
+208	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	30	7	frees `g`, which may already be freed or may not be an allocation (a local, a global or a member)
+209	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	30	7	frees `g`, which may not be the start of an allocation
+210	assert.failed	internal	tests/memory/struct_array_owner_global.c	30	7	the liveness cell of a block is at slot -2
+211	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	30	7	frees `g` while a pointer to it may still be in use elsewhere
+212	assert.failed	internal	tests/memory/struct_array_owner_global.c	30	7	the lengths of a block
+213	assert.failed	invalid-free	tests/memory/struct_array_owner_global.c	30	7	frees `g` without owning all of it: `g->n` is not owned here
+214	assert.failed	internal	tests/memory/struct_array_owner_global.c	30	7	the range of the value under its flag
+219	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_global.c	30	7	frees `g` without owning all of it: `g->a` is not owned here
+225	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_global.c	30	7	frees `g` without owning all of it: `g->a` is not owned here
+230	assert.failed	internal	tests/memory/struct_array_owner_global.c	30	7	the range of the value under its flag
+231	call.precondition	internal	tests/memory/struct_array_owner_global.c	30	7	internal check: Silicon's own check of the precondition of `free`
+234	assert.failed	leak	tests/memory/struct_array_owner_global.c	31	1	`destroy` may return while it still owns an allocation that its `ensures` does not hand back
+239	not.wellformed	internal	tests/memory/struct_array_owner_global.c	33	5	internal check: well-formedness of the contract of `main`
+239	postcondition.violated	internal	tests/memory/struct_array_owner_global.c	33	5	internal check: Silicon's own check of the postcondition of `main`
+257	call.precondition	internal	tests/memory/struct_array_owner_global.c	33	5	internal check: Silicon's own check of the call of program_start
+259	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+260	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+261	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+262	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+263	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+264	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs `g` to have a value
+265	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+266	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+267	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+268	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+269	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own `g`, without owning it
+270	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	passes `g` and `g` to `init`, which needs to own the whole allocation of the first, but they may be the same object
+271	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs owning global `g` to hold its block or be null
+272	assert.failed	internal	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own the whole allocation `g` points to, without owning it
+273	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs owning global `g` to hold its block or be null
+274	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs owning global `g` to hold its block or be null
+275	assert.failed	internal	tests/memory/struct_array_owner_global.c	35	7	the liveness cell of a block is at slot -2
+276	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs owning global `g` to hold its block or be null
+277	assert.failed	internal	tests/memory/struct_array_owner_global.c	35	7	the lengths of a block
+278	assert.failed	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs owning global `g` to hold its block or be null
+279	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs `g->n` to have a value; it may not have one here
+280	assert.failed	internal	tests/memory/struct_array_owner_global.c	35	7	the range of the value under its flag
+285	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own the whole allocation `g` points to, without owning it
+291	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs to own the whole allocation `g` points to, without owning it
+296	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	35	7	calls `init`, which needs `g->a` to have a value; it may not have one here
+300	assert.failed	internal	tests/memory/struct_array_owner_global.c	35	7	the range of the value under its flag
+303	call.precondition	internal	tests/memory/struct_array_owner_global.c	35	7	internal check: Silicon's own check of the precondition of `init`
+307	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+308	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+309	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+310	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+311	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+312	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs `g` to have a value
+313	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+314	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+315	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+316	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+317	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own `g`, without owning it
+318	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	passes `g` and `g` to `destroy`, which needs to own the whole allocation of the first, but they may be the same object
+319	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs owning global `g` to hold its block or be null
+320	assert.failed	internal	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own the whole allocation `g` points to, without owning it
+321	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs owning global `g` to hold its block or be null
+322	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs owning global `g` to hold its block or be null
+323	assert.failed	internal	tests/memory/struct_array_owner_global.c	36	10	the liveness cell of a block is at slot -2
+324	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs owning global `g` to hold its block or be null
+325	assert.failed	internal	tests/memory/struct_array_owner_global.c	36	10	the lengths of a block
+326	assert.failed	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs owning global `g` to hold its block or be null
+327	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs `g->n` to have a value; it may not have one here
+328	assert.failed	internal	tests/memory/struct_array_owner_global.c	36	10	the range of the value under its flag
+333	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own the whole allocation `g` points to, without owning it
+339	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs to own the whole allocation `g` points to, without owning it
+344	assert.failed	uninitialized	tests/memory/struct_array_owner_global.c	36	10	calls `destroy`, which needs `g->a` to have a value; it may not have one here
+348	assert.failed	internal	tests/memory/struct_array_owner_global.c	36	10	the range of the value under its flag
+352	call.precondition	internal	tests/memory/struct_array_owner_global.c	36	10	internal check: Silicon's own check of the precondition of `destroy`
+356	assert.failed	missing-return	tests/memory/struct_array_owner_global.c	38	1	control may reach the end of `main` without returning a value
+358	assert.failed	leak	tests/memory/struct_array_owner_global.c	38	1	`main` may return while it still owns an allocation that its `ensures` does not hand back
+364	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free`
+365	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free`
+366	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free`
+372	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc`
+373	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc`
+373	postcondition.violated	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: Silicon's own check of the postcondition of `calloc`
+374	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc`
+374	postcondition.violated	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: Silicon's own check of the postcondition of `calloc`
+379	not.wellformed	internal	tests/memory/struct_array_owner_global.c	16	6	internal check: well-formedness of the contract of `init (well-formedness)`
+380	not.wellformed	internal	tests/memory/struct_array_owner_global.c	16	6	internal check: well-formedness of the contract of `init (well-formedness)`
+381	not.wellformed	internal	tests/memory/struct_array_owner_global.c	16	6	internal check: well-formedness of the contract of `init (well-formedness)`
+382	not.wellformed	internal	tests/memory/struct_array_owner_global.c	16	6	internal check: well-formedness of the contract of `init (well-formedness)`
+390	not.wellformed	internal	tests/memory/struct_array_owner_global.c	27	6	internal check: well-formedness of the contract of `destroy (well-formedness)`
+391	not.wellformed	internal	tests/memory/struct_array_owner_global.c	27	6	internal check: well-formedness of the contract of `destroy (well-formedness)`
+392	not.wellformed	internal	tests/memory/struct_array_owner_global.c	27	6	internal check: well-formedness of the contract of `destroy (well-formedness)`
+400	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free (well-formedness)`
+401	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free (well-formedness)`
+409	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+410	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+411	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+412	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+413	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+414	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+415	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+416	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+417	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+418	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+419	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+420	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+421	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+422	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+423	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+424	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+425	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+428	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it
+429	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it
+430	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it
+431	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it

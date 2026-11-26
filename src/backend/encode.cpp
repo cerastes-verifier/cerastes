@@ -3987,14 +3987,13 @@ private:
                         reported_types->insert(k);
                         bad = true;
                     }
-                    else if (kind != Annot::not_invalidating && edg_type_has_array(pe))
+                    else if (kind != Annot::not_invalidating && edg_type_has_aggregate_array(pe))
                     {
+                        // decision 0064 item 15 (question 348): a pointee with an array member of scalars takes the marker (Part D); an array member of structures or arrays is M4.5e2's
                         reject(
                             Diag::unsupported_annotation, ns[0U]->position,
                             "\"" + an + "\" on parameter " + pname +
-                                (kind == Annot::owning
-                                     ? " (a pointer to a structure with an array member: heap storage of such a structure is M4.5e1e2, question 292; decision 0063 item 1)"
-                                     : " (a pointer to a structure with an array member: M4.5e1e2, question 294; decision 0063 item 1)"));
+                                " (a pointer to a structure with an array member of structures or arrays: M4.5e2, decision 0064 item 15, question 348)");
                         bad = true;
                     }
                 }
@@ -4763,14 +4762,13 @@ private:
                        marker(a) + " on a function declared not to return (it has no result)");
                 return;
             }
-            if (pointer_to_array_struct(return_type(r)))
+            if (pointer_to_aggregate_array_struct(return_type(r)))
             {
+                // decision 0064 item 15 (question 348): only an array member of structures or arrays stays rejected
                 reject(
                     Diag::unsupported_annotation, a->position,
                     marker(a) +
-                        (a == owning
-                             ? " on a function that returns a pointer to a structure with an array member (heap storage of such a structure: M4.5e1e2, question 292; decision 0063 item 1)"
-                             : " on a function that returns a pointer to a structure with an array member (M4.5e1e2, question 294; decision 0063 item 1)"));
+                        " on a function that returns a pointer to a structure with an array member of structures or arrays (M4.5e2, decision 0064 item 15, question 348)");
                 return;
             }
         }
@@ -5334,7 +5332,7 @@ private:
     static std::vector<OwnLeaf> owning_leaves(const vir::StructType& st)
     {
         std::vector<OwnLeaf> out;
-        // the object view (decision 0063 item 4): an array member is one array leaf, never owning (question 293 rejects an owner beside an array)
+        // the object view (decision 0063 item 4): an array member is one array leaf, never owning (question 293: an owner beside an array member of scalars is accepted, decision 0064 item 15; beside an aggregate array member it is rejected)
         for (const vir::StructLeaf& lf : vir::struct_object_leaves(st))
         {
             if (!lf.array && leaf_is_owning(st, lf.path))
@@ -9184,7 +9182,7 @@ private:
 
     // Decision 0058 item 4: the member of `st` along `path` (nested by-value structs), or null.
     // Decision 0063: whether a VIR type is an array, or a structure with an array member anywhere (by-value structure members included).  Only for structures
-    // that are complete (never a provisional one inside struct_info: edg_type_has_array reads the front end's fields).
+    // that are complete (never a provisional one inside struct_info: edg_type_has_aggregate_array reads the front end's fields).
     static bool vir_struct_has_array(const vir::StructType& st, int depth = 0)
     {
         for (const vir::StructMember& m : st.members)
@@ -9197,10 +9195,55 @@ private:
         }
         return false;
     }
-    static bool vir_type_has_array(const vir::Type& t)
+    // Decision 0064 item 15's last clause (question 348): the predicate of Part D's six positions.  An array whose ELEMENT is a structure or an array is an aggregate
+    // array; a structure has one when a member, at any depth of its by-value nest, is one.  An array of scalars (cells, pointers) is not: the six positions take it
+    // (Part D) and keep rejecting an aggregate one (the general form is M4.5e2's).  vir_struct_has_array above keeps meaning "any array member" for every other site.
+    static bool vir_type_is_aggregate_array(const vir::Type& t)
     {
-        return t.is_array() || (t.is_struct() && t.struct_type != nullptr && vir_struct_has_array(*t.struct_type));
+        return t.is_array() && t.element != nullptr && (t.element->is_struct() || t.element->is_array());
     }
+    static bool vir_struct_has_aggregate_array(const vir::StructType& st, int depth = 0)
+    {
+        for (const vir::StructMember& m : st.members)
+        {
+            if (vir_type_is_aggregate_array(m.type) ||
+                (m.type.is_struct() && m.type.struct_type != nullptr && depth < 32 &&
+                 vir_struct_has_aggregate_array(*m.type.struct_type, depth + 1)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // A type that is an aggregate array, or a structure with one (the VIR type of a pointee: the structure, or the array member's own type).
+    static bool vir_type_has_aggregate_array(const vir::Type& t)
+    {
+        return vir_type_is_aggregate_array(t) ||
+               (t.is_struct() && t.struct_type != nullptr && vir_struct_has_aggregate_array(*t.struct_type));
+    }
+    // Decision 0064 item 15 (question 354): the number of value clauses that calloc's typed view writes for a structure `st`, one per cell leaf and one per ELEMENT of an array leaf
+    // (heap_view's `result->a[0] == 0`, ..., each once; the by-value members' leaves included), and whether `st` has an array leaf at all.
+    static unsigned long long calloc_zero_clause_count(const vir::StructType& st, bool* has_array)
+    {
+        unsigned long long n {0U};
+        for (const vir::StructLeaf& lf : vir::struct_object_leaves(st))
+        {
+            if (lf.array)
+            {
+                *has_array = true;
+                n += lf.count;
+            }
+            else
+            {
+                n += 1U;
+            }
+        }
+        return n;
+    }
+    // The cap of that count for a structure with an array leaf (question 354): a view with more clauses ends without a verdict, either Silicon's stack overflows in the view's
+    // `__wf` method or the proof takes over five minutes (on the x86-64 box one array of 50 elements verified and one of 52 did not; with cells beside the array the time grows
+    // faster: 30 elements and 60 cells timed out).  The cap is about half of 50.
+    static constexpr unsigned long long kCallocClauseCap {24U};
     // ---- helper predicates for record 0064's rejections (M4.5e1e2): array_vtype, struct_element_pointee_reason (Part B); edg_index_depth and declared_array_dimensions (Part E's depth limit and the array parameters) ----
     // Item 2 (M4.8's rejection): whether an array ELEMENT type is, or holds anywhere (by-value structure members, array members, rows), a structure with an `owning` or
     // `ref_to_uninit` member.  `vir_struct_has_marked` stops at an array member; this one does not.
@@ -9239,7 +9282,7 @@ private:
         return t->is_struct() && t->struct_type != nullptr && vir_struct_has_array(*t->struct_type);
     }
     // Item 2's depth limit: the greatest number of INDEX steps on any leaf path of a front-end type (an array adds one over its element's greatest; a structure's is the
-    // greatest over its fields; a pointer, an integer or a `bool` is 0).  A provisional or incomplete structure counts 0 (as edg_type_has_array).  `int m[2][3]` is 2, `struct S { int
+    // greatest over its fields; a pointer, an integer or a `bool` is 0).  A provisional or incomplete structure counts 0 (as edg_type_has_aggregate_array).  `int m[2][3]` is 2, `struct S { int
     // a[2]; } v[3]` is 2, `struct S v[3]` of cells is 1.
     [[maybe_unused]] static int edg_index_depth(a_type_ptr t, int depth = 0)
     {
@@ -9368,8 +9411,9 @@ private:
         }
         return false;
     }
-    // The same over the front end's type, for a structure that may still be provisional (a pointee read inside struct_info).
-    static bool edg_type_has_array(a_type_ptr t, int depth = 0)
+    // Decision 0064 item 15's predicate (question 348) over the front end's type, for a structure that may still be provisional (a pointee read inside struct_info): a member, at any depth of the by-value nest, that is an array whose element
+    // (typedefs skipped) is a structure or an array.  A structure that is incomplete counts false, as there.
+    static bool edg_type_has_aggregate_array(a_type_ptr t, int depth = 0)
     {
         t = t != nullptr ? skip_typerefs(t) : nullptr;
         if (t == nullptr || !is_struct_kind(t) || t->incomplete || depth > 32)
@@ -9379,22 +9423,36 @@ private:
         for (a_field_ptr f {t->variant.class_struct_union.field_list}; f != nullptr; f = f->next)
         {
             a_type_ptr u {f->type != nullptr ? skip_typerefs(f->type) : nullptr};
-            if (u != nullptr && (u->kind == tk_array || edg_type_has_array(u, depth + 1)))
+            if (u == nullptr)
+            {
+                continue;
+            }
+            if (u->kind == tk_array)
+            {
+                a_type_ptr e {u->variant.array.element_type != nullptr ? skip_typerefs(u->variant.array.element_type)
+                                                                       : nullptr};
+                if (e != nullptr && (e->kind == tk_array || is_struct_kind(e)))
+                {
+                    return true;
+                }
+            }
+            else if (edg_type_has_aggregate_array(u, depth + 1))
             {
                 return true;
             }
         }
         return false;
     }
-    // Whether `t` is a pointer whose pointee is a structure with an array member (ONE level of pointer is stripped: `struct S **` is not, the pointee being a pointer).
-    static bool pointer_to_array_struct(a_type_ptr t)
+    // Whether `t` is a pointer whose pointee is a structure with an aggregate array member (ONE level of pointer is stripped: `struct S **` is not, the pointee being a
+    // pointer).  Decision 0064 item 15 (question 348).
+    static bool pointer_to_aggregate_array_struct(a_type_ptr t)
     {
         t = t != nullptr ? skip_typerefs(t) : nullptr;
         if (t == nullptr || t->kind != tk_pointer || t->variant.pointer.is_reference)
         {
             return false;
         }
-        return edg_type_has_array(t->variant.pointer.type);
+        return edg_type_has_aggregate_array(t->variant.pointer.type);
     }
     static const vir::StructMember* member_at(const vir::StructType& st, const std::vector<int>& path)
     {
@@ -11049,8 +11107,9 @@ private:
     // `requires` and `old` the entry state, an `ensures` the return state) with every rule that applies to a read (the marked-parameter rule of 0042 item 6,
     // `old` of the result).  The node is decided by its shape, never by its lvalue flag (P70 H4, H16).  The root must be a parameter, a global or, in an
     // `ensures`, the result; `old` inside the path (`*old(*pp)`, `old(p)->q->x`) is M8's.  Null (reported) otherwise.
-    // Question 306 (decision 0063 item 1): a contract place reached through a heap read (a load on the way, decision 0045) is rejected when a structure with an
-    // array member lies anywhere on its path, the root's pointee included (`owns(*p->q)`, `p->q->a[i]` with an array member in `*p` or `*p->q`).  True when reported.
+    // Question 306 (decision 0064 item 15, question 348): a contract place reached through a heap read (a load on the way, decision 0045) is rejected when a structure
+    // with an array member of structures or arrays lies anywhere on its path, the root's pointee included (`owns(*p->q)`, `p->q->v[i].x` with such a member in `*p` or
+    // `*p->q`); an array member of scalars is accepted (Part D).  True when reported.
     bool reject_array_behind_load(const Expr* x, const a_source_position& at)
     {
         std::vector<int> steps;
@@ -11062,7 +11121,7 @@ private:
         bool array {false};
         for (const Expr* e {x}; e != nullptr; e = e->a)
         {
-            if (e->type.is_ptr() && e->type.pointee != nullptr && vir_type_has_array(*e->type.pointee))
+            if (e->type.is_ptr() && e->type.pointee != nullptr && vir_type_has_aggregate_array(*e->type.pointee))
             {
                 array = true;
             }
@@ -11077,7 +11136,7 @@ private:
         }
         reject(
             Diag::unsupported_annotation, at,
-            "a place of a contract reached through a heap read (a pointer loaded from memory) with a structure that has an array member on its path (`owns(*p->q)`, `p->q->a[i]`: M4.5e1e2, question 306, decision 0063 item 1)");
+            "a place of a contract reached through a heap read (a pointer loaded from memory) with a structure that has an array member of structures or arrays on its path (`owns(*p->q)`, `p->q->v[i].x`: M4.5e2, decision 0064 item 15, question 348)");
         return true;
     }
 
@@ -12093,6 +12152,22 @@ private:
         return atom;
     }
 
+    // Decision 0064 item 15: whether the place address `x` of an atom is an array member (the address of one, a pointer to an array type) or a structure with an array
+    // member anywhere in its by-value nest (the atoms of those are a written atom's array parts, built for `owns` of a pointer variable only).
+    static bool written_array_atom(const Expr* x)
+    {
+        if (x == nullptr || !x->type.is_ptr() || x->type.pointee == nullptr)
+        {
+            return false;
+        }
+        const vir::Type& pt {*x->type.pointee};
+        if (x->kind == Expr::Kind::MemberAddr && pt.is_array())
+        {
+            return true;
+        }
+        return pt.is_struct() && pt.struct_type != nullptr && vir_struct_has_array(*pt.struct_type);
+    }
+
     // `cerastes::owns(*q)`, `reads(*q)`, `live(q)` in the `invariant` of a loop (decision 0040 item 5): an Atom of a pointer variable (a local or a
     // parameter's copy, a cell included), read at the start of each iteration.  The positions are checked by check_program (vir::loop_atoms).
     const Expr* invariant_atom(an_expr_node_ptr e, SpecFn fn, const std::string& name,
@@ -12152,13 +12227,51 @@ private:
                    "\"" + name + "\" of something other than a pointer variable");
             return nullptr;
         }
-        if (fn != SpecFn::live && x->type.pointee != nullptr && vir_type_has_array(*x->type.pointee))
+        if (fn != SpecFn::live && x->type.pointee != nullptr && vir_type_has_aggregate_array(*x->type.pointee))
         {
+            // decision 0064 item 15 (question 348): a written atom on an array member of scalars, or a structure with one, is built (Part D); an array member of
+            // structures or arrays (a loop carries those places by itself) stays rejected
             reject(
                 Diag::unsupported_annotation, e->position,
                 "\"" + name +
-                    "\" written in a loop invariant on an array member or a structure with an array member (a loop carries those places by itself: M4.5e1e2, decision 0063 items 7 and 10)");
+                    "\" written in a loop invariant on an array member of structures or arrays or a structure with one (a loop carries those places by itself: M4.5e2, decision 0064 item 15, question 348)");
             return nullptr;
+        }
+        if (fn != SpecFn::live && written_array_atom(x))
+        {
+            // decision 0064 item 15 (audit rounds D1 and D2): a written `owns` atom on a structure with an array member of scalars or on such a member, read from a pointer
+            // variable whose address is not taken, is built (Part D); every other written atom on one is refused here, at the invariant's line
+            if (fn == SpecFn::reads)
+            {
+                reject(
+                    Diag::unsupported_annotation, e->position,
+                    "\"" + name +
+                        "\" written in a loop invariant on a structure with an array member or on an array member (a written `reads` of an array part: M4.5e2, decision 0064 item 15)");
+                return nullptr;
+            }
+            const Expr* base {x->kind == Expr::Kind::MemberAddr ? x->a : x};
+            const bool plain {x->kind == Expr::Kind::MemberAddr
+                                  ? (x->type.pointee != nullptr && x->type.pointee->is_array() && base != nullptr &&
+                                     base->kind == Expr::Kind::Local)
+                                  : x->kind == Expr::Kind::Local};
+            if (!plain || base->var == nullptr || base->var->address_taken || !base->type.is_ptr())
+            {
+                reject(
+                    Diag::unsupported_annotation, e->position,
+                    "\"" + name +
+                        "\" written in a loop invariant on a structure with an array member or on an array member, reached other than directly from a pointer variable whose address is not taken "
+                        "(a pointer read through memory, a global pointer, an address-taken local, a member of a by-value member: M4.5e2, decision 0064 item 15)");
+                return nullptr;
+            }
+            if (base->type.pointee != nullptr && vir_type_has_aggregate_array(*base->type.pointee))
+            {
+                reject(
+                    Diag::unsupported_annotation, e->position,
+                    "\"" + name +
+                        "\" written in a loop invariant on an array member of a structure that also has an array member of structures or arrays (a loop carries those places by itself: M4.5e2, "
+                        "decision 0064 item 15, question 348)");
+                return nullptr;
+            }
         }
         std::vector<int> steps;
         const Expr* root {vir::place_root(x, &steps)};
@@ -12250,6 +12363,27 @@ private:
                         "\" in this position (it may be a top-level conjunct, the right operand of `||` or an arm of `?:` "
                         "whose left operand or condition holds no atom, call or side effect: Viper cannot express it anywhere else, decisions 0037 item 5, 0045 item 9)");
                 ok = false;
+            }
+        }
+        for (const vir::AtomSite& st : sites)
+        {
+            // decision 0064 item 15 (audit round D2): the guard of a written atom on a structure with an array member, or on such a member, reads no memory (the array
+            // parts are framed by the loop's own places, which a guard that reads memory is not part of)
+            if ((st.atom->atom == vir::AtomKind::Owns || st.atom->atom == vir::AtomKind::Reads) &&
+                written_array_atom(st.atom->a))
+            {
+                for (const vir::AtomGuard& g : st.guards)
+                {
+                    if (g.cond != nullptr && vir::reads_heap(*g.cond))
+                    {
+                        reject(
+                            Diag::unsupported_annotation, pos_of(st.atom),
+                            std::string("\"") + spelling(st.atom) +
+                                "\" written in a loop invariant on a structure with an array member or on an array member, under a condition that reads memory (M4.5e2, decision 0064 item 15)");
+                        ok = false;
+                        break;
+                    }
+                }
             }
         }
         for (size_t k {0U}; k < sites.size(); ++k)
@@ -13926,12 +14060,13 @@ private:
                                         spelling(st.atom) + "\" of the same " + atom_word(*st.atom) +
                                         " in the `requires`"};
                 if (st.atom->a != nullptr && st.atom->a->type.is_ptr() && st.atom->a->type.pointee != nullptr &&
-                    vir_type_has_array(*st.atom->a->type.pointee))
+                    vir_type_has_aggregate_array(*st.atom->a->type.pointee))
                 {
+                    // decision 0064 item 15 (question 348): partnerless atoms on an array member of scalars are built (Part D)
                     reject(
                         Diag::unsupported_annotation, pos_of(st.atom),
                         head +
-                            ": a permission given on an array member or a structure with an array member (M4.5e1e2, decision 0063 item 1)");
+                            ": a permission given on an array member of structures or arrays or a structure with one (M4.5e2, decision 0064 item 15, question 348)");
                     continue;
                 }
                 if (!pk.valid())
@@ -15030,14 +15165,13 @@ private:
                 r.skip = r.bad = true;
                 continue;
             }
-            if (edg_type_has_array(pe))
+            if (edg_type_has_aggregate_array(pe))
             {
+                // decision 0064 item 15 (question 348)
                 reject(
                     Diag::unsupported_annotation, at,
                     "\"" + an + "\" on `" + name +
-                        (k == Annot::owning
-                             ? "` (a pointer to a structure with an array member: heap storage of such a structure is M4.5e1e2, question 292; decision 0063 item 1)"
-                             : "` (a pointer to a structure with an array member: M4.5e1e2, question 294; decision 0063 item 1)"));
+                        "` (a pointer to a structure with an array member of structures or arrays: M4.5e2, decision 0064 item 15, question 348)");
                 r.skip = r.bad = true;
                 continue;
             }
@@ -18613,12 +18747,20 @@ private:
     std::vector<HeapView> heap_views_;
 
     // `T *` for the zero test of one leaf of calloc's block: the leaf at `path` of the struct (or the object itself) under the result.
-    const Expr* heap_zero_clause(vir::Function* f, const std::vector<int>& path, const vir::Type& leaf, const SrcLoc& l)
+    // `elem` >= 0: the leaf is an array member of scalars (decision 0064 item 15) and the clause is about its element `elem` (`result->a[elem] == 0`), `leaf` the element's type.
+    const Expr* heap_zero_clause(vir::Function* f, const std::vector<int>& path, const vir::Type& leaf, const SrcLoc& l,
+                                 long long elem = -1)
     {
         const Expr* addr {b_.result(*f, l)};
         for (int k : path)
         {
             addr = b_.member_addr(addr, k, l);
+        }
+        if (elem >= 0)
+        {
+            const Expr* ix {
+                b_.int_const(vir::Type::integer(prog_.int_type("long", 64, true)), std::to_string(elem), l)};
+            addr = b_.elem_addr(addr, ix, l);
         }
         const Expr* value {b_.deref(addr, l)};
         const Expr* zero {leaf.is_bool()  ? b_.bool_const(false, l)
@@ -18631,10 +18773,10 @@ private:
     // deallocation routine for a pointer to `pointee`: bodiless, trusted from vlibc's tag, one per (routine, type).
     vir::Function* heap_view(a_routine_ptr r, const HeapShape& sh, const vir::Type& pointee, a_type_ptr edg_pointee)
     {
-        if (vir_type_has_array(pointee))
+        if (vir_type_has_aggregate_array(pointee))
         {
             internal_error(
-                "heap_view: a structure with an array member (allocation_view and heap_call reject it first, decision 0063 item 1)");
+                "heap_view: a structure with an array member of structures or arrays (allocation_view and heap_call reject it first, decision 0064 item 15)");
         }
         for (const HeapView& v : heap_views_)
         {
@@ -18661,9 +18803,23 @@ private:
             {
                 if (pointee.is_struct())
                 {
-                    for (const vir::StructLeaf& lf : vir::struct_leaves(*pointee.struct_type))
+                    // the object view (decision 0063 item 4): an array member of scalars is one array leaf (item 15 of 0064 takes it; allocation_view rejects an aggregate
+                    // one first), zero element by element
+                    for (const vir::StructLeaf& lf : vir::struct_object_leaves(*pointee.struct_type))
                     {
-                        rhs = b_.binary(vir::BinaryOp::LAnd, rhs, heap_zero_clause(f, lf.path, lf.type, l), l);
+                        if (lf.array)
+                        {
+                            for (unsigned long long i {0U}; i < lf.count; ++i)
+                            {
+                                rhs = b_.binary(vir::BinaryOp::LAnd, rhs,
+                                                heap_zero_clause(f, lf.path, lf.element, l, static_cast<long long>(i)),
+                                                l);
+                            }
+                        }
+                        else
+                        {
+                            rhs = b_.binary(vir::BinaryOp::LAnd, rhs, heap_zero_clause(f, lf.path, lf.type, l), l);
+                        }
                     }
                 }
                 else
@@ -18809,13 +18965,31 @@ private:
                        " bytes): only `sizeof(T)` bytes for a `T *` is supported until M4.5e2 (decision 0047 item 2)");
             return nullptr;
         }
-        if (vir_type_has_array(*to.t.pointee))
+        if (vir_type_has_aggregate_array(*to.t.pointee))
         {
+            // decision 0064 item 15 (question 348): the typed view of a structure with an array member of scalars is built (Part D)
             reject(
                 Diag::unsupported_expression, call->position,
                 "`" + name +
-                    "` of a structure with an array member (heap storage of such a structure: M4.5e1e2, question 292, decision 0063 item 1)");
+                    "` of a structure with an array member of structures or arrays (heap storage of such a structure: M4.5e2, decision 0064 item 15, question 348)");
             return nullptr;
+        }
+        if (sh.zeroed && to.t.pointee->is_struct() && to.t.pointee->struct_type != nullptr)
+        {
+            bool has_array {false};
+            const unsigned long long clauses {calloc_zero_clause_count(*to.t.pointee->struct_type, &has_array)};
+            if (has_array && clauses > kCallocClauseCap)
+            {
+                // decision 0064 item 15 (question 354)
+                reject(
+                    Diag::unsupported_expression, call->position,
+                    "`" + name + "` of a structure with an array member whose zeroed block has " +
+                        std::to_string(clauses) + " values (more than " + std::to_string(kCallocClauseCap) +
+                        "): the view of `calloc` states every value is zero one by one, and a longer one cannot be proved (a quantified zero line per array: M4.5e2, "
+                        "decision 0064 item 15); allocate with `malloc` and write each element before it is read (a read of an element that only a loop wrote is reported "
+                        "as `uninitialized` today)");
+                return nullptr;
+            }
         }
         vir::Function* v {heap_view(r, sh, *to.t.pointee, pt)};
         // decision 0047 item 8 (audit S6), 0052 item 4
@@ -18944,12 +19118,12 @@ private:
                    "a conversion whose operand has another type than the IL says");
             return nullptr;
         }
-        if (vir_type_has_array(*from.t.pointee))
+        if (vir_type_has_aggregate_array(*from.t.pointee))
         {
             reject(
                 Diag::unsupported_expression, e->position,
                 "`" + name +
-                    "` of a structure with an array member (heap storage of such a structure: M4.5e1e2, question 292, decision 0063 item 1)");
+                    "` of a structure with an array member of structures or arrays (heap storage of such a structure: M4.5e2, decision 0064 item 15, question 348)");
             return nullptr;
         }
         vir::Function* v {heap_view(callee, sh, *from.t.pointee, pt)};
@@ -19027,12 +19201,12 @@ private:
                    "\"" + name + "\" of something that is not a pointer (decision 0047 item 4)");
             return nullptr;
         }
-        if (vir_type_has_array(*p->type.pointee))
+        if (vir_type_has_aggregate_array(*p->type.pointee))
         {
             reject(
                 Diag::unsupported_annotation, e->position,
                 "\"" + name +
-                    "\" of a pointer to a structure with an array member (heap storage of such a structure: M4.5e1e2, question 292, decision 0063 item 1)");
+                    "\" of a pointer to a structure with an array member of structures or arrays (heap storage of such a structure: M4.5e2, decision 0064 item 15, question 348)");
             return nullptr;
         }
         if (reject_array_behind_load(p, e->position))
@@ -19121,12 +19295,12 @@ private:
                    "\"" + name + "\" of something that is not a pointer (decision 0047 item 4)");
             return nullptr;
         }
-        if (vir_type_has_array(*x->type.pointee))
+        if (vir_type_has_aggregate_array(*x->type.pointee))
         {
             reject(
                 Diag::unsupported_annotation, e->position,
                 "\"" + name +
-                    "\" of a pointer to a structure with an array member (heap storage of such a structure: M4.5e1e2, question 292, decision 0063 item 1)");
+                    "\" of a pointer to a structure with an array member of structures or arrays (heap storage of such a structure: M4.5e2, decision 0064 item 15, question 348)");
             return nullptr;
         }
         if (reject_array_behind_load(x, e->position))
@@ -26661,7 +26835,7 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
     bool packed_layout {false};
     bool non_public {false};
     // the first member that is an array or a by-value structure holding one (question 293's report)
-    a_source_position first_array_at {};
+    a_source_position first_aggregate_array_at {};
     for (a_field_ptr f {cs.field_list}; f != nullptr; f = f->next)
     {
         const a_source_position fp {f->source_corresp.decl_position.seq != 0U ? f->source_corresp.decl_position : p};
@@ -26806,11 +26980,12 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                     own[0U]->position,
                     "a pointer to a `const` or `volatile` object: nothing may be written through an owner; decision 0055 item 2");
             }
-            else if (pointer_to_array_struct(f->type))
+            else if (pointer_to_aggregate_array_struct(f->type))
             {
+                // decision 0064 item 15 (question 348): a pointee with an array member of scalars is built (Part D)
                 refuse_owning(
                     own[0U]->position,
-                    "a pointer to a structure with an array member: heap storage of such a structure is M4.5e1e2, question 292; decision 0063 item 1");
+                    "a pointer to a structure with an array member of structures or arrays: M4.5e2; decision 0064 item 15, question 348");
             }
             else
             {
@@ -26855,11 +27030,11 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                     ref[0U]->position,
                     "a pointer to a `const` or `volatile` object: nothing could initialize it; decision 0058 item 4");
             }
-            else if (pointer_to_array_struct(f->type))
+            else if (pointer_to_aggregate_array_struct(f->type))
             {
                 refuse_ref(
                     ref[0U]->position,
-                    "a pointer to a structure with an array member: M4.5e1e2, question 294; decision 0063 item 1");
+                    "a pointer to a structure with an array member of structures or arrays: M4.5e2; decision 0064 item 15, question 348");
             }
             else
             {
@@ -26915,9 +27090,9 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                     ok = false;
                     continue;
                 }
-                if (first_array_at.seq == 0U)
+                if (first_aggregate_array_at.seq == 0U && vir_type_is_aggregate_array(mt.t))
                 {
-                    first_array_at = fp;
+                    first_aggregate_array_at = fp;
                 }
                 break;
             }
@@ -26939,9 +27114,9 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                     }
                     continue;
                 }
-                if (first_array_at.seq == 0U && vir_type_has_array(mt.t))
+                if (first_aggregate_array_at.seq == 0U && vir_type_has_aggregate_array(mt.t))
                 {
-                    first_array_at = fp;
+                    first_aggregate_array_at = fp;
                 }
                 break;
             case tk_pointer:
@@ -27027,13 +27202,14 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
     {
         refuse(p, "an empty struct (decision 0043 item 2)");
     }
-    // question 293 (decision 0063 item 1): a structure with an array member (or a by-value member holding one) and an `owning` or `ref_to_uninit` member
-    if (ok && first_array_at.seq != 0U && vir_struct_has_marked(*st))
+    // question 293 (decision 0064 item 15, question 348): a structure with an array member of scalars is accepted beside an `owning` or `ref_to_uninit` member (Part D);
+    // one with an array member of structures or arrays (or a by-value member holding one) is not
+    if (ok && first_aggregate_array_at.seq != 0U && vir_struct_has_marked(*st))
     {
         refuse(
-            first_array_at,
+            first_aggregate_array_at,
             "the struct " + spelled +
-                " has an array member and an `owning` or `ref_to_uninit` member (M4.5e1e2, question 293, decision 0063 item 1)");
+                " has an array member of structures or arrays and an `owning` or `ref_to_uninit` member (M4.5e2, question 293, decision 0064 item 15, question 348)");
     }
     if (ok)
     {

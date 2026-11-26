@@ -1,0 +1,106 @@
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+38	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+38	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+39	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+39	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+45	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc`
+45	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the postcondition of `calloc`
+46	not.wellformed	internal	t.c	43	3	internal check: well-formedness of the contract of `calloc`
+46	postcondition.violated	internal	t.c	43	3	internal check: Silicon's own check of the postcondition of `calloc`
+52	not.wellformed	internal	t.c	45	3	internal check: well-formedness of the contract of `free`
+53	not.wellformed	internal	t.c	53	3	internal check: well-formedness of the contract of `free`
+77	call.precondition	internal	t.c	94	3	internal check: Silicon's own check of the precondition of `calloc`
+78	assert.failed	lifetime	t.c	94	3	uses the pointer after the object it points to may have ended
+80	assert.failed	lifetime	t.c	96	3	uses `p` after the object it points to may have ended
+104	assert.failed[insufficient.permission]	permission	t.c	89	3	this loop begins without the permission to `p->a`
+105	assert.failed[insufficient.permission]	permission	t.c	89	3	this loop begins without the permission to `p->a`
+109	invariant.not.established	internal	t.c	89	3	internal check: automatic range invariant of `i`
+109	invariant.not.preserved	internal	t.c	89	3	internal check: automatic range invariant of `i`
+110	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+110	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+111	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+111	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+112	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+112	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+113	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+113	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+114	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+114	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+115	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+115	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+116	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+116	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+117	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+117	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+118	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+118	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+119	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+119	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+120	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+120	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+121	invariant.not.established	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+121	invariant.not.preserved	internal	t.c	89	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+122	invariant.not.established	invariant-entry	t.c	84	3	this loop invariant may not hold on entry
+122	invariant.not.preserved	invariant-preserved	t.c	84	3	this loop invariant may not be preserved by an iteration
+123	invariant.not.established	overflow	t.c	87	3	signed `int` subtraction may overflow
+123	invariant.not.preserved	overflow	t.c	87	3	signed `int` subtraction may overflow
+124	termination.failed	termination	t.c	88	3	the measure of this loop may not decrease, or may not be bounded below by zero
+126	assert.failed	null-dereference	t.c	64	3	dereferences `p`, which may be null
+127	assert.failed	out-of-bounds	t.c	64	3	writes an element of the array, whose index may be outside `p->a`
+129	assert.failed	permission	t.c	64	3	writes the object the pointer points to without owning it: the object it points to may have ended
+132	assert.failed	overflow	t.c	65	3	signed `int` addition may overflow
+135	assert.failed[insufficient.permission]	permission	t.c	67	3	an iteration of this loop ends without the permission to `p->a` that it began with
+136	assert.failed[insufficient.permission]	permission	t.c	67	3	an iteration of this loop ends without the permission to `p->a` that it began with
+139	assert.failed	permission	t.c	67	3	an iteration of this loop ends without the permission to `p->n` that it began with
+142	assert.failed	permission	t.c	67	3	an iteration of this loop ends without the permission to `p->n` that it began with
+145	assert.failed	permission	t.c	67	3	an iteration of this loop ends without the allocation `p->n` that it began with
+147	assert.failed	permission	t.c	67	3	an iteration of this loop ends with `p->n` holding something other than what it began with
+148	assert.failed	permission	t.c	67	3	an iteration of this loop ends with `p->n` holding something other than what it began with
+149	assert.failed	permission	t.c	67	3	an iteration of this loop ends with `p->n` holding something other than what it began with
+151	assert.failed	null-dereference	t.c	72	3	dereferences `p`, which may be null
+152	assert.failed	out-of-bounds	t.c	72	3	reads `p->a[3]`, whose index may be outside `p->a`
+153	assert.failed	permission	t.c	72	3	reads `p->a[3]` without owning it: the object it points to may have ended
+154	assert.failed	uninitialized	t.c	72	3	`p->a[3]` may be read here before it is given a value
+156	assert.failed	internal	t.c	92	3	frees `p`, which may not point to an allocation
+157	assert.failed	invalid-free	t.c	92	3	frees `p`, which may already be freed or may not be an allocation (a local, a global or a member)
+158	assert.failed	invalid-free	t.c	92	3	frees `p`, which may not be the start of an allocation
+159	assert.failed	internal	t.c	92	3	the liveness cell of a block is at slot -2
+160	assert.failed	invalid-free	t.c	92	3	frees `p` while a pointer to it may still be in use elsewhere
+161	assert.failed	internal	t.c	92	3	the lengths of a block
+162	assert.failed	invalid-free	t.c	92	3	frees `p` without owning all of it: `p->n` is not owned here
+163	assert.failed	internal	t.c	92	3	the range of the value under its flag
+168	assert.failed[insufficient.permission]	invalid-free	t.c	92	3	frees `p` without owning all of it: `p->a` is not owned here
+174	assert.failed[insufficient.permission]	invalid-free	t.c	92	3	frees `p` without owning all of it: `p->a` is not owned here
+179	assert.failed	internal	t.c	92	3	the range of the value under its flag
+180	call.precondition	internal	t.c	92	3	internal check: Silicon's own check of the precondition of `free`
+183	assert.failed	leak	t.c	102	3	`f` may return while it still owns an allocation that its `ensures` does not hand back
+188	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+189	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+190	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+191	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+192	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+193	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+194	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+195	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+196	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+197	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+198	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+199	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+200	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+201	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+202	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+203	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `calloc (well-formedness)`
+206	assert.failed	permission	t.c	20	3	the contract of `calloc` reads an element of a pointer without owning it
+207	assert.failed	permission	t.c	26	3	the contract of `calloc` reads an element of a pointer without owning it
+208	assert.failed	permission	t.c	32	3	the contract of `calloc` reads an element of a pointer without owning it
+209	assert.failed	permission	t.c	38	3	the contract of `calloc` reads an element of a pointer without owning it
+214	not.wellformed	internal	t.c	45	3	internal check: well-formedness of the contract of `free (well-formedness)`

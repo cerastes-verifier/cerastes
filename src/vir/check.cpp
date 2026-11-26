@@ -491,6 +491,12 @@ private:
                     err(m.loc,
                         "the owning member '" + m.name + "' of " + name + " is not a pointer (decision 0055 item 2)");
                 }
+                else if (pointee_has_aggregate_array(m.type))
+                {
+                    err(m.loc, "the owning member '" + m.name + "' of " + name +
+                                   " points to a struct with an array member of structures or arrays (" + kItem15 +
+                                   ")");
+                }
                 else if (std::set<const StructType*> seen; m.type.pointee->is_struct() &&
                                                            m.type.pointee->struct_type != nullptr &&
                                                            (m.type.pointee->struct_type == &st ||
@@ -512,11 +518,12 @@ private:
     // Decision 0063 item 1 (question 293): a struct with both an array member and an `owning` or `ref_to_uninit` member, at any depth of its nest, is M4.5e1e2's
     void array_with_marked(const StructType& st)
     {
-        if (struct_has_array(st) && struct_has_marked(st))
+        if (struct_has_aggregate_array(st) && struct_has_marked(st))
         {
             err(st.loc,
                 "the struct '" + st.c_name +
-                    "' has an array member and an `owning` or `ref_to_uninit` member (decision 0063 item 1, question 293: M4.5e1e2)");
+                    "' has an array member of structures or arrays and an `owning` or `ref_to_uninit` member (" +
+                    kItem15 + ")");
         }
     }
 
@@ -621,6 +628,11 @@ private:
         if (g.c_name.empty())
         {
             err(g.loc, "a global without a name");
+        }
+        if (g.owning && pointee_has_aggregate_array(g.type))
+        {
+            err(g.loc, name + " is `owning` and points to a struct with an array member of structures or arrays (" +
+                           kItem15 + ")");
         }
         if (g.owning && !(g.type.is_ptr() && g.type.pointee != nullptr && !g.type.pointee->is_void()))
         {
@@ -1014,6 +1026,20 @@ private:
             if (v->is_param_copy)
             {
                 scopes_.back().insert(v->id);
+            }
+            if (v->ref_to_uninit && pointee_has_aggregate_array(v->type))
+            {
+                err(v->loc,
+                    "'" + v->name +
+                        "' is marked `ref_to_uninit` and points to a struct with an array member of structures or arrays (" +
+                        kItem15 + ")");
+            }
+            if (v->owning && pointee_has_aggregate_array(v->type))
+            {
+                err(v->loc,
+                    "'" + v->name +
+                        "' is marked owning and points to a struct with an array member of structures or arrays (" +
+                        kItem15 + ")");
             }
             if (v->owning)
             {
@@ -1596,11 +1622,13 @@ private:
                         "an `ensures` atom without a `requires` atom on a place decision 0052 item 2 does not allow");
                 }
                 else if (a.atom != AtomKind::Live && a.a != nullptr &&
-                         (member_array_base(a.a) || pointee_has_array(a.a->type)))
+                         (member_array_is_aggregate(a.a) || pointee_has_aggregate_array(a.a->type)))
                 {
-                    // decision 0064 item 4 (a backstop gap closed in part A): the array parts of a structure have no output amount (lowering's array-part guards report an internal error)
+                    // decision 0064 item 15 (question 348): an output atom has rows for an array member of SCALARS; an aggregate element stays rejected
                     err(a.loc,
-                        "an `ensures` atom without a `requires` atom on a structure with an array member or on an array member (decision 0063 item 7: M4.5e1e2, Part D)");
+                        std::string(
+                            "an `ensures` atom without a `requires` atom on a structure with an array member of structures or arrays, or on such a member (") +
+                            kItem15 + ")");
                 }
                 else if (f.body == nullptr && atom_place(a).root != kResultSiteKey)
                 {
@@ -1993,11 +2021,12 @@ private:
                 continue;
             }
             if (pr.type.pointee != nullptr && pr.type.pointee->is_struct() && pr.type.pointee->struct_type != nullptr &&
-                struct_has_array(*pr.type.pointee->struct_type))
+                struct_has_aggregate_array(*pr.type.pointee->struct_type))
             {
                 err(pr.loc,
                     who +
-                        " is marked `ref_to_uninit` or `must_init` and points to a struct with an array member (decision 0063 item 1, question 294: M4.5e1e2)");
+                        " is marked `ref_to_uninit` or `must_init` and points to a struct with an array member of structures or arrays (" +
+                        kItem15 + ")");
                 continue;
             }
             if (pr.init == InitMarker::MustInit && f.noreturn)
@@ -2214,6 +2243,25 @@ private:
         if (placed.size() != all_sites.size())
         {
             err(s.loc, "a permission atom of an invariant reachable twice");
+        }
+        // Decision 0064 item 15 (audit round D2, finding 2): a written `owns` atom with an array part (`owns(*c)` of a structure with an array member, `owns(c->a)`) whose guard reads memory
+        // is refused: the part's rows take the guard as a constant there, never the guard's own read
+        for (const AtomSite& st : sites)
+        {
+            const Expr& a {*st.atom};
+            if (a.atom != AtomKind::Owns || a.a == nullptr || !(member_array_base(a.a) || pointee_has_array(a.a->type)))
+            {
+                continue;
+            }
+            for (const AtomGuard& g : st.guards)
+            {
+                if (g.cond != nullptr && reads_heap(*g.cond))
+                {
+                    err(a.loc,
+                        "a written atom on a structure with an array member, or on an array member, under a guard that reads memory (decision 0064 item 15: a guard that reads no memory is accepted; M4.5e2's)");
+                    break;
+                }
+            }
         }
         // Decision 0054 item 4: an `owns_block` site names a pointer variable once, and no other atom of the invariant names the same variable or the cells of its
         // block (the block carrier holds them whole; the written atom would hold them twice).
@@ -3983,10 +4031,12 @@ private:
                     }
                     else if (e.a->type.pointee != nullptr && e.a->type.pointee->is_struct() &&
                              e.a->type.pointee->struct_type != nullptr &&
-                             struct_has_array(*e.a->type.pointee->struct_type))
+                             struct_has_aggregate_array(*e.a->type.pointee->struct_type))
                     {
                         err(e.loc,
-                            "an `owns_block` atom of a pointer to a struct with an array member (decision 0063 item 1, question 292: heap storage of such a struct is M4.5e1e2's)");
+                            std::string(
+                                "an `owns_block` atom of a pointer to a struct with an array member of structures or arrays (") +
+                                kItem15 + ")");
                     }
                     break;
                 }
@@ -3998,11 +4048,39 @@ private:
                 const bool member_array_atom {member_array_base(e.a)};
                 if (member_array_atom)
                 {
-                    if (in_invariant_ || (e.atom != AtomKind::Owns && e.atom != AtomKind::Reads))
+                    if (e.atom != AtomKind::Owns && e.atom != AtomKind::Reads)
                     {
                         err(e.loc,
                             "a permission atom on an array member in a loop invariant, or a `live` of one (decision 0063 item 7: a written atom on a structure place with an array member is M4.5e1e2's)");
                         break;
+                    }
+                    if (in_invariant_)
+                    {
+                        // decision 0064 item 15 (Part D, step B): a written `owns(p->a)` of an array member of scalars, read from a pointer variable; `reads` has no fixture (S48 (k)) and
+                        // an aggregate element stays rejected (question 348)
+                        if (e.atom == AtomKind::Reads)
+                        {
+                            err(e.loc,
+                                "a `reads` atom on an array member in a loop invariant (decision 0064 item 15: S48 (k) covers `owns` only; a written `reads` of an array part is M4.5e2's)");
+                            break;
+                        }
+                        // the member's own element, or any aggregate-element array member of the structure it belongs to (audit round D2, finding 3: question 348 is about the structure)
+                        if (member_array_is_aggregate(e.a) ||
+                            (e.a->a != nullptr && pointee_has_aggregate_array(e.a->a->type)))
+                        {
+                            err(e.loc,
+                                std::string(
+                                    "a permission atom on an array member of structures or arrays in a loop invariant (") +
+                                    kItem15 + ")");
+                            break;
+                        }
+                        if (e.a->a == nullptr || e.a->a->kind != Expr::Kind::Local || e.a->a->var == nullptr ||
+                            e.a->a->var->address_taken || !e.a->a->type.is_ptr())
+                        {
+                            err(e.loc,
+                                "a written `owns` atom on an array member reached other than directly from a pointer variable (decision 0064 item 15: only `owns(p->a)` of a pointer variable `p` is built)");
+                            break;
+                        }
                     }
                     array_addr_ok_.insert(e.a);
                 }
@@ -4011,9 +4089,28 @@ private:
                 if (in_invariant_ && !member_array_atom && (e.atom == AtomKind::Owns || e.atom == AtomKind::Reads) &&
                     pointee_has_array(e.a->type))
                 {
-                    err(e.loc,
-                        "a permission atom on a structure with an array member in a loop invariant (decision 0064 item 4: a written atom on such a structure is M4.5e1e2's, Part D)");
-                    break;
+                    // decision 0064 item 15 (Part D, step B): a written `owns(*p)` of a pointer variable `p` whose structure has array members of scalars is built; `reads` (S48 (k) did not
+                    // cover it), an aggregate element (question 348) and a pointer read through memory are refused
+                    if (e.atom == AtomKind::Reads)
+                    {
+                        err(e.loc,
+                            "a `reads` atom on a structure with an array member in a loop invariant (decision 0064 item 15: S48 (k) covers `owns` only; a written `reads` of an array part is M4.5e2's)");
+                        break;
+                    }
+                    if (pointee_has_aggregate_array(e.a->type))
+                    {
+                        err(e.loc,
+                            std::string(
+                                "a permission atom on a structure with an array member of structures or arrays in a loop invariant (") +
+                                kItem15 + ")");
+                        break;
+                    }
+                    if (e.a->kind != Expr::Kind::Local || e.a->var == nullptr || e.a->var->address_taken)
+                    {
+                        err(e.loc,
+                            "a written `owns` atom on a structure with an array member reached other than directly from a pointer variable (decision 0064 item 15: only `owns(*p)` of a pointer variable `p` is built)");
+                        break;
+                    }
                 }
                 if (!sub(e.a))
                 {
@@ -4029,6 +4126,13 @@ private:
                     const Expr* place {place_root(e.a, &steps)};
                     // the base pointer is reached through a load or a pointer leaf
                     const bool stepped {steps.size() > atom_place(e).path.size()};
+                    if (e.implicit_atom && e.a->kind == Expr::Kind::Formal && pointee_has_aggregate_array(e.a->type))
+                    {
+                        err(e.loc,
+                            std::string(
+                                "the implicit atom of an `owning` pointer to a struct with an array member of structures or arrays (") +
+                                kItem15 + ")");
+                    }
                     if (e.implicit_atom && !(e.atom == AtomKind::Owns && !member &&
                                              ((e.a->kind == Expr::Kind::GlobalAddr && e.a->global != nullptr &&
                                                e.a->global->owner != nullptr) ||
@@ -4065,16 +4169,20 @@ private:
                         err(e.loc,
                             "a permission atom of something that is not a pointer to a bool, an integer, a struct or a pointer");
                     }
-                    else if (member_array_atom && stepped)
+                    else if (member_array_atom && stepped && member_array_is_aggregate(e.a))
                     {
                         err(e.loc,
-                            "a permission atom on an array member of a place reached through a heap read (decision 0063 item 7, question 306: M4.5e1e2)");
+                            std::string(
+                                "a permission atom on an array member of structures or arrays of a place reached through a heap read (") +
+                                kItem15 + ")");
                     }
-                    else if (stepped && !member_array_atom && pointee_has_array(e.a->type))
+                    else if (stepped && !member_array_atom && pointee_has_aggregate_array(e.a->type))
                     {
-                        // decision 0064 item 4 (a backstop gap closed in part A): `owns(*p->q)` of a structure with an array member behind a load: no array-part site looks at the load
+                        // decision 0064 item 15 (question 348): `owns(*p->q)` of a structure with an array member of aggregates behind a load stays rejected; an array member of scalars is built
                         err(e.loc,
-                            "a permission atom on a structure with an array member of a place reached through a heap read (decision 0063 item 7, question 306: M4.5e1e2, Part D)");
+                            std::string(
+                                "a permission atom on a structure with an aggregate array member of a place reached through a heap read (") +
+                                kItem15 + ")");
                     }
                     else if (member && e.atom == AtomKind::Live)
                     {
@@ -4297,9 +4405,15 @@ private:
                             !(root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::GlobalAddr ||
                               (ctx == Ctx::Ensures && root->kind == Expr::Kind::Result)))
                         {
-                            err(e.loc,
-                                "an element read in a contract of an array member whose structure is not a pointer parameter, a global or, in an `ensures`, the result, reached by members alone (decision 0063 item 7: through a heap read, question 306, M4.5e1e2)");
-                            break;
+                            // decision 0064 item 15 (question 306 built for an array member of SCALARS): the structure is reached through loads; an array member of aggregates stays rejected
+                            if (member_array_is_aggregate(e.a) || !heap_read_member_chain_ok(e.a, ctx))
+                            {
+                                err(e.loc,
+                                    std::string(
+                                        "an element read in a contract of an array member whose structure is not a pointer parameter, a global or, in an `ensures`, the result, reached by members alone, or whose elements are structures or arrays, through a heap read (") +
+                                        kItem15 + ")");
+                                break;
+                            }
                         }
                         if (root->kind == Expr::Kind::GlobalAddr && root->global != nullptr &&
                             root->global->owner != nullptr)
@@ -4601,6 +4715,20 @@ private:
         }
         return a;
     }
+    // Decision 0064 item 15 (question 306): the member chain `a` of an array member is reached from a pointer parameter, a global or (an `ensures`) the result through loads (a place of 0045)
+    static bool heap_read_member_chain_ok(const Expr* a, Ctx ctx)
+    {
+        const Expr* r {place_root(a)};
+        if (r == nullptr)
+        {
+            return false;
+        }
+        if (r->kind == Expr::Kind::GlobalAddr)
+        {
+            return r->global != nullptr && r->global->owner == nullptr;
+        }
+        return r->kind == Expr::Kind::Formal || (ctx == Ctx::Ensures && r->kind == Expr::Kind::Result);
+    }
     // Decision 0064 item 7 (Part C1): the element of a pointer parameter under at least one member step of a pure chain (`p[e].x`, `p[e].t.y`): its `ElemAddr`, or null.
     static const Expr* contract_struct_element(const Expr* a)
     {
@@ -4666,6 +4794,37 @@ private:
         }
         return false;
     }
+    // Decision 0064 item 15 (question 348): whether a struct type has an array member whose ELEMENT is a structure or an array, anywhere in its by-value nest (an array member of
+    // scalars is Part D's; an aggregate element stays rejected at the six positions of item 15)
+    static bool struct_has_aggregate_array(const StructType& st, int depth = 0)
+    {
+        for (const StructMember& m : st.members)
+        {
+            if ((m.type.is_array() && m.type.element != nullptr &&
+                 (m.type.element->is_struct() || m.type.element->is_array())) ||
+                (depth < 64 && m.type.is_struct() && m.type.struct_type != nullptr &&
+                 struct_has_aggregate_array(*m.type.struct_type, depth + 1)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // Whether `t` is a pointer to a structure with an aggregate array member anywhere in its nest
+    static bool pointee_has_aggregate_array(const Type& t)
+    {
+        return t.is_ptr() && t.pointee != nullptr && t.pointee->is_struct() && t.pointee->struct_type != nullptr &&
+               struct_has_aggregate_array(*t.pointee->struct_type);
+    }
+    // Whether the address `a` of an array member (a `MemberAddr` of array pointer type) is an array of aggregates
+    static bool member_array_is_aggregate(const Expr* a)
+    {
+        return a != nullptr && a->type.is_ptr() && a->type.pointee != nullptr && a->type.pointee->is_array() &&
+               a->type.pointee->element != nullptr &&
+               (a->type.pointee->element->is_struct() || a->type.pointee->element->is_array());
+    }
+    static constexpr const char* kItem15 =
+        "decision 0064 item 15, question 348: a structure whose array member holds structures or arrays is not accepted here";
     // Whether `t` is a pointer to a structure that has an array member anywhere in its nest (decision 0064 item 4)
     static bool pointee_has_array(const Type& t)
     {

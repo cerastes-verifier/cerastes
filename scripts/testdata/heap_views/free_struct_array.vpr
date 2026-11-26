@@ -1,0 +1,13 @@
+// Fixture (M4.5e1e2c Part D): the typed view `f_free__1` of a struct with an array member (`struct SA { int n; int a[4]; }`) as the VIR self-test's emitter writes it for the case `e1e2d_heap_array_member`,
+// regenerated from refs/tmp/e1e2c-d-j6 (2026-11-26, byte-identical to the text taken at the earlier builds): the emitter's text for a VIR case, not `cerastes verify`'s text for a C program.
+field v_int: Int
+field d_int: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `free`
+// cerastes:trusted-contract vlibc: free ends the allocation; typed view: one struct SA, decision 0047
+method f_free__1(p_ptr__0: Ref)
+  requires ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))) && (((p_ptr__0 != null) && (offset_of(p_ptr__0) < len(block_of(p_ptr__0)))) ==> ((len(member(p_ptr__0, 0)) == 1) && (len(member(p_ptr__0, 1)) == 4)))
+  requires (!(p_ptr__0 == null)) ==> ((((((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && loc(block_of(p_ptr__0), (-1)).tok) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && ((len(block_of(p_ptr__0)) == 1) && ((len(member(p_ptr__0, 0)) == 1) && (len(member(p_ptr__0, 1)) == 4)))) && acc(loc(member(p_ptr__0, 0), 0).v_int)) && acc(loc(member(p_ptr__0, 0), 0).d_int)) && (loc(member(p_ptr__0, 0), 0).d_int ==> (((-2147483648) <= loc(member(p_ptr__0, 0), 0).v_int) && (loc(member(p_ptr__0, 0), 0).v_int <= 2147483647)))) && (forall k: Int :: { loc(member(p_ptr__0, 1), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(p_ptr__0, 1), k).v_int))) && (forall k: Int :: { loc(member(p_ptr__0, 1), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(p_ptr__0, 1), k).d_int))) && (forall k: Int :: { loc(member(p_ptr__0, 1), k) } ((0 <= k) && (k < 4)) ==> (loc(member(p_ptr__0, 1), k).d_int ==> (((-2147483648) <= loc(member(p_ptr__0, 1), k).v_int) && (loc(member(p_ptr__0, 1), k).v_int <= 2147483647)))))
+  decreases _

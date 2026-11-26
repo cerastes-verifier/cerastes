@@ -318,3 +318,5 @@ static rules whose dynamic counterparts (`leak`, `invalid-free`) cerastes alread
   site's mode, which the Viper does not name, and are listed for later.
 - Pinned limits for M4.8: the loop false alarms of item 4 ("Limits"); the written `owns_block` loop invariant on a marked
   field (closes below it).
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): item 4 — `ref_to_uninit` and `must_init` on a pointer to a structure with an array member of scalars, and a marked member beside or pointing at one (0064 item 15; question 294): a `requires` site claims no flag of an array leaf, the kept-flag row is one quantifier per array leaf, and a `must_init` function sets every element's flag (`postcondition` at its closing brace otherwise, as item 4 and 0042 item 5 have it for a cell).*

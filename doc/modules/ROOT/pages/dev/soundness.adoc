@@ -56,7 +56,7 @@ one is recorded and linted:
   `zero_arr_<type>` for an array and its zero fill, `alloc_struct_<n>_<tag>` for a structure local, which carries the rows of an array member's block and is emitted for every structure type with an array member whether or not it is called,
   `copy_arr_<type>` for the copy of an array member between two structures, `program_start` for the
   globals, and the typed views of vlibc's `malloc`, `calloc` and `free` and of `vlibc_malloc`, `vlibc_calloc` and
-  `vlibc_free`) are assumptions too: the lint pins the text of each one's contract to the shape its decision record
+  `vlibc_free`, which for a structure with an array member hold each array member by quantified permissions and, for `calloc`, state the zero values one clause per element, up to 24 values) are assumptions too: the lint pins the text of each one's contract to the shape its decision record
   justifies, including the token's value that says which allocator a block belongs to
   ({gh}/internal/decisions/0050-vlibc-allocator.md[0050]).
 

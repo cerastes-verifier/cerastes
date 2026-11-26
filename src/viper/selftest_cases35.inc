@@ -151,11 +151,12 @@ void define_aggregate_element_guards()
     {
         return k.strukt("U", {{"a", k.prog.array_of(k.i32, 3U)}, {"n", k.i32}});
     };
+    // Part D (step B) builds a written `owns(*q)`; the `reads` form has no fixture (S48 (k)) and stays refused
     rc("e1e2a_rej_invariant_owns_of_a_structure_with_an_array_member",
-       "a permission atom on a structure with an array member in a loop invariant",
+       "a `reads` atom on a structure with an array member in a loop invariant",
        [=](Kit& k)
        {
-           // void f(struct U *p) requires(owns(*p)) ensures(owns(*p)) { struct U *q = p; int i = 0; while (i < 3) invariant(owns(*q) && 0 <= i && i <= 3) decreases(3 - i) { i = i + 1; } }
+           // void f(struct U *p) requires(owns(*p)) ensures(owns(*p)) { struct U *q = p; int i = 0; while (i < 3) invariant(reads(*q) && 0 <= i && i <= 3) decreases(3 - i) { i = i + 1; } }
            StructType* U {U_arr(k)};
            Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(U))}})};
            k.req(f, k.b.atom(AtomKind::Owns, k.F(f, 0), 0, k.at()));
@@ -164,32 +165,9 @@ void define_aggregate_element_guards()
            Var* i {k.local(f, "i", k.i32)};
            const Stmt* loop {
                k.whl(k.lt(k.v(i), N(k, "3")),
-                     {k.cl(k.b.atom(AtomKind::Owns, k.v(q), 1, k.at())), k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                     {k.cl(k.b.atom(AtomKind::Reads, k.v(q), 1, k.at())), k.cl(k.range(k.v(i), k.i32, "0", "3"))},
                      {k.cl(k.sub(N(k, "3"), k.v(i)))}, k.blkc({k.asg(i, k.add(k.v(i), N(k, "1")))}))};
-           f->body = k.blkc({k.decl(q, k.F(f, 0)), k.decl(i, N(k, "0")), loop});
-           k.done(f);
-       });
-    rc("e1e2a_rej_partnerless_ensures_of_a_structure_with_an_array_member",
-       "an `ensures` atom without a `requires` atom on a structure with an array member or on an array member",
-       [=](Kit& k)
-       {
-           // struct U *f(void) ensures(owns(*result)): an atom the function creates, on a structure with an array member
-           StructType* U {U_arr(k)};
-           Function* f {k.fn("f", k.ptr(k.st(U)))};
-           k.trusted(f);
-           k.ens(f, k.b.atom(AtomKind::Owns, k.R(f), 0, k.at()));
-           k.done(f);
-       });
-    rc("e1e2a_rej_owns_of_a_structure_with_an_array_member_through_a_heap_read",
-       "a permission atom on a structure with an array member of a place reached through a heap read",
-       [=](Kit& k)
-       {
-           // struct R { struct U *q; }; void f(struct R *r) requires(owns(*r->q))
-           StructType* U {U_arr(k)};
-           StructType* R {k.strukt("R", {{"q", k.ptr(k.st(U))}})};
-           Function* f {k.fn("f", k.vd, {{"r", k.ptr(k.st(R))}})};
-           k.req(f, k.b.atom(AtomKind::Owns, k.deref(k.mem(k.F(f, 0), 0)), 0, k.at()));
-           f->body = k.blk({});
+           f->body = k.blkc({k.decl(q, k.pv(f, 0)), k.decl(i, N(k, "0")), loop});
            k.done(f);
        });
 
@@ -202,7 +180,8 @@ void define_aggregate_element_guards()
            StructType* B {k.strukt("B", {{"a", k.st(A)}})};
            k.prog.add_member(A, "b", k.prog.array_of(k.st(B), 2U), k.at());
        });
-    rc("e1e2a_rej_marked_member_in_an_array_element", "has an array member and an `owning` or `ref_to_uninit` member",
+    rc("e1e2a_rej_marked_member_in_an_array_element",
+       "has an array member of structures or arrays and an `owning` or `ref_to_uninit` member",
        [=](Kit& k)
        {
            // struct T { int *owning p; }; struct S { struct T a[2]; int n[2]; }

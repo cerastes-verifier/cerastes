@@ -566,14 +566,72 @@ one function holds as a local adds much to the time its proof takes, and a
 function that holds a global structure with such a member and calls another
 function that holds it may run into the time limit.
 
-A structure with an array member cannot yet be allocated with `malloc`, have an
-`owning` or marked member besides, or be
-the object of `ref_to_uninit` or `must_init`; a contract cannot yet name part of
-the member (`cerastes_owns_range(p->data, n)`), reach it through a pointer read
-from memory (`+cerastes_owns(*p->q)+`), pass it to a quantifier or a `pure`
-function, give a structure with an array member back with an `ensures` atom that
-has no `requires` partner, put `cerastes::owning` on a pointer to one, or name one
-in a loop invariant's atom.
+A structure with an array member of scalars may be allocated (<<heap>>).
+`malloc(sizeof(struct buffer))` gives the whole object with every element
+uninitialized, `calloc(1, sizeof(struct buffer))` gives every element zero,
+`free` ends the object with its elements, and `cerastes_owns_block(p)` holds
+every element with the other members:
+
+[source,c]
+----
+include::example$memory/struct_array_heap.c[tag=source]
+----
+
+Reading an element that nothing wrote:
+
+[source,c]
+----
+include::example$memory/struct_array_heap_error.c[tag=source]
+----
+
+`calloc` of a structure with an array member is accepted when the structure
+holds at most 24 values in all, counting each element of its array members and
+each of its other members (`int data[23]; int len;` is accepted, `int data[24];
+int len;` is not): the proof that every element is zero grows with their number,
+and a larger structure is rejected at the call. Allocate a larger one with
+`malloc` and write its elements; elements written one by one can be read back,
+while a read of an element that only a loop wrote is reported as
+xref:error-messages.adoc#_uninitialized[`uninitialized`] in this version (see
+the false alarms below).
+
+Such a structure may also have an `owning` or `ref_to_uninit` member beside the
+array (<<owning-fields>>), and a pointer to it may be `owning`,
+`ref_to_uninit` or `must_init`: a `must_init` function has to write every
+element (one left unwritten is reported as
+xref:error-messages.adoc#_postcondition[`postcondition`] at its closing brace),
+and a caller that reads an element nobody wrote is told
+xref:error-messages.adoc#_uninitialized[`uninitialized`]. A contract may reach
+it through a pointer read from memory (`+cerastes_owns(*p->q)+`, after which it
+may read `p->q->data[i]`), and may give it back with an `ensures` atom that has
+no `requires` partner on the result (`+cerastes_owns(*r)+`). A loop carries the
+elements of an allocated structure as it carries a local array's
+(<<loops>>), and a loop invariant may name it with a written
+`+cerastes_owns(*p)+` or `cerastes_owns(p->data)`, `p` a pointer variable,
+which asks for the whole structure or the whole array member when the loop
+starts (not supported yet, each rejected: a written `cerastes_reads` of such a
+structure, a pointer read from memory in the atom, and an atom whose condition
+reads memory through a pointer or reads a global variable).
+
+Listed false alarms: after a loop that fills the elements of a structure
+allocated with `malloc`, reading an element is still reported as
+`uninitialized` (the loop's automatic invariant does not say which elements it
+wrote; `calloc` avoids it); after a loop that may give an owner a new block
+(the owner may be null when the loop starts, or the loop frees its block and
+allocates another), a read of that block is reported as `uninitialized` until
+it is written again; a loop over the elements of a structure
+that a called function gave back with `+cerastes_owns(*r)+` reports
+`permission`, and so does a loop invariant that reads an element of an
+allocated structure (`p->data[0]` in the invariant).
+
+None of this paragraph's forms is supported yet for a structure whose array
+member holds structures (`struct path` above): allocating it, an `owning` or
+marked member beside that member, `owning`, `ref_to_uninit` or `must_init` on a
+pointer to it, a place of it reached through a pointer read from memory, an
+`ensures` atom without a `requires` partner, and an atom in a loop invariant on
+the structure or on one of its array members are each rejected with a
+diagnostic. A contract cannot yet name part of an array
+member (`cerastes_owns_range(p->data, n)`) or pass it to a quantifier or a
+`pure` function.
 
 Not supported yet, each rejected with a diagnostic: unions, bit-fields, arrays of
 arrays as members, `const`, `volatile` and `_Atomic` members, anonymous members, members
@@ -2126,17 +2184,17 @@ These are rejected with a diagnostic, never approximated
 * arrays of arrays (`int m[2][3]`, `sizeof(int[2][3])`), an array of structures
   named through a `typedef` or as a type (`sizeof(struct point[3])`), and an element
   structure with an array member or an owning or marked member
-  (<<arrays-of-structures>>); a structure with an
-  array member that is allocated with `malloc`, that also has an `owning` or marked
-  member, or whose pointer is marked `ref_to_uninit` or `must_init`; part of a
+  (<<arrays-of-structures>>); a structure whose array member holds structures
+  that is allocated with `malloc` or `calloc`, that also has an `owning` or marked
+  member, whose pointer is `owning` or marked `ref_to_uninit` or `must_init`,
+  that is reached through a pointer read from memory, or that is named by an
+  `ensures` atom with no `requires` partner or by an atom in a loop invariant
+  (<<array-members>>); `calloc` of a structure with an array member that holds more
+  than 24 values in all; part of a
   global array or of an array member in a contract (`cerastes_owns_range(table,
   n)`, `&table[2]`), one element as an atom, and `table + i`; an array member as
   the argument of a quantifier or a `pure` function anywhere, and a global array as
-  one in a contract; an `ensures` atom with no `requires` partner, `owning` on a
-  pointer, or a written atom in a loop invariant, on a structure with an array
-  member or on the member;
-  a place reached through a pointer read from memory whose structure has an array
-  member (`+cerastes_owns(*p->q)+`); a structure value holding more than 7 array
+  one in a contract; a structure value holding more than 7 array
   elements passed or returned by value; an array compound literal in pass:[C++];
 * false alarms listed for array members (<<array-members>>): a loop that writes a
   member of a structure by name (an element of an array member, or a member of the

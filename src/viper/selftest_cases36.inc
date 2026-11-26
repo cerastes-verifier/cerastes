@@ -4074,4 +4074,1640 @@ void define_audit_c2c_binder_cases()
        });
 }
 
+// ---- Part D (M4.5e1e2, record 0064 item 15; question 348: array members of SCALARS only) ----
+// The load-rooted array part (question 306): owns(*p->q) and p->q->a[e] for a structure with an array member of scalars (struct SA { int n; int a[4]; }); built first, since no spike fixture covers a
+// receiver that holds a heap read.
+void define_part_d_load_cases()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto fx = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    auto lcv = [](const std::string& name, const std::string& doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(name + "_vacuity",
+           "the same with a function that ends in check(false): it fails (what the contract assumes is not inconsistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    auto vac_fn = [=](Kit& k)
+    {
+        if (k.vac_tail)
+        {
+            Function* g {k.fn("vac", k.vd)};
+            const Stmt* v {k.chk(k.no())};
+            g->body = k.blk({v});
+            k.done(g);
+            k.vac_loc = v->loc;
+        }
+    };
+    // struct SA { int n; int a[4]; }; struct R { struct SA *q; int z; }
+    auto mk_r = [](Kit& k, StructType** sa)
+    {
+        StructType* S {k.strukt("SA", {{"n", k.i32}, {"a", k.prog.array_of(k.i32, 4U)}})};
+        *sa = S;
+        return k.strukt("R", {{"q", k.ptr(k.st(S))}, {"z", k.i32}});
+    };
+    // int f(struct R *p) requires(owns(*p) && owns(*p->q) && p->q->a[0] > 0) ensures(owns(*p) && owns(*p->q) && result == p->q->a[0]) { [check(p->q->a[0] == 5);] return p->q->a[0]; }
+    const auto load_read = [=](Kit& k, bool false_claim, const Expr** where = nullptr) -> const Stmt*
+    {
+        StructType* S {nullptr};
+        StructType* R {mk_r(k, &S)};
+        Function* f {k.fn("f", k.i32, {{"p", k.ptr(k.st(R))}})};
+        auto spec_elem = [&]()
+        {
+            return k.deref(k.b.elem_addr(k.mem(k.deref(k.mem(fx(k, f, 0), 0)), 1), N(k, "0"), k.at()));
+        };
+        auto atoms = [&]()
+        {
+            return k.land(k.b.atom(AtomKind::Owns, fx(k, f, 0), 0, k.at()),
+                          k.b.atom(AtomKind::Owns, k.deref(k.mem(fx(k, f, 0), 0)), 1, k.at()));
+        };
+        k.req(f, k.land(atoms(), k.gt(spec_elem(), N(k, "0"))));
+        k.ens(f, k.land(atoms(), k.eq(k.R(f), spec_elem())));
+        auto code_elem = [&]()
+        {
+            return k.deref(k.b.elem_addr(k.mem(k.deref(k.mem(k.pv(f, 0), 0)), 1), N(k, "0"), k.at()));
+        };
+        std::vector<const Stmt*> body;
+        const Stmt* c {nullptr};
+        if (false_claim)
+        {
+            const Expr* r {code_elem()};
+            if (where != nullptr)
+            {
+                *where = r;
+            }
+            c = k.chk(k.eq(r, N(k, "5")));
+            body.push_back(c);
+        }
+        body.push_back(k.ret(code_elem()));
+        f->body = k.blkc(body);
+        k.done(f);
+        return c;
+    };
+    lcv("e1e2d_load_array_read",
+        "owns(*p) && owns(*p->q) with q a pointer to a structure with an array member of scalars, and the contract read p->q->a[0]: the array part's receiver holds a heap read (question 306); the body returns it (verifies)",
+        [=](Kit& k)
+        {
+            load_read(k, false);
+            vac_fn(k);
+        });
+    lc("e1e2d_load_array_read_wrong_fail",
+       "the same, with check(p->q->a[0] == 5) after only a > 0 is known: the check fails",
+       [=](Kit& k)
+       {
+           const Stmt* c {load_read(k, true)};
+           k.fail("check", c->loc);
+       });
+    // f__wf's ghosts for a load-rooted array part (question 306; the wf of tests/memory/struct_array_chain_wf.c): int f(struct R *p) requires(owns(*p) && owns(*p->q) && p->q->a[1] != 0) ensures(owns(*p) && owns(*p->q) && p->q->a[1] != 0 && (result == 0 || result == 10 / p->q->a[1 [mode 1: 2]])) { return 0; }
+    const auto load_wf = [=](Kit& k, int mode) -> const Expr*
+    {
+        StructType* S {nullptr};
+        StructType* R {mk_r(k, &S)};
+        Function* f {k.fn("f", k.i32, {{"p", k.ptr(k.st(R))}})};
+        auto spec_elem = [&](const char* i)
+        {
+            return k.deref(k.b.elem_addr(k.mem(k.deref(k.mem(fx(k, f, 0), 0)), 1), N(k, i), k.at()));
+        };
+        auto atoms = [&]()
+        {
+            return k.land(k.b.atom(AtomKind::Owns, fx(k, f, 0), 0, k.at()),
+                          k.b.atom(AtomKind::Owns, k.deref(k.mem(fx(k, f, 0), 0)), 1, k.at()));
+        };
+        k.req(f, k.land(atoms(), k.ne(spec_elem("1"), N(k, "0"))));
+        const Expr* dv {k.div(N(k, "10"), spec_elem(mode == 1 ? "2" : "1"))};
+        k.ens(f, k.land(k.land(atoms(), k.ne(spec_elem("1"), N(k, "0"))),
+                        k.lor(k.eq(k.R(f), N(k, "0")), k.eq(k.R(f), dv))));
+        f->body = k.blkc({k.ret(N(k, "0"))});
+        k.done(f);
+        return dv;
+    };
+    lcv("e1e2d_load_array_wf_division",
+        "a clause that divides by p->q->a[1] after stating p->q->a[1] != 0: the division's obligation holds in f__wf over the ghost of the load-rooted element (verifies)",
+        [=](Kit& k)
+        {
+            load_wf(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_load_array_wf_division_fail",
+       "the clause divides by p->q->a[2] while only p->q->a[1] != 0 is stated: division-by-zero in the contract's well-formedness",
+       [=](Kit& k)
+       {
+           k.fail("division-by-zero", load_wf(k, 1)->loc);
+       });
+    // void g(struct R *p) requires(owns(*p) && owns(*p->q)) ensures(owns(*p) && owns(*p->q) && p->q->a[1] == [3|4]) { p->q->a[1] = 3; p->q->n = p->q->a[1]; }
+    const auto load_write = [=](Kit& k, const char* promised)
+    {
+        StructType* S {nullptr};
+        StructType* R {mk_r(k, &S)};
+        Function* f {k.fn("g", k.vd, {{"p", k.ptr(k.st(R))}})};
+        auto atoms = [&]()
+        {
+            return k.land(k.b.atom(AtomKind::Owns, fx(k, f, 0), 0, k.at()),
+                          k.b.atom(AtomKind::Owns, k.deref(k.mem(fx(k, f, 0), 0)), 1, k.at()));
+        };
+        k.req(f, atoms());
+        const Expr* spec {k.deref(k.b.elem_addr(k.mem(k.deref(k.mem(fx(k, f, 0), 0)), 1), N(k, "1"), k.at()))};
+        k.ens(f, k.land(atoms(), k.eq(spec, N(k, promised))));
+        auto place = [&]()
+        {
+            return k.b.elem_addr(k.mem(k.deref(k.mem(k.pv(f, 0), 0)), 1), N(k, "1"), k.at());
+        };
+        const Stmt* w {k.store(place(), N(k, "3"))};
+        const Stmt* w2 {k.store(k.mem(k.deref(k.mem(k.pv(f, 0), 0)), 0), k.deref(place()))};
+        f->body = k.blkc({w, w2});
+        k.done(f);
+        return f->end_loc;
+    };
+    lc("e1e2d_load_array_write",
+       "owns(*p) && owns(*p->q): p->q->a[1] = 3 through the array part reached by a load, then p->q->n = p->q->a[1], the postcondition p->q->a[1] == 3 holds",
+       [=](Kit& k)
+       {
+           load_write(k, "3");
+       });
+    lc("e1e2d_load_array_write_wrong_fail",
+       "the same promising p->q->a[1] == 4: the postcondition fails at the closing brace",
+       [=](Kit& k)
+       {
+           const SrcLoc at {load_write(k, "4")};
+           k.fail("postcondition", at);
+       });
+}
+
+// ---- Part D, heap storage of a structure with an array member of scalars (item 15, question 292; S48 (h)) ----
+// malloc's or calloc's typed view for one object of a structure with array members: heap_alloc_view's text, the zero clauses over the cells (the array leaves are the atom's `zeroed` mark)
+Function* part_d_alloc_view(Kit& k, const char* name, Type pointee, bool zeroed)
+{
+    const Type pt {k.ptr(pointee)};
+    Function* f {k.fn(name, pt)};
+    k.trusted(f, std::string("vlibc: ") + name + " returns NULL or one new block; typed view: one " + pointee.str() +
+                     ", decision 0047");
+    const Expr* is_null {k.eq(k.R(f), k.nul(pt))};
+    const Expr* atom {k.b.atom(AtomKind::OwnsBlock, k.R(f), -1, k.at())};
+    const Expr* rhs {atom};
+    if (zeroed)
+    {
+        // the encoder's view: one value clause per cell leaf and, for an array leaf of scalars, one per ELEMENT (`result->a[i] == 0`, i a literal)
+        for (const StructLeaf& lf : struct_object_leaves(*pointee.struct_type))
+        {
+            const Expr* addr {k.R(f)};
+            for (int idx : lf.path)
+            {
+                addr = k.mem(addr, idx);
+            }
+            auto zero_of = [&](const Type& t) -> const Expr*
+            {
+                return t.is_bool() ? k.no() : t.is_ptr() ? k.nul(t) : k.num(t, "0");
+            };
+            if (lf.array)
+            {
+                for (unsigned long long i {0U}; i < lf.count; ++i)
+                {
+                    const Expr* el {k.b.elem_addr(addr, k.num(k.i32, std::to_string(i).c_str()), k.at())};
+                    rhs = k.land(rhs, k.eq(k.deref(el), zero_of(lf.element)));
+                }
+                continue;
+            }
+            rhs = k.land(rhs, k.eq(k.deref(addr), zero_of(lf.type)));
+        }
+    }
+    else
+    {
+        f->result_init = InitMarker::RefToUninit;
+    }
+    k.ens(f, k.lor(is_null, rhs));
+    k.done(f);
+    return f;
+}
+
+void define_part_d_heap_cases()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto FP = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    auto lcv = [](const std::string& name, const std::string& doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(name + "_vacuity",
+           "the same with a function that ends in check(false): it fails (what the contract assumes is not inconsistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    auto vac_fn = [=](Kit& k)
+    {
+        if (k.vac_tail)
+        {
+            Function* g {k.fn("vac", k.vd)};
+            const Stmt* v {k.chk(k.no())};
+            g->body = k.blk({v});
+            k.done(g);
+            k.vac_loc = v->loc;
+        }
+    };
+    auto SA = [](Kit& k)
+    {
+        return k.strukt("SA", {{"n", k.i32}, {"a", k.prog.array_of(k.i32, 4U)}});
+    };
+    auto elem_place = [](Kit& k, const Expr* base, const char* i)
+    {
+        return k.b.elem_addr(k.mem(base, 1), k.num(k.i32, i), k.at());
+    };
+    auto free_view = [](Kit& k, Type pointee)
+    {
+        const Type pt {k.ptr(pointee)};
+        Function* f {k.fn("free", k.vd, {{"ptr", pt}})};
+        f->params[0U].init = InitMarker::RefToUninit;
+        k.trusted(f,
+                  std::string("vlibc: free ends the allocation; typed view: one ") + pointee.str() + ", decision 0047");
+        k.req(f, k.lor(k.eq(k.b.text(k.F(f, 0), "ptr"), k.nul(pt)),
+                       k.b.atom(AtomKind::OwnsBlock, k.b.text(k.F(f, 0), "ptr"), -1, k.at())));
+        f->deallocates = true;
+        k.done(f);
+        return f;
+    };
+    // void f(void) { struct SA *p = malloc(); if (p != NULL) { p->n = 1; p->a[0..3] = 1..4 [(mode 1: a[2] unwritten, read into a local)]; check(p->a[2] == 3 [mode 5: == 7]); free(p); [mode 2: free(p) again | mode 4: p->a[1] = 9]} [mode 3: no free] }
+    const auto life = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, "malloc", k.st(S), false)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", SP)};
+        SrcLoc where;
+        std::vector<const Stmt*> in {k.lstore(k.pn(p), 0, N(k, "1"))};
+        const char* vals[4] = {"1", "2", "3", "4"};
+        const char* idx[4] = {"0", "1", "2", "3"};
+        for (int i {0}; i < 4; ++i)
+        {
+            if (mode == 1 && i == 2)
+            {
+                continue;
+            }
+            in.push_back(k.store(elem_place(k, k.pn(p), idx[i]), N(k, vals[i])));
+        }
+        if (mode == 1)
+        {
+            Var* x {k.local(f, "x", k.i32)};
+            const Expr* rd {k.deref(elem_place(k, k.pn(p), "2"))};
+            where = rd->loc;
+            in.push_back(k.decl(x, rd));
+        }
+        else
+        {
+            const Stmt* c {k.chk(k.eq_c(k.deref(elem_place(k, k.pn(p), "2")), k.i32, mode == 5 ? "7" : "3"))};
+            if (mode == 5)
+            {
+                where = c->loc;
+            }
+            in.push_back(c);
+        }
+        if (mode != 3)
+        {
+            in.push_back(k.es(k.call(fr, {k.pn(p)})));
+        }
+        if (mode == 2)
+        {
+            const Expr* again {k.call(fr, {k.pn(p)})};
+            where = again->loc;
+            in.push_back(k.es(again));
+        }
+        if (mode == 4)
+        {
+            const Stmt* w {k.store(elem_place(k, k.pn(p), "1"), N(k, "9"))};
+            where = w->loc;
+            in.push_back(w);
+        }
+        std::vector<const Stmt*> body {k.decl(p, k.call(m, {})), k.iff(k.ne(k.pn(p), k.nul(SP)), k.blk(in))};
+        f->body = k.blk(body);
+        k.done(f);
+        if (mode == 3)
+        {
+            where = f->end_loc;
+        }
+        return where;
+    };
+    lcv("e1e2d_heap_array_member",
+        "p = malloc(); if (p != NULL) { p->n = 1; p->a[0..3] written; check(p->a[2] == 3); free(p); } for a structure with an array member of scalars: the typed view holds the array leaf's permissions, free takes them, nothing leaks",
+        [=](Kit& k)
+        {
+            life(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_heap_array_member_read_unwritten_fail",
+       "malloc leaves the flags of the array leaf unknown: p->a[2] never written and read into a local is uninitialized at the read",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", life(k, 1));
+       });
+    lc("e1e2d_heap_array_member_wrong_check_fail", "check(p->a[2] == 7) after storing 3: the check fails",
+       [=](Kit& k)
+       {
+           k.fail("check", life(k, 5));
+       });
+    lc("e1e2d_heap_array_member_write_after_free_fail",
+       "p->a[1] = 9 after free(p): the array leaf is gone (permission at the store)",
+       [=](Kit& k)
+       {
+           k.fail("permission", life(k, 4));
+       });
+    lc("e1e2d_heap_array_member_leak_fail",
+       "no free(p): the function returns while it owns the allocation (leak at the closing brace)",
+       [=](Kit& k)
+       {
+           k.fail("leak", life(k, 3));
+       });
+    lc("e1e2d_heap_array_member_double_free_fail", "free(p) twice: the second finds no token (invalid-free)",
+       [=](Kit& k)
+       {
+           k.fail_only("invalid-free", life(k, 2), 6U, 0U);
+       });
+    // calloc: every element zero and every flag set (struct SA *p = calloc(); check(p->a[3] == 0 [mode 1: == 1]); free(p))
+    const auto calloc_prog = [=](Kit& k, bool wrong) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, "calloc", k.st(S), true)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", SP)};
+        const Stmt* c {k.chk(k.land(k.eq_c(k.deref(elem_place(k, k.pn(p), "3")), k.i32, wrong ? "1" : "0"),
+                                    k.eq_c(k.leaf(k.pn(p), 0), k.i32, "0")))};
+        f->body =
+            k.blk({k.decl(p, k.call(m, {})), k.iff(k.ne(k.pn(p), k.nul(SP)), k.blk({c, k.es(k.call(fr, {k.pn(p)}))}))});
+        k.done(f);
+        return c->loc;
+    };
+    lcv("e1e2d_heap_calloc_array_member",
+        "p = calloc(): every element of p->a and p->n are zero and set, free takes the block (verifies)",
+        [=](Kit& k)
+        {
+            calloc_prog(k, false);
+            vac_fn(k);
+        });
+    lc("e1e2d_heap_calloc_array_member_wrong_fail", "check(p->a[3] == 1) after calloc: the check fails",
+       [=](Kit& k)
+       {
+           k.fail("check", calloc_prog(k, true));
+       });
+    // question 351: the trusted calloc view is not vacuous.  void f(void) { struct SA *p = calloc(); if (p != NULL) { check(p->a[3] == 0); check(false); free(p); } }: the false check is reported
+    lc("e1e2d_heap_calloc_view_not_vacuous_fail",
+       "calloc's view reads its last element in its own ensures (framed by its block site); a function that reads p->a[3] and then asserts false still reports the false check (the trusted ensures is satisfiable)",
+       [=](Kit& k)
+       {
+           StructType* S {SA(k)};
+           const Type SP {k.ptr(k.st(S))};
+           Function* m {part_d_alloc_view(k, "calloc", k.st(S), true)};
+           Function* fr {free_view(k, k.st(S))};
+           Function* f {k.fn("f", k.vd)};
+           Var* p {k.local(f, "p", SP)};
+           const Stmt* c1 {k.chk(k.eq_c(k.deref(elem_place(k, k.pn(p), "3")), k.i32, "0"))};
+           const Stmt* c2 {k.chk(k.no())};
+           f->body = k.blk({k.decl(p, k.call(m, {})),
+                            k.iff(k.ne(k.pn(p), k.nul(SP)), k.blk({c1, c2, k.es(k.call(fr, {k.pn(p)}))}))});
+           k.done(f);
+           k.fail("check", c2->loc);
+       });
+    // void g(int i) requires(0 <= i && i < 4) { struct SA *p = calloc(); if (p != NULL) { check(p->a[i] == 0); free(p); } }
+    const auto calloc_sym = [=](Kit& k, bool wrong) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, "calloc", k.st(S), true)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("g", k.vd, {{"i", k.i32}})};
+        k.req(f, k.land(k.le(N(k, "0"), FP(k, f, 0)), k.lt(FP(k, f, 0), N(k, "4"))));
+        Var* p {k.local(f, "p", SP)};
+        const Expr* rd {k.deref(k.b.elem_addr(k.mem(k.pn(p), 1), k.pv(f, 0), k.at()))};
+        const Stmt* c {k.chk(k.eq_c(rd, k.i32, wrong ? "1" : "0"))};
+        f->body = k.blkc(
+            {k.decl(p, k.call(m, {})), k.iff(k.ne(k.pn(p), k.nul(SP)), k.blk({c, k.es(k.call(fr, {k.pn(p)}))}))});
+        k.done(f);
+        return c->loc;
+    };
+    lc("e1e2d_heap_calloc_symbolic_index",
+       "p = calloc(); p->a[i] at a symbolic i in [0, 4) is zero: every element is zero and set (verifies)",
+       [=](Kit& k)
+       {
+           calloc_sym(k, false);
+       });
+    lc("e1e2d_heap_calloc_symbolic_index_wrong_fail",
+       "check(p->a[i] == 1) at a symbolic i after calloc: the check fails",
+       [=](Kit& k)
+       {
+           k.fail("check", calloc_sym(k, true));
+       });
+    // void use(struct SA *p) requires(owns_block(p)) ensures(owns_block(p)) { p->a[1] = 3; }
+    // void g(void) { struct SA *p = malloc(); if (p != NULL) { p->n = 0; p->a[0..3] = 0 [mode 1: a[3] unwritten]; use(p); [check(p->a[1] == 3)] free(p); } }
+    const auto contract_prog = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, "malloc", k.st(S), false)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* u {k.fn("use", k.vd, {{"p", SP}})};
+        k.req(u, k.b.atom(AtomKind::OwnsBlock, FP(k, u, 0), -1, k.at()));
+        k.ens(u, k.b.atom(AtomKind::OwnsBlock, FP(k, u, 0), -1, k.at()));
+        u->body = k.blkc({k.store(elem_place(k, k.pv(u, 0), "1"), N(k, "3"))});
+        k.done(u);
+        Function* f {k.fn("g", k.vd)};
+        Var* p {k.local(f, "p", SP)};
+        std::vector<const Stmt*> in {k.lstore(k.pn(p), 0, N(k, "0"))};
+        for (const char* i : {"0", "1", "2", "3"})
+        {
+            if (mode == 1 && std::string(i) == "3")
+            {
+                continue;
+            }
+            in.push_back(k.store(elem_place(k, k.pn(p), i), N(k, "0")));
+        }
+        const Expr* call {k.call(u, {k.pn(p)})};
+        in.push_back(k.es(call));
+        SrcLoc where {call->loc};
+        if (mode == 2)
+        {
+            const Stmt* c {k.chk(k.eq_c(k.deref(elem_place(k, k.pn(p), "1")), k.i32, "3"))};
+            where = c->loc;
+            in.push_back(c);
+        }
+        in.push_back(k.es(k.call(fr, {k.pn(p)})));
+        f->body = k.blk({k.decl(p, k.call(m, {})), k.iff(k.ne(k.pn(p), k.nul(SP)), k.blk(in))});
+        k.done(f);
+        return where;
+    };
+    lcv("e1e2d_heap_owns_block_contract",
+        "use(p) requires and ensures owns_block(p) of a structure with an array member and writes p->a[1]; the caller holds a block with every element written, calls it and frees the block (verifies)",
+        [=](Kit& k)
+        {
+            contract_prog(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_heap_owns_block_contract_unwritten_fail",
+       "the caller writes p->a[0..2] but not p->a[3]: the call needs every element to have a value (uninitialized at the call)",
+       [=](Kit& k)
+       {
+           k.fail_only("uninitialized", contract_prog(k, 1), 2U, 1U);
+       });
+    lc("e1e2d_heap_owns_block_contract_forgot_fail",
+       "check(p->a[1] == 3) after use(p): owns_block says nothing about the contents, the check fails",
+       [=](Kit& k)
+       {
+           k.fail("check", contract_prog(k, 2));
+       });
+    // void drop(struct SA *p) requires(owns_block(p)) { free(p); }   [mode 1: { }: the allocation is not handed back]
+    const auto drop_prog = [=](Kit& k, bool forget) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* fr {free_view(k, k.st(S))};
+        Function* d {k.fn("drop", k.vd, {{"p", SP}})};
+        k.req(d, k.b.atom(AtomKind::OwnsBlock, FP(k, d, 0), -1, k.at()));
+        d->body = forget ? k.blkc({}) : k.blkc({k.es(k.call(fr, {k.pv(d, 0)}))});
+        k.done(d);
+        return d->end_loc;
+    };
+    lc("e1e2d_heap_drop", "drop(p) requires owns_block(p) and frees it: the free's rows hold, nothing leaks",
+       [=](Kit& k)
+       {
+           drop_prog(k, false);
+       });
+    lc("e1e2d_heap_drop_leak_fail", "the same without the free: the function returns owning the allocation (leak)",
+       [=](Kit& k)
+       {
+           k.fail("leak", drop_prog(k, true));
+       });
+    // ---- the loop column (Part D2, step 1): the array part of a heap block is a place of the loop ----
+    // void f(void) { struct SA *p = alloc(); if (p != NULL) { int i = 0; while (i < 4) inv 0 <= i <= 4 { p->a[i] = i; i++ [mode 2: free(p);] } x = p->a[3]; [mode 1: the loop stops at 3 and
+    // malloc leaves the flags unknown] free(p); } }
+    // mode 0: calloc, the fill loop, the read after it (the flag the loop kept); 1: malloc, a loop that fills three elements, the read of the fourth (uninitialized); 2: calloc and a loop that
+    // frees the block (the back edge ends without it); 3: the same over a structure with no cell, only the array member (the liveness and the token are carried by a place with no value)
+    const auto heap_loop_prog = [=](Kit& k, int mode) -> SrcLoc
+    {
+        const bool only {mode == 3};
+        StructType* S {only ? k.strukt("SO", {{"a", k.prog.array_of(k.i32, 4U)}}) : SA(k)};
+        const int member {only ? 0 : 1};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, mode == 1 ? "malloc" : "calloc", k.st(S), mode != 1)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd)};
+        Var* p {k.local(f, "p", SP)};
+        Var* i {k.local(f, "i", k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        const char* top {mode == 1 ? "3" : "4"};
+        std::vector<const Stmt*> body {k.store(k.b.elem_addr(k.mem(k.pn(p), member), k.v(i), k.at()), k.v(i)),
+                                       k.incS(i)};
+        if (mode == 2)
+        {
+            body.push_back(k.es(k.call(fr, {k.pn(p)})));
+        }
+        const Stmt* loop_body {k.blkc(body)};
+        const Expr* rd {k.deref(k.b.elem_addr(k.mem(k.pn(p), member), N(k, "3"), k.at()))};
+        std::vector<const Stmt*> in {k.decl(i, N(k, "0")),
+                                     k.whl(k.lt(k.v(i), N(k, top)), {k.cl(k.range(k.v(i), k.i32, "0", top))},
+                                           {k.cl(k.sub(N(k, top), k.v(i)))}, loop_body),
+                                     k.decl(x, rd)};
+        in.push_back(k.es(k.call(fr, {k.pn(p)})));
+        f->body = k.blk({k.decl(p, k.call(m, {})), k.iff(k.ne(k.pn(p), k.nul(SP)), k.blk(in))});
+        k.done(f);
+        return mode == 1 ? rd->loc : loop_body->end_loc;
+    };
+    lcv("e1e2d_loop_heap_fill",
+        "p = calloc(); while (i < 4) { p->a[i] = i; i++; } x = p->a[3]; free(p): the array part of the block is a place of the loop (the permission at the entry amount, the flags kept), so the loop's stores and the read after it verify",
+        [=](Kit& k)
+        {
+            heap_loop_prog(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_heap_fill_unwritten_fail",
+       "p = malloc(); a loop fills p->a[0..3) and p->a[3] is read after it: the flags of the array part are the entry's (unknown), so the read is uninitialized",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", heap_loop_prog(k, 1));
+       });
+    lc("e1e2d_loop_heap_give_away_fail",
+       "the loop frees p at the end of each iteration: the iteration ends without the permission to the block that it began with (permission at the closing brace of the body)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", heap_loop_prog(k, 2), 2U, 0U, "the permission to `p->a` that it began with");
+       });
+    lcv("e1e2d_loop_heap_only_array",
+        "a structure whose only member is an array: the heap block's liveness cell and token are carried by a place with no value, the array part by its own place; the fill loop verifies and free takes the block",
+        [=](Kit& k)
+        {
+            heap_loop_prog(k, 3);
+            vac_fn(k);
+        });
+    // mode 4: calloc, a callee that owns &p->a[2] and keeps it, then the loop: the loop begins without the permission to every element of p->a (entry row, not the automatic invariant)
+    lc("e1e2d_loop_heap_kept_element_fail",
+       "a callee takes ownership of &p->a[2] before the loop: the loop begins without the permission to p->a (permission at the loop, from the part's entry row)",
+       [=](Kit& k)
+       {
+           StructType* S {SA(k)};
+           const Type SP {k.ptr(k.st(S))};
+           Function* m {part_d_alloc_view(k, "calloc", k.st(S), true)};
+           Function* fr {free_view(k, k.st(S))};
+           Function* t {k.fn("take", k.vd, {{"q", k.ptr(k.i32)}})};
+           k.req(t, k.b.atom(AtomKind::Owns, FP(k, t, 0), 0, k.at()));
+           t->body = k.blkc({});
+           k.done(t);
+           Function* f {k.fn("f", k.vd)};
+           Var* p {k.local(f, "p", SP)};
+           Var* i {k.local(f, "i", k.i32)};
+           const Stmt* wl {k.whl(
+               k.lt(k.v(i), N(k, "4")), {k.cl(k.range(k.v(i), k.i32, "0", "4"))}, {k.cl(k.sub(N(k, "4"), k.v(i)))},
+               k.blkc({k.store(k.b.elem_addr(k.mem(k.pn(p), 1), k.v(i), k.at()), k.v(i)), k.incS(i)}))};
+           const Stmt* call_take {k.es(k.call(t, {k.b.elem_addr(k.mem(k.pn(p), 1), N(k, "2"), k.at())}))};
+           f->body = k.blk({k.decl(p, k.call(m, {})),
+                            k.iff(k.ne(k.pn(p), k.nul(SP)),
+                                  k.blk({call_take, k.decl(i, N(k, "0")), wl, k.es(k.call(fr, {k.pn(p)}))}))});
+           k.done(f);
+           k.fail_only("permission", wl->loc, 2U, 0U, "this loop begins without the permission to `p->a`");
+       });
+    // void fill(struct SA *p) requires(owns_block(p)) ensures(owns_block(p)) { int i = 0; while (i < 4) inv 0 <= i <= 4 { p->a[i] = i; i++; [mode 1: free(p);] } }
+    const auto param_loop_prog = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("fill", k.vd, {{"p", SP}})};
+        k.req(f, k.b.atom(AtomKind::OwnsBlock, FP(k, f, 0), -1, k.at()));
+        k.ens(f, k.b.atom(AtomKind::OwnsBlock, FP(k, f, 0), -1, k.at()));
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> body {k.store(k.b.elem_addr(k.mem(k.pv(f, 0), 1), k.v(i), k.at()), k.v(i)), k.incS(i)};
+        if (mode == 1)
+        {
+            body.push_back(k.es(k.call(fr, {k.pv(f, 0)})));
+        }
+        const Stmt* loop_body {k.blkc(body)};
+        f->body = k.blk({k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), N(k, "4")), {k.cl(k.range(k.v(i), k.i32, "0", "4"))},
+                                                     {k.cl(k.sub(N(k, "4"), k.v(i)))}, loop_body)});
+        k.done(f);
+        return loop_body->end_loc;
+    };
+    lcv("e1e2d_loop_heap_param_block",
+        "fill(p) requires and ensures owns_block(p) and writes p->a[i] in a loop: the parameter's block is held through the loop, its array part by a heap array place (verifies)",
+        [=](Kit& k)
+        {
+            param_loop_prog(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_heap_param_block_give_away_fail",
+       "the loop frees the parameter's block at the end of each iteration: the iteration ends without the permission to p->a that it began with",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", param_loop_prog(k, 1), 2U, 0U, "the permission to `p->a` that it began with");
+       });
+    // void f(void) { [[owning]] struct SA *q = calloc(); if (q != NULL) { int i = 0; while (i < 4) { q->a[i] = i; i++; [mode 1: free(q);] } x = q->a[3]; free(q); } }
+    const auto owning_loop_prog = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, "calloc", k.st(S), true)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd)};
+        Var* q {k.local(f, "q", SP)};
+        q->owning = true;
+        Var* i {k.local(f, "i", k.i32)};
+        Var* x {k.local(f, "x", k.i32)};
+        std::vector<const Stmt*> body {k.store(k.b.elem_addr(k.mem(k.pn(q), 1), k.v(i), k.at()), k.v(i)), k.incS(i)};
+        if (mode == 1)
+        {
+            body.push_back(k.es(k.call(fr, {k.pn(q)})));
+        }
+        const Stmt* loop_body {k.blkc(body)};
+        const Expr* rd {k.deref(k.b.elem_addr(k.mem(k.pn(q), 1), N(k, "3"), k.at()))};
+        f->body = k.blkc({k.decl(q, k.call(m, {})),
+                          k.iff(k.ne(k.pn(q), k.nul(SP)),
+                                k.blk({k.decl(i, N(k, "0")),
+                                       k.whl(k.lt(k.v(i), N(k, "4")), {k.cl(k.range(k.v(i), k.i32, "0", "4"))},
+                                             {k.cl(k.sub(N(k, "4"), k.v(i)))}, loop_body),
+                                       k.decl(x, rd), k.es(k.call(fr, {k.pn(q)}))}))});
+        k.done(f);
+        return loop_body->end_loc;
+    };
+    lcv("e1e2d_loop_heap_owning_local",
+        "an owning local filled by a loop (q->a[i] = i) and freed after it: the loop carries the block through its heap place, the array part included (verifies)",
+        [=](Kit& k)
+        {
+            owning_loop_prog(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_heap_owning_local_give_away_fail",
+       "the loop frees the owning local at the end of each iteration: the iteration ends without the permission to q->a that it began with",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", owning_loop_prog(k, 1), 2U, 0U, "the permission to `q->a` that it began with");
+       });
+    // ---- the loop column's owner carriers (Part D, step A): the written site of an owner in memory carries the block's array parts ----
+    // struct SA { int n; int a[4]; }; [[owning]] struct SA *g = NULL;
+    // void f(void) requires(owns(g) && (g == NULL || owns_block(g)) && g != NULL) ensures(owns(g) && (g == NULL || owns_block(g))) { int i = 0; while (i < 4) { g->a[i] = i; i++; [mode 1: free(g);] } }
+    const auto owner_global_loop = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* fr {free_view(k, k.st(S))};
+        Global* g {k.prog.add_global("g", SP, k.at())};
+        g->init_kind = Global::Init::Null;
+        g->owning = true;
+        auto gval = [&](Kit& kk)
+        {
+            return kk.deref(kk.b.global_addr(g, kk.at()));
+        };
+        auto deep = [&](Kit& kk)
+        {
+            return kk.land(kk.b.atom(AtomKind::Owns, kk.b.global_addr(g, kk.at()), 0, kk.at()),
+                           kk.lor(kk.eq(gval(kk), kk.nul(SP)), kk.b.atom(AtomKind::OwnsBlock, gval(kk), -1, kk.at())));
+        };
+        Function* f {k.fn("f", k.vd)};
+        k.req(f, k.land(deep(k), k.ne(gval(k), k.nul(SP))));
+        k.ens(f, deep(k));
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> body {k.store(k.b.elem_addr(k.mem(gval(k), 1), k.v(i), k.at()), k.v(i)), k.incS(i)};
+        if (mode == 1)
+        {
+            body.push_back(k.es(k.call(fr, {gval(k)})));
+        }
+        const Stmt* loop_body {k.blkc(body)};
+        f->body = k.blk({k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), N(k, "4")), {k.cl(k.range(k.v(i), k.i32, "0", "4"))},
+                                                     {k.cl(k.sub(N(k, "4"), k.v(i)))}, loop_body)});
+        k.done(f);
+        return loop_body->end_loc;
+    };
+    lcv("e1e2d_loop_owner_global",
+        "an owning global holding a structure with an array member, filled by a loop (g->a[i] = i): the loop's synthetic written site carries the block's array part, the contract's deep atom is kept (verifies)",
+        [=](Kit& k)
+        {
+            owner_global_loop(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_owner_global_give_away_fail",
+       "the loop frees the owning global's block at the end of each iteration: the invariant of the loop needs the whole allocation g points to",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", owner_global_loop(k, 1), 7U, 1U, "to own the whole allocation `g` points to");
+       });
+    // A loop that REASSIGNS the owning global (decision 0064 item 15, Part D step 1d): the written site's pointer is read through memory the loop writes, so its array parts are named by a
+    // ghost taken again at the back edge, after the rows
+    // void f(void) requires(deep && g != NULL) ensures(deep) { int i = 0; while (i < 3) { [mode 2: no] free(g); g = [mode 1: malloc, else calloc](); i++; } if (g != NULL) { g->n = 0; g->a[0..3] = 0; } }
+    const auto owner_global_reassigned = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, mode == 1 ? "malloc" : "calloc", k.st(S), mode != 1)};
+        Function* fr {free_view(k, k.st(S))};
+        Global* g {k.prog.add_global("g", SP, k.at())};
+        g->init_kind = Global::Init::Null;
+        g->owning = true;
+        auto gval = [&](Kit& kk)
+        {
+            return kk.deref(kk.b.global_addr(g, kk.at()));
+        };
+        auto deep = [&](Kit& kk)
+        {
+            return kk.land(kk.b.atom(AtomKind::Owns, kk.b.global_addr(g, kk.at()), 0, kk.at()),
+                           kk.lor(kk.eq(gval(kk), kk.nul(SP)), kk.b.atom(AtomKind::OwnsBlock, gval(kk), -1, kk.at())));
+        };
+        Function* f {k.fn("f", k.vd)};
+        k.req(f, k.land(deep(k), k.ne(gval(k), k.nul(SP))));
+        k.ens(f, deep(k));
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> body;
+        if (mode != 2)
+        {
+            body.push_back(k.es(k.call(fr, {gval(k)})));
+        }
+        const Stmt* st {k.store(k.b.global_addr(g, k.at()), k.call(m, {}))};
+        body.push_back(st);
+        body.push_back(k.incS(i));
+        const Stmt* loop_body {k.blkc(body)};
+        std::vector<const Stmt*> fill {k.store(k.mem(gval(k), 0), N(k, "0"))};
+        for (const char* ix : {"0", "1", "2", "3"})
+        {
+            fill.push_back(k.store(k.b.elem_addr(k.mem(gval(k), 1), N(k, ix), k.at()), N(k, "0")));
+        }
+        f->body = k.blk({k.decl(i, N(k, "0")),
+                         k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                               {k.cl(k.sub(N(k, "3"), k.v(i)))}, loop_body),
+                         k.iff(k.ne(gval(k), k.nul(SP)), k.blk(fill))});
+        k.done(f);
+        return mode == 2 ? st->loc : loop_body->end_loc;
+    };
+    lcv("e1e2d_loop_owner_global_reassigned",
+        "a loop frees the owning global and takes a calloc'ed block each iteration (g = calloc()): the written site's pointer is read through a cell the loop writes, and its array part is held at the pointer the body ends with (verifies)",
+        [=](Kit& k)
+        {
+            owner_global_reassigned(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_owner_global_reassigned_malloc_fail",
+       "the same with malloc: the new block's elements have no value, and the iteration ends with g->a having none though it had one when the loop began",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", owner_global_reassigned(k, 1), 2U);
+       });
+    lc("e1e2d_loop_owner_global_reassigned_leak_fail",
+       "the same without the free: the store drops the block g holds (leak at the store)",
+       [=](Kit& k)
+       {
+           k.fail("leak", owner_global_reassigned(k, 2));
+       });
+    // struct SA { int n; int a[4]; }; struct R { struct SA *q [[owning]]; int z; };
+    // void f(struct R *r) requires(owns(*r) && (r->q == NULL || owns_block(r->q))) ensures(the same) { if (r->q != NULL) { int i = 0; while (i < 4) { r->q->a[i] = i; i++; [mode 1: free(r->q);] } } }
+    const auto owner_member_loop = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        StructType* R {k.strukt("R", {{"q", SP}, {"z", k.i32}})};
+        R->members[0U].owning = true;
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd, {{"r", k.ptr(k.st(R))}})};
+        const Var* rp {f->param_var(0)};
+        const auto atoms = [&]()
+        {
+            // mode 2: the pointer has no spelling (no text node), and a message names the array part by the member's own name
+            const Expr* rq {mode == 2 ? k.leaf(k.F(f, 0), 0) : k.b.text(k.leaf(k.F(f, 0), 0), "r->q")};
+            return k.land(k.b.atom(AtomKind::Owns, k.b.text(k.F(f, 0), "r"), 0, k.at()),
+                          k.lor(k.eq(k.leaf(k.F(f, 0), 0), k.nul(SP)), k.b.atom(AtomKind::OwnsBlock, rq, -1, k.at())));
+        };
+        k.req(f, atoms());
+        k.ens(f, atoms());
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> body {k.store(k.b.elem_addr(k.mem(k.leaf(k.pn(rp), 0), 1), k.v(i), k.at()), k.v(i)),
+                                       k.incS(i)};
+        if (mode != 0)
+        {
+            body.push_back(k.es(k.call(fr, {k.leaf(k.pn(rp), 0)})));
+        }
+        const Stmt* loop_body {k.blkc(body)};
+        f->body = k.blk(
+            {k.iff(k.ne(k.leaf(k.pn(rp), 0), k.nul(SP)),
+                   k.blk({k.decl(i, N(k, "0")), k.whl(k.lt(k.v(i), N(k, "4")), {k.cl(k.range(k.v(i), k.i32, "0", "4"))},
+                                                      {k.cl(k.sub(N(k, "4"), k.v(i)))}, loop_body)}))});
+        k.done(f);
+        return loop_body->end_loc;
+    };
+    lcv("e1e2d_loop_owner_member",
+        "a structure with an owning member that points at a structure with an array member: a loop writes r->q->a[i]; the block of r->q is a key place of the loop and its array part a heap array place (verifies)",
+        [=](Kit& k)
+        {
+            owner_member_loop(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_owner_member_give_away_fail",
+       "the loop frees r->q at the end of each iteration: the iteration ends without the permission to r->q->a that it began with",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", owner_member_loop(k, 1), 2U, 0U, "the permission to `r->q->a` that it began with");
+       });
+    lc("e1e2d_loop_owner_member_unnamed_give_away_fail",
+       "the same with a pointer that has no spelling: the message names the array part by the member's own name, not an empty or arrow-led text",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", owner_member_loop(k, 2), 2U, 0U, "the permission to `a` that it began with");
+       });
+    // The owning local's own carrier (a loop that writes it, or one that names it not): the owner's invariants and rows take the block's array parts
+    // void f(void) { [[owning]] struct SA *q = NULL; int i = 0; while (i < 3) { [mode 0: free(q);] q = calloc(); if (q != NULL) { q->a[1] = i; } i++; } free(q); }
+    const auto owner_written_loop = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, "calloc", k.st(S), true)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* f {k.fn("f", k.vd)};
+        Var* q {k.local(f, "q", SP)};
+        q->owning = true;
+        Var* i {k.local(f, "i", k.i32)};
+        const Stmt* st {k.asg(q, k.call(m, {}))};
+        std::vector<const Stmt*> body;
+        if (mode == 0)
+        {
+            body.push_back(k.es(k.call(fr, {k.pn(q)})));
+        }
+        body.push_back(st);
+        body.push_back(k.iff(k.ne(k.pn(q), k.nul(SP)),
+                             k.blk({k.store(k.b.elem_addr(k.mem(k.pn(q), 1), N(k, "1"), k.at()), k.v(i))})));
+        body.push_back(k.incS(i));
+        f->body = k.blkc({k.decl(q, k.nul(SP)), k.decl(i, N(k, "0")),
+                          k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                                {k.cl(k.sub(N(k, "3"), k.v(i)))}, k.blkc(body)),
+                          k.es(k.call(fr, {k.pn(q)}))});
+        k.done(f);
+        return st->loc;
+    };
+    lcv("e1e2d_loop_owner_written",
+        "a loop frees an owning local and takes a new allocation each iteration (q = calloc()), writing q->a[1]: the owner's carrier holds the block's array part (verifies)",
+        [=](Kit& k)
+        {
+            owner_written_loop(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_owner_written_leak_fail",
+       "the same without the free before the allocation: the store drops the block it holds (leak at the store)",
+       [=](Kit& k)
+       {
+           k.fail("leak", owner_written_loop(k, 1));
+       });
+    // void touch(int *x) requires(owns(*x)) ensures(owns(*x)); void f(int *y) requires(owns(*y)) ensures(owns(*y)) { [[owning]] struct SA *q = calloc(); int i = 0; while (i < 3) { touch(y); i++; } [mode 0: free(q);] }
+    const auto owner_unmentioned_loop = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* m {part_d_alloc_view(k, "calloc", k.st(S), true)};
+        Function* fr {free_view(k, k.st(S))};
+        Function* t {k.fn("touch", k.vd, {{"x", k.ptr(k.i32)}})};
+        k.trusted(t, "a callee that keeps the cell it borrows");
+        k.req(t, k.b.atom(AtomKind::Owns, FP(k, t, 0), 0, k.at()));
+        k.ens(t, k.b.atom(AtomKind::Owns, FP(k, t, 0), 0, k.at()));
+        k.done(t);
+        Function* f {k.fn("f", k.vd, {{"y", k.ptr(k.i32)}})};
+        k.req(f, k.b.atom(AtomKind::Owns, FP(k, f, 0), 0, k.at()));
+        k.ens(f, k.b.atom(AtomKind::Owns, FP(k, f, 0), 0, k.at()));
+        Var* q {k.local(f, "q", SP)};
+        q->owning = true;
+        Var* i {k.local(f, "i", k.i32)};
+        std::vector<const Stmt*> tail;
+        if (mode == 0)
+        {
+            tail.push_back(k.es(k.call(fr, {k.pn(q)})));
+        }
+        std::vector<const Stmt*> all {k.decl(q, k.call(m, {})), k.decl(i, N(k, "0")),
+                                      k.whl(k.lt(k.v(i), N(k, "3")), {k.cl(k.range(k.v(i), k.i32, "0", "3"))},
+                                            {k.cl(k.sub(N(k, "3"), k.v(i)))},
+                                            k.blkc({k.es(k.call(t, {k.pv(f, 0)})), k.incS(i)}))};
+        all.insert(all.end(), tail.begin(), tail.end());
+        f->body = k.blkc(all);
+        k.done(f);
+        return f->body->end_loc;
+    };
+    lcv("e1e2d_loop_owner_unmentioned",
+        "a loop that calls a function and never names the owning local: the owner's carrier, guarded by the held ghost, keeps the block and its array part through the loop; the owner is freed after it (verifies)",
+        [=](Kit& k)
+        {
+            owner_unmentioned_loop(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_owner_unmentioned_leak_fail",
+       "the same without the free: the function returns owning the allocation (leak)",
+       [=](Kit& k)
+       {
+           k.fail("leak", owner_unmentioned_loop(k, 1));
+       });
+
+    // ---- the loop column's written atoms (Part D, step B): `owns(*p)` and `owns(p->a)` in a loop invariant, the array parts of the atom (S48 (k)'s shape) ----
+    // struct SA { int n; int a[4]; };
+    // void f(struct SA *p, int n) requires(owns(*p) [mode 4: owns(p->a) only]) ensures(owns(*p)) { p = p; int i = 0; while (i < n) invariant(owns(*p) [mode 2: owns(p->a) && owns(p->n)]) { [mode 1: p = NULL;] p->n = i; p->a[1] = i; i++; } }
+    // mode 3: the same with a structure that has no cell leaf (struct TA { int a[4]; })
+    const auto written_owns_loop = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {mode == 3 ? k.strukt("TA", {{"a", k.prog.array_of(k.i32, 4U)}}) : SA(k)};
+        const int arr {mode == 3 ? 0 : 1};
+        Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(S))}, {"n", k.i32}})};
+        const Var* rp {f->param_var(0)};
+        const Var* rn {f->param_var(1)};
+        if (mode == 4)
+        {
+            k.req(f, k.b.atom(AtomKind::Owns, k.mem(k.b.text(k.F(f, 0), "p"), arr), 0, k.at()));
+        }
+        else
+        {
+            k.req(f, k.b.atom(AtomKind::Owns, k.b.text(k.F(f, 0), "p"), 0, k.at()));
+            if (mode != 1)
+            {
+                k.ens(f, k.b.atom(AtomKind::Owns, k.b.text(k.F(f, 0), "p"), 1, k.at()));
+            }
+        }
+        k.req(f, k.range(k.F(f, 1), k.i32, "0", "100"));
+        Var* i {k.local(f, "i", k.i32)};
+        const SrcLoc il {k.at()};
+        const Expr* inv {mode == 2 ? k.land(k.b.atom(AtomKind::Owns, k.mem(k.pn(rp), arr), -1, k.at()),
+                                            k.b.atom(AtomKind::Owns, k.mem(k.pn(rp), 0), -1, k.at()))
+                                   : k.b.atom(AtomKind::Owns, k.pn(rp), -1, il)};
+        std::vector<const Stmt*> body;
+        if (mode == 1)
+        {
+            body.push_back(k.asg(rp, k.nul(k.ptr(k.st(S)))));
+        }
+        else
+        {
+            if (mode != 3)
+            {
+                body.push_back(k.store(k.mem(k.pn(rp), 0), k.v(i)));
+            }
+            body.push_back(k.store(k.b.elem_addr(k.mem(k.pn(rp), arr), N(k, "1"), k.at()), k.v(i)));
+        }
+        body.push_back(k.incS(i));
+        const Stmt* loop_body {k.blkc(body)};
+        f->body = k.blkc({k.asg(rp, k.pn(rp)), k.decl(i, N(k, "0")),
+                          k.whl(k.lt(k.v(i), k.pn(rn)), {k.cl(k.land(k.range(k.v(i), k.i32, "0", "100"), inv))},
+                                {k.cl(k.sub(k.pn(rn), k.v(i)))}, loop_body)});
+        k.done(f);
+        return mode == 4 ? il : loop_body->end_loc;
+    };
+    lcv("e1e2d_loop_written_owns_moved",
+        "owns(*p) written in a loop invariant on a structure with an array member whose pointer parameter the function assigns: the array part's conjuncts (S48 (k)'s shape), the loop stores p->n and p->a[1] (verifies)",
+        [=](Kit& k)
+        {
+            written_owns_loop(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_loop_written_owns_moved_null_fail",
+       "the loop assigns the pointer NULL: the iteration ends without owning the array part its invariant names",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", written_owns_loop(k, 1), 14U, 0U);
+       });
+    lc("e1e2d_loop_written_owns_entry_missing_fail",
+       "the function holds the array member only (owns(p->a)) and the invariant owns(*p): the loop is entered without owning the cell p->n",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", written_owns_loop(k, 4), 14U, 7U);
+       });
+    lcv("e1e2d_loop_written_owns_member",
+        "owns(p->a) and owns(p->n) written in the invariant (the array member's own atom has the atom's basic row): the same loop (verifies)",
+        [=](Kit& k)
+        {
+            written_owns_loop(k, 2);
+            vac_fn(k);
+        });
+    lcv("e1e2d_loop_written_owns_cell_less",
+        "owns(*p) on a structure whose only member is an array: its liveness-only entry carries the basic row and the liveness amount (verifies)",
+        [=](Kit& k)
+        {
+            written_owns_loop(k, 3);
+            vac_fn(k);
+        });
+}
+
+// ---- Part D's refusals: record 0052 item 2a stays in front of the partnerless gate, and the six positions refuse an aggregate element (question 348) ----
+void define_part_d_reject_cases()
+{
+    auto A4 = [](Kit& k)
+    {
+        return k.prog.array_of(k.i32, 4U);
+    };
+    auto SA = [=](Kit& k)
+    {
+        return k.strukt("SA", {{"n", k.i32}, {"a", A4(k)}});
+    };
+    // struct P { int x; int y; }; struct T { struct P v[2]; int n; }: an array member of structures
+    auto TA = [](Kit& k)
+    {
+        StructType* P {k.strukt("P", {{"x", k.i32}, {"y", k.i32}})};
+        return k.strukt("T", {{"v", k.prog.array_of(k.st(P), 2U)}, {"n", k.i32}});
+    };
+    // ---- question 348: an aggregate element stays rejected at each of item 15's six positions ----
+    auto fp = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    const char* const kAgg {"decision 0064 item 15, question 348"};
+    rc("e1e2d_rej_aggregate_owns_block", kAgg,
+       [=](Kit& k)
+       {
+           // void f(struct T *p) requires(owns_block(p)); struct T { struct P v[2]; int n; }
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           k.req(f, k.b.atom(AtomKind::OwnsBlock, fp(k, f, 0), -1, k.at()));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_marker_on_a_pointer", kAgg,
+       [=](Kit& k)
+       {
+           // void f(struct T *p [[cerastes::must_init]]) requires(owns(*p)) ensures(owns(*p))
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           f->params[0].init = InitMarker::MustInit;
+           k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           k.ens(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_array_beside_an_owning_member", kAgg,
+       [=](Kit& k)
+       {
+           // struct R { struct P v[2]; int *q [[cerastes::owning]]; }
+           StructType* P {k.strukt("P", {{"x", k.i32}, {"y", k.i32}})};
+           StructType* R {k.strukt("R", {{"v", k.prog.array_of(k.st(P), 2U)}, {"q", k.ptr(k.i32)}})};
+           R->members[1].owning = true;
+       });
+    rc("e1e2d_rej_owning_member_to_an_aggregate_array_structure", kAgg,
+       [=](Kit& k)
+       {
+           // struct R { struct T *q [[cerastes::owning]]; int z; }
+           StructType* T {TA(k)};
+           StructType* R {k.strukt("R", {{"q", k.ptr(k.st(T))}, {"z", k.i32}})};
+           R->members[0].owning = true;
+       });
+    rc("e1e2d_rej_aggregate_owning_global", kAgg,
+       [=](Kit& k)
+       {
+           // struct T *g [[cerastes::owning]]; struct T { struct P v[2]; int n; }
+           StructType* T {TA(k)};
+           Global* g {k.prog.add_global("g", k.ptr(k.st(T)), k.at())};
+           g->init_kind = Global::Init::Null;
+           g->owning = true;
+           Function* f {k.fn("f", k.vd)};
+           f->body = k.blkc({});
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_owning_local", kAgg,
+       [=](Kit& k)
+       {
+           // void f(void) { struct T *q [[cerastes::owning]] = NULL; }
+           StructType* T {TA(k)};
+           const Type TP {k.ptr(k.st(T))};
+           Function* f {k.fn("f", k.vd)};
+           Var* q {k.local(f, "q", TP)};
+           q->owning = true;
+           f->body = k.blkc({k.decl(q, k.nul(TP))});
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_owning_formal_implicit_atom", kAgg,
+       [=](Kit& k)
+       {
+           // void f(struct T *p [[cerastes::owning]]): the implicit atom owns(*p) of an owning formal
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           const Expr* a {k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at())};
+           const_cast<Expr*>(a)->implicit_atom = true;
+           k.req(f, a);
+           f->body = k.blkc({});
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_atom_through_a_heap_read", kAgg,
+       [=](Kit& k)
+       {
+           // struct R { struct T *q; }; void f(struct R *r) requires(owns(*r->q))
+           StructType* T {TA(k)};
+           StructType* R {k.strukt("R", {{"q", k.ptr(k.st(T))}})};
+           Function* f {k.fn("f", k.vd, {{"r", k.ptr(k.st(R))}})};
+           k.req(f, k.b.atom(AtomKind::Owns, k.deref(k.mem(k.F(f, 0), 0)), 0, k.at()));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_element_read_through_a_heap_read", kAgg,
+       [=](Kit& k)
+       {
+           // struct R { struct T *q; }; void f(struct R *r) requires(r->q->v[1].x == 0)
+           StructType* T {TA(k)};
+           StructType* R {k.strukt("R", {{"q", k.ptr(k.st(T))}})};
+           Function* f {k.fn("f", k.vd, {{"r", k.ptr(k.st(R))}})};
+           const Expr* loaded {k.deref(k.mem(k.F(f, 0), 0))};
+           const Expr* el {k.b.elem_addr(k.mem(loaded, 0), k.num(k.i32, "1"), k.at())};
+           k.req(f, k.eq(k.deref(k.mem(el, 0)), k.num(k.i32, "0")));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_partnerless_result", kAgg,
+       [=](Kit& k)
+       {
+           // struct T *f(void) ensures(owns(*result)) (no body)
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.ptr(k.st(T)))};
+           k.trusted(f);
+           k.ens(f, k.b.atom(AtomKind::Owns, k.R(f), 0, k.at()));
+           k.done(f);
+       });
+    rc("e1e2d_rej_aggregate_ref_to_uninit_local", kAgg,
+       [=](Kit& k)
+       {
+           // struct T *p [[cerastes::ref_to_uninit]] = null;
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd)};
+           Var* p {k.local(f, "p", k.ptr(k.st(T)))};
+           p->ref_to_uninit = true;
+           f->body = k.blk({k.decl(p, k.nul(k.ptr(k.st(T))))});
+           k.done(f);
+       });
+    // ---- the lowering's own stop at each Part D site that takes an aggregate element (the harness cannot pin an exit 3, so each is a refused program lowered anyway) ----
+    ru("e1e2d_ru_block_lines_of_an_aggregate_array_structure", "the lines of an owns_block",
+       [=](Kit& k)
+       {
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           k.req(f, k.b.atom(AtomKind::OwnsBlock, fp(k, f, 0), -1, k.at()));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    ru("e1e2d_ru_block_rows_of_an_aggregate_array_structure", "the rows of a block",
+       [=](Kit& k)
+       {
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           k.req(f, k.b.atom(AtomKind::OwnsBlock, fp(k, f, 0), -1, k.at()));
+           k.ens(f, k.b.atom(AtomKind::OwnsBlock, fp(k, f, 0), -1, k.at()));
+           f->body = k.blkc({});
+           k.done(f);
+       });
+    ru("e1e2d_ru_block_framing_of_an_aggregate_array_structure", "the framing of a contract read",
+       [=](Kit& k)
+       {
+           // void f(struct T *p) requires(owns_block(p) && p->v[0].x == 0)
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           const Expr* el {k.b.elem_addr(k.mem(fp(k, f, 0), 0), k.num(k.i32, "0"), k.at())};
+           k.req(f, k.land(k.b.atom(AtomKind::OwnsBlock, fp(k, f, 0), -1, k.at()),
+                           k.eq(k.deref(k.mem(el, 0)), k.num(k.i32, "0"))));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    ru("e1e2d_ru_block_call_record_of_an_aggregate_array_structure", "the sequencing record of a call's block site",
+       [=](Kit& k)
+       {
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           k.req(f, k.b.atom(AtomKind::OwnsBlock, fp(k, f, 0), -1, k.at()));
+           f->body = k.blk({});
+           k.done(f);
+           Function* g {k.fn("g", k.vd, {{"q", k.ptr(k.st(T))}})};
+           k.req(g, k.b.atom(AtomKind::OwnsBlock, fp(k, g, 0), -1, k.at()));
+           g->body = k.blk({k.es(k.call(f, {k.pv(g, 0)}))});
+           k.done(g);
+       });
+    ru("e1e2d_ru_marked_atom_array_part_of_an_aggregate", "the array part of a marked or partnerless atom",
+       [=](Kit& k)
+       {
+           // void f(struct T *p [[cerastes::ref_to_uninit]]) requires(owns(*p)) ensures(owns(*p)) {}
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           f->params[0].init = InitMarker::RefToUninit;
+           k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           k.ens(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           f->body = k.blkc({});
+           k.done(f);
+       });
+    ru("e1e2d_ru_marked_return_rows_of_an_aggregate", "the return rows of a marked or partnerless atom",
+       [=](Kit& k)
+       {
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           f->params[0].init = InitMarker::RefToUninit;
+           k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           k.ens(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           f->body = k.blkc({});
+           k.done(f);
+       });
+    ru("e1e2d_ru_marked_call_rows_of_an_aggregate", "the call rows of an atom under an initialization marker",
+       [=](Kit& k)
+       {
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(T))}})};
+           f->params[0].init = InitMarker::RefToUninit;
+           k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           k.ens(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+           f->body = k.blkc({});
+           k.done(f);
+           Function* g {k.fn("g", k.vd, {{"q", k.ptr(k.st(T))}})};
+           k.req(g, k.b.atom(AtomKind::Owns, fp(k, g, 0), 0, k.at()));
+           k.ens(g, k.b.atom(AtomKind::Owns, fp(k, g, 0), 0, k.at()));
+           g->body = k.blkc({k.es(k.call(f, {k.pv(g, 0)}))});
+           k.done(g);
+       });
+    ru("e1e2d_ru_partnerless_array_part_of_an_aggregate", "the array part of a marked or partnerless atom",
+       [=](Kit& k)
+       {
+           // struct T *f(void) ensures(owns(*result)) (no body)
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.ptr(k.st(T)))};
+           k.trusted(f);
+           k.ens(f, k.b.atom(AtomKind::Owns, k.R(f), 0, k.at()));
+           k.done(f);
+       });
+    ru("e1e2d_ru_partnerless_return_rows_of_an_aggregate", "the return rows of a marked or partnerless atom",
+       [=](Kit& k)
+       {
+           // struct T *f(void) ensures(owns(*result)) { return null; }
+           StructType* T {TA(k)};
+           Function* f {k.fn("f", k.ptr(k.st(T)))};
+           k.ens(f, k.b.atom(AtomKind::Owns, k.R(f), 0, k.at()));
+           f->body = k.blk({k.ret(k.nul(k.ptr(k.st(T))))});
+           k.done(f);
+       });
+    ru("e1e2d_ru_contract_read_through_a_heap_read_of_an_aggregate",
+       "the element of a pointer to structures in a contract",
+       [=](Kit& k)
+       {
+           // struct R { struct T *q; }; void f(struct R *r) requires(r->q->v[1].x == 0)
+           StructType* T {TA(k)};
+           StructType* R {k.strukt("R", {{"q", k.ptr(k.st(T))}})};
+           Function* f {k.fn("f", k.vd, {{"r", k.ptr(k.st(R))}})};
+           const Expr* loaded {k.deref(k.mem(k.F(f, 0), 0))};
+           const Expr* el {k.b.elem_addr(k.mem(loaded, 0), k.num(k.i32, "1"), k.at())};
+           k.req(f, k.eq(k.deref(k.mem(el, 0)), k.num(k.i32, "0")));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    // a written `reads` atom in a loop invariant on a structure with an array member, or on an array member (decision 0064 item 15, Part D step B): S48 (k) covers `owns` only, so the checker
+    // refuses it and lowering stops (never a dropped array leaf); `owns` of a pointer variable is built (the cases e1e2d_loop_written_*)
+    const auto written = [=](Kit& k, bool member_array, AtomKind kind, bool aggregate = false)
+    {
+        StructType* S {aggregate ? TA(k) : SA(k)};
+        Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(S))}})};
+        k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+        k.ens(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* atom {member_array ? k.b.atom(kind, k.mem(k.pv(f, 0), 1), 1, k.at())
+                                       : k.b.atom(kind, k.pv(f, 0), 0, k.at())};
+        const Stmt* lp {k.whl(k.lt(k.v(i), k.num(k.i32, "4")), {k.cl(k.land(k.range(k.v(i), k.i32, "0", "4"), atom))},
+                              {k.cl(k.sub(k.num(k.i32, "4"), k.v(i)))},
+                              k.blkc({k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))};
+        f->body = k.blkc({k.decl(i, k.num(k.i32, "0")), lp});
+        k.done(f);
+    };
+    rc("e1e2d_rej_written_reads_structure_atom_with_an_array_member",
+       "a `reads` atom on a structure with an array member in a loop invariant",
+       [=](Kit& k)
+       {
+           written(k, false, AtomKind::Reads);
+       });
+    rc("e1e2d_rej_written_reads_member_array_atom", "a `reads` atom on an array member in a loop invariant",
+       [=](Kit& k)
+       {
+           written(k, true, AtomKind::Reads);
+       });
+    rc("e1e2d_rej_written_owns_aggregate_array_structure",
+       "a permission atom on a structure with an array member of structures or arrays in a loop invariant",
+       [=](Kit& k)
+       {
+           written(k, false, AtomKind::Owns, true);
+       });
+    // an `owns(*r->q)` written in a loop invariant: the pointer is read through memory (the loop column builds a pointer variable only)
+    const auto written_load = [=](Kit& k)
+    {
+        StructType* S {SA(k)};
+        StructType* R {k.strukt("R", {{"q", k.ptr(k.st(S))}, {"z", k.i32}})};
+        Function* f {k.fn("f", k.vd, {{"r", k.ptr(k.st(R))}})};
+        const Var* rp {f->param_var(0)};
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* atom {k.b.atom(AtomKind::Owns, k.leaf(k.pn(rp), 0), 0, k.at())};
+        const Stmt* lp {k.whl(k.lt(k.v(i), k.num(k.i32, "4")), {k.cl(k.land(k.range(k.v(i), k.i32, "0", "4"), atom))},
+                              {k.cl(k.sub(k.num(k.i32, "4"), k.v(i)))},
+                              k.blkc({k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))};
+        f->body = k.blkc({k.decl(i, k.num(k.i32, "0")), lp});
+        k.done(f);
+    };
+    rc("e1e2d_rej_written_owns_through_a_load",
+       "a written `owns` atom on a structure with an array member reached other than directly from a pointer variable",
+       [=](Kit& k)
+       {
+           written_load(k);
+       });
+    ru("e1e2d_ru_written_owns_through_a_load",
+       "a written atom on a structure with an array member, or on an array member",
+       [=](Kit& k)
+       {
+           written_load(k);
+       });
+    ru("e1e2d_ru_written_reads_structure_atom_with_an_array_member",
+       "a written atom on a structure with an array member, or on an array member",
+       [=](Kit& k)
+       {
+           written(k, false, AtomKind::Reads);
+       });
+    ru("e1e2d_ru_written_reads_member_array_atom",
+       "a written atom on a structure with an array member, or on an array member",
+       [=](Kit& k)
+       {
+           written(k, true, AtomKind::Reads);
+       });
+    ru("e1e2d_ru_written_owns_aggregate_array_structure",
+       "a written atom on a structure with an array member, or on an array member",
+       [=](Kit& k)
+       {
+           written(k, false, AtomKind::Owns, true);
+       });
+    // ---- audit round D2's three fixes (record 0064 item 15) ----
+    // Finding 2: a written `owns` atom with an array part under a guard that reads memory.  void f(struct SA *p, struct R *r) { ... while (i < 4)
+    // invariant(0 <= i && i <= 4 && (r->z > 0 ? owns(*p) : true)) ... }, or owns(p->a) for the member form
+    const auto written_guard = [=](Kit& k, bool member_array)
+    {
+        StructType* S {SA(k)};
+        StructType* R {k.strukt("R", {{"z", k.i32}})};
+        Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(S))}, {"r", k.ptr(k.st(R))}})};
+        const Var* rp {f->param_var(0)};
+        const Var* rr {f->param_var(1)};
+        k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+        k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 1), 1, k.at()));
+        k.ens(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* atom {member_array ? k.b.atom(AtomKind::Owns, k.mem(k.pn(rp), 1), -1, k.at())
+                                       : k.b.atom(AtomKind::Owns, k.pn(rp), -1, k.at())};
+        const Expr* guarded {k.cond(k.gt(k.leaf(k.pn(rr), 0), k.num(k.i32, "0")), atom, k.yes())};
+        const Stmt* lp {
+            k.whl(k.lt(k.v(i), k.num(k.i32, "4")), {k.cl(k.land(k.range(k.v(i), k.i32, "0", "4"), guarded))},
+                  {k.cl(k.sub(k.num(k.i32, "4"), k.v(i)))}, k.blkc({k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))};
+        f->body = k.blkc({k.decl(i, k.num(k.i32, "0")), lp});
+        k.done(f);
+    };
+    rc("e1e2d_rej_written_owns_structure_under_a_guard_that_reads_memory", "under a guard that reads memory",
+       [=](Kit& k)
+       {
+           written_guard(k, false);
+       });
+    rc("e1e2d_rej_written_owns_member_array_under_a_guard_that_reads_memory", "under a guard that reads memory",
+       [=](Kit& k)
+       {
+           written_guard(k, true);
+       });
+    ru("e1e2d_ru_written_owns_structure_under_a_guard_that_reads_memory",
+       "a guard that reads memory reached the array part of a written atom",
+       [=](Kit& k)
+       {
+           written_guard(k, false);
+       });
+    ru("e1e2d_ru_written_owns_member_array_under_a_guard_that_reads_memory",
+       "a guard that reads memory reached the array part of a written atom",
+       [=](Kit& k)
+       {
+           written_guard(k, true);
+       });
+    // Findings 3 and the item 10 gaps: a written `owns` of an array member in a loop invariant, three shapes beside the ones above.  `kind` 0: the member is an array of structures
+    // (check.cpp's aggregate member form); 1: a scalar array member of a structure that also has an array member of structures (struct SB { int a[4]; struct P v[2]; }, finding 3);
+    // 2: a scalar array member reached through a load (`&r->q->a`, the member form reached indirectly)
+    const auto written_member = [=](Kit& k, int kind)
+    {
+        StructType* P {k.strukt("P", {{"x", k.i32}, {"y", k.i32}})};
+        StructType* S {kind == 0   ? TA(k)
+                       : kind == 1 ? k.strukt("SB", {{"a", A4(k)}, {"v", k.prog.array_of(k.st(P), 2U)}})
+                                   : SA(k)};
+        StructType* R {k.strukt("R", {{"q", k.ptr(k.st(S))}, {"z", k.i32}})};
+        Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(kind == 2 ? R : S))}})};
+        const Var* rp {f->param_var(0)};
+        k.req(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+        k.ens(f, k.b.atom(AtomKind::Owns, fp(k, f, 0), 0, k.at()));
+        Var* i {k.local(f, "i", k.i32)};
+        const Expr* atom {kind == 2 ? k.b.atom(AtomKind::Owns, k.mem(k.leaf(k.pn(rp), 0), 1), -1, k.at())
+                                    : k.b.atom(AtomKind::Owns, k.mem(k.pn(rp), 0), -1, k.at())};
+        const Stmt* lp {k.whl(k.lt(k.v(i), k.num(k.i32, "4")), {k.cl(k.land(k.range(k.v(i), k.i32, "0", "4"), atom))},
+                              {k.cl(k.sub(k.num(k.i32, "4"), k.v(i)))},
+                              k.blkc({k.asg(i, k.add(k.v(i), k.num(k.i32, "1")))}))};
+        f->body = k.blkc({k.decl(i, k.num(k.i32, "0")), lp});
+        k.done(f);
+    };
+    rc("e1e2d_rej_written_owns_aggregate_member_array",
+       "a permission atom on an array member of structures or arrays in a loop invariant",
+       [=](Kit& k)
+       {
+           written_member(k, 0);
+       });
+    rc("e1e2d_rej_written_owns_scalar_member_array_of_an_aggregate_structure",
+       "a permission atom on an array member of structures or arrays in a loop invariant",
+       [=](Kit& k)
+       {
+           written_member(k, 1);
+       });
+    rc("e1e2d_rej_written_owns_member_array_through_a_load",
+       "a written `owns` atom on an array member reached other than directly from a pointer variable",
+       [=](Kit& k)
+       {
+           written_member(k, 2);
+       });
+    // void give(struct SA *p) ensures(owns(p->a));  (no body): 0052 item 2a, a partnerless atom on a formal of a function without a body
+    rc("e1e2d_rej_bodiless_partnerless_owns_member_array_of_a_formal",
+       "an `ensures` atom without a `requires` atom on something other than the result in a function without a body",
+       [=](Kit& k)
+       {
+           StructType* S {SA(k)};
+           Function* f {k.fn("give", k.vd, {{"p", k.ptr(k.st(S))}})};
+           k.ens(f, k.b.atom(AtomKind::Owns, k.mem(k.F(f, 0), 1), 0, k.at()));
+           k.done(f);
+       });
+    // void give(struct SA *p) ensures(owns(*p));  (no body)
+    rc("e1e2d_rej_bodiless_partnerless_owns_structure_of_a_formal",
+       "an `ensures` atom without a `requires` atom on something other than the result in a function without a body",
+       [=](Kit& k)
+       {
+           StructType* S {SA(k)};
+           Function* f {k.fn("give", k.vd, {{"p", k.ptr(k.st(S))}})};
+           k.ens(f, k.b.atom(AtomKind::Owns, k.F(f, 0), 0, k.at()));
+           k.done(f);
+       });
+}
+
+// ---- Part D, markers and partnerless atoms on a structure with an array member of scalars (item 15; S48 (i), (l)) ----
+void define_part_d_marker_cases()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto FP = [](Kit& k, Function* f, int i)
+    {
+        return k.b.text(k.F(f, i), f->params[static_cast<size_t>(i)].name);
+    };
+    auto lcv = [](const std::string& name, const std::string& doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(name + "_vacuity",
+           "the same with a function that ends in check(false): it fails (what the contract assumes is not inconsistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    auto vac_fn = [=](Kit& k)
+    {
+        if (k.vac_tail)
+        {
+            Function* g {k.fn("vac", k.vd)};
+            const Stmt* v {k.chk(k.no())};
+            g->body = k.blk({v});
+            k.done(g);
+            k.vac_loc = v->loc;
+        }
+    };
+    auto SA = [](Kit& k)
+    {
+        return k.strukt("SA", {{"n", k.i32}, {"a", k.prog.array_of(k.i32, 4U)}});
+    };
+    auto elem_place = [](Kit& k, const Expr* base, const char* i)
+    {
+        return k.b.elem_addr(k.mem(base, 1), k.num(k.i32, i), k.at());
+    };
+    // callee `wr` ([ref_to_uninit] | [must_init]) requires(owns(*p)) ensures(owns(*p)) { p->n = 1; p->a[1] = 7; [p->a[0], p->a[2], p->a[3]] }, caller `use`
+    // mode 0 (ref_to_uninit): the caller writes n and a[0..3], calls wr (writes a[1]), reads a[2] and n: the kept flags hold
+    // mode 1 (ref_to_uninit): a[2] unwritten by the caller, read after the call: uninitialized at the read
+    // mode 2 (must_init): the caller writes nothing, the filler writes everything, the caller reads a[2] and n
+    // mode 3 (must_init): the filler misses a[3]: postcondition at the callee's closing brace
+    const auto marker = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        const bool must {mode >= 2};
+        Function* w {k.fn("wr", k.vd, {{"p", SP}})};
+        w->params[0].init = must ? InitMarker::MustInit : InitMarker::RefToUninit;
+        k.req(w, k.b.atom(AtomKind::Owns, FP(k, w, 0), 0, k.at()));
+        k.ens(w, k.b.atom(AtomKind::Owns, FP(k, w, 0), 0, k.at()));
+        std::vector<const Stmt*> wb {k.lstore(k.pv(w, 0), 0, N(k, "1"))};
+        for (const char* i : {"0", "1", "2", "3"})
+        {
+            if (!must && std::string(i) != "1")
+            {
+                continue;
+            }
+            if (mode == 3 && std::string(i) == "3")
+            {
+                continue;
+            }
+            wb.push_back(k.store(elem_place(k, k.pv(w, 0), i), N(k, "7")));
+        }
+        w->body = k.blkc(wb);
+        k.done(w);
+        Function* f {k.fn("use", k.vd)};
+        Var* s {k.scell(f, "s", S)};
+        Var* x {k.local(f, "x", k.i32)};
+        Var* y {k.local(f, "y", k.i32)};
+        std::vector<const Stmt*> body {k.decl(s, nullptr)};
+        if (!must)
+        {
+            body.push_back(k.lstore(k.addr(s), 0, N(k, "0")));
+            for (const char* i : {"0", "1", "2", "3"})
+            {
+                if (mode == 1 && std::string(i) == "2")
+                {
+                    continue;
+                }
+                body.push_back(k.store(elem_place(k, k.addr(s), i), N(k, "0")));
+            }
+        }
+        body.push_back(k.es(k.call(w, {k.addr(s)})));
+        const Expr* rd {k.deref(elem_place(k, k.addr(s), "2"))};
+        body.push_back(k.decl(x, rd));
+        body.push_back(k.decl(y, k.leaf(k.addr(s), 0)));
+        f->body = k.blkc(body);
+        k.done(f);
+        return mode == 1 ? rd->loc : w->end_loc;
+    };
+    lcv("e1e2d_marker_ref_to_uninit_array_member",
+        "wr(p [ref_to_uninit]) requires and ensures owns(*p) of a structure with an array member: the requires claims no flag, the ensures keeps a set one (one quantifier for the array leaf); the caller reads s.a[2] and s.n after the call (verifies)",
+        [=](Kit& k)
+        {
+            marker(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_marker_ref_to_uninit_array_member_unwritten_fail",
+       "the caller never writes s.a[2] and reads it after the call: the callee kept only the flags that were set (uninitialized at the read)",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", marker(k, 1));
+       });
+    lcv("e1e2d_marker_must_init_array_member",
+        "fill(p [must_init]) writes n and every element: the ensures states every flag of the array leaf; the caller starts with no value and reads s.a[2] and s.n (verifies)",
+        [=](Kit& k)
+        {
+            marker(k, 2);
+            vac_fn(k);
+        });
+    lc("e1e2d_marker_must_init_array_member_misses_fail",
+       "the filler misses a[3]: the return row `forall k :: flag` of the array leaf fails (postcondition at the closing brace)",
+       [=](Kit& k)
+       {
+           k.fail_only("postcondition", marker(k, 3), 2U, 1U);
+       });
+    // struct SA *fresh(void) ensures(owns(*result)) (no body, trusted); struct SA *wrap(void) ensures(owns(*result)) { return fresh(); | return null; }
+    // void use(void) { struct SA *p = wrap(); if (p != null) { p->n = 2; p->a[1] = 3; check(p->a[1] == [3|4]); } }
+    const auto partnerless = [=](Kit& k, int mode) -> SrcLoc
+    {
+        StructType* S {SA(k)};
+        const Type SP {k.ptr(k.st(S))};
+        Function* fr {k.fn("fresh", SP)};
+        k.trusted(fr);
+        k.ens(fr, k.b.atom(AtomKind::Owns, k.R(fr), 0, k.at()));
+        k.done(fr);
+        Function* wr {k.fn("wrap", SP)};
+        k.ens(wr, k.b.atom(AtomKind::Owns, k.R(wr), 0, k.at()));
+        const Stmt* rt {k.ret(mode == 2 ? k.nul(SP) : k.call(fr, {}))};
+        wr->body = k.blk({rt});
+        k.done(wr);
+        Function* f {k.fn("use", k.vd)};
+        Var* p {k.local(f, "p", SP)};
+        const Stmt* c {k.chk(k.eq_c(k.deref(elem_place(k, k.pn(p), "1")), k.i32, mode == 1 ? "4" : "3"))};
+        f->body = k.blk({k.decl(p, k.call(wr, {})),
+                         k.iff(k.ne(k.pn(p), k.nul(SP)), k.blk({k.lstore(k.pn(p), 0, N(k, "2")),
+                                                                k.store(elem_place(k, k.pn(p), "1"), N(k, "3")), c}))});
+        k.done(f);
+        return mode == 1 ? c->loc : rt->loc;
+    };
+    lcv("e1e2d_partnerless_array_member",
+        "wrap() returns what fresh() gave it: an ensures atom owns(*result) with no requires partner on a structure with an array member; the caller writes through the result and checks a written element (verifies)",
+        [=](Kit& k)
+        {
+            partnerless(k, 0);
+            vac_fn(k);
+        });
+    lc("e1e2d_partnerless_array_member_wrong_check_fail", "check(p->a[1] == 4) after storing 3: the check fails",
+       [=](Kit& k)
+       {
+           k.fail("check", partnerless(k, 1));
+       });
+    lc("e1e2d_partnerless_array_member_returns_null_fail",
+       "wrap() returns NULL under ensures(owns(*result)): the return does not hold the atom (permission at the return)",
+       [=](Kit& k)
+       {
+           k.fail_only("permission", partnerless(k, 2), 11U, 0U);
+       });
+}
+
 } // namespace

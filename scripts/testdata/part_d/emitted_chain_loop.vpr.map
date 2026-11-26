@@ -1,0 +1,226 @@
+30	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+30	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+31	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+31	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+32	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+32	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+33	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+33	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+34	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+34	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+35	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+35	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+36	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+36	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+41	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	15	6	internal check: well-formedness of the contract of `zero_fill`
+42	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	15	6	internal check: well-formedness of the contract of `zero_fill`
+43	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+44	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+45	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+46	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+47	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+48	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+49	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+50	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+51	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+52	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+53	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+54	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+55	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+56	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+57	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+58	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+59	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	16	5	internal check: well-formedness of the contract of `zero_fill`
+60	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+60	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+61	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+61	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+62	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+62	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+63	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+63	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+64	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+64	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+65	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+65	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+66	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+66	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+67	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+67	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+68	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+68	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+69	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+69	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+70	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+70	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+71	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+71	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+72	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+72	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+73	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+73	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+74	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+74	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+75	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+75	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+76	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+76	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+77	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: well-formedness of the contract of `zero_fill`
+77	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	17	5	internal check: Silicon's own check of the postcondition of `zero_fill`
+96	assert.failed	null-dereference	tests/memory/struct_array_chain_loop.c	19	11	dereferences `p`, which may be null
+97	assert.failed	out-of-bounds	tests/memory/struct_array_chain_loop.c	19	11	writes `p->a[0]`, whose index may be outside `p->a`
+99	assert.failed	permission	tests/memory/struct_array_chain_loop.c	19	11	writes `p->a[0]` without owning it: the object it points to may have ended
+119	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	23	3	this loop begins without the permission to every element of `p->a`
+120	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	23	3	this loop begins without the permission to every element of `p->a`
+121	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->a`, which its invariant needs
+122	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->a`, which its invariant needs
+124	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->a`, which its invariant needs
+127	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->a`, which its invariant needs
+135	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+136	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+137	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+138	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+139	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+140	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+141	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+142	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+143	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+144	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	55	enters this loop without owning `p->n`, which its invariant needs
+145	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	67	this loop invariant reads `p->a[0]`, which this loop does not hold
+148	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: automatic range invariant of `i`
+148	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: automatic range invariant of `i`
+149	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+149	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+150	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+150	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+151	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+151	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+152	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+152	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+153	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+153	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+154	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+154	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+155	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+155	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+156	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+156	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+157	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+157	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+158	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+158	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+159	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+159	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+160	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+160	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+161	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+161	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+162	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+162	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+163	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+163	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+164	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+164	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+165	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+165	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+166	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+166	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+167	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+167	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+168	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+168	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+169	invariant.not.established	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+169	invariant.not.preserved	internal	tests/memory/struct_array_chain_loop.c	23	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+170	invariant.not.established	out-of-bounds	tests/memory/struct_array_chain_loop.c	21	67	this loop invariant reads `p->a[0]`, whose index may be outside `p->a`
+170	invariant.not.preserved	out-of-bounds	tests/memory/struct_array_chain_loop.c	21	67	this loop invariant reads `p->a[0]`, whose index may be outside `p->a`
+171	invariant.not.established	uninitialized	tests/memory/struct_array_chain_loop.c	21	67	this loop invariant reads `p->a[0]` before it is given a value
+171	invariant.not.preserved	uninitialized	tests/memory/struct_array_chain_loop.c	21	67	this loop invariant reads `p->a[0]` before it is given a value
+172	invariant.not.established	invariant-entry	tests/memory/struct_array_chain_loop.c	21	3	this loop invariant may not hold on entry
+172	invariant.not.preserved	invariant-preserved	tests/memory/struct_array_chain_loop.c	21	3	this loop invariant may not be preserved by an iteration
+173	invariant.not.established	overflow	tests/memory/struct_array_chain_loop.c	22	24	signed `int` subtraction may overflow
+173	invariant.not.preserved	overflow	tests/memory/struct_array_chain_loop.c	22	24	signed `int` subtraction may overflow
+174	termination.failed	termination	tests/memory/struct_array_chain_loop.c	22	3	the measure of this loop may not decrease, or may not be bounded below by zero
+180	assert.failed	null-dereference	tests/memory/struct_array_chain_loop.c	24	13	dereferences `p`, which may be null
+181	assert.failed	out-of-bounds	tests/memory/struct_array_chain_loop.c	24	13	writes `p->a[i]`, whose index may be outside `p->a`
+183	assert.failed	permission	tests/memory/struct_array_chain_loop.c	24	13	writes `p->a[i]` without owning it: the object it points to may have ended
+186	assert.failed	overflow	tests/memory/struct_array_chain_loop.c	25	11	signed `int` addition may overflow
+188	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without the permission to `p->n` that it began with
+189	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without the permission to `p->n` that it began with
+190	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without the permission to `p->a` that it began with
+191	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without the permission to `p->a` that it began with
+192	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+193	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+194	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+195	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+196	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+197	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+198	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+199	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+200	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+201	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+202	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+203	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+205	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+208	assert.failed	permission	tests/memory/struct_array_chain_loop.c	26	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+210	assert.failed	permission	tests/memory/struct_array_chain_loop.c	21	67	this loop invariant reads `p->a[0]`, which this loop does not hold
+216	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `*p`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+217	assert.failed	internal	tests/memory/struct_array_chain_loop.c	27	1	internal check: WF of a pointer parameter
+218	assert.failed	internal	tests/memory/struct_array_chain_loop.c	27	1	internal check: a pointer parameter points into its block
+219	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `*p`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+220	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `*p`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+221	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `*p`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+222	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `*p`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+223	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `*p`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+225	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `p->a`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+226	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `p->a`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+227	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `p->a`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+228	assert.failed	permission	tests/memory/struct_array_chain_loop.c	27	1	returns without owning `p->a`, which its contract promises	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+229	assert.failed	postcondition	tests/memory/struct_array_chain_loop.c	27	1	the postcondition of `zero_fill` may not hold	tests/memory/struct_array_chain_loop.c:17:this is the postcondition
+235	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	29	5	internal check: well-formedness of the contract of `use`
+235	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	29	5	internal check: Silicon's own check of the postcondition of `use`
+236	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	30	5	internal check: well-formedness of the contract of `use`
+236	postcondition.violated	internal	tests/memory/struct_array_chain_loop.c	30	5	internal check: Silicon's own check of the postcondition of `use`
+249	call.precondition	internal	tests/memory/struct_array_chain_loop.c	32	12	internal check: Silicon's own check of the allocation of `s`
+250	assert.failed	out-of-bounds	tests/memory/struct_array_chain_loop.c	32	18	writes `s.a[0]`, whose index may be outside `s.a`
+252	assert.failed	permission	tests/memory/struct_array_chain_loop.c	32	18	writes `s.a[0]` without owning it: a callee may have kept its object
+255	assert.failed	out-of-bounds	tests/memory/struct_array_chain_loop.c	32	21	writes `s.a[1]`, whose index may be outside `s.a`
+257	assert.failed	permission	tests/memory/struct_array_chain_loop.c	32	21	writes `s.a[1]` without owning it: a callee may have kept its object
+260	assert.failed	out-of-bounds	tests/memory/struct_array_chain_loop.c	32	24	writes `s.a[2]`, whose index may be outside `s.a`
+262	assert.failed	permission	tests/memory/struct_array_chain_loop.c	32	24	writes `s.a[2]` without owning it: a callee may have kept its object
+265	assert.failed	out-of-bounds	tests/memory/struct_array_chain_loop.c	32	27	writes `s.a[3]`, whose index may be outside `s.a`
+267	assert.failed	permission	tests/memory/struct_array_chain_loop.c	32	27	writes `s.a[3]` without owning it: a callee may have kept its object
+271	assert.failed	permission	tests/memory/struct_array_chain_loop.c	32	31	writes `s.n` without owning it: the object it points to may have ended
+275	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+276	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+277	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+278	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+279	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+280	assert.failed	uninitialized	tests/memory/struct_array_chain_loop.c	33	12	passes `&s` to `zero_fill`, whose parameter `p` needs `s.n` to have a value; it may not have one here
+281	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+282	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+284	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+285	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+286	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s.a`, without owning it
+287	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s.a`, without owning it
+288	assert.failed	uninitialized	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs every element of `s.a` to have a value; it may not have one here
+289	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s.a`, without owning it
+290	assert.failed	permission	tests/memory/struct_array_chain_loop.c	33	12	calls `zero_fill`, which needs to own `s`, without owning it
+291	call.precondition	internal	tests/memory/struct_array_chain_loop.c	33	12	internal check: Silicon's own check of the precondition of `zero_fill`
+292	assert.failed	out-of-bounds	tests/memory/struct_array_chain_loop.c	34	13	reads `s.a[0]`, whose index may be outside `s.a`
+293	assert.failed	permission	tests/memory/struct_array_chain_loop.c	34	13	reads `s.a[0]` without owning it: a callee may have kept its object
+294	assert.failed	uninitialized	tests/memory/struct_array_chain_loop.c	34	13	`s.a[0]` may be read here before it is given a value
+296	assert.failed	lifetime	tests/memory/struct_array_chain_loop.c	34	3	the address of `s.n` may still be in use when its lifetime ends
+298	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_chain_loop.c	34	3	the address of an element of `s.a` may still be in use when its lifetime ends
+299	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_chain_loop.c	34	3	the address of an element of `s.a` may still be in use when its lifetime ends
+300	assert.failed	lifetime	tests/memory/struct_array_chain_loop.c	34	3	the address of `s` may still be in use when its lifetime ends
+305	assert.failed	postcondition	tests/memory/struct_array_chain_loop.c	34	3	the postcondition of `use` may not hold	tests/memory/struct_array_chain_loop.c:30:this is the postcondition
+307	assert.failed	lifetime	tests/memory/struct_array_chain_loop.c	35	1	the address of `s.n` may still be in use when its lifetime ends
+309	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_chain_loop.c	35	1	the address of an element of `s.a` may still be in use when its lifetime ends
+310	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_chain_loop.c	35	1	the address of an element of `s.a` may still be in use when its lifetime ends
+311	assert.failed	lifetime	tests/memory/struct_array_chain_loop.c	35	1	the address of `s` may still be in use when its lifetime ends
+316	assert.failed	missing-return	tests/memory/struct_array_chain_loop.c	35	1	control may reach the end of `use` without returning a value
+322	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	15	6	internal check: well-formedness of the contract of `zero_fill (well-formedness)`
+323	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	15	6	internal check: well-formedness of the contract of `zero_fill (well-formedness)`
+324	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	15	6	internal check: well-formedness of the contract of `zero_fill (well-formedness)`
+327	assert.failed	permission	tests/memory/struct_array_chain_loop.c	17	47	the contract of `zero_fill` reads `p->a[0]` without owning it
+332	not.wellformed	internal	tests/memory/struct_array_chain_loop.c	29	5	internal check: well-formedness of the contract of `use (well-formedness)`

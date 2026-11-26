@@ -1,5 +1,5 @@
 // expect: rejected cerastes-unsupported_expression @ L18
-// expect: rejected cerastes-unsupported_expression @ L23
+// (L23, malloc of a structure with an array member, was rejected here until Part D lifted it: tests/memory/struct_array_heap_malloc.c; the line stays)
 // expect: rejected cerastes-unsupported_expression @ L24
 // expect: rejected cerastes-array_address_null_test @ L25
 // mode: c23, c++20

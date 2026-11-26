@@ -1,5 +1,5 @@
-// expect: rejected cerastes-unsupported_declaration @ L21
 // expect: rejected cerastes-unsupported_declaration @ L26
+// (L21, an owning member beside an array member, was rejected here until Part D lifted it: tests/memory/struct_array_owner_beside.c; the line stays)
 // expect: rejected cerastes-unsupported_declaration @ L31
 // (the member struct P v[2] at L36 drew unsupported_declaration here until Part C2 lifted it; its row is retired, the line stays)
 // expect: rejected cerastes-unsupported_declaration @ L41
