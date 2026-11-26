@@ -1866,6 +1866,7 @@ int main(int argc, char** argv)
     define_array_literals();
     define_aggregate_element_guards();
     define_restrict_backstop_cases();
+    define_struct_range_cases();
     define_array_of_structures_lowering();
     define_array_of_structures_loops();
     define_array_of_structures_pairs_and_copies();

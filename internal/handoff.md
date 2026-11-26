@@ -1466,7 +1466,23 @@ numbered from 338):
   which C23 6.7.3.1 gives no promise by the auditor's reading and which one compiled program confirms; not
   shown wrong, on the base too, an M8 entry with the model of `restrict` (record 0064 item 19).
 
-The next questions start at 343.
+- **343, OPEN FOR THE OWNER** (fail closed: an internal error, exit 3, never "verified"; it went to the advisor
+  first, who left the fix to the owner because it changes existing programs' Viper). A structure pointer
+  formed by indexing a pointer base outside the slots the function's atoms cover (`&p[n]` one past a range of
+  structures, `&p[i]` with `i` in `[0, n]`, and `&p[1]` under `owns(*p)`) cannot be shown well-formed as a
+  structure pointer. Passing it to a function with no atom on that parameter, directly or through a local copy,
+  or returning it, ends in exit 3 at Silicon's own check (the explicit row record 0028 item 11 asks for is
+  missing). It predates Part C1: `g(&p[1])` under `owns(*p)` does the same on Commit 1's build, since the
+  first session's Part B accepted `&p[i]` on a pointer to a structure. Record 0064 item 7 lists the limit and
+  the page says it; the planned pin `range_struct_past_end_false_alarm.c` did not land (the harness cannot pin
+  an exit 3). Seven probes: `build/m4.5e1e2b/q343/`. **Recommended:** one explicit row, `permission`, in source
+  terms ("passes `&p[n]`, which may point outside the structures this function holds"), written at a call for
+  every structure-pointer argument and at a `return` for a structure-pointer result; approve that the Viper
+  of existing programs with such arguments or results gains that row (a neutrality run then lists them), and
+  build it at the start of the next session, before Part C2's audit. **Alternative:** keep the exit 3 listed
+  until M4.5e2, which gives pointers into arrays their bounds rows anyway.
+
+The next questions start at 344.
 
 ### Questions for the owner (after the planning of M4.5e1e2's continuation)
 

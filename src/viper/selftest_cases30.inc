@@ -934,7 +934,9 @@ void define_ranges_lowering()
            f->body = k.blk({});
            k.done(f);
        });
-    rc("range_rej_struct_pointee", "a range permission atom of something other than a pointer parameter",
+    // Part C1 lifts this refusal (the text said "structures: M4.5e1e2"; flipped from `rc`): the contract of one function over structures is accepted
+    lc("range_struct_pointee",
+       "requires(owns_range(sp, n)) with a struct S *sp: accepted, the rows of its one leaf path",
        [=](Kit& k)
        {
            // requires(owns_range(sp, n)) with a struct S *sp

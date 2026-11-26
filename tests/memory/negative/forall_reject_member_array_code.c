@@ -1,10 +1,10 @@
 // expect: rejected cerastes-unsupported_annotation @ L23
 // expect: rejected cerastes-unsupported_annotation @ L35
 // expect: rejected cerastes-forall_function @ L52
-// expect: rejected cerastes-unsupported_annotation @ L52
+// (the owns_range over structures at L52 drew unsupported_annotation here until Part C1 lifted it, question 340; its row is retired, the line stays)
 // mode: c23, c++20
 // twin: tests/memory/struct_array_owns_array.c
-// Pins: M4.5e1e2 (continuation), Part F retires or re-expects this staging pin (plan section 10, Flips A; R2 of Step 0): cerastes_forall over a member array in a check and in a loop invariant, and over a pointer to structures (p[i].x under the binder). The rows are what the frozen base build (f07d80a) printed in both modes
+// Pins: M4.5e1e2 (continuation), Part F retires or re-expects this staging pin (plan section 10, Flips A; R2 of Step 0): cerastes_forall over a member array in a check and in a loop invariant, and over a pointer to structures (p[i].x under the binder). The rows are what the frozen base build (f07d80a) printed in both modes [Part C1 (question 340): the unsupported_annotation row of L52, owns_range over structures, is retired by the lift; forall_function @ L52 stays for Part F]
 // Pre-registered from the base build's R2 run, before any part of M4.5e1e2: rejected (observed, not predicted)
 #include <cerastes.h>
 #include <stddef.h>

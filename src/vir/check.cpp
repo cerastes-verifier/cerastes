@@ -938,6 +938,8 @@ private:
         ok_members_.clear();
         array_addr_ok_.clear();
         contract_elem_ok_.clear();
+        contract_struct_elem_ok_.clear();
+        loop_struct_elem_ok_.clear();
         struct_pos_.clear();
         field_base_.clear();
         literal_stores_.clear();
@@ -1113,6 +1115,12 @@ private:
         if (f.pure)
         {
             pure_contract_rules(f);
+            if (holds_struct_range(f))
+            {
+                err(f.loc,
+                    "the `pure` function '" + f.c_name +
+                        "' reads a range of structures (decision 0064 item 7: the rows of a `pure` function over structures are M4.5e1e2 part F)");
+            }
         }
         if (f.noreturn && !f.ensures_.empty())
         {
@@ -1310,6 +1318,54 @@ private:
         }
     }
 
+    // Decision 0064 item 7, Part C1: the pairing rows of a range over structures with the other atoms of its function (a cell, a structure atom, a range of any element type, per pair of
+    // leaf paths of one field, Form P) are built in the calls' and the returns' rows.  What stays refused is an `owns_block` atom of the same function that holds a cell of one of the
+    // range's leaf fields: the rows of a heap block beside a range over structures are Part D's (question 292).
+    static std::vector<Type> held_leaf_types(const AtomSite& s)
+    {
+        std::vector<Type> out;
+        if (s.atom == nullptr || s.atom->atom == AtomKind::Live || s.atom->a == nullptr || !s.atom->a->type.is_ptr() ||
+            s.atom->a->type.pointee == nullptr)
+        {
+            return out;
+        }
+        for (const LeafPath& l : object_leaf_paths(*s.atom->a->type.pointee))
+        {
+            out.push_back(l.type);
+        }
+        return out;
+    }
+    void struct_range_neighbours(const Function& f, const std::vector<AtomSite>& sites,
+                                 const std::vector<AtomSite>& block_sites)
+    {
+        for (const AtomSite& a : sites)
+        {
+            if (!is_range_atom(a.atom->atom) || a.atom->a == nullptr || !a.atom->a->type.is_ptr() ||
+                a.atom->a->type.pointee == nullptr || !a.atom->a->type.pointee->is_struct())
+            {
+                continue;
+            }
+            const std::vector<Type> mine {held_leaf_types(a)};
+            for (const AtomSite& o : block_sites)
+            {
+                bool shares {false};
+                for (const Type& t : held_leaf_types(o))
+                {
+                    for (const Type& m : mine)
+                    {
+                        shares = shares || t == m;
+                    }
+                }
+                if (shares)
+                {
+                    err(o.atom->loc,
+                        "an `owns_block` atom beside a range over structures in '" + f.c_name +
+                            "' that holds a cell of one of the same leaf fields (decision 0064 item 7: a heap block beside such a range is M4.5e1e2 part D, not yet lifted)");
+                }
+            }
+        }
+    }
+
     // Record 0060 item 3, what the encoder refuses first and this repeats: a guard of a range atom reads no memory (its rows are pure `assert`s); one range atom
     // of a parameter (the same kind twice, `owns_range` beside `reads_range`) and no cell atom, `live` or `owns_block` beside it on the same parameter, in one clause
     // list or one in each (M4.8).
@@ -1385,6 +1441,7 @@ private:
         // decision 0047 item 4: no ghost amount, no partner
         const std::vector<AtomSite> block_sites {contract_block_atoms(f)};
         range_sites(f, sites, block_sites);
+        struct_range_neighbours(f, sites, block_sites);
         std::set<const Expr*> placed;
         for (const AtomSite& s : sites)
         {
@@ -1634,10 +1691,21 @@ private:
             return;
         }
         if (e.a->kind != Expr::Kind::Formal || !e.a->type.is_ptr() || !accepted_pointer(e.a->type) ||
-            e.a->type.pointee == nullptr || e.a->type.pointee->is_struct())
+            e.a->type.pointee == nullptr)
         {
             err(e.loc,
-                "a range permission atom of something other than a pointer parameter to a bool, an integer, an enumeration or a pointer (record 0060 item 3; other bases: M4.5e2, structures: M4.5e1e2)");
+                "a range permission atom of something other than a pointer parameter to a bool, an integer, an enumeration, a pointer or a structure (record 0060 item 3, decision 0064 item 7; other bases: M4.5e2)");
+        }
+        else if (e.a->type.pointee->is_struct())
+        {
+            // decision 0064 item 7 (Part C1): a range over verified structures, per leaf path.  An element with an array member (arrays of arrays: Part E) or with an `owning` or
+            // `ref_to_uninit` member (Part D) has no rows yet
+            if (e.a->type.pointee->struct_type == nullptr || struct_has_array(*e.a->type.pointee->struct_type) ||
+                struct_has_marked(*e.a->type.pointee->struct_type))
+            {
+                err(e.loc,
+                    "a range permission atom over structures whose element holds an array member or an `owning` or `ref_to_uninit` member (decision 0064 item 7: M4.5e1e2 parts D and E)");
+            }
         }
         if (!e.b->type.is_int() || e.b->type.is_bool() || is_enum(e.b->type))
         {
@@ -3679,6 +3747,33 @@ private:
                     {
                         contract_elem_ok_.insert(e.a); // record 0060 item 5: `p[e]` read in a contract
                     }
+                    if (const Expr* el {contract_struct_element(e.a)}; el != nullptr)
+                    {
+                        // decision 0064 item 7 (Part C1): `p[e].x` of a pointer parameter to structures, read as the leaf of the element's slot
+                        contract_elem_ok_.insert(el);
+                        contract_struct_elem_ok_.insert(el);
+                    }
+                }
+                else if (ctx == Ctx::Annot && (in_invariant_ || in_loop_measure_))
+                {
+                    // decision 0064 item 10 (Part C1): `p[e].x` of a pointer VARIABLE to structures in a loop invariant or measure (a parameter's local copy; the loop's places frame it by
+                    // the slot of the pointer's current value).  A global array's or an array member's element is C2's, `p[e].q[i]` and `*p[e].q` are refused where they stand.
+                    if (through_element_pointer(e.a))
+                    {
+                        err(e.loc,
+                            "a read through a pointer loaded from a member of an element of a pointer to structures in a loop invariant or measure (decision 0064 item 10: the range holds the member, not its pointee)");
+                        break;
+                    }
+                    // Only a parameter's own local copy whose function holds a range over structures on that parameter in its `requires` (the encoder's predicate, `struct_range_carried`): a
+                    // pointer with only a structure atom is the encoder's rejection ("write `p->x`"), and this is its backstop.
+                    if (const Expr* el {member_chain_root(e.a)};
+                        e.a != nullptr && e.a->kind == Expr::Kind::MemberAddr && el != nullptr &&
+                        el->kind == Expr::Kind::ElemAddr && el->a != nullptr && el->a->kind == Expr::Kind::Local &&
+                        el->a->var != nullptr && el->a->var->is_param_copy && fn_ != nullptr &&
+                        holds_struct_range_on(*fn_, el->a->var->param_index))
+                    {
+                        loop_struct_elem_ok_.insert(el);
+                    }
                 }
                 if (e.a != nullptr && shared_addrs_.count(e.a) != 0U)
                 { // the address of the enclosing store, already checked (decision 0039 item 5)
@@ -3710,7 +3805,8 @@ private:
                     // record 0060 item 5: the element `p[e]` of a pointer parameter (its ElemAddr is checked where it stands) is rooted at that parameter
                     const Expr* root {e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr
                                           ? (member_array_base(e.a->a) ? place_root(e.a->a) : e.a->a)
-                                          : place_root(e.a)};
+                                      : contract_struct_element(e.a) != nullptr ? contract_struct_element(e.a)->a
+                                                                                : place_root(e.a)};
                     if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal &&
                         root->kind != Expr::Kind::GlobalAddr && root->kind != Expr::Kind::ForallArg &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
@@ -3956,7 +4052,9 @@ private:
                 if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
                 {
                     // decision 0045 item 2: under loads and pointer leaves too (`p->q->x`)
-                    const Expr* root {place_root(&e)};
+                    const Expr* sel {contract_struct_element(&e)};
+                    const Expr* root {sel != nullptr && contract_struct_elem_ok_.count(sel) != 0U ? sel->a
+                                                                                                  : place_root(&e)};
                     if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
                     {
@@ -4168,18 +4266,18 @@ private:
                     {
                         // decision 0064 item 5 (Part B): `p[i]` of a pointer to a verified structure in code; the element of a pointer in a contract is Part C's, and one whose
                         // structure holds an array member is an array of arrays (Part E)
-                        if (ctx == Ctx::Requires || ctx == Ctx::Ensures)
+                        if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && contract_struct_elem_ok_.count(&e) == 0U)
                         {
                             err(e.loc,
-                                "the element of a pointer to a structure in a contract (decision 0064 item 7: M4.5e1e2 part C)");
+                                "the element of a pointer to a structure in a contract other than the read of one of its members, `p[e].x` (decision 0064 item 7)");
                             break;
                         }
                         // a loop invariant or measure reads memory through the loop's places (item 10): `v[e].x` of a named local array is framed by the leaf's place, `p[e].x` through
                         // a pointer is Part C's (the framing of an element of a pointer's range), refused here until then
-                        if (in_invariant_ || in_loop_measure_)
+                        if ((in_invariant_ || in_loop_measure_) && loop_struct_elem_ok_.count(&e) == 0U)
                         {
                             err(e.loc,
-                                "the element of a pointer to a structure in a loop invariant or measure (decision 0064 item 10: M4.5e1e2 part C)");
+                                "the element of a pointer to a structure in a loop invariant or measure other than the read of one of its members through a local pointer, `p[e].x` (decision 0064 item 10)");
                             break;
                         }
                         if (e.a->type.pointee->struct_type == nullptr ||
@@ -4427,6 +4525,46 @@ private:
             a = a->a;
         }
         return a;
+    }
+    // Decision 0064 item 7 (Part C1): the element of a pointer parameter under at least one member step of a pure chain (`p[e].x`, `p[e].t.y`): its `ElemAddr`, or null.
+    static const Expr* contract_struct_element(const Expr* a)
+    {
+        if (a == nullptr || a->kind != Expr::Kind::MemberAddr)
+        {
+            return nullptr;
+        }
+        const Expr* r {member_chain_root(a)};
+        return r != nullptr && r->kind == Expr::Kind::ElemAddr && r->a != nullptr && r->a->kind == Expr::Kind::Formal
+                   ? r
+                   : nullptr;
+    }
+    // Decision 0064 item 10 (Part C1): the address `a` is reached through a pointer that was READ from a member of an element of a pointer to structures (`p[e].q[i]`, `*p[e].q`, `p[e].q->x`):
+    // the range holds the leaf `q`, not what it points to, so a loop invariant or measure reading the pointee is refused here rather than left to a framing assert that always fails
+    static bool through_element_pointer(const Expr* a)
+    {
+        while (a != nullptr)
+        {
+            if (a->kind == Expr::Kind::MemberAddr || a->kind == Expr::Kind::ElemAddr)
+            {
+                a = a->a;
+            }
+            else if (a->kind == Expr::Kind::Deref)
+            {
+                const Expr* r {member_chain_root(a->a)};
+                if (a->a != nullptr && a->a->kind == Expr::Kind::MemberAddr && r != nullptr &&
+                    r->kind == Expr::Kind::ElemAddr && r->a != nullptr && r->a->type.is_ptr() &&
+                    r->a->type.pointee != nullptr && r->a->type.pointee->is_struct())
+                {
+                    return true;
+                }
+                a = a->a;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return false;
     }
     // Whether a struct type has an array member anywhere in its nest (decision 0063 item 4): a struct VALUE of one is part E's.
     static bool struct_has_array(const StructType& st, int depth = 0)
@@ -4986,6 +5124,35 @@ private:
         }
     }
 
+    // Whether `f`'s contract holds a range atom over structures (decision 0064 item 7, Part C1).  What is not lifted yet for such a function is refused where it appears: a loop in
+    // it (the range places of item 10) and a `pure` function that holds one (Part F).  Its calls and returns are lifted (slice 2a: the call rows of item 8; the pairing rows of item 7
+    // stay refused by `struct_range_neighbours` until 2b).
+    // Whether `f`'s `requires` holds a range atom over structures on its parameter number `param` (the pointer is the formal itself)
+    static bool holds_struct_range_on(const Function& f, int param)
+    {
+        for (const AtomSite& s : contract_atoms(f))
+        {
+            if (!s.in_ensures && s.atom != nullptr && is_range_atom(s.atom->atom) && s.atom->a != nullptr &&
+                s.atom->a->kind == Expr::Kind::Formal && s.atom->a->index == param && s.atom->a->type.is_ptr() &&
+                s.atom->a->type.pointee != nullptr && s.atom->a->type.pointee->is_struct())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool holds_struct_range(const Function& f)
+    {
+        for (const AtomSite& s : contract_atoms(f))
+        {
+            if (s.atom != nullptr && is_range_atom(s.atom->atom) && s.atom->a != nullptr && s.atom->a->type.is_ptr() &&
+                s.atom->a->type.pointee != nullptr && s.atom->a->type.pointee->is_struct())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
     void call(const Expr& e, Ctx ctx)
     {
         if (!seen_effects_.insert(&e).second)
@@ -5416,6 +5583,10 @@ private:
     std::set<const Expr*> array_addr_ok_;
     // the ElemAddr nodes that are the operand of a Deref in a contract (record 0060 item 5: `p[e]` is a read there, `&p[e]` is not)
     std::set<const Expr*> contract_elem_ok_;
+    // the ElemAddr nodes of a pointer parameter to structures that stand under member steps in the place of a read in a contract (`p[e].x`, decision 0064 item 7)
+    std::set<const Expr*> contract_struct_elem_ok_;
+    // the same in a loop invariant or measure: the ElemAddr nodes of a local pointer to structures under member steps (`p[e].x`, decision 0064 item 10)
+    std::set<const Expr*> loop_struct_elem_ok_;
     std::unordered_set<const StructType*> structs_; // the program's struct types
     // the struct-typed nodes a consumer allows (call argument, return, struct Store, expression statement, Field
     // operand; decision 0044 item 2)

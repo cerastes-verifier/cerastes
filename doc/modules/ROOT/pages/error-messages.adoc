@@ -544,7 +544,8 @@ right is missing:
   literal negative count, and "calls `f`,
   which needs to read `a[0..4)`, without the permission to read it" for
   `cerastes_reads_range`), "passes `a[0..2)` and `a[1..3)` to `f`,
-  which may be one object, once to own it", "returns without owning `p[0..n)`, which
+  which may be one object, once to own it" (for a range of structures the second
+  place may be a member of an element, `v[1].x`, or an element), "returns without owning `p[0..n)`, which
   its contract promises", "the contract of `f` reads `p[i]` without owning it", and
   "the contract of `f` returns `p[0..n)` on a path where its `requires` did not take
   it" (xref:memory.adoc#ranges[Ranges in contracts]);

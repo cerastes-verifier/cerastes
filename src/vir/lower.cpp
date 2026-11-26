@@ -4420,8 +4420,14 @@ private:
     // heap and do not mention the binder `k`; a null `amount` is full permission.
     E range_perm(const E& ref, const E& lo, const E& hi, const std::string& field, const E& amount = nullptr)
     {
+        return range_perm(ref, lo, hi, std::vector<int> {}, field, amount);
+    }
+    // The same over a LEAF PATH of the element (decision 0064 item 7): the receiver of the permission, and its trigger, is the leaf's `loc(member(loc(block_of(p), k), j), 0)`
+    E range_perm(const E& ref, const E& lo, const E& hi, const std::vector<int>& path, const std::string& field,
+                 const E& amount = nullptr)
+    {
         const E k {low::var("k")};
-        const E slot {low::dom("loc", {block_of(ref), k})};
+        const E slot {chain_ref(low::dom("loc", {block_of(ref), k}), path)};
         const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, lo, k), low::bin(low::BinOp::Lt, k, hi))};
         return low::forall_("k", {slot},
                             low::bin(low::BinOp::Implies, in,
@@ -4463,12 +4469,19 @@ private:
     // mention `k`; the lint admits exactly these shapes.
     E range_quant(const E& ptr, const E& count, const std::function<E(const E&)>& body)
     {
+        return range_quant(ptr, count, std::vector<int> {}, body);
+    }
+    // The same over a LEAF PATH of the element (decision 0064 item 7): the quantifier's trigger and the body's receiver are the leaf's receiver
+    // `loc(member(loc(block_of(p), k), j), 0)` (one member step per path entry); an empty path is the slot itself, the text above.
+    E range_quant(const E& ptr, const E& count, const std::vector<int>& path, const std::function<E(const E&)>& body)
+    {
         const E k {low::var("k")};
         const E slot {low::dom("loc", {block_of(ptr), k})};
+        const E recv {chain_ref(slot, path)};
         const E lo {off_of(ptr)};
         const E hi {plus(lo, count)};
         const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, lo, k), low::bin(low::BinOp::Lt, k, hi))};
-        return low::forall_("k", {slot}, low::bin(low::BinOp::Implies, in, body(slot)));
+        return low::forall_("k", {recv}, low::bin(low::BinOp::Implies, in, body(recv)));
     }
     // `q` is a slot of the range `base[0..n)`: the same block, `offset_of(base) <= offset_of(q) < offset_of(base) + n` (item 5's framing, item 9's sums).
     E in_range(const E& q, const E& base, const E& count)
@@ -4845,7 +4858,7 @@ private:
 
     // `v[e].x`, `v[e].t.x` of a named local array of structures in an invariant or a measure (decision 0064 item 10): like `a[e]`, the loop carries the array whole (a place per leaf, whose
     // `acc` conjuncts come before the user's), so the read needs no framing chain: `ite(in bounds, <leaf cell>, dummy)` with the bound (`out-of-bounds`) and the leaf's flag
-    // (`uninitialized`) as obligation clauses.  The bound is strict (a member step needs its slot to exist, item 5).  A read through a pointer (`p[e].x`) or of a global array is Part C's
+    // (`uninitialized`) as obligation clauses.  The bound is strict (a member step needs its slot to exist, item 5).  A read through a pointer variable (`p[e].x`) is framed by the loop's places (below); one of a global array is Part C2's
     // (check_program refuses it before lowering): an internal error here.
     LV inv_member_elem(const Expr& e, const Expr& below, const Env& env, const E& guard, const Deps& gdep, Full& full)
     {
@@ -4854,11 +4867,27 @@ private:
                           below.a->var != nullptr && below.a->var->type.is_array() &&
                           below.a->var->type.element != nullptr && below.a->var->type.element->is_struct() &&
                           !e.type.is_struct() && !e.type.is_array()};
+        // `p[e].x` of a pointer variable to structures (a parameter's local copy, or any local; decision 0064 item 10, record 0060 item 11): the slot is the pointer's CURRENT value's block at its
+        // offset plus the index, the leaf its receiver; the read is framed by the loop's places (a cell place, a range place's leaf, an array place) by that slot, else `permission` at the
+        // clause.  A parameter the function assigns has no range place, so a read through it is unframed whatever it was on entry.  No bound row, as for a scalar pointer's `p[e]`.
+        const bool pointer {below.a != nullptr && below.b != nullptr && below.a->kind == Expr::Kind::Local &&
+                            below.a->type.is_ptr() && below.a->type.pointee != nullptr &&
+                            below.a->type.pointee->is_struct() && !e.type.is_struct() && !e.type.is_array()};
+        if (pointer)
+        {
+            std::vector<int> steps;
+            member_root(e.a, &steps);
+            const LV b {lower(*below.a, env, guard, gdep, full)};
+            const LV i {lower(*below.b, env, guard, gdep, full)};
+            const E slot {low::dom("loc", {block_of(b.e), low::bin(BinOp::Add, low::dom("offset_of", {b.e}), i.e)})};
+            return inv_read_at(e, LV {chain_ref(slot, steps), join(b.dep, i.dep)},
+                               e.c_text.empty() ? place_text(*e.a) : e.c_text, guard, gdep, full);
+        }
         if (!named)
         {
             internal_error(
                 e.loc,
-                "a member of an element that is not a member of an element of a named local array of structures reached a loop annotation (decision 0064 item 10: a pointer base is Part C's)");
+                "a member of an element that is not a member of an element of a named local array of structures reached a loop annotation (decision 0064 item 10: the element of a global array or of an array member is Part C2's)");
             return {inv_dummy(e.type), {}};
         }
         std::vector<int> steps;
@@ -5073,7 +5102,8 @@ private:
         {
             for (const RangePlace& rp : *inv_ranges_)
             {
-                if (rp.cmp == sfx)
+                // a leaf of a range over structures is no interval of slots (an application over one is a false alarm, fail closed, as for a leaf of an array of structures)
+                if (rp.cmp == sfx && rp.leaf.empty())
                 {
                     add(low::and_(low::and_(rp.guard, low::bin(BinOp::Eq, block_of(r.ptr), block_of(rp.base))),
                                   low::and_(low::bin(BinOp::Le, rp.lo, off), low::bin(BinOp::Le, end, rp.hi))));
@@ -7255,9 +7285,18 @@ private:
         std::set<std::string> out;
         if (site_is_range(s))
         {
-            // the one field of the element type (a range over a structure is refused by the checker: record 0060 item 3; decision 0064 item 4, trap 3: the empty set
-            // would record no write by a callee, so a structure or array element is an internal error until Part C gives it one field per leaf path)
-            out.insert(elem_cell_suffix(site_pointee(s)));
+            // the one field of the element type; a range over structures has one field per leaf path (decision 0064 items 4 and 7, trap 3: the empty set would record no write by
+            // a callee)
+            const Type& pt {site_pointee(s)};
+            if (pt.is_struct())
+            {
+                for (const ElemLeaf& l : elem_leaves(pt))
+                {
+                    out.insert(cell_suffix(l.type));
+                }
+                return out;
+            }
+            out.insert(elem_cell_suffix(pt));
             return out;
         }
         if (!site_takes_cell(s))
@@ -7684,6 +7723,12 @@ private:
                 out_name(site.atom->amount - fa.nreq)); // decision 0052 item 2: no partner, no sum of its objects
         }
         E r {low::var(amount_name(site.atom->amount))};
+        if (site_is_range(site) && site_pointee(site).is_struct() && !site.via.empty())
+        {
+            // decision 0064 item 7: a range over structures is on a pointer parameter (its amount is its partner's: no object to follow through a load); a place reached through a step has no rows
+            internal_error(site.atom->loc,
+                           "a range over structures reached through a load reached lowering (decision 0064 item 7)");
+        }
         if (!site.in_ensures || site.via.empty() || !is_derived_key(site_key(site)) ||
             !derived_of(site_key(site)).has_load)
         {
@@ -7904,53 +7949,87 @@ private:
         }
         const bool owns {e.atom == AtomKind::OwnsRange};
         const E amount {low::var(amount_name(e.amount))};
-        const std::string sfx {use_cell_type(t)};
-        E r {pure};
-        r = low::and_(r, range_quant(root, n.e,
-                                     [&](const E& slot)
-                                     {
-                                         return owns ? low::acc(slot, "v_" + sfx) : low::acc(slot, "v_" + sfx, amount);
-                                     }));
-        r = low::and_(r, range_quant(root, n.e,
-                                     [&](const E& slot)
-                                     {
-                                         return owns ? low::acc(slot, "d_" + sfx) : low::acc(slot, "d_" + sfx, amount);
-                                     }));
+        // Decision 0064 item 7: per LEAF PATH of the element (a scalar element is the one leaf with the empty path, so the text of a range over scalars is as before): the value and
+        // the flag permission, the flag, the type's range, each a quantifier over the absolute slot with the leaf's receiver as its trigger
+        struct RangeLeaf
+        {
+            std::vector<int> path;
+            Type type;
+        };
+        std::vector<RangeLeaf> leaves;
+        if (t.is_struct())
+        {
+            for (const ElemLeaf& l : elem_leaves(t))
+            {
+                leaves.push_back(RangeLeaf {l.path, l.type});
+            }
+        }
+        else
+        {
+            leaves.push_back(RangeLeaf {{}, t});
+        }
         // Record 0060 item 12 (decision 0042 item 5): a marked parameter's elements need not have a value on entry, so its `requires` atom has no flags conjunct and states the
         // type's range under the flag; `must_init`'s `ensures` atom is the plain one; `ref_to_uninit`'s `ensures` atom keeps a flag that was set (`old(flag) ==> flag`, under
         // the partner's guard in the entry state) and states the range under the flag
         const InitMarker mk {site_marker(*cf_, site)};
         const bool plain {mk == InitMarker::None || (mk == InitMarker::MustInit && site.in_ensures)};
-        if (plain)
+        E r {pure};
+        if (t.is_struct())
         {
+            // Decision 0064 item 7, "the first line": item 3's LENGTH FACTS of every slot of the range, one quantifier over the absolute slot with the slot as its trigger (what
+            // `struct_lens` states of one structure slot).  A hypothesis the caller discharges at its LENS row, an allocation or its own atom gives it; never an axiom.
             r = low::and_(r, range_quant(root, n.e,
                                          [&](const E& slot)
                                          {
-                                             return cell_flag(slot, t);
+                                             return struct_lens(slot, *t.struct_type);
                                          }));
         }
-        else if (site.in_ensures && e.amount >= 0 && e.amount < atoms_of(*cf_).nreq)
+        for (const RangeLeaf& l : leaves)
         {
-            const E gp {site_guard(atoms_of(*cf_).sites[static_cast<size_t>(e.amount)], env)};
-            r = low::and_(r, range_quant(root, n.e,
-                                         [&](const E& slot)
+            const std::string sfx {use_cell_type(l.type)};
+            r = low::and_(r, range_quant(root, n.e, l.path,
+                                         [&](const E& recv)
                                          {
-                                             E kept {low::old_(cell_flag(slot, t))};
-                                             if (gp)
+                                             return owns ? low::acc(recv, "v_" + sfx)
+                                                         : low::acc(recv, "v_" + sfx, amount);
+                                         }));
+            r = low::and_(r, range_quant(root, n.e, l.path,
+                                         [&](const E& recv)
+                                         {
+                                             return owns ? low::acc(recv, "d_" + sfx)
+                                                         : low::acc(recv, "d_" + sfx, amount);
+                                         }));
+            if (plain)
+            {
+                r = low::and_(r, range_quant(root, n.e, l.path,
+                                             [&](const E& recv)
                                              {
-                                                 kept = low::and_(old_entry(gp), kept);
-                                             }
-                                             return low::implies(kept, cell_flag(slot, t));
-                                         }));
-        }
-        if (!t.is_bool())
-        {
-            r = low::and_(r, range_quant(root, n.e,
-                                         [&](const E& slot)
-                                         {
-                                             const E range {element_range(cell_value(slot, t), t)};
-                                             return plain ? range : low::implies(cell_flag(slot, t), range);
-                                         }));
+                                                 return cell_flag(recv, l.type);
+                                             }));
+            }
+            else if (site.in_ensures && e.amount >= 0 && e.amount < atoms_of(*cf_).nreq)
+            {
+                const E gp {site_guard(atoms_of(*cf_).sites[static_cast<size_t>(e.amount)], env)};
+                r = low::and_(r, range_quant(root, n.e, l.path,
+                                             [&](const E& recv)
+                                             {
+                                                 E kept {low::old_(cell_flag(recv, l.type))};
+                                                 if (gp)
+                                                 {
+                                                     kept = low::and_(old_entry(gp), kept);
+                                                 }
+                                                 return low::implies(kept, cell_flag(recv, l.type));
+                                             }));
+            }
+            if (!l.type.is_bool())
+            {
+                r = low::and_(r, range_quant(root, n.e, l.path,
+                                             [&](const E& recv)
+                                             {
+                                                 const E range {element_range(cell_value(recv, l.type), l.type)};
+                                                 return plain ? range : low::implies(cell_flag(recv, l.type), range);
+                                             }));
+            }
         }
         r = low::and_(r, low::acc(live_cell(root), "lv", amount));
         return {r, {}};
@@ -8335,7 +8414,8 @@ private:
         }
         if (is_elem_key(param))
         {
-            return "hv_e" + std::to_string(elem_of(param).local) + (post ? "_post" : "_pre");
+            // the leaf path names one ghost per cell of the element (decision 0064 item 7); empty for an element of a scalar, as before
+            return "hv_e" + std::to_string(elem_of(param).local) + mem + (post ? "_post" : "_pre");
         }
         if (is_derived_key(param))
         { // decision 0045: a read through a load or a pointer leaf, numbered after the function's parameters
@@ -9376,6 +9456,8 @@ private:
         const Expr* ea {fq_ != nullptr && fq_cls < 0 ? fq_resolve(e.a) : e.a};
         const bool elem {ea != nullptr && ea->kind == Expr::Kind::ElemAddr};
         const Expr* root {ea == nullptr || elem || fq_cls >= 0 ? nullptr : member_root(ea, &path)};
+        // Decision 0064 item 7 (Part C1): `p[e].x`, `p[e].t.y` of a pointer parameter to structures: the leaf `path` of the element's slot (`loc(member(loc(block_of(p), offset_of(p) + e), j), 0)`)
+        const bool struct_elem {root != nullptr && root->kind == Expr::Kind::ElemAddr};
         int k {kNoPlaceKey};
         E p;
         if (fq_cls >= 0)
@@ -9395,6 +9477,24 @@ private:
             const LV b {lower(*ea->a, env, guard, gdep, full)};
             const LV i {lower(*ea->b, env, guard, gdep, full)};
             p = elem_slot(b.e, i.e);
+        }
+        else if (struct_elem)
+        {
+            // The element's key is its own (as `p[i]`'s above), the ghost value of the read one per leaf path (`ghost_name` names the path): `p[0].x` and `p[0].y` are two reads, two
+            // cells.  Only a pointer parameter's element reaches here (check.cpp's `contract_struct_element`); a base under a quantifier's binder is Part F's.
+            if (fq_ != nullptr || root->a == nullptr || root->a->kind != Expr::Kind::Formal || root->b == nullptr ||
+                path.empty())
+            {
+                internal_error(
+                    e.loc,
+                    "the element of a pointer to structures in a contract, in a form that is not `p[e].x` over a "
+                    "pointer parameter, reached lowering (decision 0064 item 7)");
+                return {low::int_lit("0"), {}};
+            }
+            k = elem_key(*cf_, *root);
+            const LV b {lower(*root->a, env, guard, gdep, full)};
+            const LV i {lower(*root->b, env, guard, gdep, full)};
+            p = chain_ref(elem_slot(b.e, i.e), path);
         }
         else if (root != nullptr && (root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::Result ||
                                      root->kind == Expr::Kind::GlobalAddr))
@@ -9467,7 +9567,15 @@ private:
                 // Record 0060 item 5: a range atom frames the cells of its interval: `g_i && block_of(q) == block_of(p_i) && offset_of(p_i) <= offset_of(q) < offset_of(p_i) + n_i`
                 Full scratch;
                 const LV n {lower(*s.atom->b, env, nullptr, Deps {}, scratch)};
-                const E d {in_range(p, site_ref(s, env), n.e)};
+                // Decision 0064 item 7: a range over structures frames the cell `p` when it is a cell of that field of an element slot inside the range, one membership test per leaf
+                // of the element that holds the field (`range_covers_cell`: `in_range` for a scalar element, as before)
+                const E d {site_pointee(s).is_struct()
+                               ? range_covers_cell(p, sfx, site_pointee(s), site_ref(s, env), n.e)
+                               : in_range(p, site_ref(s, env), n.e)};
+                if (d == nullptr)
+                {
+                    continue;
+                }
                 const E g {site_guard(s, env)};
                 ds.push_back(g ? low::and_(g, d) : d);
                 continue;
@@ -9621,7 +9729,7 @@ private:
                 {
                     read_text = ea->a->c_text + "[" + ea->b->c_text + "]";
                 }
-                const char* what_read {elem ? "an element of a pointer" : "a pointer's object"};
+                const char* what_read {elem || struct_elem ? "an element of a pointer" : "a pointer's object"};
                 obl(full, guard, gdep, any, {}, meta("permission", e.loc, unowned_read_text(read_text, what_read)));
             }
             return {low::var(ghost_name(key)), {}};
@@ -9696,6 +9804,10 @@ private:
             std::string text;
             bool loads {false};
             E count; // a range atom (record 0060 item 10): the place is the range's first element and `count` its length; null for a cell
+            // a range over structures (decision 0064 items 7 and 10): ONE atom per leaf path, `place` the range's base pointer and `leaf` that leaf's member steps; `elem` the element
+            bool agg {false};
+            std::vector<int> leaf;
+            const Type* elem {nullptr};
         }; // `loads`: the place is reached through a heap read (decision 0045)
         std::string callee;
         std::vector<Atom> atoms; // a memory call's atoms
@@ -9877,8 +9989,18 @@ private:
         {
             if (!s.in_ensures && site_is_range(s))
             {
-                r.insert(elem_fkey(
-                    site_pointee(s))); // record 0060 item 10: a range atom is a memory call on its element field
+                // record 0060 item 10: a range atom is a memory call on its element field; decision 0064 item 7: on every leaf field of a structure element
+                if (site_pointee(s).is_struct())
+                {
+                    for (const ElemLeaf& l : elem_leaves(site_pointee(s)))
+                    {
+                        r.insert(fkey(l.type));
+                    }
+                }
+                else
+                {
+                    r.insert(elem_fkey(site_pointee(s)));
+                }
             }
             if (!s.in_ensures && site_takes_cell(s))
             {
@@ -10129,6 +10251,150 @@ private:
     // Record an access and make the obligations of decision 0039 items 3 and 4 against every earlier access of the field that C does not order with
     // it: `g_a && g_b ==> place_a != place_b`, category `unsequenced`, at this (the later-created) access.  An earlier access recorded in an enclosing
     // full expression is named in a branch's set (audit S5): the branch follows what its places use.
+    // `q` is the leaf cell `path` of one element of the range `base[0..count)` over structures (decision 0064 item 7, Form P against a cell): the element index is recovered from `q` by one
+    // `parent_of(block_of(.))` per member step of the path, innermost first, and the cell is compared with the leaf's receiver written out at that index.  A single recovery for every
+    // leaf would let an alias through a nested leaf pass; a bare block comparison is never written (the member blocks of two elements differ).
+    E leaf_in_range(const E& q, const E& base, const E& count, const std::vector<int>& path)
+    {
+        using low::BinOp;
+        E x {q};
+        for (size_t i {0U}; i < path.size(); ++i)
+        {
+            x = low::dom("parent_of", {block_of(x)});
+        }
+        const E at {low::dom("offset_of", {x})};
+        const E lo {low::dom("offset_of", {base})};
+        E r {low::bin(BinOp::And, low::bin(BinOp::Le, lo, at),
+                      low::bin(BinOp::Lt, at, low::bin(BinOp::Add, lo, count)))};
+        return low::and_(r, low::bin(BinOp::Eq, q, chain_ref(low::dom("loc", {block_of(base), at}), path)));
+    }
+    // The condition that the cell `q` is outside the atom `k` of a memory call (a range over structures: Form P by leaf path; any other atom: place_disjoint)
+    E cell_outside(const E& q, const Acc::Atom& k)
+    {
+        if (!k.agg)
+        {
+            return place_disjoint(q, nullptr, k.place, k.count);
+        }
+        return low::not_(leaf_in_range(q, k.place, k.count, k.leaf));
+    }
+    // The condition that two atoms of memory calls share no slot (decision 0064 item 7, Form P): a range over structures against a cell range or one cell by `leaf_in_range`, two ranges over
+    // structures per leaf path by `leaf_ranges_disjoint` (the slot row; the element structures may differ).
+    E atoms_disjoint(const Acc::Atom& k1, const Acc::Atom& k2, const SrcLoc& at)
+    {
+        using low::BinOp;
+        if (!k1.agg && !k2.agg)
+        {
+            return place_disjoint(k1.place, k1.count, k2.place, k2.count);
+        }
+        if (k1.agg != k2.agg)
+        {
+            // a range over structures against a plain range or a cell: the plain side's first slot, as a cell (a member block holds one slot, so a range that meets a leaf starts at it);
+            // the empty range meets nothing
+            const Acc::Atom& g {k1.agg ? k1 : k2};
+            const Acc::Atom& o {k1.agg ? k2 : k1};
+            E meets {leaf_in_range(o.place, g.place, g.count, g.leaf)};
+            if (o.count != nullptr)
+            {
+                meets = low::and_(low::bin(BinOp::Lt, low::int_lit("0"), o.count), meets);
+            }
+            return low::not_(meets);
+        }
+        if (k1.elem == nullptr || k2.elem == nullptr)
+        {
+            internal_error(
+                at,
+                "a range over structures without its element type reached the sequencing rows (decision 0064 item 7)");
+            return low::bool_lit(false);
+        }
+        const E row {
+            leaf_ranges_disjoint(k1.place, k1.count, k1.leaf, *k1.elem, k2.place, k2.count, k2.leaf, *k2.elem)};
+        return row != nullptr ? row : low::bool_lit(true);
+    }
+    // Decision 0064 item 7, Form P, "Two ranges": the condition that the leaf path `la` of the range `pa[0..na)` over `ea` and the leaf path `lb` of `pb[0..nb)` over `eb` (the two leaves are
+    // of one cell field; a scalar element has the empty path) share no cell, or null when two leaves of one element type are two member blocks (their paths differ at a step: `member` is
+    // injective at every step).  Two ranges of one element type and one path: the SLOT ROW, each range's first leaf receiver against the other's at the recovered index, never a bare
+    // block comparison.  Any other pair (the element structures may differ: a range over `struct T` at `&v[1].t` meets a range over `struct S` through `t.a`): each range's first leaf
+    // receiver is a cell of the other's leaf or it is not; a range that meets another in any slot has its first slot, or the other's, among the shared ones (a member block holds one slot, a
+    // block of slots is one interval), so the two membership tests are the whole row.
+    E leaf_ranges_disjoint(const E& pa, const E& na, const std::vector<int>& la, const Type& ea, const E& pb,
+                           const E& nb, const std::vector<int>& lb, const Type& eb)
+    {
+        using low::BinOp;
+        const bool same_type {ea.is_struct() && eb.is_struct() && ea == eb};
+        if (same_type && la != lb && la.size() == lb.size())
+        {
+            return nullptr;
+        }
+        const E zero {low::int_lit("0")};
+        if (same_type && la == lb)
+        {
+            const E op {low::dom("offset_of", {pa})};
+            const E oq {low::dom("offset_of", {pb})};
+            auto at_index = [&](const E& base, const E& index)
+            {
+                return chain_ref(low::dom("loc", {block_of(base), index}), la);
+            };
+            const E first_p {at_index(pa, op)};
+            const E first_q {at_index(pb, oq)};
+            const E q_in_p {
+                low::and_(low::bin(BinOp::Le, op, oq), low::and_(low::bin(BinOp::Lt, oq, low::bin(BinOp::Add, op, na)),
+                                                                 low::bin(BinOp::Eq, first_q, at_index(pa, oq))))};
+            const E p_in_q {
+                low::and_(low::bin(BinOp::Le, oq, op), low::and_(low::bin(BinOp::Lt, op, low::bin(BinOp::Add, oq, nb)),
+                                                                 low::bin(BinOp::Eq, first_p, at_index(pb, op))))};
+            E both {low::and_(low::bin(BinOp::Lt, zero, na), low::bin(BinOp::Lt, zero, nb))};
+            both = low::and_(both, low::bin(BinOp::Or, q_in_p, p_in_q));
+            return low::not_(both);
+        }
+        auto first = [&](const E& p, const std::vector<int>& path)
+        {
+            return path.empty() ? p : chain_ref(low::dom("loc", {block_of(p), low::dom("offset_of", {p})}), path);
+        };
+        const E a_in_b {low::and_(low::bin(BinOp::Lt, zero, na), leaf_meets(first(pa, la), pb, nb, lb))};
+        const E b_in_a {low::and_(low::bin(BinOp::Lt, zero, nb), leaf_meets(first(pb, lb), pa, na, la))};
+        return low::not_(low::bin(BinOp::Or, a_in_b, b_in_a));
+    }
+    // The cell `q` is a cell of the leaf `path` of the range `base[0..count)`: the slot test for a scalar element, `leaf_in_range` for a leaf of a structure
+    E leaf_meets(const E& q, const E& base, const E& count, const std::vector<int>& path)
+    {
+        return path.empty() ? in_range(q, base, count) : leaf_in_range(q, base, count, path);
+    }
+    // Whether the element of a range holds a cell of the field `sfx` (a scalar element is one cell; a structure, its leaves)
+    bool elem_holds_field(const Type& elem, const std::string& sfx)
+    {
+        if (!elem.is_struct())
+        {
+            return cell_suffix(elem) == sfx;
+        }
+        for (const ElemLeaf& l : elem_leaves(elem))
+        {
+            if (cell_suffix(l.type) == sfx)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // Decision 0064 item 7: the condition that the cell `q` of the field `sfx` is a cell of the range `base[0..count)` over `elem`, one membership test per leaf of the element that holds the field
+    // (a scalar element: `in_range`, as before); null when the element holds no cell of the field.
+    E range_covers_cell(const E& q, const std::string& sfx, const Type& elem, const E& base, const E& count)
+    {
+        if (!elem.is_struct())
+        {
+            return cell_suffix(elem) == sfx ? in_range(q, base, count) : nullptr;
+        }
+        E r;
+        for (const ElemLeaf& l : elem_leaves(elem))
+        {
+            if (cell_suffix(l.type) != sfx)
+            {
+                continue;
+            }
+            const E m {leaf_in_range(q, base, count, l.path)};
+            r = r ? low::bin(low::BinOp::Or, r, m) : m;
+        }
+        return r;
+    }
     // The condition that two places do not overlap (0039 item 4's pair rows, record 0060 item 10): two cells differ; a cell is outside a range; two ranges (a null `count_*` is a
     // cell) share no slot, item 8's formulas.
     E place_disjoint(const E& pa, const E& count_a, const E& pb, const E& count_b)
@@ -10244,8 +10510,8 @@ private:
                         what = "uses " + quoted(x.text, "a pointer") + ", whose object the call to " + callee +
                                " may end, ";
                     }
-                    emit(place_disjoint(x.place, nullptr, k.place, k.count),
-                         low::and_(low::and_(x.guard, k.guard), c.guard), what + "in an order C leaves unspecified", b,
+                    emit(cell_outside(x.place, k), low::and_(low::and_(x.guard, k.guard), c.guard),
+                         what + "in an order C leaves unspecified", b,
                          &x.loc); // at the access
                 }
             }
@@ -10259,8 +10525,7 @@ private:
                         {
                             continue;
                         }
-                        emit(place_disjoint(k1.place, k1.count, k2.place, k2.count),
-                             low::and_(low::and_(k1.guard, k2.guard), g_ab),
+                        emit(atoms_disjoint(k1, k2, a.loc), low::and_(low::and_(k1.guard, k2.guard), g_ab),
                              "the calls to " + quoted(b.callee, "a function") + " and " +
                                  quoted(a.callee, "a function") + " may both " +
                                  (k1.field == "lv" ? "use or end the lifetime of the object " : "access ") +
@@ -11713,6 +11978,30 @@ private:
         {
             return x.site->atom->atom == AtomKind::Owns || x.site->atom->atom == AtomKind::OwnsRange;
         };
+        // Decision 0064 item 8: the leaf paths of a range's element, one row group each (a scalar element is the one leaf with the empty path, so its rows are as before)
+        auto leaves_of = [&](const S& x) -> std::vector<ElemLeaf>
+        {
+            if (x.t->is_struct())
+            {
+                return elem_leaves(*x.t);
+            }
+            return {ElemLeaf {{}, *x.t, std::string()}};
+        };
+        // The cell fields a range holds, one per leaf (a scalar range: its element's)
+        auto range_fields = [&](const S& x)
+        {
+            std::set<std::string> r;
+            for (const ElemLeaf& l : leaves_of(x))
+            {
+                r.insert(cell_suffix(l.type));
+            }
+            return r;
+        };
+        // The first slot's leaf receiver of a range: `loc(member(loc(block_of(root), offset_of(root)), j), 0)`, the slot itself for an empty path
+        auto first_leaf = [&](const S& x, const std::vector<int>& path)
+        {
+            return chain_ref(low::dom("loc", {block_of(x.root), low::dom("offset_of", {x.root})}), path);
+        };
         auto text_of = [&](const S& x)
         {
             const std::string pl {site_phrase(*x.site, quoted(x.place, x.range ? "the range the pointer points to"
@@ -11811,12 +12100,16 @@ private:
                 }
                 if (reads_part(x))
                 {
-                    const E first {low::dom("loc", {block_of(x.root), low::dom("offset_of", {x.root})})};
-                    add(x.g,
-                        low::not_(low::and_(low::bin(BinOp::Gt, x.count, low::int_lit("0")),
-                                            low::bin(BinOp::Or, low::bin(BinOp::Eq, value_perm(first, *x.t), none),
-                                                     low::bin(BinOp::Eq, flag_perm(first, *x.t), none)))),
-                        m);
+                    for (const ElemLeaf& l : leaves_of(x))
+                    {
+                        const E first {first_leaf(x, l.path)};
+                        add(x.g,
+                            low::not_(
+                                low::and_(low::bin(BinOp::Gt, x.count, low::int_lit("0")),
+                                          low::bin(BinOp::Or, low::bin(BinOp::Eq, value_perm(first, l.type), none),
+                                                   low::bin(BinOp::Eq, flag_perm(first, l.type), none)))),
+                            m);
+                    }
                 }
                 if (!x.synth)
                 {
@@ -11912,7 +12205,7 @@ private:
                 // the field of a range or of an array part is its element's; a cell site's are its leaves' (decision 0063 item 7: by field of the part, not of its parent)
                 auto fields_of = [&](const S& x)
                 {
-                    return x.range ? std::set<std::string> {cell_suffix(*x.t)} : site_fields(*x.site);
+                    return x.range ? range_fields(x) : site_fields(*x.site);
                 };
                 bool shared {false};
                 for (const std::string& fa_ : fields_of(a))
@@ -11929,6 +12222,46 @@ private:
                 const std::string msg_tail {" to `" + callee.c_name + "`, which may be one object, once to own it"};
                 const std::string na {quoted(a.place, a.range ? "a range" : "an object")};
                 const std::string nb {quoted(b.place, b.range ? "a range" : "an object")};
+                if ((a.range && a.t->is_struct()) || (b.range && b.t->is_struct()))
+                {
+                    // Decision 0064 item 7, Form P: a pure row per pair of leaf paths of one field, over slot terms with the receivers in view (never a bare block comparison): two ranges by
+                    // `leaf_ranges_disjoint`, a range and a cell (a leaf of a structure atom is such a cell) by `leaf_meets`
+                    if (a.range && b.range)
+                    {
+                        for (const ElemLeaf& la : leaves_of(a))
+                        {
+                            for (const ElemLeaf& lb : leaves_of(b))
+                            {
+                                if (cell_suffix(la.type) != cell_suffix(lb.type))
+                                {
+                                    continue;
+                                }
+                                if (const E row = leaf_ranges_disjoint(a.root, a.count, la.path, *a.t, b.root, b.count,
+                                                                       lb.path, *b.t))
+                                {
+                                    add(both, row, "passes " + na + " and " + nb + msg_tail);
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        const S& r {a.range ? a : b};
+                        const S& c {a.range ? b : a};
+                        for (const Cell& cl : c.cells)
+                        {
+                            for (const ElemLeaf& l : leaves_of(r))
+                            {
+                                if (cell_suffix(l.type) == cell_suffix(cl.type))
+                                {
+                                    add(both, low::not_(leaf_meets(cl.recv, r.root, r.count, l.path)),
+                                        "passes " + na + " and " + nb + msg_tail);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 if (a.synth && b.synth)
                 {
                     // two array leaves of structure members: their blocks are two member blocks, which differ exactly when their first slots do (the slot term, audit round 1, S3: never a
@@ -12070,14 +12403,26 @@ private:
                 E m {live_perm(x.root)};
                 if (x.site->atom->atom == AtomKind::ReadsRange)
                 {
-                    const E first {low::dom("loc", {block_of(x.root), low::dom("offset_of", {x.root})})};
-                    E least {min_perm(min_perm(value_perm(first, *x.t), flag_perm(first, *x.t)), m)};
+                    // decision 0064 item 7, "Amounts": the least over the first slot of EVERY leaf path (its value and flag permission), the liveness cell and the caller's own read
+                    // amounts of every field the range holds
+                    E least;
+                    for (const ElemLeaf& l : leaves_of(x))
+                    {
+                        const E first {first_leaf(x, l.path)};
+                        least = least ? min_perm(min_perm(least, value_perm(first, l.type)), flag_perm(first, l.type))
+                                      : min_perm(min_perm(value_perm(first, l.type), flag_perm(first, l.type)), m);
+                    }
+                    const std::set<std::string> held {range_fields(x)};
                     const FnAtoms& caller {atoms_of(*fn_.f)};
                     for (int j {0}; j < caller.nreq; ++j)
                     {
                         const AtomSite& cs {caller.sites[static_cast<size_t>(j)]};
-                        if ((cs.atom->atom == AtomKind::Reads || cs.atom->atom == AtomKind::ReadsRange) &&
-                            site_fields(cs).count(cell_suffix(*x.t)) != 0U)
+                        bool shares {false};
+                        for (const std::string& f : site_fields(cs))
+                        {
+                            shares = shares || held.count(f) != 0U;
+                        }
+                        if ((cs.atom->atom == AtomKind::Reads || cs.atom->atom == AtomKind::ReadsRange) && shares)
                         {
                             least = min_perm(least, low::var(amount_name(j)));
                         }
@@ -12148,11 +12493,21 @@ private:
             }
             const std::string m {text_of(x)};
             const bool owns {owns_part(x)};
-            const std::string sfx {use_cell_type(*x.t)};
             const E lo {low::dom("offset_of", {x.root})};
             const E hi {low::bin(BinOp::Add, lo, x.count)};
-            obl(full, nullptr, adep, low::bool_lit(true), {},
-                meta("internal", e.loc, "internal check: the marked rows of a call's range atom"), &pre.ex);
+            const std::vector<ElemLeaf> leaves {leaves_of(x)};
+            const bool aggregate {x.t->is_struct()};
+            if (aggregate)
+            {
+                // decision 0064 item 8: item 3's length facts of the range (an obligation of the call, written once for the range)
+                add(x.g,
+                    range_quant(x.root, x.count,
+                                [&](const E& slot)
+                                {
+                                    return struct_lens(slot, *x.t->struct_type);
+                                }),
+                    m);
+            }
             // Audit round 3, B1: where another `reads_range` of the field in this call may cover a slot of this one, the row asks for the sum of the two amounts there, as a return's
             // does (`range_returns`, S44 (e)): each atom's own amount would pass where the callee kept a fraction of a slot that two of them meet at, and Silicon's own check of the
             // precondition, which takes the sum, would fail.  Elsewhere the row is the atom's amount alone.
@@ -12162,10 +12517,13 @@ private:
                 const E kv {low::var("k")};
                 for (size_t j {0U}; j < ss.size(); ++j)
                 {
-                    if (j == i || !reads_part(ss[j]) || cell_suffix(*ss[j].t) != cell_suffix(*x.t) ||
-                        (x.synth && ss[j].synth && x.parent == ss[j].parent))
+                    if (j == i || !reads_part(ss[j]) || (x.synth && ss[j].synth && x.parent == ss[j].parent))
                     {
                         continue;
+                    }
+                    if (cell_suffix(*ss[j].t) != cell_suffix(*x.t))
+                    {
+                        continue; // (a range over structures beside a read part of another element type that shares a leaf field adds its amount per leaf, below)
                     }
                     const E loj {low::dom("offset_of", {ss[j].root})};
                     const E inside {
@@ -12201,71 +12559,104 @@ private:
                     }
                 }
             }
+            for (const ElemLeaf& l : leaves)
             {
-                low::LStmt ifs;
-                std::vector<low::LStmt> rows;
-                for (const char* field : {"v_", "d_"})
+                const std::string sfx {use_cell_type(l.type)};
+                // Decision 0064 item 7 (Form P, the amounts): another read range of a DIFFERENT element type (a structure or a scalar) that holds the leaf's field adds its amount where its
+                // leaves cover this leaf's slot `k`, per leaf (the same element type's is the sum above: one path, the same slot)
+                E leaf_amount {marked_amount};
+                if (!owns)
                 {
-                    emit_marked_row(x.g ? ifs.then_body : rows,
-                                    range_perm(x.root, lo, hi, std::string(field) + sfx, marked_amount),
-                                    meta("permission", e.loc, m));
+                    const E kv {low::var("k")};
+                    const E recv {leaf_slot(x.root, kv, l.path)};
+                    for (size_t j {0U}; j < ss.size(); ++j)
+                    {
+                        if (j == i || !reads_part(ss[j]) || (x.synth && ss[j].synth && x.parent == ss[j].parent) ||
+                            cell_suffix(*ss[j].t) == cell_suffix(*x.t) || (!aggregate && !ss[j].t->is_struct()))
+                        {
+                            continue;
+                        }
+                        if (const E cov =
+                                range_covers_cell(recv, cell_suffix(l.type), *ss[j].t, ss[j].root, ss[j].count))
+                        {
+                            leaf_amount = low::bin(BinOp::Add, leaf_amount,
+                                                   low::ite(low::and_(ss[j].g, cov), amt(amounts, j), none));
+                        }
+                    }
                 }
-                if (x.g)
+                // the messages of item 8: the member of every element, in source terms
+                const std::string lm {aggregate ? m + " (the member `" + l.text + "` of every element)" : m};
+                obl(full, nullptr, adep, low::bool_lit(true), {},
+                    meta("internal", e.loc, "internal check: the marked rows of a call's range atom"), &pre.ex);
                 {
-                    ifs.kind = low::LStmt::Kind::If;
-                    ifs.expr = x.g;
-                    rows.push_back(std::move(ifs));
+                    low::LStmt ifs;
+                    std::vector<low::LStmt> rows;
+                    for (const char* field : {"v_", "d_"})
+                    {
+                        emit_marked_row(x.g ? ifs.then_body : rows,
+                                        range_perm(x.root, lo, hi, l.path, std::string(field) + sfx, leaf_amount),
+                                        meta("permission", e.loc, lm));
+                    }
+                    if (x.g)
+                    {
+                        ifs.kind = low::LStmt::Kind::If;
+                        ifs.expr = x.g;
+                        rows.push_back(std::move(ifs));
+                    }
+                    full.obls.back().stmts = std::move(rows);
                 }
-                full.obls.back().stmts = std::move(rows);
-            }
-            // a marked parameter's atom has no flags row and its range holds under the flag (record 0060 item 12, decision 0042 item 5)
-            const bool marked_range {site_marker(callee, *x.site) != InitMarker::None};
-            if (!marked_range)
-            {
-                // the whole-array atom of a global (decision 0063 item 7) names no argument: "calls `f`, which needs every element of `g` to have a value"
-                std::string flag_message;
-                if (x.synth)
+                // a marked parameter's atom has no flags row and its range holds under the flag (record 0060 item 12, decision 0042 item 5)
+                const bool marked_range {site_marker(callee, *x.site) != InitMarker::None};
+                if (!marked_range)
                 {
-                    flag_message = "calls `" + callee.c_name + "`, which needs every element of " +
-                                   quoted(x.place, "an array member") + " to have a value; it may not have one here";
+                    const std::string every {aggregate ? "the member `" + l.text + "` of every element of "
+                                                       : std::string("every element of ")};
+                    // the whole-array atom of a global (decision 0063 item 7) names no argument: "calls `f`, which needs every element of `g` to have a value"
+                    std::string flag_message;
+                    if (x.synth)
+                    {
+                        flag_message = "calls `" + callee.c_name + "`, which needs every element of " +
+                                       quoted(x.place, "an array member") +
+                                       " to have a value; it may not have one here";
+                    }
+                    else if (site_array(*x.site))
+                    {
+                        flag_message =
+                            "calls `" + callee.c_name + "`, which needs " +
+                            site_phrase(*x.site, "every element of " + quoted(site_text(*x.site), "a global array")) +
+                            " to have a value; it may not have one here";
+                    }
+                    else
+                    {
+                        const Expr& arg {site_arg(*x.site, e)};
+                        const std::string who {arg.kind == Expr::Kind::Null ? std::string("the null pointer")
+                                               : arg.c_text.empty()         ? std::string("a pointer")
+                                                                            : "`" + arg.c_text + "`"};
+                        const std::string& pname {callee.params[static_cast<size_t>(site_key(*x.site))].name};
+                        flag_message = "passes " + who + " to `" + callee.c_name + "`, whose parameter " +
+                                       (pname.empty() ? std::string() : "`" + pname + "` ") + "needs " + every +
+                                       quoted(site_text(*x.site), "the range it points to") +
+                                       " to have a value; it may not have one here";
+                    }
+                    add_as("uninitialized", x.g,
+                           range_quant(x.root, x.count, l.path,
+                                       [&](const E& slot)
+                                       {
+                                           return cell_flag(slot, l.type);
+                                       }),
+                           flag_message);
                 }
-                else if (site_array(*x.site))
+                if (!l.type.is_bool())
                 {
-                    flag_message =
-                        "calls `" + callee.c_name + "`, which needs " +
-                        site_phrase(*x.site, "every element of " + quoted(site_text(*x.site), "a global array")) +
-                        " to have a value; it may not have one here";
+                    add(x.g,
+                        range_quant(x.root, x.count, l.path,
+                                    [&](const E& slot)
+                                    {
+                                        return low::implies(cell_flag(slot, l.type),
+                                                            element_range(cell_value(slot, l.type), l.type));
+                                    }),
+                        lm);
                 }
-                else
-                {
-                    const Expr& arg {site_arg(*x.site, e)};
-                    const std::string who {arg.kind == Expr::Kind::Null ? std::string("the null pointer")
-                                           : arg.c_text.empty()         ? std::string("a pointer")
-                                                                        : "`" + arg.c_text + "`"};
-                    const std::string& pname {callee.params[static_cast<size_t>(site_key(*x.site))].name};
-                    flag_message = "passes " + who + " to `" + callee.c_name + "`, whose parameter " +
-                                   (pname.empty() ? std::string() : "`" + pname + "` ") + "needs every element of " +
-                                   quoted(site_text(*x.site), "the range it points to") +
-                                   " to have a value; it may not have one here";
-                }
-                add_as("uninitialized", x.g,
-                       range_quant(x.root, x.count,
-                                   [&](const E& slot)
-                                   {
-                                       return cell_flag(slot, *x.t);
-                                   }),
-                       flag_message);
-            }
-            if (!x.t->is_bool())
-            {
-                add(x.g,
-                    range_quant(x.root, x.count,
-                                [&](const E& slot)
-                                {
-                                    return low::implies(cell_flag(slot, *x.t),
-                                                        element_range(cell_value(slot, *x.t), *x.t));
-                                }),
-                    m);
             }
         }
         // 5. the sums over each cell an atom takes a fraction of (decision 0037 item 8, audit round 1 S3), per leaf cell
@@ -12308,6 +12699,20 @@ private:
                         // record 0060 item 8: a `reads_range` of the field adds its amount where the cell lies in it (so does an array part of a `reads` site, decision 0063 item 7)
                         for (size_t j {0U}; j < ss.size(); ++j)
                         {
+                            if (ss[j].range && ss[j].t->is_struct())
+                            {
+                                // decision 0064 item 7 (Form P, the amounts): a read range over structures adds its amount where one of its leaves of the cell's field is this cell
+                                if (reads_part(ss[j]))
+                                {
+                                    if (const E cov = range_covers_cell(ci.recv, cell_suffix(ci.type), *ss[j].t,
+                                                                        ss[j].root, ss[j].count))
+                                    {
+                                        total =
+                                            low::bin(BinOp::Add, total, term(low::and_(ss[j].g, cov), amt(amounts, j)));
+                                    }
+                                }
+                                continue;
+                            }
                             if (reads_part(ss[j]) && cell_suffix(*ss[j].t) == cell_suffix(ci.type) &&
                                 !(ss[j].synth && ss[j].parent == i))
                             {
@@ -12732,8 +13137,25 @@ private:
                     k.count = lower(*site.atom->b, cenv, nullptr, Deps {}, scratch).e;
                 }
                 k.owns = site.atom->atom == AtomKind::OwnsRange;
-                k.field = elem_fkey(site_pointee(site));
                 k.text = site_call_text(site, e);
+                const Type& element {site_pointee(site)};
+                if (element.is_struct())
+                {
+                    // decision 0064 items 7 and 10 (trap 3): a range over structures is an access to ONE FIELD PER LEAF PATH, each recorded on its own so that the writes of the callee reach
+                    // every leaf field and the pair rows compare by leaf path (`leaf_in_range`)
+                    for (const ElemLeaf& l : elem_leaves(element))
+                    {
+                        Acc::Atom kl {k};
+                        kl.agg = true;
+                        kl.leaf = l.path;
+                        kl.elem = &element;
+                        kl.field = fkey(l.type);
+                        fx.tags.push_back(MemTag {0, kl.field, true, kl.owns, path_, {}});
+                        ca.atoms.push_back(std::move(kl));
+                    }
+                    continue;
+                }
+                k.field = elem_fkey(element);
                 fx.tags.push_back(MemTag {0, k.field, true, k.owns, path_, {}});
                 ca.atoms.push_back(std::move(k));
             }
@@ -15600,14 +16022,17 @@ private:
                             {
                                 const AtomSite& sj {fa.sites[ens[j]]};
                                 if (sj.atom->atom != AtomKind::ReadsRange ||
-                                    cell_suffix(site_pointee(sj)) != cell_suffix(c.type))
+                                    !elem_holds_field(site_pointee(sj), cell_suffix(c.type)))
                                 {
                                     continue;
                                 }
                                 Full scratch;
                                 const E nj {lower(*sj.atom->b, env, nullptr, Deps {}, scratch).e};
+                                // (a range over structures: the cell is one of its leaf cells of the field, `leaf_in_range` per leaf, decision 0064 item 7)
                                 total = low::bin(BinOp::Add, total,
-                                                 term(low::and_(g[j], in_range(c.recv, p[j], nj)), amt_of(j)));
+                                                 term(low::and_(g[j], range_covers_cell(c.recv, cell_suffix(c.type),
+                                                                                        site_pointee(sj), p[j], nj)),
+                                                      amt_of(j)));
                             }
                             add(low::bin(BinOp::Ge, flag ? flag_perm(c.recv, c.type) : value_perm(c.recv, c.type),
                                          total),
@@ -15812,7 +16237,16 @@ private:
                 continue;
             }
             const Type& t {site_pointee(site)};
-            const std::string sfx {use_cell_type(t)};
+            // decision 0064 items 7 and 8: the rows per LEAF PATH of the element (a scalar element is the one leaf with the empty path: the rows are as before)
+            std::vector<ElemLeaf> leaves;
+            if (t.is_struct())
+            {
+                leaves = elem_leaves(t);
+            }
+            else
+            {
+                leaves.push_back(ElemLeaf {{}, t, std::string()});
+            }
             const bool owns {site.atom->atom == AtomKind::OwnsRange};
             Full scratch;
             const E n {lower(*site.atom->b, env, nullptr, Deps {}, scratch).e};
@@ -15867,9 +16301,61 @@ private:
             {
                 low::LStmt ifs;
                 std::vector<low::LStmt>& dst {gk ? ifs.then_body : out};
-                for (const char* field : {"v_", "d_"})
+                for (const ElemLeaf& l : leaves)
                 {
-                    emit_marked_row(dst, range_perm(ptr, lo, hi, std::string(field) + sfx, amount), meta_k);
+                    const std::string sfx {use_cell_type(l.type)};
+                    // Decision 0064 item 7 (Form P, the amounts): another read atom of a DIFFERENT element type that holds the leaf's field adds its amount where it covers the slot `k`
+                    // of this leaf: a range over a structure or a scalar by its leaves' membership, a cell atom of the field (a leaf of a structure atom) by the cell
+                    E leaf_amount {amount};
+                    if (!owns)
+                    {
+                        const E kv {low::var("k")};
+                        const E recv {leaf_slot(ptr, kv, l.path)};
+                        for (size_t j {0U}; j < ens.size(); ++j)
+                        {
+                            const AtomSite& sj {fa.sites[ens[j]]};
+                            if (j == k || (sj.atom->atom != AtomKind::ReadsRange && sj.atom->atom != AtomKind::Reads) ||
+                                cell_suffix(site_pointee(sj)) == cell_suffix(t))
+                            {
+                                continue;
+                            }
+                            E cov;
+                            if (sj.atom->atom == AtomKind::ReadsRange)
+                            {
+                                if (!t.is_struct() && !site_pointee(sj).is_struct())
+                                {
+                                    continue;
+                                }
+                                if (elem_holds_field(site_pointee(sj), cell_suffix(l.type)))
+                                {
+                                    Full sc2;
+                                    const E nj {lower(*sj.atom->b, env, nullptr, Deps {}, sc2).e};
+                                    cov = range_covers_cell(recv, cell_suffix(l.type), site_pointee(sj), root[j], nj);
+                                }
+                            }
+                            else if (t.is_struct())
+                            {
+                                for (const Cell& cj : site_cells(sj, chain_ref(root[j], sj.path)))
+                                {
+                                    if (cell_suffix(cj.type) == cell_suffix(l.type))
+                                    {
+                                        const E eq {low::bin(low::BinOp::Eq, recv, cj.recv)};
+                                        cov = cov ? low::bin(low::BinOp::Or, cov, eq) : eq;
+                                    }
+                                }
+                            }
+                            if (cov)
+                            {
+                                leaf_amount = low::bin(low::BinOp::Add, leaf_amount,
+                                                       low::ite(low::and_(g[j], cov), amt_of(j), none));
+                            }
+                        }
+                    }
+                    for (const char* field : {"v_", "d_"})
+                    {
+                        emit_marked_row(dst, range_perm(ptr, lo, hi, l.path, std::string(field) + sfx, leaf_amount),
+                                        meta_k);
+                    }
                 }
                 if (gk)
                 {
@@ -15882,6 +16368,15 @@ private:
             {
                 row(range_shape(ptr, site.atom->a->type, n));
             }
+            if (t.is_struct())
+            {
+                // the shape row's length facts (decision 0064 items 7 and 8): the same quantifier the atom states
+                row(range_quant(ptr, n,
+                                [&](const E& slot)
+                                {
+                                    return struct_lens(slot, *t.struct_type);
+                                }));
+            }
             // Record 0060 item 12 (decision 0042 item 5): a marked parameter.  `must_init`: the flags row is the promise (`postcondition`, "returns without initializing every
             // element of `p[0..n)`, which `cerastes::must_init` on `p` promises") and the range holds under the flag, so a missing write is reported once; `ref_to_uninit`: an element
             // that had a flag on entry keeps it (`old(flag) ==> flag`, an `internal` row, under the partner's guard in the entry state), and the range holds under the flag.
@@ -15890,55 +16385,65 @@ private:
             {
                 emit_assert(out, gk ? low::implies(gk, std::move(cond)) : std::move(cond), m);
             };
-            if (mk == InitMarker::None)
+            for (const ElemLeaf& l : leaves)
             {
-                row(range_quant(ptr, n,
-                                [&](const E& slot)
-                                {
-                                    return cell_flag(slot, t);
-                                }));
-            }
-            else if (mk == InitMarker::MustInit)
-            {
-                const std::string& pname {f.params[static_cast<size_t>(site_key(site))].name};
-                row_as(range_quant(ptr, n,
-                                   [&](const E& slot)
-                                   {
-                                       return cell_flag(slot, t);
-                                   }),
-                       cat_meta("postcondition",
-                                "returns without initializing every element of " + pl +
-                                    ", which `cerastes::must_init` on " +
-                                    (pname.empty() ? std::string("the parameter") : "`" + pname + "`") + " promises",
-                                k));
-            }
-            else
-            {
-                E gp;
-                if (site.atom->amount >= 0 && site.atom->amount < fa.nreq)
+                if (mk == InitMarker::None)
                 {
-                    gp = site_guard(fa.sites[static_cast<size_t>(site.atom->amount)], env);
+                    row(range_quant(ptr, n, l.path,
+                                    [&](const E& slot)
+                                    {
+                                        return cell_flag(slot, l.type);
+                                    }));
                 }
-                row_as(range_quant(ptr, n,
-                                   [&](const E& slot)
-                                   {
-                                       E kept {low::old_(cell_flag(slot, t))};
-                                       if (gp)
+                else if (mk == InitMarker::MustInit)
+                {
+                    const std::string& pname {f.params[static_cast<size_t>(site_key(site))].name};
+                    row_as(range_quant(ptr, n, l.path,
+                                       [&](const E& slot)
                                        {
-                                           kept = low::and_(old_entry(gp), kept);
-                                       }
-                                       return low::implies(kept, cell_flag(slot, t));
-                                   }),
-                       internal("an element that had a value on entry keeps it"));
+                                           return cell_flag(slot, l.type);
+                                       }),
+                           cat_meta("postcondition",
+                                    "returns without initializing " +
+                                        (t.is_struct() ? "the member `" + l.text + "` of every element of "
+                                                       : std::string("every element of ")) +
+                                        pl + ", which `cerastes::must_init` on " +
+                                        (pname.empty() ? std::string("the parameter") : "`" + pname + "`") +
+                                        " promises",
+                                    k));
+                }
+                else
+                {
+                    E gp;
+                    if (site.atom->amount >= 0 && site.atom->amount < fa.nreq)
+                    {
+                        gp = site_guard(fa.sites[static_cast<size_t>(site.atom->amount)], env);
+                    }
+                    row_as(range_quant(ptr, n, l.path,
+                                       [&](const E& slot)
+                                       {
+                                           E kept {low::old_(cell_flag(slot, l.type))};
+                                           if (gp)
+                                           {
+                                               kept = low::and_(old_entry(gp), kept);
+                                           }
+                                           return low::implies(kept, cell_flag(slot, l.type));
+                                       }),
+                           internal("an element that had a value on entry keeps it"));
+                }
             }
-            if (!t.is_bool())
+            for (const ElemLeaf& l : leaves)
             {
-                row(range_quant(ptr, n,
-                                [&](const E& slot)
-                                {
-                                    const E range {element_range(cell_value(slot, t), t)};
-                                    return mk == InitMarker::None ? range : low::implies(cell_flag(slot, t), range);
-                                }));
+                if (!l.type.is_bool())
+                {
+                    row(range_quant(ptr, n, l.path,
+                                    [&](const E& slot)
+                                    {
+                                        const E range {element_range(cell_value(slot, l.type), l.type)};
+                                        return mk == InitMarker::None ? range
+                                                                      : low::implies(cell_flag(slot, l.type), range);
+                                    }));
+                }
             }
             E total {amt_of(k)};
             for (size_t j {0U}; j < ens.size(); ++j)
@@ -16604,11 +17109,36 @@ private:
         std::string cmp;    // the field suffix of a place of the same field (`cell_suffix`)
         bool reach {false}; // a write in the loop can reach a slot of the field
         std::string text;   // `p[0..n)` as written, or empty
+        // decision 0064 item 10 (Part C1): one LEAF of the structure elements of a range over structures: `leaf` the member path after the slot (`x` is {0}, `t.y` is {1, 1}), `element` the
+        // leaf's cell type, `leaf_text` how a message names it; the place's cells are the leaf's receivers `loc(member(loc(block_of(base), k), j), 0)`.  An empty `leaf` is a range of scalars
+        std::vector<int> leaf;
+        std::string leaf_text;
     };
 
-    // The slot `q` is one of the range place's, and the place's guard holds (item 5's interval test over the entry values).
+    // The cell of the range place at slot `k`: `loc(block_of(base), k)` for a range of scalars, the leaf's receiver for a leaf of a range of structures
+    E rp_slot(const RangePlace& rp, const E& k)
+    {
+        return chain_ref(low::dom("loc", {block_of(rp.base), k}), rp.leaf);
+    }
+    // How the entry and back-edge messages name what the place stands for: `every element of `p[0..n)`` for a range of scalars, the leaf's member of every element for a structure's
+    std::string rp_what(const RangePlace& rp, bool entry)
+    {
+        const std::string range {quoted(rp.text, "the range")};
+        if (rp.leaf.empty())
+        {
+            return entry ? "every element of " + range : range;
+        }
+        return "the member `" + rp.leaf_text + "` of every element of " + range;
+    }
+
+    // The cell `q` is one of the range place's, and the place's guard holds (item 5's interval test over the entry values; for a leaf of a range of structures item 7's membership test of
+    // the leaf's cell, one `parent_of(block_of(.))` per member step).
     E range_place_hit(const RangePlace& rp, const E& q)
     {
+        if (!rp.leaf.empty())
+        {
+            return low::and_(rp.guard, leaf_in_range(q, rp.base, rp.count, rp.leaf));
+        }
         return low::and_(rp.guard, in_range(q, rp.base, rp.count));
     }
 
@@ -16625,15 +17155,32 @@ private:
         const E kv {low::var("k")};
         for (const RangePlace& o : all)
         {
-            if (&o == &rp || o.owns || o.cmp != rp.cmp)
+            // the leaves of one range over structures are distinct cells of every element: no other leaf of the same atom covers this one's slots
+            if (&o == &rp || o.owns || o.cmp != rp.cmp || (!rp.leaf.empty() && o.site == rp.site))
             {
                 continue;
             }
-            const E inside {
-                low::bin(low::BinOp::And,
-                         low::bin(low::BinOp::And, low::bin(low::BinOp::Eq, block_of(o.base), block_of(rp.base)),
-                                  low::bin(low::BinOp::Le, o.lo, kv)),
-                         low::bin(low::BinOp::Lt, kv, o.hi))};
+            // two different leaf paths of one length of one structure type are different cells at every slot (`member` is injective at every step): nothing of `o` covers this slot
+            if (!rp.leaf.empty() && !o.leaf.empty() && o.leaf != rp.leaf && o.leaf.size() == rp.leaf.size() &&
+                rp.site != nullptr && o.site != nullptr &&
+                site_pointee(*rp.site).struct_type == site_pointee(*o.site).struct_type)
+            {
+                continue;
+            }
+            // two places of scalars, or of one leaf path of one structure type: the interval test over the slot index (the leaf receivers are injective in the block and the slot, so the
+            // cells at one slot index are one cell exactly when the blocks are one: the slot row of item 7, a term Silicon decides inside a quantified amount); any other leaf of a
+            // structure on either side: the membership test of the cell `rp`'s slot `k` is (item 7)
+            const bool same_leaf {rp.leaf.empty()
+                                      ? o.leaf.empty()
+                                      : o.leaf == rp.leaf && rp.site != nullptr && o.site != nullptr &&
+                                            site_pointee(*rp.site).struct_type == site_pointee(*o.site).struct_type};
+            const E inside {same_leaf ? low::bin(low::BinOp::And,
+                                                 low::bin(low::BinOp::And,
+                                                          low::bin(low::BinOp::Eq, block_of(o.base), block_of(rp.base)),
+                                                          low::bin(low::BinOp::Le, o.lo, kv)),
+                                                 low::bin(low::BinOp::Lt, kv, o.hi))
+                            : o.leaf.empty() ? in_range(rp_slot(rp, kv), o.base, o.count)
+                                             : leaf_in_range(rp_slot(rp, kv), o.base, o.count, o.leaf)};
             amount = low::bin(low::BinOp::Add, amount, low::ite(low::and_(o.guard, inside), o.amount, low::no_perm()));
         }
         return amount;
@@ -16648,7 +17195,7 @@ private:
         const E amount {range_row_amount(rp, all)};
         for (const char* field : {"v_", "d_"})
         {
-            emit_marked_row(dst, range_perm(rp.base, rp.lo, rp.hi, std::string(field) + rp.sfx, amount), m);
+            emit_marked_row(dst, range_perm(rp.base, rp.lo, rp.hi, rp.leaf, std::string(field) + rp.sfx, amount), m);
         }
         if (rp.guard)
         {
@@ -16735,12 +17282,29 @@ private:
             {
                 rp.amount = low::var(amount_name(site.atom->amount));
             }
+            rp.text = site_text(site);
+            if (site_pointee(site).is_struct())
+            {
+                // decision 0064 item 10: a range over structures is one range place per LEAF of the element (the same base, count, guard and amount; the leaf's own cell type, field and
+                // receivers).  Its liveness is the parameter's `live` place's, once.  A write of the field reaches every leaf of it (the listed false alarm of item 10).
+                for (const ElemLeaf& l : elem_leaves(site_pointee(site)))
+                {
+                    RangePlace lp {rp};
+                    lp.element = l.type;
+                    lp.sfx = use_cell_type(lp.element);
+                    lp.cmp = elem_cell_suffix(lp.element);
+                    lp.reach = writes.fields.count(lp.cmp) != 0U || !writes.globals.empty() || !writes.gleaves.empty();
+                    lp.leaf = l.path;
+                    lp.leaf_text = l.text;
+                    out.push_back(std::move(lp));
+                }
+                continue;
+            }
             rp.element = site_pointee(site);
             rp.sfx = use_cell_type(rp.element);
             rp.cmp = elem_cell_suffix(rp.element);
             // a store through any pointer of the field, or a call that owns a cell of it, can reach a slot; a global written by name can too (the range may be that global's cell)
             rp.reach = writes.fields.count(rp.cmp) != 0U || !writes.globals.empty() || !writes.gleaves.empty();
-            rp.text = site_text(site);
             out.push_back(std::move(rp));
         }
         return out;
@@ -19263,9 +19827,11 @@ private:
                 {
                     if (elem_cell_suffix(ap.element) == rp.cmp)
                     {
-                        // a leaf of an array of structures stands in a block of one slot: the range's first slot is one of the leaf's cells or it is not
-                        case_split(entry, ap.agg ? array_place_hit(ap, rp.base)
-                                                 : low::bin(BinOp::Eq, block_of(rp.base), block_of(ap_ref(ap))));
+                        // a leaf of an array of structures stands in a block of one slot: the range's first slot is one of the leaf's cells or it is not; for a leaf of a range over
+                        // structures the range's first cell of that leaf is the term compared
+                        const E first {rp.leaf.empty() ? rp.base : rp_slot(rp, low::dom("offset_of", {rp.base}))};
+                        case_split(entry, ap.agg ? array_place_hit(ap, first)
+                                                 : low::bin(BinOp::Eq, block_of(first), block_of(ap_ref(ap))));
                     }
                 }
             }
@@ -19425,8 +19991,7 @@ private:
         {
             range_marked_rows(
                 entry, rp, ranges,
-                meta("permission", loop_at,
-                     "this loop begins without the permission to every element of " + quoted(rp.text, "the range")));
+                meta("permission", loop_at, "this loop begins without the permission to " + rp_what(rp, true)));
         }
         // the conjuncts: every `acc` first (so every read after it is framed), then the flags, the range and the values (item 8's list; S43 (c) and its addendum)
         for (const ArrayPlace& ap : arrays)
@@ -19478,15 +20043,15 @@ private:
             };
             for (const RangePlace& rp : ranges)
             {
-                w.invariants.push_back(
-                    auto_invariant(guarded(rp, range_perm(rp.base, rp.lo, rp.hi, "v_" + rp.sfx, rp.amount)), s.loc));
-                w.invariants.push_back(
-                    auto_invariant(guarded(rp, range_perm(rp.base, rp.lo, rp.hi, "d_" + rp.sfx, rp.amount)), s.loc));
+                w.invariants.push_back(auto_invariant(
+                    guarded(rp, range_perm(rp.base, rp.lo, rp.hi, rp.leaf, "v_" + rp.sfx, rp.amount)), s.loc));
+                w.invariants.push_back(auto_invariant(
+                    guarded(rp, range_perm(rp.base, rp.lo, rp.hi, rp.leaf, "d_" + rp.sfx, rp.amount)), s.loc));
             }
             for (const RangePlace& rp : ranges)
             {
                 const E k {low::var("k")};
-                const E slot {low::dom("loc", {block_of(rp.base), k})};
+                const E slot {rp_slot(rp, k)};
                 const E in {low::bin(BinOp::And, low::bin(BinOp::Le, rp.lo, k), low::bin(BinOp::Lt, k, rp.hi))};
                 const E flag {cell_flag(slot, rp.element)};
                 w.invariants.push_back(auto_invariant(
@@ -19986,8 +20551,8 @@ private:
             const SrcLoc at {s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : loop_at};
             range_marked_rows(w.then_body, rp, ranges,
                               meta("permission", at,
-                                   "an iteration of this loop ends without the permission to " +
-                                       quoted(rp.text, "the range") + " that it began with"));
+                                   "an iteration of this loop ends without the permission to " + rp_what(rp, false) +
+                                       " that it began with"));
         }
         owner_flag_rows(owners, places, s.body != nullptr && s.body->end_loc.known() ? s.body->end_loc : s.loc,
                         w.then_body);
@@ -24415,6 +24980,12 @@ private:
                 {
                     continue;
                 }
+                if (range && site_pointee(rs).is_struct())
+                {
+                    // decision 0064 item 7 (C1, slice 2a): a range over structures holds one interval per leaf path; the keep fact is not stated for one (the fact is lost, never assumed:
+                    // a lost keep fact costs completeness only)
+                    continue;
+                }
                 const std::string sfx {use_cell_type(site_pointee(rs))};
                 const E ref {site_ref(rs, env)};
                 E n_site {low::int_lit("1")};
@@ -24636,7 +25207,9 @@ private:
     {
         if (is_elem_key(k))
         {
-            return elem_ref(*elem_of(k).addr, env);
+            return chain_ref(
+                elem_ref(*elem_of(k).addr, env),
+                path); // the leaf of a structure's slot (decision 0064 item 7); `path` is empty for an element of a scalar
         }
         if (!is_derived_key(k))
         {
@@ -25032,6 +25605,13 @@ private:
                         {
                             continue;
                         }
+                        // Decision 0064 item 7: the read is a leaf of an element of a structure (`path` not empty); only a `reads_range` over structures ties it, by `range_covers_cell`
+                        // (the cell is a cell of that field of a slot inside the range).  A `reads(*p)` atom of a structure, a scalar range and a scalar cell never hold such a leaf
+                        // here, and none is tied (completeness only: a lost fact).
+                        if (!path.empty() && !(range && site_pointee(rs).is_struct()))
+                        {
+                            continue;
+                        }
                         for (const AtomSite& es : fa.sites)
                         {
                             if (!es.in_ensures || es.atom->amount != i)
@@ -25040,6 +25620,20 @@ private:
                             }
                             Full scratch;
                             E cond {low::and_(site_guard(rs, env), site_guard(es, env))};
+                            if (!path.empty())
+                            {
+                                const E cover {range_covers_cell(addr, cell_suffix(t), site_pointee(rs),
+                                                                 site_ref(rs, env),
+                                                                 lower(*rs.atom->b, env, nullptr, Deps {}, scratch).e)};
+                                if (cover == nullptr)
+                                {
+                                    continue;
+                                }
+                                cond = low::and_(cond, cover);
+                                facts_.push_back(low::implies(cond, low::bin(low::BinOp::Eq, low::var(ghost_name(key)),
+                                                                             low::var(ghost_name(kr, path, false)))));
+                                continue;
+                            }
                             cond =
                                 low::and_(cond, range ? in_range(addr, site_ref(rs, env),
                                                                  lower(*rs.atom->b, env, nullptr, Deps {}, scratch).e)
@@ -25161,9 +25755,10 @@ private:
                 if (is_elem_key(kr))
                 {
                     const Expr& addr {*elem_of(kr).addr};
-                    if (addr.a->kind == Expr::Kind::GlobalAddr || addr.a->kind == Expr::Kind::MemberAddr)
+                    if (addr.a->kind == Expr::Kind::GlobalAddr || addr.a->kind == Expr::Kind::MemberAddr ||
+                        !std::get<1>(gk).empty())
                     {
-                        continue; // a global array's or an array member's element has no ghost function (decision 0063 item 7: under a binder it is e1e2's)
+                        continue; // a global array's or an array member's element has no ghost function (decision 0063 item 7: under a binder it is e1e2's); nor does a leaf of a structure's element (decision 0064 item 7: Part F)
                     }
                     if (!elem_base_kind_ok(*addr.a, "the ghost tie of f__wf"))
                     {

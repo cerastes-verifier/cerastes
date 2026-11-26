@@ -10,7 +10,9 @@
   10; **Part C2**, item 9 and the global and member parts of 10 and 12; **Part D**, item 15; **Part E**, item 13
   and depths 2 and 3; **Part F**, item 14). **Amended on 2026-11-26, before Part R's code** (invariant 6), from
   section 6 of that plan: this header; items 1, 5, 7, 12, 13, 16 and 19; the table of facts (P84); the
-  consequences. Written before code
+  consequences. **The continuation's first session built Part R (its Commit 1) and Part C1 (its Commit 2:
+  items 7 and 8 and the range parts of 10 for a pointer parameter's range over structures, with round R's
+  fixes); Parts C2 to F stay "decided, built by the next session" until their commits.** Written before code
   (invariant 6) from section 7 of the plan
   (`.claude/plans/m4-5e1e2-arrays-of-structures.md`, written at a session that only planned and executed without
   re-planning). Revised by P83's and S48's decision tables (the plan's section 6; `internal/il-inventory.md`,
@@ -85,6 +87,18 @@
     no page statement and one call site without a test row (item 16); notes 4 to 8 in items 5, 16 and 19. The
     record and the pages were made true of that build before Commit 1; the code and test fixes land with the
     continuation's Commit 2 and are read again by the audit round of Part C1.
+  - **Audit round C1** (a fresh Fable auditor on the joined snapshot of Part C1, `0513b158e4e2`;
+    `build/m4.5e1e2b/auditor-report-C1.md`; about 575 runs): no wrong program verifies and no blocking finding;
+    round R's fixes hold. Should-fix 1, the sequencing rows of a call that holds a range over structures have
+    no other check behind them and had no C-level test (items 7 and 11: pinned with Commit 2); 2, a `pure`
+    application beside a range over structures is framed as an interval of scalar cells (`apply_frame`; fail
+    closed, an exit 3 beside the right diagnostics); 3, a quantifier beside such a range is accepted with a
+    body outside 0061 item 11 (the lint refuses its Viper); 4, a range over a structure with a
+    pointer-to-structure member is accepted and right, but untested, and the lint refuses its Viper; 5,
+    `f__wf`'s ghosts per leaf and slot had no must-fail test (pinned with Commit 2); 6, the lint's scope-exit
+    rule is switched off by any `assert false` in the method; 7, an unlisted cost (item 7). Items 2, 3, 4 and
+    6 are code and lint fixes that land with Commit 3 (Part C2) and are read again by the audit round of Part
+    C2; until then this record says what Commit 2's build does.
 - **Milestone:** M4.5e1e2.
 - **Amends:** 0012 item 11 (the lint); 0024 item 6 (array types of aggregates); 0028 items 2 and 16 (as built); 0043
 items 6, 7, 9 and 11; 0044 items 2–5 and 8; 0045 items 1 and 12; 0047 items 2, 4, 6 and 8; 0052 item 2; 0055
@@ -279,13 +293,19 @@ doc example holds.
      touched. **An address the front end folds to a constant is under the rule too** (audit round R,
      should-fix 2): a constant index into an array of static storage (`&ga[2]`, a `static` local array's
      element, `&gs.a[1]`) reaches the encoder as a `ck_address` constant whose kept `expr` is the written
-     `&E[i]`, and the predicate reads through it. **As built at the continuation's Commit 1** it does not: in C
-     such an address as the condition of an `if` is accepted (`if (&ga[2])`; it verified on the base too; GCC
-     flags it; sound, the address is never null and the proof says so), and in its other positions (`!&ga[1]`,
-     `&ga[1] != NULL`, an operand of `?:` or `&&`, an initializer) and everywhere in C++ it is rejected, but
-     under `unsupported_expression` ("taking an address … in an expression the compiler folded to a constant").
-     Commit 2 rejects the `if` form (`array_address_null_test`, pinned) and leaves every row that already
-     rejects with its tag and line. **Over-strict beyond `&p[0]`, listed** (audit round R, note 4; question
+     `&E[i]`, and the predicate reads through it. **As built** (the continuation's Commit 2; Commit 1's build
+     did not read through the fold): in C every truth test whose OPERAND is the folded address is
+     `array_address_null_test` — the condition of an `if`, `while`, `for` or `do`, an operand of `&&`, `||` or
+     `?:`, a conversion to `bool` of the address itself (`if (&ga[2])` and `x && &ga[2]` verified before, on
+     the base too; GCC flags them; they were sound, the address is never null and the proof said so). A test
+     that the front end folds WHOLE to a constant (`!&ga[1]`, `&ga[1] != NULL`, `(bool)&ga[2]`) never shows
+     the address as an operand and keeps its older rejection, `unsupported_expression` ("taking an address …
+     in an expression the compiler folded to a constant"), and so does every such test in C++. Among the 254
+     probe runs before and after and `rejections.py`'s record, no row that already rejected changed its tag
+     or line. Audit round C1 (note 14) found one contract line, `!!&p[1]` in an `ensures`, that draws two rows
+     (`array_address_null_test` and the older `unsupported_expression`, "the address of an element, `&p[e]`,
+     in a contract") where the base drew the older one alone; whether the pair came with Part R or with these
+     fixes was not determined (no lane held Commit 1's build then). Fail closed either way. **Over-strict beyond `&p[0]`, listed** (audit round R, note 4; question
      342): a test written through a macro (`assert(&a[1] != NULL)`, `ISNULL(&a[1])`, `TRUTH(&a[1])`), on which
      GCC and clang are silent in both modes, and `&a[1] == (int *)0` in C, which only g++ flags; the rule
      rejects them, the base accepted them for arrays of scalars, and no existing test or doc example holds
@@ -368,6 +388,11 @@ doc example holds.
        ((offset_of(p) <= offset_of(q) && offset_of(q) < offset_of(p) + n && loc(member(q, 0), 0) ==
        loc(member(loc(block_of(p), offset_of(q)), 0), 0)) || (offset_of(q) <= offset_of(p) && offset_of(p) <
        offset_of(q) + m && loc(member(p, 0), 0) == loc(member(loc(block_of(q), offset_of(p)), 0), 0))))` —
+       (**as built**, one choice wider than this wording: two leaves of ONE structure whose paths differ in
+       length, `x` against `t.a`, get the general two-way membership row rather than no row, since this
+       item argues that two leaf paths cannot meet only for paths of equal length; a pair of ranges over
+       different element structures gets that general row too, `!((0 < n && first_p meets q's range) || (0
+       < m && first_q meets p's range))`)
        **never the block row** `!(block_of(q) == block_of(p) && the intervals meet)` that 0060 item 8 writes
        for scalar ranges and the S48 (c) fixtures wrote: Silicon does not decide it where a function forwards
        two of its own ranges over structures (no leaf receiver of a first slot is in view; a false
@@ -377,8 +402,11 @@ doc example holds.
        is not built for a pairing in which either site is an `owns`; two `reads` sites that may meet keep the
        sum form of 0060 items 8 and 9 and 0063 item 7, which checks their amounts and separates nothing.
      - Never a bare block comparison, never `perm` under a quantifier. A row Silicon cannot decide is a false
-       `permission` or an exit 3, never a proof: behind every pairing row stands the call's own precondition
-       (the audit's nine `fp_*` probes: with no row at all, each alias fails Silicon's precondition check).
+       `permission` or an exit 3, never a proof: behind every pairing row **of a call, a return and a loop**
+       stands the call's own precondition, the postcondition or the invariant (the audit's nine `fp_*`
+       probes: with no row at all, each alias fails Silicon's precondition check; audit round C1 repeated it
+       on Part C1's build). **That is not true of the sequencing rows, which the same membership tests
+       write** (item 11; audit round C1, finding 1): nothing stands behind those.
      - **A site that is a nested slot** may be paired by its slot instead of leaf by leaf (the two are
        equivalent, and lowering writes one of them per site kind): a structure atom on a nested structure of
        the element (`struct T` on `&v[k].t`) by one row on the atom's slot, `!(g && lo <= X && X < hi && q ==
@@ -399,9 +427,59 @@ doc example holds.
        forwarded structure atom of the element's own type (the audit's probes `fwd_row`, `fwd3_row` decide
        both). The nested twins are the slow ones (48–85 s at load 3–11, the positive 43.5 s): Part C's tests
        of them are timed under the test budget's rule 3.
-     - **Listed false alarm** (audit round 1, note 13): `&p[n]`, one past a range of structures but inside its
-       block, cannot be shown `WF_S` (the length facts cover the range's slots only), so passing it to a
-       `struct S *` parameter is a false alarm.
+     - **Listed limit, fail closed: an exit 3** (audit round 1, note 13, called it a false alarm; question 343,
+       open for the owner). A structure pointer formed by indexing a pointer base outside the slots that the
+       function's atoms show to hold structures cannot be shown `WF_S` (the length facts of a range cover its
+       slots only; `owns(*p)` covers `p`'s own slot): `&p[n]` one past a range, `&p[i]` with `i` only known to
+       be in `[0, n]`, and `&p[1]` under `owns(*p)`. Forming it is accepted. **Passing it to a function with no
+       atom on that parameter** (directly or through a local copy) **and returning it end in an internal error**
+       (exit 3: "Silicon's own check of the precondition of `g`"; "the pointer a function returns is
+       well-formed"), not in a diagnostic: nothing is reported verified, but the explicit row that 0028 item
+       11 asks for is missing. Passing it to a callee that owns or reads the pointee is an ordinary
+       `permission` error, storing it into a cell a false `lifetime`, and inside the range (`&p[0]` with `1 <=
+       n`) everything verifies. To a callee with only `live(q)` on that parameter it is two false
+       `permission` errors ("needs `&p[n]` to point to a live object"; "returns without owning `p[0..n)`"),
+       and `f(&p[n], 0)` to a range callee one (audit round C1, note 9, which found no use of such a pointer
+       that verifies something false: a false `check` after forming it is reported, and `&p[n] == &p[0]`
+       is not provable). **It predates Part C1:** `g(&p[1])` under `owns(*p)` gives the same exit 3 on
+       the continuation's Commit 1 build, since the first session's Part B accepted `&p[i]` on a pointer to a
+       structure. The fix is one explicit `WF_S` row (`permission`) for a structure-pointer argument and
+       result; written for every such value it changes the Viper of existing programs, which is the owner's
+       to approve, and written only for functions that hold a range it would leave the older form as it is.
+       So nothing is built here; the harness cannot pin an exit 3, and the planned pin
+       `range_struct_past_end_false_alarm.c` did not land. Probes: `build/m4.5e1e2b/q343/`.
+     - **Listed, from Part C1's lowering:** a `must_init` filler over a range of structures that fills WITH A
+       LOOP fails its flag rows at the return (the loop's automatic conjuncts do not say which flags it set;
+       a quantified invariant over a member is item 14's, Part F): a false alarm, pinned by a self-test case;
+       a `ref_to_uninit` loop verifies. In a contract and in a loop annotation a read through a pointer
+       member of an element (`*p[0].q`, `p[0].q[0]`, `p[0].q->x`) is refused (M4.5e2, with the other
+       memory-reading places). In a loop annotation `p[e].x` is accepted for the parameter's own copy in a
+       function whose `requires` holds a range on it; after `p = q;` the read is framed by `q`'s place or
+       fails `permission`, never by `p`'s entry range (0060 item 11). A caller that holds one element fewer
+       gets two `permission` errors at the call, the shape row and the first leaf's marked row, as 0060 item
+       8 has it for a forwarder (a local array one element short: one row, which names no member).
+     - **As built at the continuation's Commit 2, to be fixed with Commit 3** (audit round C1; each fails
+       closed): (finding 2) a contract that applies a `pure` function to a scalar range beside a range over
+       structures has that range written into the application's framing as an interval of the member's
+       cells (`apply_frame` was not given the leaf path); Silicon's own check of the application stands
+       behind the guard, so an unframed application gets its two right diagnostics and then an exit 3, and
+       a framed one can only be a false alarm; the same exit 3 for a structure atom predates this record.
+       (finding 3) A `cerastes_forall` over a scalar range beside a range over structures of that member
+       type is accepted and its results are right, but the quantifier's body then holds a computed `loc`
+       term over the binder, outside 0061 item 11; the lint refuses that Viper, so no test holds the
+       combination. (finding 4) A range over a structure with a pointer-to-structure member (`struct N {
+       struct N *next; int v; }`) is accepted and behaves rightly, but the lint refuses the well-formedness
+       row of that leaf (as it does for a scalar range over `struct P **`, since M4.5e1b), so no test holds
+       it either.
+     - **Cost, listed** (audit round C1, finding 7; fail closed: a timeout is exit 3; M4.8's cost items): a
+       function that holds two `reads_range` atoms over ONE structure type and has a loop is slow. Under a
+       loaded box, a loop that only reads took 81 s, and its twin whose loop writes through one of the
+       ranges, which owes a `permission` error, got no verdict in 560 s. The lowering's own case of that
+       shape took 78 to 112 s before `range_row_amount` used the slot-index test for a leaf against itself.
+     - **Not of this record, listed** (audit round C1, note 12): a contract that owns one object twice and
+       says so (`owns_range(p, n) && owns_range(q, n) && p == q`, also the cell and scalar-range forms, which
+       verify on the base) verifies vacuously; no caller can meet it, and no entry row reports it for
+       ranges (0060 item 7 asserts no separation for ranges).
    - **Amounts** (0060 item 6): a `reads_range`'s amount is the minimum over each leaf path's first slot, the
      liveness cell and the caller's own read amounts of those fields (question 238's listed limit applies).
    - **Rejected** (`unsupported_annotation`): item 1's M4.5e2 rows; two atoms on one parameter that overlap
@@ -441,6 +519,16 @@ doc example holds.
     takes the path-precise row); and a structure store's leaves (`struct_store_leaves`) carry the index steps
     of an array member of aggregates, so a write to `t.v[0].x` inside a value stored to `t` is the static
     conflict it is for a scalar member.
+    **A call that holds a range over structures** (Part C1) is a memory call on every leaf path of the
+    range: the path-precise `unsequenced` rows against another access or another call in the same full
+    expression are written per leaf with item 7's membership tests (a cell against a leaf's slots; two
+    ranges by the slot row or the two-way membership row). **Nothing stands behind these rows** (audit round
+    C1, finding 1): Viper has no evaluation order to check, so with a row left out `wr(v, 2) + wr(&v[1], 2)`
+    verifies with one order's result (the auditor made the rows `assert true` in the kept Viper and Silicon
+    verified it). As built the rows are right (23 probes in both modes: every overlap is `unsequenced`, the
+    disjoint control passes), and they are pinned at C level by `tests/memory/range_struct_seq.c` and
+    `negative/range_struct_seq_unsequenced.c` and by six self-test cases (`e1e2c1_seq_*`); no lint rule
+    inspects them.
 12. **Structure values and elements** (amends 0043 item 7, 0044 items 2–5, 0063 item 13). An element `v[i]` or
     `p[i]` is a structure place: a copy's source and destination, a by-value argument, an initializer's source,
     with 0043 item 7's and 0063 item 13's rows, after the index's own rows. **The source's rows come before any guard** (0063 item 13: the source's permission and every source flag,
@@ -628,6 +716,21 @@ doc example holds.
       clause sets, each (receiver, field) once; `program_start`'s row group per leaf path; a user quantifier's
       class trigger with member steps (item 14).
     - Each rule with a refusing twin in `scripts/test_lint_viper.py`.
+    - **As built through Part C1** (the continuation's Commit 2): leaf rows in a range atom's `requires`
+      and `ensures` and in a call's rows; the length-facts row of a range, and its tie to every leaf row;
+      the `reads_range` amount as a minimum over each leaf of the first slot; a scope exit's rows tied to
+      its allocation's (receiver, field) set (the first session's audit 2, issue 7). **Known gaps:** that
+      scope-exit rule is switched off for a method that holds an `assert false` anywhere, which every
+      method with a result does (audit round C1, finding 6: a method that drops an array's exit whole is
+      not refused; fixed with Commit 3); the row for the well-formedness of a pointer-to-structure leaf is
+      refused (finding 4, above). **Not inspected by any rule, by design** (audit round C1, note 8): the
+      pairing rows of a call, the `? :` terms of a marked amount, a cell's sum row and the contract-read
+      framing disjunction, each of which Silicon checks again (a wrong one is a false alarm or an exit 3:
+      a marked row consumes and gives nothing, and the amount a callee receives is bound by Silicon's own
+      exhale of its precondition); and the sequencing rows and `f__wf`'s ghost names, which Silicon does
+      NOT check again and which tests pin instead (item 11; `tests/memory/range_struct_wf.c` and
+      `negative/range_struct_wf_division.c` for the ghosts: one per leaf path and slot, a `reads_range`'s
+      post value tied to its pre value and an `owns_range`'s not).
 18. **Categories and tags:** none new. **Facts:** P83, S48.
 19. **`restrict`: every `restrict` parameter is rejected** (question 326, the owner, 2026-11-25: "Reject
     restrict"; this item was rewritten on 2026-11-26, before the code of the continuation's Part R; amends 0037
@@ -654,12 +757,14 @@ doc example holds.
       advisor, fail closed): it is rejected when ANY of its declarations in the unit gives a parameter the
       qualifier, in C and in C++, reported as above. The front end's merged type of two declarations that
       differ in a parameter's top-level qualifiers carries none, so the encoder reads each declaration's own
-      written type. **As built at the continuation's Commit 1** it reads only the merged type: a called
-      function without a body that is declared once with `restrict` and once without it (in either order, or
-      with a differing `const`), and in C++ one declared plain first and with `__restrict` second, is
-      accepted. Not unsound (no body is verified, the contract is trusted either way, and C gives a
-      prototype's `restrict` no meaning); it also verified on the base. Commit 2 builds the rule, with a pin
-      per form the audit found. **The qualifier is
+      written type. **Built with the continuation's Commit 2** (`declared_restrict_params`; an `int
+      p[restrict]` on a second declaration is read too; pins `restrict_reject_redeclared.c` and
+      `restrict_reject_redeclared_cpp.cpp`). In C++ the rejection is `vtype`'s `unsupported_type`, at the head
+      of the function's first declaration, whichever declaration has the keyword. Commit 1's build read only
+      the merged type and accepted a called function without a body declared once with `restrict` and once
+      without it (in either order, or with a differing `const`), and in C++ one declared plain first and
+      with `__restrict` second: not unsound (no body is verified, the contract is trusted either way, and C
+      gives a prototype's `restrict` no meaning), and it verified on the base too. **The qualifier is
       read where it is read today:** from the definition's own parameters when the unit holds the definition, from the declaration
       otherwise. So `restrict` written only on a prototype of a function that the unit defines without it,
       before or after the definition, stays accepted, as it is today: C attaches the promise to the block of the definition (6.7.3.1), and

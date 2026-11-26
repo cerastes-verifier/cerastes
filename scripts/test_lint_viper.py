@@ -7676,6 +7676,52 @@ class RangeAtomQuantifierTests(unittest.TestCase):
         lines[-2] = f"  l1 := (((v_n > 0) ? {bad} : {self.LIVE})) / 2"
         self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in self.probs(lines)))
 
+    # --- decision 0064 item 7 (Amounts): the minimum of a `reads_range` over structures, per leaf path's first slot (the il-analyst's slice 2b
+    # emits it: `(n > 0 ? min(v, d of each leaf, the liveness, the caller's amounts) : liveness) / N`)
+    def leaf_perm(self, path, f, t="int", slot=None):
+        cell = slot or self.SLOT
+        for j in path:
+            cell = f"loc(member({cell}, {j}), 0)"
+        return f"perm({cell}.{f}_{t})"
+
+    def test_the_minimum_over_a_range_of_structures_takes_both_permissions_of_each_leaf_of_the_first_slot(self):
+        lp = self.leaf_perm
+        for label, leaves in {
+            "two leaves": [lp([0], "v"), lp([0], "d"), lp([1], "v"), lp([1], "d"), self.LIVE],
+            "a leaf of another type": [lp([0], "v", "bool"), lp([0], "d", "bool"), self.LIVE],
+            "a nested leaf": [lp([0], "v"), lp([0], "d"), lp([1, 1], "v"), lp([1, 1], "d"), self.LIVE],
+            "the caller's own amounts": [lp([0], "v"), lp([0], "d"), self.LIVE, "amt", "amt2"],
+            "one leaf alone": [lp([0], "v"), lp([0], "d"), self.LIVE],
+        }.items():
+            with self.subTest(minimum=label):
+                self.clean(self.own_min_lines(leaves))
+
+    def test_the_minimum_over_a_range_of_structures_takes_nothing_else(self):
+        lp = self.leaf_perm
+        slot2 = "loc(block_of(ra1), offset_of(ra1) + 1)"
+        other_slot = "loc(block_of(v_q), offset_of(v_q))"
+        v0, d0 = lp([0], "v"), lp([0], "d")
+        for label, leaves in {
+            "a leaf without its flag": [v0, lp([1], "v"), lp([1], "d"), self.LIVE],
+            "a leaf without its value": [d0, lp([1], "v"), lp([1], "d"), self.LIVE],
+            "a flag of another type": [v0, lp([0], "d", "bool"), self.LIVE],
+            "no liveness cell": [v0, d0, "amt"],
+            "another liveness cell": [v0, d0, "perm(lvloc(block_of(v_q)).lv)"],
+            "a leaf of the second slot": [v0, d0, lp([1], "v", slot=slot2), lp([1], "d", slot=slot2), self.LIVE],
+            "a leaf of another variable's slot": [v0, d0, lp([1], "v", slot=other_slot), lp([1], "d", slot=other_slot), self.LIVE],
+            "a leaf cell of another variable": [v0, d0, "perm(loc(member(v_q, 1), 0).v_int)", "perm(loc(member(v_q, 1), 0).d_int)", self.LIVE],
+            "a leaf cell that is not under the slot": [v0, d0, "perm(loc(member(v_p, 1), 0).v_int)", "perm(loc(member(v_p, 1), 0).d_int)", self.LIVE],
+            "the slot's own cell beside a leaf": [v0, d0, f"perm({self.SLOT}.v_int)", f"perm({self.SLOT}.d_int)", self.LIVE],
+            "a member that is not a literal": [v0, d0, "perm(loc(member(" + self.SLOT + ", k), 0).v_int)", "perm(loc(member(" + self.SLOT + ", k), 0).d_int)", self.LIVE],
+            "a leaf at another cell of its block": [v0, d0, f"perm(loc(member({self.SLOT}, 1), 1).v_int)", f"perm(loc(member({self.SLOT}, 1), 1).d_int)", self.LIVE],
+            "a Perm local": [v0, d0, self.LIVE, "kl"],
+            "a literal": [v0, d0, self.LIVE, "write"],
+            "a quotient": [v0, d0, self.LIVE, "(amt / 2)"],
+        }.items():
+            with self.subTest(minimum=label):
+                probs = self.probs(self.own_min_lines(leaves))
+                self.assertTrue(any("`Perm` local `l1` is assigned" in p for p in probs), probs)
+
     # --- decision 0063 item 8: the amount of a `reads(*p)` or `reads(p->a)` site with array parts (cells, first slots of the array parts, the liveness)
     SITE_LIVE = "perm(lvloc(block_of(v_p)).lv)"
 
@@ -10879,6 +10925,293 @@ class ArrayCopyCallTests(unittest.TestCase):
         lines[i + 1] = "  requires true"
         self.assertEqual(self.probs(lines), [])  # refused as a copy by the clause rule instead
         self.assertTrue([p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "not the trusted array copy" in p])
+
+
+class LeafRangeAtomTests(unittest.TestCase):
+    """Decision 0064 items 7 and 17 (Part C1): a range atom over STRUCTURES in a method's `requires` and `ensures`, and the pure rows of a call over it.
+    Per element `k` of the range `offset_of(X) <= k && k < offset_of(X) + n`: the length facts (`len(member(<chain>, j)) == 1` for each member block, a
+    nested structure's own members included) with the slot `loc(block_of(X), k)` for the trigger, and per LEAF PATH, with the receiver `loc(member(<chain>,
+    j), 0)` for the trigger and for the cell, the rows of a scalar range atom (`acc` of the value and of the flag, the flag, the type's range, the flag
+    implication, in an `ensures` `old(flag) ==> flag`).  Each twin changes one thing of a clean fixture; a leaf row with no length facts of its range, or
+    whose member blocks the length facts do not state, is refused (the tie)."""
+
+    def slot(self, x="v_p", k="k"):
+        return f"loc(block_of({x}), {k})"
+
+    def recv(self, chain=(0,), x="v_p", k="k"):
+        r = self.slot(x, k)
+        for j in chain:
+            r = f"loc(member({r}, {j}), 0)"
+        return r
+
+    def member(self, chain, x="v_p", k="k"):
+        r = self.slot(x, k)
+        for j in chain[:-1]:
+            r = f"loc(member({r}, {j}), 0)"
+        return f"member({r}, {chain[-1]})"
+
+    def quant(self, cons, trigger=None, x="v_p", n="v_n", k="k", lo=None, hi=None, extra=None):
+        lo = f"offset_of({x})" if lo is None else lo
+        hi = f"offset_of({x}) + {n}" if hi is None else hi
+        ante = f"(({lo} <= {k}) && ({k} < {hi}))"
+        if extra:
+            ante = f"({ante} && {extra})"
+        return f"forall {k}: Int :: {{ {trigger or self.slot(x, k)} }} {ante} ==> {cons}"
+
+    def lens(self, members=((0,), (1,)), x="v_p", **kw):
+        parts = " && ".join(f"(len({self.member(m, x)}) == 1)" for m in members)
+        return self.quant(f"({parts})", x=x, **kw)
+
+    def leaf(self, cons, chain=(0,), x="v_p", **kw):
+        return self.quant(cons, trigger=self.recv(chain, x), x=x, **kw)
+
+    def rows(self, chain=(0,), x="v_p", old=False, amount=""):
+        r = self.recv(chain, x)
+        rng = f"(((-2147483648) <= {r}.v_int) && ({r}.v_int <= 2147483647))"
+        out = [self.leaf(f"acc({r}.v_int{amount})", chain, x), self.leaf(f"acc({r}.d_int{amount})", chain, x), self.leaf(f"{r}.d_int", chain, x),
+               self.leaf(f"({r}.d_int ==> {rng})", chain, x)]
+        if old:
+            out.append(self.leaf(f"(old({r}.d_int) ==> {r}.d_int)", chain, x))
+        return out
+
+    def atom(self, chains=((0,), (1,)), members=((0,), (1,)), old=False, amount=""):
+        return [self.lens(members), *[row for c in chains for row in self.rows(c, old=old, amount=amount)]]
+
+    def method(self, requires=(), ensures=(), body=(), formals="v_p: Ref, v_n: Int, amt: Perm"):
+        lines = [f"method m__1({formals})", Check("  requires none < amt && amt < write", WF, "internal")]
+        lines += [Check(f"  requires {r}", WF, "internal") for r in requires]
+        lines += [Check(f"  ensures {e}", P, "postcondition") for e in ensures]
+        return lines + ["  decreases", "{", "  var t4: Ref", "  var t5: Int", *body, "}"]
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map")
+                if any(w in p for w in ("`forall`", "quantified", "leaf", "length fact", "member block", "length-facts", "marked range row"))]
+
+    def clean(self, lines):
+        self.assertEqual(self.probs(lines), [])
+        self.assertEqual(lint_vpr_other(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    def refused(self, lines, fragment="`forall` outside the shapes"):
+        probs = self.probs(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    # --- the clean shapes
+    def test_the_rows_of_an_atom_over_structures_are_clean(self):
+        self.clean(self.method(requires=self.atom(), ensures=self.atom(old=True)))
+
+    def test_a_nested_structures_leaf_paths_are_clean(self):
+        members = ((0,), (1,), (1, 0), (1, 1))
+        chains = ((0,), (1, 0), (1, 1))
+        self.clean(self.method(requires=self.atom(chains, members), ensures=self.atom(chains, members, old=True)))
+
+    def test_a_reads_atom_carries_a_perm_formal_as_its_amount(self):
+        self.clean(self.method(requires=self.atom(amount=", amt"), ensures=self.atom(amount=", amt")))
+
+    def test_a_guard_stands_outside_each_row(self):
+        g = "(v_p != null) ==> "
+        self.clean(self.method(requires=[g + r for r in self.atom()], ensures=[g + r for r in self.atom(old=True)]))
+
+    def test_the_pure_rows_of_a_call_over_the_bound_local_are_clean(self):
+        # the rows of a call (`assert`, no map reason): the length facts, the flags and the type's range of each leaf
+        r = self.recv((0,), "t4")
+        rng = f"(((-2147483648) <= {r}.v_int) && ({r}.v_int <= 2147483647))"
+        body = [Check("  assert " + self.lens(x="t4", n="t5"), A, "precondition"),
+                Check("  assert " + self.leaf(f"{r}.d_int", (0,), "t4", n="t5"), A, "uninitialized"),
+                Check("  assert " + self.leaf(f"({r}.d_int ==> {rng})", (0,), "t4", n="t5"), A, "precondition")]
+        self.clean(self.method(body=body))
+
+    # --- a leaf row keeps the shape of a scalar range atom's
+    def test_a_leaf_row_must_keep_its_shape(self):
+        r = self.recv((0,))
+        mutants = {
+            "an extra antecedent": self.leaf(f"acc({r}.v_int)", extra="true"),
+            "a value row": self.leaf(f"({r}.v_int == 0)"),
+            "a flag that implies something else": self.leaf(f"({r}.d_int ==> ({r}.v_int >= 0))"),
+            "a permission with an amount that is no formal": self.leaf(f"acc({r}.v_int, write)"),
+            "a range that does not start at the base": self.leaf(f"acc({r}.v_int)", lo="0"),
+            "a range that starts at another base": self.leaf(f"acc({r}.v_int)", lo="offset_of(v_q)"),
+            "a range that ends at the index": self.leaf(f"acc({r}.v_int)", hi="offset_of(v_p) + k"),
+            "an old in a requires": self.leaf(f"(old({r}.d_int) ==> {r}.d_int)"),
+            "the cell of another leaf": self.leaf(f"acc({self.recv((1,))}.v_int)"),
+            "two fields": self.leaf(f"(acc({r}.v_int) && acc({r}.d_int))"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.refused(self.method(requires=[self.lens(), row]), "a row over a leaf of an array of structures")
+
+    def test_a_receiver_must_be_the_canonical_chain_rooted_at_the_slot(self):
+        r = self.recv((0,))
+        ok = self.leaf(f"acc({r}.v_int)")
+        self.assertEqual(self.probs(self.method(requires=[self.lens(), ok])), [])
+        mutants = {
+            "a variable member index": ok.replace("member(loc(block_of(v_p), k), 0)", "member(loc(block_of(v_p), k), j)"),
+            "an offset in the slot": ok.replace("loc(block_of(v_p), k)", "loc(block_of(v_p), k + 1)"),
+            "a trigger that is the slot": self.quant(f"acc({r}.v_int)"),
+            "two roots": ok.replace("acc(loc(member(loc(block_of(v_p), k), 0), 0)", "acc(loc(member(loc(block_of(v_q), k), 0), 0)"),
+            "a block that is not a variable": ok.replace("block_of(v_p)", "block_of(f(v_p))"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method(requires=[self.lens(), row])), label)
+
+    # --- the length facts
+    def test_the_length_facts_must_keep_their_shape(self):
+        base = self.method(requires=[self.lens(), *self.rows((0,))])
+        self.assertEqual(self.probs(base), [])
+        slot = self.slot()
+        mutants = {
+            "a length of 2": self.quant(f"(len({self.member((0,))}) == 2)"),
+            "a length that is not a literal": self.quant(f"(len({self.member((0,))}) == v_n)"),
+            "a member twice": self.lens(((0,), (0,))),
+            "a nested member without its structure's block": self.lens(((0,), (1, 0))),
+            "a fact about the block of the slot": self.quant(f"(len(block_of({slot})) == 1)"),
+            "a member of a variable index": self.quant(f"(len(member({slot}, j)) == 1)"),
+            "a disjunction": self.quant(f"((len({self.member((0,))}) == 1) || (len({self.member((1,))}) == 1))"),
+        }
+        for label, row in mutants.items():
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method(requires=[row, *self.rows((0,))])), label)
+
+    def test_the_slot_facts_of_a_nested_structure_are_exactly_item_4s_or_none(self):
+        members = ((0,), (1,), (1, 0), (1, 1))
+        a, b = self.recv(()), self.recv((1,))
+        rows = [row for c in ((0,), (1, 0), (1, 1)) for row in self.rows(c)]
+
+        def lens_with(facts):
+            parts = " && ".join([f"(len({self.member(m)}) == 1)" for m in members] + [f"({x} != {y})" for x, y in facts])
+            return self.quant(f"({parts})")
+
+        # the pair of the root and the nested structure is item 4's (the only one here); with it, or with none, the rows are clean
+        self.assertEqual(self.probs(self.method(requires=[lens_with([(a, b)]), *rows])), [])
+        self.assertEqual(self.probs(self.method(requires=[lens_with([]), *rows])), [])
+        for label, facts in (("a pair that is not item 4's", [(self.recv((0,)), b)]), ("the pair twice", [(a, b), (a, b)]),
+                             ("a pair of two leaves", [(a, b), (self.recv((1, 0)), self.recv((1, 1)))])):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.probs(self.method(requires=[lens_with(facts), *rows])), label)
+
+    # --- the tie of the leaves to the length facts
+    def test_a_leaf_needs_the_length_facts_of_its_range(self):
+        self.refused(self.method(requires=self.rows((0,))), "have no length-facts row over the same range")
+        # twin: the same rows with the length facts are clean
+        self.assertEqual(self.probs(self.method(requires=[self.lens(), *self.rows((0,))])), [])
+        # the facts of another range or another clause kind are not these rows' facts
+        self.refused(self.method(requires=[self.lens(n="v_m"), *self.rows((0,))], formals="v_p: Ref, v_n: Int, v_m: Int, amt: Perm"),
+                     "have no length-facts row over the same range")
+        self.refused(self.method(ensures=[self.lens()], requires=self.rows((0,))), "have no length-facts row over the same range")
+
+    def test_the_length_facts_name_the_member_block_of_each_leaf(self):
+        self.refused(self.method(requires=[self.lens(((0,),)), *self.rows((1,))]), "do not state the member block (1,)")
+        members = ((0,), (1,))
+        self.refused(self.method(requires=[self.lens(members), *self.rows((1, 0))]), "do not state the member block (1, 0)")
+        self.assertEqual(self.probs(self.method(requires=[self.lens(((0,), (1,), (1, 0))), *self.rows((1, 0))])), [])
+
+    def test_a_leaf_row_is_still_refused_where_no_range_atom_stands(self):
+        # a flag implication in a statement other than a method's `assert`, `requires` or `ensures`, and an inhale
+        q = self.leaf(f"{self.recv()}.d_int")
+        probs = [p for p in lv.lint_vpr(*build(self.method(body=[f"  inhale {q} // cerastes:inhale-ok test"])), "t.vpr", "t.vpr.map") if "`forall`" in p]
+        self.assertTrue(probs, probs)
+
+
+class ScopeExitTieTests(unittest.TestCase):
+    """Decision 0064 item 6 (audit round 2, issue 7): every way out of the scope of an array of structures exhales exactly what its allocation gave.  In a
+    method with `v := alloc_arr_<E>(N)`, each run of `exhale forall` rows over `block_of(v)` is the allocation's set of (receiver, field) rows over
+    `0 <= k && k < N`, and a run of marked `assert`s of the same set stands directly before it.  The mutants are the audit's: the exit blanked, an exit over
+    `k < 1` for `k < 2`, a marked row on another field, an allocation of 3 for an array of 2, a leaf dropped, a row twice."""
+
+    ALLOC = AggregateArrayAllocationTests("test_the_wrapper_is_pinned")
+
+    def rows(self, n=3, leaves=((0,), (1,)), drop=(), swap=None, v_hi=None):
+        out = []
+        for c in leaves:
+            for f in ("v_int", "d_int"):
+                if (c, f) in drop:
+                    continue
+                g = f if swap is None or swap[0] != (c, f) else swap[1]
+                r = self.ALLOC.recv(c).replace("block_of(r)", "block_of(v_a)")
+                out.append((f"forall k: Int :: {{ {r} }} ((0 <= k) && (k < {n if v_hi is None else v_hi})) ==> acc({r}.{g})", c, f))
+        return out
+
+    def program(self, alloc_n=3, exit_n=None, marked=None, exits=None, live=True, leaves=((0,), (1,)), extra=(), never=False, lv_exhale=True):
+        h = self.ALLOC
+        decl = h.method("alloc_arr_P", h.alloc(leaves=leaves))
+        exit_rows = exits if exits is not None else self.rows(exit_n or alloc_n, leaves)
+        marked_rows = marked if marked is not None else self.rows(exit_n or alloc_n, leaves)
+        body = ["  var v_a: Ref", f"  v_a := alloc_arr_P({alloc_n})"]
+        if never:
+            body.append(Check("  assert false", A, "missing-return"))
+        for text, _c, _f in marked_rows:
+            body.append(Check(f"  assert {text}", MARKED, "lifetime"))
+        if live:
+            body.append(Check("  assert perm(lvloc(block_of(v_a)).lv) == write", A, "lifetime"))
+        for text, _c, _f in exit_rows:
+            body.append(f"  exhale {text}")
+        body += list(extra)
+        if lv_exhale:
+            body.append("  exhale acc(lvloc(block_of(v_a)).lv)")
+        return [*decl, "method m__1()", "  decreases", "{", *body, "}"]
+
+    @staticmethod
+    def probs(lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0064 item 6" in p]
+
+    def refused(self, lines, fragment):
+        probs = self.probs(lines)
+        self.assertTrue(any(fragment in p for p in probs), (fragment, probs))
+
+    def test_an_exit_that_is_the_allocations_is_clean(self):
+        self.assertEqual(self.probs(self.program()), [])
+        self.assertEqual(self.probs(self.program(alloc_n=2, leaves=((0,),))), [])
+
+    def test_two_exits_are_each_checked(self):
+        lines = self.program()
+        # a second exit: a copy of the marked rows, the liveness assert and the exhales, then the first exit's rows dropped from the copy
+        start = next(i for i, l in enumerate(lines) if isinstance(l, Check) and l.error_id == MARKED)
+        end = len(lines) - 2
+        exit_lines = lines[start:end]
+        doubled = lines[:end] + [l for l in exit_lines] + lines[end:]
+        self.assertEqual(self.probs(doubled), [])
+        broken = lines[:end] + [l for l in exit_lines if not (isinstance(l, str) and "d_int" in l and "k < 3" in l and "member(loc(block_of(v_a), k), 1)" in l)] + lines[end:]
+        self.refused(broken, "are not the rows of its allocation")
+
+    def test_the_exhales_are_the_allocations(self):
+        self.refused(self.program(exits=[]), "not directly preceded by the exhales of its rows")
+        self.refused(self.program(exits=self.rows(3, drop=[((1,), "d_int")])), "missing")
+        self.refused(self.program(exits=self.rows(3, drop=[((0,), "v_int")])), "missing")
+        self.refused(self.program(exits=self.rows(3, leaves=((0,),))), "missing")
+        self.refused(self.program(exits=self.rows(3, leaves=((0,), (1,), (2,)))), "unexpected")
+
+    def test_an_exit_over_a_shorter_or_longer_range_is_refused(self):
+        self.refused(self.program(alloc_n=3, exits=self.rows(2)), "not the allocation's `0 <= k && k < 3`")
+        self.refused(self.program(alloc_n=2, exits=self.rows(3)), "not the allocation's `0 <= k && k < 2`")
+        # the allocation says 3 for an array of 2: both rows say 2
+        self.refused(self.program(alloc_n=3, exits=self.rows(2), marked=self.rows(2)), "not the allocation's")
+
+    def test_an_exit_on_another_field_is_refused(self):
+        rows = self.rows(3, swap=(((0,), "d_int"), "v_int"))
+        self.refused(self.program(exits=rows), "a (receiver, field) row twice")
+
+    def test_a_marked_row_on_another_field_or_a_missing_one_is_refused(self):
+        self.refused(self.program(marked=self.rows(3, drop=[((0,), "d_int")])), "the lifetime rows before a scope exit")
+        self.refused(self.program(marked=[]), "not directly preceded by its lifetime rows")
+        self.refused(self.program(marked=self.rows(3, swap=(((1,), "v_int"), "d_int"))), "give a (receiver, field) row twice")
+
+    def test_a_method_that_never_leaves_the_scope_is_not_refused(self):
+        self.assertEqual(self.probs(self.program(exits=[], marked=[], live=False, never=True, lv_exhale=False)), [])
+        self.refused(self.program(exits=[], marked=[], live=False, lv_exhale=False), "is never exhaled")
+
+    def test_a_missing_return_assert_false_hides_no_blanked_exit(self):
+        # the emitted non-void methods carry `assert false` (missing-return): the audit's b01x, every exit `exhale forall` blanked, must still be refused,
+        # through the liveness cell's exhale that stands after the run
+        self.refused(self.program(exits=[], never=True), "not directly preceded by the exhales of its rows")
+        self.assertEqual(self.probs(self.program(never=True)), [])
+
+    def test_a_loops_back_edge_rows_are_not_lifetime_rows(self):
+        loop = [Check(f"  assert {text}", MARKED, "permission") for text, _c, _f in self.rows(3, drop=[((0,), "d_int")])]
+        lines = self.program()
+        i = next(i for i, l in enumerate(lines) if l == "  var v_a: Ref") + 2
+        lines[i:i] = [Check("  assert true", A, "check"), *loop, Check("  assert true", A, "check")]
+        self.assertEqual(self.probs(lines), [])
 
 
 if __name__ == "__main__":

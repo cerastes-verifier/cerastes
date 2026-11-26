@@ -140,6 +140,19 @@ status 1) on:
   method's first `requires` and the views'; `struct_lens`' `len(member(...)) == N` of an unknown pointer's row equals the allocation's count;
   `copy_arr_<t>` is pinned by its clause set (source flags kept by its `ensures`) with `alloc_*` and `zero_arr_<t>`; all three are exempt from the global facts, and
   `copy_arr_<t>` from the ghost-amount bounds, by the clause set and not by the name;
+* ranges over structures (decision 0064 items 6, 7 and 17, M4.5e1e2 Part C1): in a method's `requires` and `ensures` (and the pure `assert` rows of a call) a
+  range atom over a pointer to structures is, per element `k` of `offset_of(X) <= k && k < offset_of(X) + n`, the length facts `forall k :: { loc(block_of(X), k) }
+  ... ==> len(member(<chain>, j)) == 1` for each member block of the element (a chain rooted at the slot, a nested structure's own members inside its block, no
+  block twice, the slot facts of decision 0043 item 4 exactly or none) and, per LEAF path, the rows of a scalar range atom with the leaf receiver `loc(member(
+  <chain>, j), 0)` as trigger and cell (`acc` of the value and of the flag with an amount that is a `Perm` formal, the flag, the type's range, the flag implication, in
+  an `ensures` `old(flag) ==> flag`); a leaf row needs the length-facts row of its range in the same clause kind and that row must state the member block of the leaf
+  and of every nested structure above it (a permission over a member block of unknown length is not an atom).  A method with `v := alloc_arr_<E>(N)` of an
+  aggregate element exhales at every exit exactly what the allocation gave: each run of `exhale forall` rows over `block_of(v)` is the allocation's set of (receiver,
+  field) rows over `0 <= k && k < N`, directly preceded (a `perm(lvloc(block_of(v)).lv) == write` assert may stand between) by a run of marked `assert`s of the same
+  set, and each `exhale acc(lvloc(block_of(v)).lv)` stands directly after the whole run of its exhales (a method's missing-return `assert false` hides nothing), a method that allocates and has no exit at all and no `assert false` is refused (the loops' back-edge rows are other runs).
+  The amount a call row divides for a `reads_range` over structures is `n > 0 ? <minimum> : <liveness>` where the minimum (nested conditionals) takes both the value and the
+  flag permission of each leaf cell of the range's first slot (`loc(member(<slot>, j), 0)`, nested for a nested leaf), the liveness cell and the method's own `Perm` formals, nothing else
+  (decision 0064 item 7, Amounts: `_struct_range_minimum_ok`)
 * the user quantifiers of decision 0061 item 11 (M4.5e1c; `cerastes_forall`): `forall q0: Int[, q1: Int ...] :: { loc(block_of(X), q0)[, ...] } body`, the
   binders named `q<j>`, ONE trigger set holding one term per binder with X a variable, an antecedent that holds the type's range of the bound
   variable (`lo_T <= (q0 - offset_of(X)) && (q0 - offset_of(X)) <= hi_T`), a body with no `acc`, `perm`, `forperm`, `inhale` or `forall` and no
@@ -1817,6 +1830,38 @@ def _site_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: dic
     return all(fs == {"v", "d"} for fs in held.values())
 
 
+def _first_slot_leaf(cell: str, slot: str) -> bool:
+    """Whether `cell` is a leaf of the first slot of a range over structures (decision 0064 item 7: the receiver of a leaf
+    path of the element at the range's first slot): `loc(member(<S>, j), 0)` with `<S>` the slot `loc(block_of(B), offset_of(B))`
+    itself or, for a leaf of a nested structure, another such cell, so `loc(member(loc(member(<slot>, 1), 0), 0), 0)`; at least one
+    member step (the slot itself is a scalar range's cell).  Squashed text."""
+    steps = 0
+    while cell != slot:
+        m = re.fullmatch(r"loc\(member\((.+),\d+\),0\)", cell)
+        if m is None:
+            return False
+        cell, steps = m.group(1), steps + 1
+    return steps >= 1
+
+
+def _struct_range_minimum_ok(leaves: list[str], slot: str, big: str, formals: frozenset[str]) -> bool:
+    """The minimum a `reads_range` over structures' call row divides (decision 0064 item 7, Amounts: the minimum over each leaf
+    path's first slot, the liveness cell and the caller's own read amounts): for every leaf cell of the first slot both its value and
+    its flag permission (of one type), the liveness cell `big`, and nothing else but the method's own `Perm` formals.  A leaf of
+    another range's slot, a cell of another variable, a `Perm` local, a literal or a missing value or flag is refused.  Not checked:
+    that every leaf of the element is in it (a missing leaf only leaves the amount above what that leaf holds, which the call's own
+    exhale reports as a false alarm, never a proof: `_site_amount_inner`'s note)."""
+    held: dict[tuple[str, str], set[str]] = {}
+    for leaf in leaves:
+        if leaf == big or leaf in formals:
+            continue
+        m = PERM_LEAF_FIELD_RE.match(leaf)
+        if m is None or not _first_slot_leaf(m.group("cell"), slot):
+            return False
+        held.setdefault((m.group("cell"), m.group("t")), set()).add(m.group("f"))
+    return big in leaves and all(fs == {"v", "d"} for fs in held.values())
+
+
 def _range_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: dict[str, str] | None = None) -> bool:
     """The amount a range atom's call row divides (decision 0060 item 6, S44 (c), audit round 2 S5): the liveness
     `perm(lvloc(block_of(B)).lv)` of a variable B (an `owns_range`), or, for a `reads_range`, `n > 0 ? min(perm(F.v_t), perm(F.d_t),
@@ -1841,6 +1886,8 @@ def _range_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: di
     if leaves is None:
         return False
     slot = f"loc(block_of({bb}),offset_of({bb}))"
+    if any((m := PERM_LEAF_FIELD_RE.match(leaf)) is not None and m.group("cell") != slot for leaf in leaves if leaf != big and leaf not in formals):
+        return _struct_range_minimum_ok(leaves, slot, big, formals)
     types = {m.group(1) for leaf in leaves if (m := re.fullmatch(rf"perm\({re.escape(slot)}\.v_({IDENT})\)", leaf))}
     if len(types) != 1:
         return False
@@ -3897,6 +3944,186 @@ def lint_array_allocations(src: Source, decls: list[Decl], add: Callable[[int, s
             add(d.line, f"`method {d.name}` is not the {what} of decision 0059 item 3: {why}")
 
 
+# Decision 0064 item 6 (audit round 2, issue 7): every way out of the scope of an array of structures exhales exactly what its allocation gave.  In a method
+# with `X := alloc_arr_<E>(N)` (N a literal) of an aggregate element, each run of consecutive `exhale forall` rows over `block_of(X)` is the allocation's set of
+# (receiver, field) rows over `0 <= k && k < N` (each leaf's value and flag permission, each once), and is directly preceded (a `perm(lvloc(block_of(X)).lv) ==
+# write` assert may stand between) by a run of marked `assert forall` rows of the same set (the lifetime rows); a method that allocates and has no such exit
+# and no `assert false` (a path that never leaves) is refused.  A row over another variable is the older rules'.
+ALLOC_ARR_CALL_RE = re.compile(rf"^\s*(?P<v>{IDENT})\s*:=\s*(?P<alloc>alloc_arr_[A-Za-z0-9_$']+)\s*\((?P<n>[^()]*)\)\s*$")
+LIVE_EXHALE_RE = re.compile(rf"^\s*exhale\s+acc\(lvloc\(block_of\((?P<v>{IDENT})\)\)\.lv\)\s*$")
+LIVE_WRITE_RE = re.compile(rf"^\s*assert\s+perm\(lvloc\(block_of\((?P<v>{IDENT})\)\)\.lv\)\s*==\s*write\b")
+
+
+def _aggregate_leaf_rows(src: Source, d: Decl) -> list[tuple[int, str, str, tuple[int, ...], str, str, str]]:
+    """(line, `assert` or `exhale`, X, leaf chain, field, lo, hi) of the unguarded quantified permission rows over a leaf of the elements of X in `d`."""
+    rows = []
+    for n in range(d.line, d.end_line + 1):
+        m = QUANT_STMT_RE.match(src.code[n - 1])
+        if m is None or m.group("kw") not in ("assert", "exhale"):
+            continue
+        guard, body = split_guard(m.group("rest"))
+        q = parse_leaf_row(body) if body is not None and guard is None else None
+        if q is None or q[2]:
+            continue
+        acc = _row_acc(q)
+        xm = BLOCK_BASE_RE.match(_squash(q[1]))
+        chain = parse_struct_chain(q[6], f"loc({_squash(q[1])},{q[0]})")
+        if acc is None or acc[1] is not None or xm is None or not chain:
+            continue
+        rows.append((n, m.group("kw"), xm.group(1), chain, acc[0], q[4], q[5]))
+    return rows
+
+
+def lint_scope_exits(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0064 item 6 (the lint half of `Every way out exhales exactly what the allocation gave`): see the comment above."""
+    field_types = array_field_types(src)
+    by_name = {d.name: d for d in decls if d.kind == "method"}
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        allocs: dict[str, tuple[int, int | None, set[tuple[tuple[int, ...], str]]]] = {}
+        for n in range(d.line, d.end_line + 1):
+            m = ALLOC_ARR_CALL_RE.match(src.code[n - 1])
+            ad = by_name.get(m.group("alloc")) if m else None
+            if m is None or ad is None or not any("member(" in src.code[k - 1] for k in range(ad.line, ad.end_line + 1)):
+                continue
+            why, leaves = aggregate_array_problem(src, ad, True, field_types)
+            if why is not None:
+                continue  # `lint_array_allocations` reports it
+            want = {(chain, f"{kind}_{t}") for chain, t in leaves.items() for kind in "vd"}
+            count = int(m.group("n")) if re.fullmatch(r"[0-9]+", m.group("n").strip()) else None
+            allocs[m.group("v")] = (n, count, want)
+        if not allocs:
+            continue
+        rows = [r for r in _aggregate_leaf_rows(src, d) if r[2] in allocs]
+        # runs of consecutive rows of one kind over one array
+        runs: list[list[tuple[int, str, str, tuple[int, ...], str, str, str]]] = []
+        for r in rows:
+            if runs and runs[-1][-1][1] == r[1] and runs[-1][-1][2] == r[2] \
+                    and all(not src.code[k - 1].strip() for k in range(runs[-1][-1][0] + 1, r[0])):
+                runs[-1].append(r)
+            else:
+                runs.append([r])
+        exits: dict[str, int] = {}
+        lifetime: set[int] = set()  # the first line of each marked run that stands directly before an exit's exhales (the loops' back-edge rows are others)
+        for run in runs:
+            if run[0][1] != "exhale":
+                continue
+            prev = run[0][0] - 1
+            while prev >= d.line and not src.code[prev - 1].strip():
+                prev -= 1
+            lm = LIVE_WRITE_RE.match(src.code[prev - 1]) if prev >= d.line else None
+            if lm is not None and lm.group("v") == run[0][2]:
+                prev -= 1
+                while prev >= d.line and not src.code[prev - 1].strip():
+                    prev -= 1
+            for rr in runs:
+                if rr[-1][0] == prev and rr[0][1] == "assert" and rr[0][2] == run[0][2]:
+                    lifetime.add(rr[0][0])
+        for i, run in enumerate(runs):
+            kind, x = run[0][1], run[0][2]
+            at, count, want = allocs[x]
+            if kind == "assert" and run[0][0] not in lifetime:
+                continue
+            got = [(r[3], r[4]) for r in run]
+            what = "the scope exit's `exhale`s" if kind == "exhale" else "the lifetime rows before a scope exit"
+            if len(set(got)) != len(got):
+                add(run[0][0], f"{what} over `{x}` give a (receiver, field) row twice (decision 0064 item 6)")
+            elif set(got) != want:
+                missing = sorted(want - set(got))
+                extra = sorted(set(got) - want)
+                add(run[0][0], f"{what} over `{x}` are not the rows of its allocation (line {at}): "
+                    + (f"missing {missing[0]}" if missing else f"unexpected {extra[0]}") + " (decision 0064 item 6: every way out exhales exactly what the allocation gave)")
+            bad = [r for r in run if r[5] != "0" or (count is not None and r[6] != str(count))]
+            if bad:
+                add(bad[0][0], f"{what} over `{x}` range over `{bad[0][5]} <= k && k < {bad[0][6]}`, not the allocation's `0 <= k && k < {count}` (line {at}; decision 0064 item 6)")
+            if kind != "exhale":
+                continue
+            exits[x] = exits.get(x, 0) + 1
+            prev = run[0][0] - 1
+            while prev >= d.line and not src.code[prev - 1].strip():
+                prev -= 1
+            lm = LIVE_WRITE_RE.match(src.code[prev - 1]) if prev >= d.line else None
+            if lm is not None and lm.group("v") == x:
+                prev -= 1
+                while prev >= d.line and not src.code[prev - 1].strip():
+                    prev -= 1
+            marked = next((r for r in rows if r[0] == prev), None)
+            if marked is None or marked[1] != "assert" or marked[2] != x:
+                add(run[0][0], f"the scope exit's `exhale`s over `{x}` are not directly preceded by its lifetime rows (marked `assert`s over the same rows, decision 0064 item 6)")
+            else:
+                chain_run = next((rr for rr in runs if rr[-1][0] == prev), None)
+                if chain_run is None or {(r[3], r[4]) for r in chain_run} != set(got):
+                    add(run[0][0], f"the lifetime rows before the exhale over `{x}` are not the same (receiver, field) rows as the exhale's (decision 0064 item 6)")
+        # the audit's b01x: every `exhale forall` of the exits blanked.  A method with a missing-return `assert false` is no help: the liveness cell is
+        # exhaled at each exit after the rows, so each `exhale acc(lvloc(block_of(v)).lv)` must stand directly after the whole run of its exhales
+        run_ends = {run[-1][0]: run[0][2] for run in runs if run[0][1] == "exhale"}
+        lv_exits: dict[str, int] = {}
+        for n in range(d.line, d.end_line + 1):
+            lm = LIVE_EXHALE_RE.match(src.code[n - 1])
+            if lm is None or lm.group("v") not in allocs:
+                continue
+            x = lm.group("v")
+            lv_exits[x] = lv_exits.get(x, 0) + 1
+            prev = n - 1
+            while prev >= d.line and not src.code[prev - 1].strip():
+                prev -= 1
+            if run_ends.get(prev) != x:
+                add(n, f"the exit's `exhale` of the liveness cell of `{x}` is not directly preceded by the exhales of its rows (decision 0064 item 6: every way out exhales "
+                       "exactly what the allocation gave)")
+        never = any("assert false" in src.code[k - 1] for k in range(d.line, d.end_line + 1))
+        for x, (at, _count, _want) in allocs.items():
+            if exits.get(x, 0) == 0 and lv_exits.get(x, 0) == 0 and not never:
+                add(at, f"the array `{x}` allocated here is never exhaled at a scope exit (decision 0064 item 6: every way out exhales exactly what the allocation gave)")
+
+
+# Decision 0064 item 7: the length facts a range atom over structures states are tied to the leaves its permission rows name.  In a method's `requires` or
+# `ensures`, the rows over one range of one pointer (the same clause kind, block and bounds): a row over a leaf receiver `loc(member(...), 0)` needs the
+# length-facts row of that range to state the member block of the leaf and of every nested structure member above it, and a leaf with no length-facts row at
+# all is refused (a permission row over a member block of unknown length is not a well-formed atom).
+def lint_range_length_facts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    for d in decls:
+        if d.kind != "method" or d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX, ARR_COPY_PREFIX, ALLOC_PREFIX)) or d.name == PROGRAM_START:
+            continue
+        lens: dict[tuple[str, str, str, str], tuple[int, set[tuple[int, ...]]]] = {}
+        leaves: dict[tuple[str, str, str, str], list[tuple[int, tuple[int, ...]]]] = {}
+        for n in range(d.line, (d.body_line or d.end_line + 1)):
+            m = QUANT_STMT_RE.match(src.code[n - 1])
+            if m is None or m.group("kw") not in ("requires", "ensures"):
+                continue
+            guard, body = split_guard(m.group("rest"))
+            if body is None:
+                continue
+            q = parse_range_quantifier_full(body)
+            if q is not None:
+                cs = _squash(q[3])
+                if not q[2] and "len(member(" in cs:
+                    keys, why = range_lens_members(cs, f"loc({_squash(q[1])},{q[0]})")
+                    if why is None and keys is not None:
+                        xm = BLOCK_BASE_RE.match(_squash(q[1]))
+                        lens[(m.group("kw"), xm.group(1) if xm else "", q[4], q[5])] = (n, set(keys))
+                continue
+            q = parse_leaf_row(body)
+            if q is None:
+                continue
+            chain = parse_struct_chain(q[6], f"loc({_squash(q[1])},{q[0]})")
+            xm = BLOCK_BASE_RE.match(_squash(q[1]))
+            if chain and xm:
+                leaves.setdefault((m.group("kw"), xm.group(1), q[4], q[5]), []).append((n, chain))
+        for key, rows in leaves.items():
+            have = lens.get(key)
+            if have is None:
+                add(rows[0][0], f"the rows over the leaves of the elements of `{key[1]}` in this `{key[0]}` have no length-facts row over the same range "
+                                "(decision 0064 item 7: `len(member(<chain>, j)) == 1` for each member block of the element)")
+                continue
+            for line, chain in rows:
+                need = [chain[:i] for i in range(1, len(chain) + 1)]
+                missing = [c for c in need if c not in have[1]]
+                if missing:
+                    add(line, f"the length facts (line {have[0]}) of `{key[1]}` do not state the member block {missing[0]} of this leaf {chain} (decision 0064 item 7)")
+                    break
+
+
 ARR_COPY_CALL_RE = re.compile(rf"^\s*(?P<name>copy_arr_[A-Za-z0-9_$']+)\s*\((?P<args>.*)\)\s*$")
 
 
@@ -4103,6 +4330,44 @@ def _std_type_range(cons: str, cell: str, t: str) -> bool:
     return (low, high) in VIEW_STANDARD_RANGES
 
 
+def range_lens_members(cons: str, slot: str) -> tuple[list[tuple[int, ...]] | None, str | None]:
+    """(the member blocks, why not) of the length-facts consequent `cons` (squashed) of a range atom over structures: `len(member(<chain>, j)) == 1`
+    for each member block of the element at `slot` (a chain of decision 0043 item 13 rooted at the slot, a literal j each), a member of a member only
+    inside a nested structure member, no block twice, and the slot facts `A != B` (decision 0043 item 4) either exactly the pairs of the root or a
+    nested slot and a nested slot below it, or none (the range atom's rows state the lengths only: S48 (c2))."""
+    try:
+        parts = [_squash(x) for x in _flatten_and(cons)]
+    except ValueError:
+        return None, "the length facts are not a conjunction"
+    members = [x for x in parts if "!=" not in x]
+    facts = [x for x in parts if "!=" in x]
+    keys: list[tuple[int, ...]] = []
+    for part in members:
+        m = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", part)
+        key = parse_struct_member(m.group("m"), slot) if m else None
+        if key is None or int(m.group("n")) != 1:
+            return None, f"`{part}` is not `len(member(<chain>, <literal>)) == 1` with a chain rooted at the slot `{slot}`"
+        if key in keys:
+            return None, f"the member block {key} twice"
+        keys.append(key)
+    if not keys:
+        return None, "no member block"
+    kset = set(keys)
+    for key in kset:
+        if key[:-1] and key[:-1] not in kset:
+            return None, f"the member block {key} is not inside a nested struct member"
+    if facts:
+        why = struct_wf_lens_problem(parts, slot)
+        if why is not None:
+            return None, why
+    return keys, None
+
+
+def range_lens_problem(cons: str, cell: str) -> str | None:
+    """Why `cons` is not the length facts of a range atom over structures (`range_lens_members`), or None."""
+    return range_lens_members(cons, cell)[1]
+
+
 def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str],
                            bound: Callable[[str], tuple[set[int], str] | None] | None = None) -> str | None:
     """Decision 0060 item 16: why the quantified `requires`, `ensures` or pure `assert` row `q` (under `guard`) is not one of the rows
@@ -4110,7 +4375,8 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
     offset_of(X) + n`): `acc(F.f[, a])` with `a` a `Perm` formal of the method (a `requires` or `ensures`; the marked `assert` rows are
     another rule), the flag `F.d_t`, the type's range of `F.v_t`, `F.d_t ==> range`, and `old(F.d_t) ==> F.d_t` (an `ensures` or an
     `assert`).  Nothing else holds a `forall` there."""
-    k, b, extra, cons, lo, hi = q
+    k, b, extra, cons, lo, hi = q[:6]
+    recv = q[6] if len(q) > 6 else None  # a leaf row's receiver (decision 0064 item 17), the cell its consequent is about
     x = BLOCK_BASE_RE.match(_squash(b)).group(1)
     if guard is not None:
         if GUARD_BAD_RE.search(guard):
@@ -4137,9 +4403,9 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
         rem = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
         if not rem or re.search(rf"(?<![\w$']){re.escape(k)}(?![\w$'])", rem):
             return f"the range does not end at `offset_of({x}) + <a count that does not name {k}>`"
-    cell = f"loc({_squash(b)},{k})"
+    cell = recv if recv is not None else f"loc({_squash(b)},{k})"
     cells = re.escape(cell)
-    acc = _range_acc(cons, k, b)
+    acc = _range_acc(cons, k, b, recv)
     if acc is not None:
         if kw == "assert":
             return "a permission row (`acc`) is a marked row: unguarded, no wrapping, `assert` only with its own map entry"
@@ -4150,6 +4416,9 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
     stripped = _strip_wrap(cons)
     sides = _split_top(stripped, "==>")
     cs = _squash(stripped)
+    if recv is None and len(sides) == 1 and "len(member(" in cs:
+        # decision 0064 item 7: the length facts of the elements of a range of structures, one quantifier over the slots with the slot as its trigger
+        return range_lens_problem(cs, cell)
     if len(sides) == 1:
         if re.fullmatch(cells + r"\.d_" + IDENT, cs):
             return None
@@ -5557,16 +5826,18 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                 old_labels = []
             else:
                 old_labels = c[1]
-        elif leaf_row:
-            # a leaf row other than a marked row, a range `exhale` or a loop conjunct (a contract's atom rows, the pure rows of a call): the part that
-            # lifts a range atom over structures gives them their rules (decision 0064 item 17)
+        elif leaf_row and not (kind in ("requires", "ensures", "assert") and m is not None and lineno in method_of):
+            # a leaf row other than a marked row, a range `exhale` or a loop conjunct, outside a method's clauses and a method's pure rows
             why = "a row over a leaf of an array of structures is a marked `assert`, a range `exhale` or a loop conjunct here"
         elif q is not None and kind in ("requires", "ensures", "assert") and m is not None and lineno in method_of:
-            # decision 0060 item 16: a range atom's quantifiers in a method's clauses and its pure rows
+            # decision 0060 item 16: a range atom's quantifiers in a method's clauses and its pure rows; decision 0064 items 7 and 17: the same rows per
+            # leaf path of the element (the receiver, a chain of member steps below the slot, is the trigger and the cell) and the length facts
             md0 = method_of[lineno]
             if md0.line not in bound_ctx:
                 bound_ctx[md0.line] = bound_locals(src, md0, decls, gb_names, array_counts, struct_counts)
             why = range_atom_row_problem(kind, guard, q, perm_formals(lineno), bound_ctx[md0.line].get) or ""
+            if why and leaf_row:
+                why = "a row over a leaf of an array of structures: " + why
             ok = not why
         elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
                 and (bq := parse_block_row(body)) is not None:
@@ -6474,6 +6745,8 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_allocations(src, decls, add)
     lint_array_allocations(src, decls, add)
     lint_array_copy_calls(src, decls, add)
+    lint_scope_exits(src, decls, add)
+    lint_range_length_facts(src, decls, add)
     has_globals, global_facts = lint_globals(src, decls, add)
     quantified = classify_quantified_lines(src, decls)
     lint_ghost_amounts(src, decls, add, quantified.wildcard_rows | frozenset(n for n, (why, wild) in pf_requires.items() if wild and why is None))

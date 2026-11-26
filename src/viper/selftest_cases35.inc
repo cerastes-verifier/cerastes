@@ -98,8 +98,9 @@ void define_aggregate_element_guards()
            k.done(f);
        });
 
-    ru("e1e2a_guard_range_over_structures_in_a_call",
-       "a range over structures or arrays reached a site that names one field for it",
+    // Part C1 (slice 2a) lifts this guard too: the call rows of a range over structures (item 8), the access of its callee per leaf path (flipped from `ru`)
+    lc("e1e2a_guard_range_over_structures_in_a_call",
+       "a call of a function that needs owns_range(p, n) over struct T, passing its own range: the call rows per leaf path",
        [=](Kit& k)
        {
            // void g(struct T *p, int n) requires(owns_range(p, n)); void f(struct T *p, int n) requires(owns_range(p, n)) { g(p, n); }
@@ -115,7 +116,9 @@ void define_aggregate_element_guards()
        });
 
     // ---- trap 3: a range over structures, and an array that names no field ----
-    ru("e1e2a_guard_range_over_structures", "a range over structures or arrays reached the range of one element type",
+    // Part C1 lifts this guard (the contract of one function: item 7's rows per leaf path; flipped from `ru`); a call of such a function is the case above (slice 2a)
+    lc("e1e2a_guard_range_over_structures",
+       "owns_range(p, n) over struct T in a function that does nothing: the rows of its leaf path in the contract",
        [=](Kit& k)
        {
            // void f(struct T *p, int n) requires(owns_range(p, n)) {}

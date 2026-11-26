@@ -277,9 +277,8 @@ A few more rules:
   its signature: at the first call of it in the file, or, for some signatures
   (a pointer to a structure among them), at the declaration itself whether or
   not it is called. A declaration that is neither called nor read in that way
-  is not reported; nothing is verified against it. Where two declarations of a
-  function without a body disagree about the keyword, this version does not
-  report it yet. `restrict` written only on a declaration, before or after the
+  is not reported; nothing is verified against it. One declaration with the keyword is enough, whatever the
+  function's other declarations say. `restrict` written only on a declaration, before or after the
   definition, of a function that the file defines without it is accepted: C
   attaches the promise to the definition, and that definition makes none.
 * The address of a parameter may be taken (`int *q = &a;`): the parameter is
@@ -693,10 +692,10 @@ Not supported yet, each rejected with a diagnostic: a structure value stored
 into an element (`v[i] = f();`, `v[i] = (struct point){1, 2};`: copy from a
 structure local instead); an element structure with
 an array member or with an owning or marked member; arrays of structures as
-globals, `static` locals and members, and ranges of structures in contracts
-(`cerastes_owns_range` on a pointer to a structure, `p[i].x` in a contract);
+globals, `static` locals and members;
 `cerastes::uninit`, `cerastes::owning` and `cerastes::ref_to_uninit` on an
-array of structures; `p[i].x` through a pointer in a loop invariant or measure;
+array of structures; `p[i].x` through a pointer in a loop invariant or measure
+of a function whose contract holds no range on `p` (<<ranges-of-structures>>);
 and a truth test or a comparison with `NULL` of `&v[i]`, `&v[i].x` or `&p[i]`
 (`array_address_null_test`: the address is never null, and GCC warns).
 
@@ -790,6 +789,71 @@ says which ones the loop has written with an invariant over every element
 (<<quantifiers>>), and its `must_init` then holds; without one it is reported as not kept.
 `cerastes::owning(n)` on a parameter is `p == NULL || cerastes_owns_range(p, n)`
 (xref:annotations.adoc#_owning_parameters[Owning parameters]).
+
+[#ranges-of-structures]
+==== Ranges of structures
+
+`cerastes_owns_range(p, n)` and `cerastes_reads_range(p, n)` also take a pointer
+parameter to a structure. The function then holds every member of each of the
+`n` elements `p[0]` to `p[n - 1]` (for a structure inside the element, its
+members in turn), and a caller passes an array of structures:
+
+[source,c]
+----
+include::example$memory/array_of_structs.c[tag=source]
+----
+
+The contract may read a member of an element (`p[0].x`, `p[i].t.y`), also under
+`cerastes_old` and in a `decreases`, where the element lies in a range the
+contract holds; a read of an element outside it is reported in the contract as
+xref:error-messages.adoc#_permission[`permission`], as for a range of integers.
+At a call the caller must hold every member of every element it passes. An
+array one element too short is reported at the call ("calls `fill`, which needs
+to own `v[0..3)`, without owning it"), and so is a member that a called
+function kept, where the message names the member ("... (the member `x` of
+every element)").
+
+A range of structures and another pointer may not name the same object twice.
+A function that owns the range and also owns one member of one element, a
+whole element, or a second range that overlaps the first asks for the same
+object two times, and the call is reported:
+
+[source,c]
+----
+include::example$memory/array_of_structs_alias_error.c[tag=source]
+----
+
+[source,console]
+----
+array_of_structs_alias_error.c:25: error: permission: passes `v[0..3)` and `v[1].x` to `tally`, which may be one object, once to own it
+----
+
+A loop in such a function carries each member of every element of the range as
+it carries a range of integers, and its invariant and measure may read
+`p[i].x`. A write to a member reaches every member of that type in the ranges
+and structures the function holds, so the loop does not keep by itself what
+was known about another `int` member; a member of another type is kept.
+`cerastes::owning(n)` and the markers of <<initialization>> apply to a range of
+structures member by member: `cerastes::must_init` promises every member of
+every element a value on return, and the message names the member a path
+leaves out ("returns without initializing the member `y` of every element of
+`p[0..n)`, which `cerastes::must_init` on `p` promises").
+
+Not supported yet, each rejected with a diagnostic unless said otherwise: a
+range of structures that have an array member or an owning or marked member; a
+range on part of an array (`cerastes_owns_range(&v[1], n)`) and an atom on one
+element (`cerastes_owns(p[1])`, `cerastes_owns(p[1].x)`); `&p[i]` in a
+contract; a read through a pointer member of an element in a contract or a
+loop invariant (`*p[0].q`, `p[0].q->x`). Two known limits: a function marked
+`cerastes::must_init` that gives the elements their values in a loop is
+reported as not keeping its promise, because a loop cannot say yet which
+members it has written; and a pointer to an element that the contract does not
+cover, `&p[n]` one past the range or `&p[1]` under `cerastes_owns(*p)`, may be
+formed, but passing it to a function that neither owns nor reads what it
+points to, or returning it, stops `cerastes verify` with an internal error
+instead of a diagnostic. Nothing is reported as verified in either case. A
+function that reads two ranges of the same structure type and has a loop is
+slow to verify, and may run into the time limit.
 
 [#array-parameters]
 === Array parameters

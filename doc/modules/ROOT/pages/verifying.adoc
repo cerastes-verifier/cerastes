@@ -864,8 +864,10 @@ the function, and the `return` of a pure function that `cerastes_forall` names, 
   `p == NULL` for a pointer variable and a comparison of two addresses
   (`&a[1] == q`) are ordinary comparisons. For an array with static storage
   and a constant index (`&table[2]` of a global), the front end folds the
-  address into a constant: such a test is rejected as `unsupported_expression`
-  instead, and in C this version still accepts it as the condition of an `if`;
+  address into a constant: in C a test of that address (`if (&table[2])`,
+  `x && &table[2]`) is rejected in the same way, while a test that folds as a
+  whole (`!&table[2]`, `&table[2] != NULL`), and every such test in pass:[C++],
+  is rejected as `unsupported_expression` instead;
 * a braced initializer that leaves out the braces of an inner structure or array
   (`-Wmissing-braces`, which clang reports in both languages and GCC in C):
 ** a list of values (`struct line l = {1, 2, 3, 4};`, `struct point v[2] = {1,

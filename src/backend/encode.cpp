@@ -1249,12 +1249,23 @@ private:
         }
         if (b->type.pointee->is_struct())
         {
-            reject(
-                Diag::unsupported_expression, e->position,
-                "an element of a pointer to a structure in a contract (M4.5e1e2 (continuation), Part C, decision 0064 items 1 and 7)");
-            return nullptr;
+            // `p[e].x` of a pointer parameter to verified structures (decision 0064 item 7, Part C1): the element's address, whose member steps are a contract place
+            // (contract_place_address_raw) and whose framing is a range atom's or a structure atom's.  A member step is the only use that stays: the whole element
+            // as a value, under `old` or as an atom's place is rejected where it is read.
+            if (b->kind == Expr::Kind::ForallArg)
+            {
+                reject(
+                    Diag::unsupported_annotation, e->position,
+                    "an element of a pointer to a structure in the function of a quantifier (a member of an element under a binder: M4.5e1e2 (continuation), Part F, decision 0064 item 14)");
+                return nullptr;
+            }
+            if (const char* why {struct_element_pointee_reason(*b->type.pointee)}; why != nullptr)
+            {
+                reject(Diag::unsupported_annotation, e->position, why);
+                return nullptr;
+            }
         }
-        if (!b->type.pointee->is_bool() && !b->type.pointee->is_int() && !b->type.pointee->is_ptr())
+        else if (!b->type.pointee->is_bool() && !b->type.pointee->is_int() && !b->type.pointee->is_ptr())
         {
             reject(Diag::unsupported_expression, e->position,
                    "a subscript of something that is not a pointer to a bool, an integer, an enumeration or a pointer");
@@ -1262,6 +1273,39 @@ private:
         }
         const std::string name {!b->c_text.empty() ? b->c_text : std::string("the pointer")};
         return contract_element_finish(e, index, b, name, false);
+    }
+
+    // Whether a place of a contract passes through the address of an element (`p[e].x`, `p[e].q->x`): the nodes from the place down to its root are members, loads and
+    // fields, and an `ElemAddr` among them is such an element (decision 0064 item 7: an atom's place is never one; only a read is).
+    static bool place_through_element(const Expr* x)
+    {
+        for (int guard {0}; x != nullptr && guard < 64; ++guard)
+        {
+            if (x->kind == Expr::Kind::ElemAddr)
+            {
+                return true;
+            }
+            if (x->kind != Expr::Kind::MemberAddr && x->kind != Expr::Kind::Deref && x->kind != Expr::Kind::Field &&
+                x->kind != Expr::Kind::Old)
+            {
+                return false;
+            }
+            x = x->a;
+        }
+        return false;
+    }
+
+    // `old(p[e])` of a pointer to structures (decision 0064 item 7, Part C1): a whole structure has no value in a contract, its member does (`old(p[e].x)`).  True when reported.
+    bool reject_old_element_struct(const Expr* element_address, const a_source_position& at)
+    {
+        if (element_address == nullptr || !element_address->type.is_ptr() || element_address->type.pointee == nullptr ||
+            !element_address->type.pointee->is_struct())
+        {
+            return false;
+        }
+        reject(Diag::unsupported_annotation, at,
+               "`old(p[e])` of a whole structure (write `old(p[e].x)` for a member's old value, decision 0064 item 7)");
+        return true;
     }
 
     // The common end of contract_element_address (record 0060 item 5; decision 0063 item 7): the index of `base[index]` in a contract and the element address over `b`,
@@ -1369,6 +1413,57 @@ private:
             return "an element of a pointer to a structure with an array member (depth 2: M4.5e1e2 (continuation), Part E, decision 0064 items 1 and 2)";
         }
         return nullptr;
+    }
+    // Decision 0064 items 2 and 7 (Part C1): why a range atom (`owns_range`, `reads_range`, `owning(n)`) over a pointer to the structure `st` has no rows: null when it
+    // has.  An element structure that holds an array member at any depth is depth 2 (arrays of arrays: Part E), one that holds an `owning` or `ref_to_uninit` member is
+    // M4.8's (a range of owners).  The text completes "... over structures whose element ".
+    const char* range_element_reason(const vir::Type& st) const
+    {
+        if (vir_aggregate_has_marked(st))
+        {
+            return "has an `owning` or `ref_to_uninit` member, at any depth (M4.8, decision 0064 items 2 and 7)";
+        }
+        if (vir_element_has_array_member(st))
+        {
+            return "has an array member, at any depth (depth 2: M4.5e1e2 (continuation), Part E, decision 0064 items 2 and 7)";
+        }
+        return nullptr;
+    }
+
+    // Decision 0064 item 10 (Part C1): whether a loop of the function carries the range of the pointer `base` read in a loop invariant or measure.  The narrowest
+    // predicate: `base` is the parameter's own local (`Local` of a parameter copy, not address-taken: a cell read by name is a load) and the function's `requires`
+    // (after `owning(n)` was applied) holds an `owns_range` or `reads_range` atom of that parameter.  `*structure_atom` is set when only an `owns` or `reads` atom of
+    // the parameter's pointee is there instead (the message advises `p->x`).  The lowering and the checker carry the same rule (`vir::atom_place`'s root of a range
+    // atom is the parameter's index).
+    bool struct_range_carried(const Expr& base, bool* structure_atom) const
+    {
+        *structure_atom = false;
+        if (cx_.fn == nullptr || base.kind != Expr::Kind::Local || base.var == nullptr || !base.var->is_param_copy ||
+            base.var->param_index < 0 || base.var->address_taken)
+        {
+            return false;
+        }
+        for (const vir::AtomSite& st : vir::contract_atoms(*cx_.fn))
+        {
+            if (st.in_ensures || st.atom == nullptr || st.atom->a == nullptr)
+            {
+                continue;
+            }
+            const vir::PlaceKey k {vir::atom_place(*st.atom)};
+            if (k.root != base.var->param_index || !k.via.empty())
+            {
+                continue;
+            }
+            if (st.atom->atom == vir::AtomKind::OwnsRange || st.atom->atom == vir::AtomKind::ReadsRange)
+            {
+                return true;
+            }
+            if (st.atom->atom == vir::AtomKind::Owns || st.atom->atom == vir::AtomKind::Reads)
+            {
+                *structure_atom = true;
+            }
+        }
+        return false;
     }
 
     // The address of the element `a[i]` (or `i[a]`) of a local array (decision 0059 item 4): `ElemAddr(AddrOf(a), i)`, reported when the shape is not one this
@@ -1551,7 +1646,9 @@ private:
                 !base_expr->c_text.empty() ? vir::postfix_operand_text(base_expr->c_text) : std::string("the pointer");
         }
         // An element that is a structure, named in a loop invariant or measure (decision 0064 item 10): `v[e].x` and `v[e].t.x` of a named local array of
-        // structures are framed by the lowering, per leaf (Part B); `p[e].x` through a pointer is Part C's (a `check` reads an element like code does)
+        // structures are framed by the lowering, per leaf (Part B); `p[e].x` through a pointer is read only where the loop carries the range of `p` (Part C1:
+        // the parameter itself, with an `owns_range` or `reads_range` of it in the function's `requires`: struct_range_carried), and with only a structure atom
+        // on `p` it is rejected with the advice to read `p->x` (a `check` reads an element like code does)
         if (cx_.loop_clause && !named_local && base_expr != nullptr && base_expr->type.is_ptr() &&
             base_expr->type.pointee != nullptr)
         {
@@ -1559,10 +1656,16 @@ private:
             const vir::Type& el {pe.is_array() && pe.element != nullptr ? *pe.element : pe};
             if (el.is_struct())
             {
-                reject(
-                    Diag::unsupported_expression, e->position,
-                    "a member of an element of a pointer (`p[e].x`) in a loop invariant or measure (the element's framing through a pointer: M4.5e1e2 (continuation), Part C, decision 0064 item 10; name the array, `v[e].x`, or read the element in the loop body)");
-                return nullptr;
+                bool structure_atom {false};
+                if (!struct_range_carried(*base_expr, &structure_atom))
+                {
+                    reject(
+                        Diag::unsupported_expression, e->position,
+                        structure_atom
+                            ? "a member of an element of a pointer (`p[e].x`) in a loop invariant or measure where the function holds only a structure atom on the pointer (`owns(*p)`, `reads(*p)`): write `p->x` for the first element, or take `owns_range(p, n)` or `reads_range(p, n)` (decision 0064 item 10)"
+                            : "a member of an element of a pointer (`p[e].x`) in a loop invariant or measure of a pointer that is not a parameter with an `owns_range` or `reads_range` in the function's `requires` (the loop carries only the ranges of its function's parameters; decision 0064 item 10; name the array, `v[e].x`, or read the element in the loop body)");
+                    return nullptr;
+                }
             }
         }
         // a plain `char` index (-Wchar-subscripts, clang and GCC at -Wall; a constant such as 'a' is exempt in GCC), decision 0059 item 4 (audit round 1, item 6)
@@ -1903,6 +2006,21 @@ private:
                 {
                     *base = pv->variant.variable.ptr->source_corresp.name;
                 }
+                else if (pv != nullptr && pv->kind == enk_param_ref && cx_.contract && cx_.fn != nullptr)
+                {
+                    // in a contract the pointer is a reference to the function's parameter by position (audit round R, note 7g)
+                    const ParamRef pr {
+                        interpret_param_ref(pv, cx_.owning_count ? Annot::owning : cx_.annot, cx_.binder_present, 0)};
+                    if (pr.kind == ParamRef::Kind::param && pr.num >= 1U && pr.num <= cx_.fn->params.size())
+                    {
+                        const std::string& pn {cx_.fn->params[pr.num - 1U].name};
+                        *base = pn.empty() ? "arg" + std::to_string(pr.num) : pn;
+                    }
+                    else if (pr.kind == ParamRef::Kind::binder && !cx_.binder_name.empty())
+                    {
+                        *base = cx_.binder_name; // the result's name in an `ensures`
+                    }
+                }
                 break;
             }
         }
@@ -1911,9 +2029,25 @@ private:
 
     // A truth test or a null comparison of an array's address (decision 0059 item 10): the address is never null.  Decision 0064 item 5: so is every address
     // formed by an index, whatever the element (index_address).
+    // In C, an address the front end folded to a constant (`if (&ga[2])`, `x && &ga[2]` on a global or `static` array or a global structure's array member: a
+    // `ck_address` constant whose kept `expr` is the written `&E[i]`) is read through to that expression (decision 0064 item 5, audit round R, should-fix 2).  Where
+    // the whole test folds to an integer constant (`!&ga[1]`, `&ga[1] != NULL`, `bool b = &ga[1]`), its original expression is read in a constant context (`const_depth`), where the address already rejects as `unsupported_expression`: no second row is added there.
     bool detect_array_address_test(an_expr_node_ptr operand, const char* what)
     {
         an_expr_node_ptr decay {peel_generated_conversions(operand)};
+        if (il_header.source_language == sl_C && cx_.const_depth <= cx_.addr_const && decay != nullptr &&
+            decay->kind == enk_constant && decay->variant.constant.ptr != nullptr &&
+            decay->variant.constant.ptr->kind == ck_address &&
+            decay->variant.constant.ptr->variant.address.kind == abk_variable &&
+            (decay->variant.constant.ptr->expr != nullptr || decay->variant.constant.ptr->local_expr_ref))
+        {
+            if (an_expr_node_ptr original {expr_node_from_constant(decay->variant.constant.ptr)};
+                original != nullptr && index_address(peel_generated_conversions(original), nullptr))
+            {
+                detected_.insert(decay);
+                decay = peel_generated_conversions(original);
+            }
+        }
         if (std::string base; index_address(decay, &base))
         {
             detected_.insert(decay);
@@ -3302,6 +3436,58 @@ private:
         return a.seq != b.seq ? a.seq < b.seq : a.column < b.column;
     }
 
+    // Decision 0064 item 19 (question 341): the parameters (0-based) that ANY declaration of `r` in the unit gives the qualifier `restrict`, read from each
+    // declaration's own written type: the front end's merged type of two declarations that differ in a parameter's top-level qualifiers carries none of
+    // them, and each declaration's own type survives only as its `declared_type` (the primary's `r->declared_type`, a later one's secondary declaration;
+    // P79 F3).  Used for a function without a body; a function with a body keeps the definition's own parameters (function_of).
+    std::set<size_t> declared_restrict_params(a_routine_ptr r)
+    {
+        std::vector<a_type_ptr> types;
+        if (r->declared_type != nullptr)
+        {
+            types.push_back(r->declared_type);
+        }
+        if (ents_ != nullptr)
+        {
+            if (auto sd {ents_->secondary_decls.find(r)}; sd != ents_->secondary_decls.end())
+            {
+                for (const IlEntities::SecondaryDecl& q : sd->second)
+                {
+                    if (q.declared_type != nullptr)
+                    {
+                        types.push_back(q.declared_type);
+                    }
+                }
+            }
+        }
+        std::set<size_t> out;
+        for (a_type_ptr ft : types)
+        {
+            a_type_ptr t {skip_typerefs(ft)};
+            if (t == nullptr || t->kind != tk_routine || t->variant.routine.extra_info == nullptr)
+            {
+                continue;
+            }
+            size_t k {0U};
+            for (a_param_type_ptr p {t->variant.routine.extra_info->param_type_list}; p != nullptr; p = p->next, ++k)
+            {
+                a_type_ptr pt {p->type != nullptr ? skip_typerefs(p->type) : nullptr};
+                // a declaration keeps a parameter written `int p[restrict]` as the array type, whose own qualifiers hold the keyword (il_def.h: variant.array.qualifiers)
+                if (pt != nullptr && pt->kind == tk_pointer && !pt->variant.pointer.is_reference &&
+                    ((f_get_type_qualifiers(p->type, TRUE) | p->qualifiers) & TQ_RESTRICT) != 0U)
+                {
+                    out.insert(k);
+                }
+                else if (pt != nullptr && pt->kind == tk_array &&
+                         ((pt->variant.array.qualifiers | p->qualifiers) & TQ_RESTRICT) != 0U)
+                {
+                    out.insert(k);
+                }
+            }
+        }
+        return out;
+    }
+
     bool check_signature(a_routine_ptr r, const a_source_position& at)
     {
         if (!signature_checked_.insert(r).second)
@@ -3440,6 +3626,27 @@ private:
             if (ours)
             {
                 check_attributes(p->attributes);
+            }
+        }
+        // Decision 0064 item 19 (question 341): in C++ `__restrict` is `unsupported_type` (vtype), and a function without a body is rejected when any of its
+        // declarations gives a parameter the qualifier, not only the one the merged type kept.  In C function_of rejects it (unsupported_annotation).
+        if (ok && il_header.source_language != sl_C && body_scope(r) == nullptr)
+        {
+            for (const size_t k : declared_restrict_params(r))
+            {
+                size_t i {0U};
+                for (a_param_type_ptr p {x->param_type_list}; p != nullptr; p = p->next, ++i)
+                {
+                    if (i == k)
+                    {
+                        const VType pt {signature_vtype(p->type, true, p->qualifiers | TQ_RESTRICT)};
+                        if (!pt.ok)
+                        {
+                            reject_type(pt, at);
+                            ok = false;
+                        }
+                    }
+                }
             }
         }
         if (ok)
@@ -4959,17 +5166,21 @@ private:
         } restore {this, saved_contract, saved_annotation, saved_annot};
         const std::string head {"\"cerastes::owning(n)\" on `" + pname + "`"};
         const vir::Type& pt {f->params[static_cast<size_t>(o.index)].type};
-        if (pt.pointee == nullptr || pt.pointee->is_struct())
+        if (pt.pointee != nullptr && pt.pointee->is_struct())
         {
-            reject(Diag::unsupported_annotation, o.pos,
-                   head + " over structures (arrays of structures and their members: M4.5e1e2, decision 0060 item 1)");
-            return nullptr;
+            // decision 0064 item 7 (Part C1): `owning(n)` over verified structures is the `owns_range` the atom would be
+            if (const char* why {range_element_reason(*pt.pointee)}; why != nullptr)
+            {
+                reject(Diag::unsupported_annotation, o.pos, head + " over structures whose element " + why);
+                return nullptr;
+            }
         }
-        if (!pt.pointee->is_bool() && !pt.pointee->is_int() && !pt.pointee->is_ptr())
+        else if (pt.pointee == nullptr || (!pt.pointee->is_bool() && !pt.pointee->is_int() && !pt.pointee->is_ptr()))
         {
-            reject(Diag::unsupported_annotation, o.pos,
-                   head +
-                       " over something other than bool, integers, enumerations and pointers (decision 0060 item 3)");
+            reject(
+                Diag::unsupported_annotation, o.pos,
+                head +
+                    " over something other than bool, integers, enumerations, pointers and structures (decision 0060 item 3, decision 0064 item 7)");
             return nullptr;
         }
         an_expr_node_ptr cn {peel_one_generated_cast(o.count)};
@@ -5838,6 +6049,20 @@ private:
                 f->params[static_cast<size_t>(k)].is_restrict = true;
                 restricted.push_back(k);
             }
+        }
+        // Decision 0064 item 19 (question 341): a function without a body is rejected when ANY of its declarations gives a parameter `restrict` (the merged
+        // type above carries none when the declarations differ in a parameter's top-level qualifiers); a function with a body keeps its own parameters' rule.
+        if (!has_body_here && il_header.source_language == sl_C)
+        {
+            for (const size_t k : declared_restrict_params(r))
+            {
+                if (k < f->params.size() && !f->params[k].is_restrict)
+                {
+                    f->params[k].is_restrict = true;
+                    restricted.push_back(static_cast<int>(k));
+                }
+            }
+            std::sort(restricted.begin(), restricted.end());
         }
         // Decision 0015 item 4; decision 0046 item 5: for a routine trusted from vlibc the flag (the platform's `__dead2`, `__noreturn__`) is ignored,
         // and "never returns" is vlibc's own `ensures(false)`.
@@ -10574,7 +10799,7 @@ private:
             ++cx_.old_depth;
             const Expr* a {contract_element_address(inner, sops)};
             --cx_.old_depth;
-            if (a == nullptr)
+            if (a == nullptr || reject_old_element_struct(a, e->position))
             {
                 return nullptr;
             }
@@ -10760,6 +10985,14 @@ private:
         {
             return nullptr;
         }
+        if (place_through_element(x))
+        {
+            // a pointer read from an element (`p[i].q`, `pp[i]`) is no base of a place (decision 0064 item 7: an element is read, never an atom's or a chain's root)
+            reject(
+                Diag::unsupported_annotation, at,
+                "a place of a contract reached through a pointer read from an element of a pointer parameter (`p[i].q->x`, `owns(*p[i].q)`, `pp[i]->x`: M4.5e2, decisions 0060 item 1, 0064 item 7)");
+            return nullptr;
+        }
         const Expr* root {vir::place_root(x)};
         if (root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::GlobalAddr ||
             root->kind == Expr::Kind::Result)
@@ -10877,6 +11110,32 @@ private:
         }
         const an_expr_operator_kind k {n->variant.operation.kind};
         auto ops {operands_of(n)};
+        if (k == eok_subscript)
+        {
+            // `p[e]` as the base of a member step (`p[e].x`, `p[e].t.y`; decision 0064 item 7, Part C1): the element's address of a pointer parameter to verified
+            // structures, a contract place that a range atom's leaf frames.  An element as a place of its own (depth 0: `owns(p[i])`) stays M4.5e2's, reported
+            // by the caller's own text.
+            if (depth == 0 || ops.size() != 2U)
+            {
+                return no_place();
+            }
+            const Expr* ea {contract_element_address(n, ops)};
+            if (ea == nullptr)
+            {
+                return nullptr;
+            }
+            if (!ea->type.is_ptr() || ea->type.pointee == nullptr || !ea->type.pointee->is_struct() ||
+                ea->kind != Expr::Kind::ElemAddr || ea->a == nullptr || ea->a->kind != Expr::Kind::Formal)
+            {
+                reject(
+                    Diag::unsupported_annotation, at,
+                    "a member of an element of anything but a pointer parameter to verified structures (a global array or an array member of structures: M4.5e1e2 (continuation), Part C2)");
+                return nullptr;
+            }
+            place_base_type_ =
+                (ops[0U]->type != nullptr && has_type_kind(ops[0U]->type, tk_pointer)) ? ops[0U]->type : ops[1U]->type;
+            return ea;
+        }
         if (k == eok_ref_indirect)
         {
             return old_member(); // C++: `old(*p).x` is dot_field(ref_indirect(call(old, ...)))
@@ -11330,6 +11589,14 @@ private:
             {
                 return nullptr;
             }
+            if (place_through_element(addr))
+            {
+                reject(
+                    Diag::unsupported_annotation, e->position,
+                    "\"" + name +
+                        "\" of a member of an element of a pointer parameter (`p[i].x`: an atom on one element, M4.5e2, decisions 0060 item 1, 0064 item 7; `owns_range(p, n)` holds the member of every element)");
+                return nullptr;
+            }
             const Expr* rootE {vir::place_root(addr)};
             // decision 0052 item 2: a member of the result (`r->x`, `r.q`) is a place of an `ensures` atom with no
             // `requires` partner
@@ -11584,7 +11851,7 @@ private:
             reject(
                 Diag::unsupported_annotation, e->position,
                 "\"" + name +
-                    "\" of something other than a pointer parameter (the result, a global, a member, a loaded pointer or a place: M4.5e2; a part of an array member: M4.5e2, structures: M4.5e1e2, decision 0060 item 1)");
+                    "\" of something other than a pointer parameter (the result, a global, a member, a loaded pointer or a place: M4.5e2; a part of an array member: M4.5e2, decision 0060 item 1)");
             return nullptr;
         }
         const Expr* pf {expr(bn)};
@@ -11597,21 +11864,25 @@ private:
             reject(
                 Diag::unsupported_annotation, e->position,
                 "\"" + name +
-                    "\" of something other than a pointer parameter (the result, a global, a member, a loaded pointer or a place: M4.5e2; a part of an array member: M4.5e2, structures: M4.5e1e2, decision 0060 item 1)");
+                    "\" of something other than a pointer parameter (the result, a global, a member, a loaded pointer or a place: M4.5e2; a part of an array member: M4.5e2, decision 0060 item 1)");
             return nullptr;
         }
         if (pf->type.pointee->is_struct())
         {
-            reject(Diag::unsupported_annotation, e->position,
-                   "\"" + name +
-                       "\" over structures (arrays of structures and their members: M4.5e1e2, decision 0060 item 1)");
-            return nullptr;
+            // decision 0064 item 7 (Part C1): a range over verified structures, per leaf path of the element
+            if (const char* why {range_element_reason(*pf->type.pointee)}; why != nullptr)
+            {
+                reject(Diag::unsupported_annotation, e->position,
+                       "\"" + name + "\" over structures whose element " + why);
+                return nullptr;
+            }
         }
-        if (!pf->type.pointee->is_bool() && !pf->type.pointee->is_int() && !pf->type.pointee->is_ptr())
+        else if (!pf->type.pointee->is_bool() && !pf->type.pointee->is_int() && !pf->type.pointee->is_ptr())
         {
-            reject(Diag::unsupported_annotation, e->position,
-                   "\"" + name +
-                       "\" over something other than bool, integers, enumerations and pointers (decision 0060 item 3)");
+            reject(
+                Diag::unsupported_annotation, e->position,
+                "\"" + name +
+                    "\" over something other than bool, integers, enumerations, pointers and structures (decision 0060 item 3, decision 0064 item 7)");
             return nullptr;
         }
         if (owns)
@@ -11962,7 +12233,8 @@ private:
             ++cx_.old_depth;
             const Expr* a {contract_element_address(in, sops)};
             --cx_.old_depth;
-            return a == nullptr ? nullptr : finish(ind, b_.old(b_.deref(a, l), l));
+            return a == nullptr || reject_old_element_struct(a, where) ? nullptr
+                                                                       : finish(ind, b_.old(b_.deref(a, l), l));
         }
         if (in != nullptr && is_member_node(in) && member_array_node(in) != nullptr)
         {
@@ -12613,7 +12885,7 @@ private:
                 if (!leaf->is_bool() && !leaf->is_int())
                 {
                     return fail(
-                        "a parameter is not a `bool`, an integer, an enumeration or a pointer to one of those or to a pointer (structures: M4.5e1e2)");
+                        "a parameter is not a `bool`, an integer, an enumeration or a pointer to one of those or to a pointer (a pointer to a structure: M4.5e1e2 (continuation), Part F, decision 0064 item 14)");
                 }
             }
             out.params.push_back(std::move(pm));
@@ -20301,6 +20573,76 @@ private:
         }
     }
 
+    // Whether the expression `e` names the variable `v` (an operand anywhere in it; a `sizeof` is no operation node, so its operand is not followed, as first_effect's).
+    static bool expression_names_variable(an_expr_node_ptr e, a_variable_ptr v, int depth = 0)
+    {
+        if (e == nullptr || depth > 1000)
+        {
+            return false;
+        }
+        if (e->kind == enk_variable)
+        {
+            return e->variant.variable.ptr == v;
+        }
+        if (e->kind != enk_operation)
+        {
+            return false;
+        }
+        for (an_expr_node_ptr o {e->variant.operation.operands}; o != nullptr; o = o->next)
+        {
+            if (expression_names_variable(o, v, depth + 1))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // Whether a dynamic component of the braced list `c` (an element, or an element of a nested list) names the variable `v`.
+    static bool list_names_variable(a_constant_ptr c, a_variable_ptr v, int depth = 0)
+    {
+        if (c == nullptr || depth > 64)
+        {
+            return false;
+        }
+        if (c->kind == ck_dynamic_init)
+        {
+            a_dynamic_init_ptr d {c->variant.dynamic_init.ptr};
+            return d != nullptr && d->kind == dik_expression && expression_names_variable(d->variant.expression, v);
+        }
+        if (c->kind != ck_aggregate)
+        {
+            return false;
+        }
+        for (a_constant_ptr k {c->variant.aggregate.first_constant}; k != nullptr; k = k->next)
+        {
+            if (list_names_variable(k, v, depth + 1))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // C++ only (decision 0064 item 6, Part C1): the front end folds the initializer of an array that reads itself (`int a[2] = {1, a[0]};`,
+    // `struct P v[2] = {{1, 2}, {v[0].x, 3}};`) to a constant list of the repeated values and runs it as a first initialization (`dik_constant`, an aggregate
+    // with `repetitions`), then the original list; the folded constant keeps the original initializer in its backing expression (il_def.h `enk_initializer`,
+    // 13692).  Whether `d` is that first initialization and the original list names the variable `v` itself: such an element is `a local variable used in its
+    // own initializer`, the message C prints (the folded list alone reads as a range designator, or as elided braces).
+    static bool folded_own_initializer(a_dynamic_init_ptr d, a_variable_ptr v)
+    {
+        if (d == nullptr || d->kind != dik_constant || d->variant.constant.ptr == nullptr)
+        {
+            return false;
+        }
+        a_constant_ptr c {d->variant.constant.ptr};
+        if (c->kind != ck_aggregate || c->expr == nullptr || c->expr->kind != enk_initializer)
+        {
+            return false;
+        }
+        a_dynamic_init_ptr orig {c->expr->variant.initializer.dyn_init};
+        return orig != nullptr && orig->kind == dik_nonconstant_aggregate && orig->variant.constant.ptr != nullptr &&
+               list_names_variable(orig->variant.constant.ptr, v);
+    }
+
     void init_statement(a_statement_ptr s, Out& out)
     {
         a_dynamic_init_ptr d {s->variant.dynamic_init};
@@ -20325,6 +20667,12 @@ private:
         }
         if (it->second->type.is_array())
         { // decision 0059 item 3
+            if (folded_own_initializer(d, v))
+            {
+                reject(Diag::unsupported_declaration, v->source_corresp.decl_position,
+                       "a local variable used in its own initializer");
+                return;
+            }
             array_initializer(v, it->second, d, nullptr, s->position.seq ? s->position : at, out);
             return;
         }
@@ -25819,7 +26167,7 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
             {
                 refuse_owning(
                     own[0U]->position,
-                    "`owning(n)`, an owned range: M4.5e2 (an array member: M4.5e2; structures: M4.5e1e2); decisions 0055 item 2, 0060 item 13");
+                    "`owning(n)`, an owned range: M4.5e2 (an array member: M4.5e2; a member that points to structures: M4.5e2 too); decisions 0055 item 2, 0060 item 13");
             }
             else if (u->kind == tk_array)
             {
