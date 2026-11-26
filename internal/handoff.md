@@ -1647,6 +1647,9 @@ The next questions start at 348.
 1. **The merge and the push** (§2, step 1): `main` still accepts every unsound `restrict` form, and the branch
    `m4.5e1e2b-arrays-of-structures` fast-forwards it. **Recommended:** `git merge --ff-only
    m4.5e1e2b-arrays-of-structures` on `main`, then push, before the next session starts.
+
+Fixed
+
 2. **343, open** (fail closed: an internal error, exit 3, never "verified"; not a regression of this session).
    A function may form a structure pointer by indexing a pointer base outside the slots its atoms cover:
    `&p[n]`, one past a range of structures, or `&p[1]` under `owns(*p)`. Forming it is accepted, as C allows a
@@ -1662,6 +1665,9 @@ The next questions start at 348.
    neutrality run then lists exactly which existing programs' Viper gains the row. **Alternative:** keep the
    exit 3 listed (record 0064 item 7, the "Memory and ownership" page) until M4.5e2, the pointer-arithmetic
    session, which gives pointers into arrays their bounds rows anyway.
+
+Follow alternative plan since it sounds like the correct fix.
+
 3. **338–342 and 344–347, the advisor's rulings in this session** (above). **Recommended:** let them stand.
    The ones that change what users can write: 341 (a function without a body is rejected if any of its
    declarations has `restrict`), 339 (in C a lone zero that elides braces must be an integer literal where
@@ -1670,6 +1676,11 @@ The next questions start at 348.
    `p->v[e].x`). 345 lists a false alarm that record 0063 already had for arrays of scalars; 346 lists
    two rejections (one of them in C only); 347 is the one to look at: this session's own change, made to fit
    the lint, cost one measured program its verdict, and the fused form with a lint rule is the alternative.
+
+Follow recommendation
+
 4. **331–337, 321–324 and 327–330, 313–319 and 301–309**, the earlier defaults and rulings still awaiting
    review. **Recommended:** let them stand; 316 (`restrict` backed by a range over structures) and 329's two
    `restrict` clauses are moot now that every `restrict` parameter is rejected.
+
+Follow recommendation
