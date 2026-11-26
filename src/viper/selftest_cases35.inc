@@ -28,7 +28,8 @@ void define_aggregate_element_guards()
     };
 
     // ---- the views of a structure's leaves (vir.h, StructLeaf::aggregate_element) ----
-    ru("e1e2a_guard_object_view", "reached a walk of a structure's leaves that has no rows for it",
+    lc("e1e2a_guard_object_view",
+       "a structure local whose member is an array of structures (Part A's guard of the object view, lifted by Part C2 slice 1 for the allocation, the scope exit and the atoms)",
        [=](Kit& k)
        {
            // void f(void) { struct S s; }  with struct S { struct T a[2]; int n; }
@@ -38,12 +39,14 @@ void define_aggregate_element_guards()
            f->body = k.blkc({k.decl(s, nullptr)});
            k.done(f);
        });
-    ru("e1e2a_guard_value_view", "reached a walk of a structure's leaves that has no rows for it",
+    lc("e1e2a_guard_value_view",
+       "a by-value structure parameter whose member is an array of structures (Part A's guard of the value view, lifted by Part C2 slice 3: the value view expands the member)",
        [=](Kit& k)
        {
            // void f(struct S s) {}
            StructType* S {S_agg(k)};
            Function* f {k.fn("f", k.vd, {{"s", k.st(S)}})};
+           f->mark_address_taken(f->param_var(0));
            f->body = k.blk({});
            k.done(f);
        });
@@ -262,7 +265,7 @@ int check_leaf_paths()
            "a matrix is one path with two index steps");
     // a structure that holds an array of structures: the three views flag the member and do not expand it
     StructType* W {k.strukt("W", {{"v", k.prog.array_of(k.st(V), 2U)}, {"n", k.i32}})};
-    for (const std::vector<StructLeaf>& view : {struct_leaves(*W), struct_object_leaves(*W), struct_value_leaves(*W)})
+    for (const std::vector<StructLeaf>& view : {struct_leaves(*W), struct_object_leaves(*W)})
     {
         expect(
             view.size() == 2U && view[0U].aggregate_element && view[0U].type.is_array() && !view[1U].aggregate_element,
@@ -270,6 +273,18 @@ int check_leaf_paths()
     }
     expect(struct_object_leaves(*W)[0U].array && struct_object_leaves(*W)[0U].element == k.st(V),
            "the object view keeps `array` and the aggregate element");
+    // decision 0064 item 12 (Part C2): the VALUE view expands a member that is an array of structures, element by element, each element's leaves in declaration order: `path` through the
+    // array member to the leaf, `elem` the index, `index_after` where the index step stands
+    StructType* Z {
+        k.strukt("Z", {{"v", k.prog.array_of(k.st(k.strukt("PZ", {{"x", k.i32}, {"y", k.i32}})), 2U)}, {"n", k.i32}})};
+    const std::vector<StructLeaf> zv {struct_value_leaves(*Z)};
+    expect(
+        zv.size() == 5U && !zv[0U].aggregate_element && zv[0U].path == std::vector<int> {0, 0} && zv[0U].elem == 0 &&
+            zv[0U].index_after == 1 && zv[1U].path == std::vector<int> {0, 1} && zv[1U].elem == 0 &&
+            zv[2U].path == std::vector<int> {0, 0} && zv[2U].elem == 1 && zv[3U].path == std::vector<int> {0, 1} &&
+            zv[3U].elem == 1 && zv[4U].path == std::vector<int> {1} && zv[4U].elem == -1 && zv[4U].index_after == -1 &&
+            zv[3U].text == "v[1].y",
+        "the value view of a member that is an array of structures: every leaf of every element, element by element");
     // a matrix member is flagged too
     StructType* X {k.strukt("X", {{"m", k.prog.array_of(k.prog.array_of(k.i32, 3U), 2U)}})};
     expect(struct_value_leaves(*X).size() == 1U && struct_value_leaves(*X)[0U].aggregate_element,

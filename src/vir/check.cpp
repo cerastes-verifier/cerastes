@@ -466,10 +466,16 @@ private:
             }
             else if (m.type.is_array())
             {
-                // decision 0063 items 2 and 3 (M4.5e1e1 part C): an array member is one dimension of at least one element of a scalar (the block `member(X, k)` of that length)
-                if (!array_local_type(m.type))
+                // decision 0063 items 2 and 3 (M4.5e1e1 part C): an array member is one dimension of at least one element of a scalar (the block `member(X, k)` of that length);
+                // decision 0064 items 1 and 2 (Part C2): or of verified structures with no array member and no `owning` or `ref_to_uninit` member (local_array_type's rule)
+                if (!local_array_type(m.type))
                 {
-                    err(m.loc, "the member '" + m.name + "' of " + name + " is " + array_reason(m.type));
+                    err(m.loc, "the member '" + m.name + "' of " + name + " is " + local_array_reason(m.type));
+                }
+                else if (const StructType* inner {held_struct(m.type)};
+                         inner != nullptr && (inner == &st || contains_by_value(*inner, &st, 0)))
+                {
+                    err(m.loc, "the member '" + m.name + "' of " + name + " contains the struct itself by value");
                 }
             }
             else if (!scalar_type(m.type))
@@ -642,9 +648,10 @@ private:
         else if (g.type.is_array())
         {
             // decision 0063 items 2 and 3 (M4.5e1e1 part B): a global or `static` array of scalars is the block `GB_g()` of N slots; `owning` is refused on it
-            if (!array_local_type(g.type))
+            // decision 0064 items 1, 2 and 9 (Part C2): or an array of verified structures (local_array_type's rule)
+            if (!local_array_type(g.type))
             {
-                err(g.loc, name + " is " + array_reason(g.type));
+                err(g.loc, name + " is " + local_array_reason(g.type));
             }
             if (g.owning || g.ref_to_uninit)
             {
@@ -697,9 +704,9 @@ private:
                 // decision 0063 item 9 (part C): an array leaf of a struct global has the listed prefix `elems` (at most N entries, each a scalar initial value of the element type) and
                 // a `rest` that is zero or unknown; the leaf's own kind mirrors the rest (Unknown iff the rest is unknown)
                 const std::string ln {"the member '" + leaves[k].text + "' of the global '" + g.c_name + "'"};
-                if (!array_local_type(leaves[k].type))
+                if (!local_array_type(leaves[k].type))
                 {
-                    err(g.loc, ln + " is " + array_reason(leaves[k].type));
+                    err(g.loc, ln + " is " + local_array_reason(leaves[k].type));
                     continue;
                 }
                 if (l.elems.size() > static_cast<size_t>(leaves[k].count))
@@ -717,7 +724,13 @@ private:
                 {
                     const GlobalLeaf& el {l.elems[i]};
                     const std::string en {"the element " + std::to_string(i) + " of " + ln};
-                    if (!el.elems.empty() || el.rest != ArrayRest::Zero)
+                    if (leaves[k].element.is_struct())
+                    {
+                        // decision 0064 item 9 (Part C2): an element that is a structure has one initial value per leaf of the structure
+                        struct_element_values(en, g.loc, leaves[k].element, el, l.rest);
+                        continue;
+                    }
+                    if (!el.elems.empty() || el.rest != ArrayRest::Zero || !el.leaves.empty())
                     {
                         err(g.loc, en + " carries array initial values (an array of arrays is M4.5e1e2's)");
                     }
@@ -773,7 +786,13 @@ private:
         {
             const GlobalLeaf& l {g.elems[i]};
             const std::string en {"the element " + std::to_string(i) + " of the global '" + g.c_name + "'"};
-            if (!l.elems.empty() || l.rest != ArrayRest::Zero)
+            if (g.type.element->is_struct())
+            {
+                // decision 0064 item 9 (Part C2): an element that is a structure has one initial value per leaf of the structure
+                struct_element_values(en, g.loc, *g.type.element, l, g.rest);
+                continue;
+            }
+            if (!l.elems.empty() || l.rest != ArrayRest::Zero || !l.leaves.empty())
             {
                 err(g.loc, en + " carries array initial values (an array of arrays is M4.5e1e2's)");
             }
@@ -786,6 +805,52 @@ private:
                              : " has an unknown initial value although the rest of the array is zero (decision 0063 item 9)"));
             }
             global_value(en, l.loc.known() ? l.loc : g.loc, *g.type.element, l.kind, l.init, l.value, l.target);
+        }
+    }
+
+    // The initial values of one element of an array global of STRUCTURES (decision 0064 item 9, Part C2): `el.leaves` has one entry per leaf of the element structure in
+    // struct_object_leaves order, each a scalar value of the leaf's type with no array values of its own, known against a zero rest and unknown against an unknown rest (the element's
+    // own scalar fields are unused)
+    void struct_element_values(const std::string& en, const SrcLoc& loc, const Type& element, const GlobalLeaf& el,
+                               ArrayRest rest)
+    {
+        if (element.struct_type == nullptr || structs_.count(element.struct_type) == 0U)
+        {
+            err(loc, en + " is a structure that is not in the program");
+            return;
+        }
+        if (!el.elems.empty() || el.rest != ArrayRest::Zero || el.init != nullptr || el.target != nullptr)
+        {
+            err(loc, en + " carries values of its own beside its leaves (decision 0064 item 9)");
+        }
+        const std::vector<StructLeaf> leaves {struct_object_leaves(*element.struct_type)};
+        if (el.leaves.size() != leaves.size())
+        {
+            err(loc, en + " has " + std::to_string(el.leaves.size()) + " initial values for the " +
+                         std::to_string(leaves.size()) + " leaves of " + element.str() + " (decision 0064 item 9)");
+            return;
+        }
+        for (size_t i {0U}; i < leaves.size(); ++i)
+        {
+            const GlobalLeaf& gl {el.leaves[i]};
+            const std::string ln {"the leaf '" + leaves[i].text + "' of " + en};
+            if (leaves[i].array || leaves[i].aggregate_element || !gl.elems.empty() || gl.rest != ArrayRest::Zero ||
+                !gl.leaves.empty())
+            {
+                err(loc,
+                    ln +
+                        " is an array or carries array initial values (an element with an array member is M4.5e1e2 part E)");
+                continue;
+            }
+            if ((gl.kind == GlobalInit::Unknown) != (rest == ArrayRest::Unknown))
+            {
+                err(loc,
+                    ln +
+                        (rest == ArrayRest::Unknown
+                             ? " has a known initial value although the rest of the array is not known (decision 0064 item 9)"
+                             : " has an unknown initial value although the rest of the array is zero (decision 0064 item 9)"));
+            }
+            global_value(ln, gl.loc.known() ? gl.loc : loc, leaves[i].type, gl.kind, gl.init, gl.value, gl.target);
         }
     }
 
@@ -1338,30 +1403,31 @@ private:
     void struct_range_neighbours(const Function& f, const std::vector<AtomSite>& sites,
                                  const std::vector<AtomSite>& block_sites)
     {
-        for (const AtomSite& a : sites)
+        // each `owns_block` atom is reported once, however many range atoms (one per clause list) share a leaf type with it
+        for (const AtomSite& o : block_sites)
         {
-            if (!is_range_atom(a.atom->atom) || a.atom->a == nullptr || !a.atom->a->type.is_ptr() ||
-                a.atom->a->type.pointee == nullptr || !a.atom->a->type.pointee->is_struct())
+            bool shares {false};
+            const std::vector<Type> theirs {held_leaf_types(o)};
+            for (const AtomSite& a : sites)
             {
-                continue;
-            }
-            const std::vector<Type> mine {held_leaf_types(a)};
-            for (const AtomSite& o : block_sites)
-            {
-                bool shares {false};
-                for (const Type& t : held_leaf_types(o))
+                if (shares || !is_range_atom(a.atom->atom) || a.atom->a == nullptr || !a.atom->a->type.is_ptr() ||
+                    a.atom->a->type.pointee == nullptr || !a.atom->a->type.pointee->is_struct())
                 {
-                    for (const Type& m : mine)
+                    continue;
+                }
+                for (const Type& m : held_leaf_types(a))
+                {
+                    for (const Type& t : theirs)
                     {
                         shares = shares || t == m;
                     }
                 }
-                if (shares)
-                {
-                    err(o.atom->loc,
-                        "an `owns_block` atom beside a range over structures in '" + f.c_name +
-                            "' that holds a cell of one of the same leaf fields (decision 0064 item 7: a heap block beside such a range is M4.5e1e2 part D, not yet lifted)");
-                }
+            }
+            if (shares)
+            {
+                err(o.atom->loc,
+                    "an `owns_block` atom beside a range over structures in '" + f.c_name +
+                        "' that holds a cell of one of the same leaf fields (decision 0064 item 7: a heap block beside such a range is M4.5e1e2 part D, not yet lifted)");
             }
         }
     }
@@ -3367,6 +3433,13 @@ private:
                                    " into " + s.addr->type.str() + " (decision 0063 item 13)");
                     break;
                 }
+                if (s.addr->type.pointee != nullptr && s.addr->type.pointee->element != nullptr &&
+                    s.addr->type.pointee->element->is_struct())
+                {
+                    err(s.loc,
+                        "an array copy of a member that is an array of structures (decision 0064 item 12: the copy of such a member is leaf stores per element, Part C2's slice 3, not yet lifted)");
+                    break;
+                }
                 array_addr_ok_.insert(s.addr);
                 array_addr_ok_.insert(s.expr);
                 expr(*s.addr, Ctx::Body, false);
@@ -3805,8 +3878,9 @@ private:
                     // record 0060 item 5: the element `p[e]` of a pointer parameter (its ElemAddr is checked where it stands) is rooted at that parameter
                     const Expr* root {e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr
                                           ? (member_array_base(e.a->a) ? place_root(e.a->a) : e.a->a)
-                                      : contract_struct_element(e.a) != nullptr ? contract_struct_element(e.a)->a
-                                                                                : place_root(e.a)};
+                                      : contract_struct_element(e.a) != nullptr
+                                          ? contract_struct_root(contract_struct_element(e.a))
+                                          : place_root(e.a)};
                     if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal &&
                         root->kind != Expr::Kind::GlobalAddr && root->kind != Expr::Kind::ForallArg &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
@@ -4053,8 +4127,9 @@ private:
                 {
                     // decision 0045 item 2: under loads and pointer leaves too (`p->q->x`)
                     const Expr* sel {contract_struct_element(&e)};
-                    const Expr* root {sel != nullptr && contract_struct_elem_ok_.count(sel) != 0U ? sel->a
-                                                                                                  : place_root(&e)};
+                    const Expr* root {sel != nullptr && contract_struct_elem_ok_.count(sel) != 0U
+                                          ? contract_struct_root(sel)
+                                          : place_root(&e)};
                     if (root->kind != Expr::Kind::Formal && root->kind != Expr::Kind::GlobalAddr &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
                     {
@@ -4534,9 +4609,21 @@ private:
             return nullptr;
         }
         const Expr* r {member_chain_root(a)};
-        return r != nullptr && r->kind == Expr::Kind::ElemAddr && r->a != nullptr && r->a->kind == Expr::Kind::Formal
+        // decision 0064 item 7 (Part C2): the base of the element may also be a global array of structures (`g[e].x`) or an array member of structures (`p->v[e].x`, `r->v[e].x`; its
+        // chain must be pure members over a parameter, a global or the result: the ElemAddr case checks it where it stands)
+        return r != nullptr && r->kind == Expr::Kind::ElemAddr && r->a != nullptr &&
+                       (r->a->kind == Expr::Kind::Formal || global_array_base(r->a) || member_array_base(r->a))
                    ? r
                    : nullptr;
+    }
+    // The root object of the element `el` that contract_struct_element found: the parameter or global the array's chain starts at (the ElemAddr's own base for a pointer parameter)
+    static const Expr* contract_struct_root(const Expr* el)
+    {
+        if (el->a->kind == Expr::Kind::Formal || global_array_base(el->a))
+        {
+            return el->a;
+        }
+        return member_chain_root(el->a);
     }
     // Decision 0064 item 10 (Part C1): the address `a` is reached through a pointer that was READ from a member of an element of a pointer to structures (`p[e].q[i]`, `*p[e].q`, `p[e].q->x`):
     // the range holds the leaf `q`, not what it points to, so a loop invariant or measure reading the pointee is refused here rather than left to a framing assert that always fails

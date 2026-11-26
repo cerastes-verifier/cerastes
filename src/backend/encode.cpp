@@ -536,8 +536,10 @@ private:
     // ---- arrays (decision 0059) ---------------------------------------------------------------------------------------------------
     // The type of an automatic local array (items 1 and 2): one dimension of at least one element of a bool, an integer, an enumeration or a pointer to an object
     // type, with a fixed bound.  The caller sends a variable length array to vtype_object, which refuses it.  The bound's own checks are check_array_bound's.
-    // `aggregate_elements`: the caller reads an element that is a verified structure (decision 0064 items 1 and 2, M4.5e1e2 Part B: the automatic local array of
-    // `declaration`, and no other caller yet: a global, a `static` local, a member, a literal and a computed type stay rejected until Parts C and E).
+    // `aggregate_elements`: the caller reads an element that is a verified structure (decision 0064 items 1 and 2: the automatic local array of `declaration`,
+    // Part B; the global and `static` local array of `global_array_vtype` and the member of `struct_info`, Part C2: each written with an array declarator).  A
+    // literal's array and a computed type (a typedef, an alias, `typeof`: `array_type_reason`) pass no flag, so an element that is a structure stays rejected there
+    // (Part E's typedef helpers).
     VType array_vtype(a_type_ptr type, bool aggregate_elements = false)
     {
         VType r;
@@ -584,7 +586,7 @@ private:
             if (!aggregate_elements)
             {
                 r.name +=
-                    " (an array of structures that is not an automatic local array written with an array declarator: a global or `static` local array is M4.5e1e2 (continuation), Part C, a member, a literal or a computed type Part C or E; decision 0064 item 1)";
+                    " (an array of structures that is not written with an array declarator on a local, a global, a `static` local or a member: a typedef or alias of one, `typeof`, an array compound literal's type: not built, Part E takes the typedef'd forms; decision 0064 item 1)";
                 return r;
             }
             // Decision 0064 item 2: an element structure that is a verified structure of cells and nested structures of cells.  Each rule below is its own
@@ -879,7 +881,9 @@ private:
             r.name += " (" + why + ")";
             return r;
         }
-        return array_vtype(v->type);
+        // an element that is a verified structure is accepted for an array written with an array declarator (decision 0064 items 1 and 9, Part C2); a typedef'd or
+        // computed array of structures stays rejected (array_vtype's message)
+        return array_vtype(v->type, written_as_array_declarator(v->type));
     }
 
     // Whether a named typedef or alias is on the typeref chain of `t`: its bound was checked where it was declared.
@@ -1207,6 +1211,21 @@ private:
                     "an array member in the function of a quantifier (`p->a` as the argument of a quantifier or a `pure` function: M4.5e1e2, decision 0063 item 1)");
                 return nullptr;
             }
+            if (contract_value_root(mn))
+            {
+                // an array member of a structure VALUE (a by-value parameter or the result): its elements have no place to read; a scalar element is the value
+                // view's (elem_value_read), an element that is a structure is not read in a contract yet
+                const a_type_ptr bt {skip_typerefs(base->type)};
+                if (bt != nullptr && bt->kind == tk_pointer && bt->variant.pointer.type != nullptr &&
+                    is_struct_kind(skip_typerefs(bt->variant.pointer.type)))
+                {
+                    reject(
+                        Diag::unsupported_annotation, e->position,
+                        "an element of an array member of structures of a structure passed or returned by value in a contract (`t.v[i].x` of a by-value parameter or of the result: M4.5f3): "
+                        "state the property on the caller's object, or check it in the body");
+                    return nullptr;
+                }
+            }
             const Expr* ma {contract_place_address(mn)};
             if (ma == nullptr)
             {
@@ -1511,7 +1530,8 @@ private:
         const Expr* base_expr {nullptr};
         std::string name;
         bool named_array {false};
-        // the array of a local variable of this function (the only array of structures a loop invariant or measure may name an element of: the lowering frames it)
+        // the array of a local variable of this function, a global or `static` local array, or an array member (the arrays of structures a loop invariant or measure
+        // may name an element of: the lowering frames each as the place the loop or the function holds, decision 0064 item 10)
         bool named_local {false};
         a_variable_ptr av {decayed_array_variable(base)};
         vir::Global* ag {av != nullptr ? global_of(av) : nullptr};
@@ -1535,6 +1555,7 @@ private:
             }
             base_expr = b_.global_addr(ag, loc_of(base->position));
             name = ag->c_name;
+            named_local = true;
         }
         else if (av != nullptr)
         {
@@ -1596,6 +1617,7 @@ private:
             }
             name = member_spelling(mn);
             named_array = true;
+            named_local = true;
         }
         else if (base->kind == enk_operation && base->variant.operation.kind == eok_array_to_pointer &&
                  array_literal_of_decay(base) == nullptr)
@@ -1886,6 +1908,17 @@ private:
         {
             return nullptr;
         }
+        if (const vir::Type& mt {sv->type.struct_type->members[static_cast<size_t>(k)].type};
+            mt.is_array() && mt.element != nullptr && !mt.element->is_bool() && !mt.element->is_int() &&
+            !mt.element->is_ptr())
+        {
+            // an element of an array member of structures of a structure value (`f().v[i]`, a by-value parameter's or the result's `v[i].x` in a contract): the value
+            // view gives its leaves, not a value of the element (decision 0064 item 12); not built, so rejected
+            reject(
+                Diag::unsupported_expression, e->position,
+                "an element of an array member of structures of a structure value (a call's result, a temporary, or a by-value parameter or the result in a contract: `f().v[i]`, `r.v[i].x`): its leaves are values of their own, and no element is one (decision 0064 item 12; copy the structure into a local first, `struct T t = f();`)");
+            return nullptr;
+        }
         if (!cx_.contract)
         {
             // a plain `char` index (-Wchar-subscripts, as for an object's element, decision 0059 item 4)
@@ -2149,7 +2182,7 @@ private:
             {
                 reject(
                     Diag::unsupported_declaration, cp,
-                    "a nested braced list in an array initializer (an array of arrays: M4.5e1e2 (continuation), Part E; an array of structures that is not an automatic local array: Part C; decision 0064 item 1)");
+                    "a nested braced list in an array initializer (an array of arrays: M4.5e1e2 (continuation), Part E, decision 0064 item 1)");
                 ok = false;
             }
             else
@@ -2413,92 +2446,16 @@ private:
         const unsigned long long count {var->type.count};
         const bool c_mode {il_header.source_language == sl_C};
         const SrcLoc l {loc_of(at)};
-        struct Slot
-        {
-            unsigned long long index {0U};
-            InitElem leaf;
-        };
-        std::vector<Slot> slots;
-        unsigned long long cursor {0U};
-        bool ok {true};
-        for (a_constant_ptr c {agg->variant.aggregate.first_constant}; c != nullptr; c = c->next)
-        {
-            const a_source_position cp {c->source_corresp.decl_position.seq != 0U ? c->source_corresp.decl_position
-                                                                                  : at};
-            if (c->kind == ck_designator)
-            {
-                reject_array_designator(c, cp);
-                return;
-            }
-            if (cursor >= count)
-            {
-                reject(Diag::unsupported_declaration, cp, "an initializer list with more elements than the array has");
-                return;
-            }
-            if (c->kind != ck_aggregate)
-            {
-                reject(
-                    Diag::unsupported_declaration, cp,
-                    "an element of an array of structures initialized from a value (write the element's braced list; decision 0064 item 6)");
-                ok = false;
-            }
-            else
-            {
-                const bool elided {!c->explicit_braces_on_aggregate};
-                const bool sole {agg->variant.aggregate.first_constant == c && c->next == nullptr};
-                if (elided && !(c_mode && sole && lone_zero_chain(c)))
-                {
-                    // item 16: C++ rejects the elided braces of an element whatever the value (the parent is an array); C accepts only the lone `{0}` that is the
-                    // whole initializer
-                    reject(
-                        Diag::unsupported_expression, cp,
-                        c_mode
-                            ? "an element of an array of structures initialized without its own braces (brace elision, -Wmissing-braces; only the lone `{0}` that is the whole initializer elides): write the element's braces (decision 0064 item 16)"
-                            : "an element of an array of structures initialized without its own braces (brace elision, -Wmissing-braces, also `{0}`: question 304): write the element's braces (decision 0064 item 16)");
-                    ok = false;
-                }
-                else if (c_mode && elided && !lone_zero_spelling_ok(c, cp))
-                {
-                    ok =
-                        false; // item 16: the parent is an array, so clang's C flags the elision unless the zero is a literal
-                }
-                else
-                {
-                    std::vector<int> prefix;
-                    std::vector<InitElem> leaves;
-                    if (!collect_init_elems(st, prefix, c, leaves, cp, elided, elided))
-                    {
-                        ok = false;
-                    }
-                    for (InitElem& el : leaves)
-                    {
-                        slots.push_back(Slot {cursor, std::move(el)});
-                    }
-                }
-            }
-            ++cursor;
-        }
-        if (!ok)
+        std::vector<ArrSlot> slots;
+        if (!collect_struct_array_slots(st, count, agg, at, slots))
         {
             return;
         }
-        // a leaf written twice (a designated list names it again): C's overridden initializer is unevaluated in C23 and evaluated by EDG
-        {
-            std::set<std::pair<unsigned long long, std::vector<int>>> seen;
-            for (const Slot& sl : slots)
-            {
-                if (!seen.insert({sl.index, sl.leaf.path}).second)
-                {
-                    reject(Diag::unsupported_declaration, sl.leaf.at,
-                           "a member initialized twice in one initializer list (decision 0043 item 6)");
-                    return;
-                }
-            }
-        }
+        bool ok {true};
         // every leaf of every element the list does not write is zero: `fill`, with the enumerations whose values exclude 0 rejected as a structure's are
         const std::vector<vir::StructLeaf> leaves {vir::struct_object_leaves(st)};
         std::set<std::pair<unsigned long long, std::vector<int>>> written;
-        for (const Slot& sl : slots)
+        for (const ArrSlot& sl : slots)
         {
             written.insert({sl.index, sl.leaf.path});
         }
@@ -2520,7 +2477,7 @@ private:
         }
         size_t dynamic {0U};
         bool effect {false};
-        for (const Slot& sl : slots)
+        for (const ArrSlot& sl : slots)
         {
             if (sl.leaf.e != nullptr)
             {
@@ -2534,7 +2491,7 @@ private:
                    "two elements of an initializer list, one of them with a side effect, whose order C leaves open");
             return;
         }
-        auto target = [&](const Slot& sl, const SrcLoc& el) -> const Expr*
+        auto target = [&](const ArrSlot& sl, const SrcLoc& el) -> const Expr*
         {
             return leaf_address(b_.elem_addr(b_.addr_of(var, el), long_const(static_cast<long>(sl.index), el), el),
                                 sl.leaf.path, el);
@@ -9154,11 +9111,17 @@ private:
     {
         if (g->type.is_array())
         { // an array global (decision 0063 item 9): every listed element and the rest past them (each element keeps its initializer as written, which the
-            // prologue checks like a known one's); the scalar fields stay as they are, unused
+            // prologue checks like a known one's); the scalar fields stay as they are, unused.  An array of structures (decision 0064 item 9): every leaf of every
+            // listed element too
             for (vir::GlobalLeaf& l : g->elems)
             {
                 l.kind = vir::GlobalInit::Unknown;
                 l.target = nullptr;
+                for (vir::GlobalLeaf& x : l.leaves)
+                {
+                    x.kind = vir::GlobalInit::Unknown;
+                    x.target = nullptr;
+                }
             }
             g->rest = vir::ArrayRest::Unknown;
             return;
@@ -9177,6 +9140,11 @@ private:
             {
                 e.kind = vir::GlobalInit::Unknown;
                 e.target = nullptr;
+                for (vir::GlobalLeaf& x : e.leaves)
+                {
+                    x.kind = vir::GlobalInit::Unknown;
+                    x.target = nullptr;
+                }
             }
             if (k < object_leaves.size() && object_leaves[k].array)
             {
@@ -9313,12 +9281,25 @@ private:
     // Decision 0063 item 13 (question 295): the number of array elements a structure VALUE holds (the value view's element leaves: every array member's count,
     // nested by-value structures included).  A value passed, returned or built is limited to kMaxValueArrayElements; a copy has no limit.
     static constexpr unsigned long long kMaxValueArrayElements {vir::kMaxByValueArrayElements};
+    // Decision 0064 item 12: an array member of structures contributes one value per leaf of every element (`count` times the element's leaves, any depth), so the limit
+    // counts those leaves.
     static unsigned long long vir_value_array_elements(const vir::StructType& st)
     {
         unsigned long long n {0U};
         for (const vir::StructLeaf& lf : vir::struct_object_leaves(st))
         {
-            if (lf.array)
+            if (!lf.array)
+            {
+                continue;
+            }
+            if (lf.aggregate_element)
+            {
+                for (const vir::LeafPath& lp : vir::object_leaf_paths(lf.type))
+                {
+                    n += lp.cells();
+                }
+            }
+            else
             {
                 n += lf.count;
             }
@@ -9329,6 +9310,49 @@ private:
     {
         return t.is_struct() && t.struct_type != nullptr &&
                vir_value_array_elements(*t.struct_type) > kMaxValueArrayElements;
+    }
+    // The value view's leaf `lf` of the structure `st` as a cell address over `root` (a structure's address): the member chain of its path with the element
+    // index of its array member (`lf.elem >= 0`) after the first array-typed member on the path (decision 0063 item 13; for an array member of structures, decision
+    // 0064 item 12: `t.v[i].x` is `MemberAddr(ElemAddr(MemberAddr(t, v), i), x)`).
+    const Expr* value_leaf_address(const Expr* root, const vir::StructType& st, const vir::StructLeaf& lf,
+                                   const SrcLoc& l)
+    {
+        const Expr* a {root};
+        const vir::StructType* cur {&st};
+        bool indexed {lf.elem < 0};
+        for (size_t k {0U}; k < lf.path.size(); ++k)
+        {
+            a = b_.member_addr(a, lf.path[k], l);
+            const vir::StructMember* m {cur != nullptr && lf.path[k] >= 0 &&
+                                                static_cast<size_t>(lf.path[k]) < cur->members.size()
+                                            ? &cur->members[static_cast<size_t>(lf.path[k])]
+                                            : nullptr};
+            if (!indexed && m != nullptr && m->type.is_array())
+            {
+                a = b_.elem_addr(a, long_const(lf.elem, l), l);
+                indexed = true;
+                cur =
+                    m->type.element != nullptr && m->type.element->is_struct() ? m->type.element->struct_type : nullptr;
+            }
+            else
+            {
+                cur = m != nullptr && m->type.is_struct() ? m->type.struct_type : nullptr;
+            }
+        }
+        return a;
+    }
+    // A value-view leaf that is the whole array member of structures, unexpanded (what the VIR layer's value view returns until it expands such a member): the encoder has
+    // no value for it.  True when reported.
+    bool reject_unexpanded_leaf(const vir::StructLeaf& lf, const a_source_position& at)
+    {
+        if (!lf.aggregate_element)
+        {
+            return false;
+        }
+        reject(
+            Diag::unsupported_type, at,
+            "a structure value whose member is an array of structures (its elements' leaves are values of their own, decision 0064 item 12; this encoder has no value for such a member yet)");
+        return true;
     }
     // Whether a structure has an `owning` or `ref_to_uninit` member anywhere (by-value structure members included).
     static bool vir_struct_has_marked(const vir::StructType& st, int depth = 0)
@@ -9482,10 +9506,11 @@ private:
                 }
             }
         }
-        // an array member the list writes in part is zero-filled past the listed prefix: an enumeration without 0 cannot be
+        // an array member the list writes in part is zero-filled past the listed prefix: an enumeration without 0 cannot be (an array member of structures reads its
+        // own leaves: read_aggregate_elems)
         for (size_t k {0U}; k < leaves.size(); ++k)
         {
-            if (!leaves[k].array)
+            if (!leaves[k].array || leaves[k].aggregate_element)
             {
                 continue;
             }
@@ -9503,6 +9528,10 @@ private:
         }
         for (const InitElem& el : elems)
         {
+            if (el.elem >= 0 && el.index_after != std::string::npos)
+            {
+                continue; // an element of an array member of structures: below
+            }
             const size_t k {index[el.path]};
             vir::GlobalLeaf& leaf {g->leaves[k]};
             const vir::Type lt {leaves[k].type};
@@ -9628,7 +9657,91 @@ private:
                 leaf.value = maybe_perturb(lt, constant_text(ec, lt));
             }
         }
+        // an array member of structures (decision 0064 item 9): the listed prefix of its elements, each with one entry per leaf of the element structure
+        for (size_t k {0U}; k < leaves.size(); ++k)
+        {
+            if (!leaves[k].array || !leaves[k].aggregate_element)
+            {
+                continue;
+            }
+            if (!leaves[k].element.is_struct() || leaves[k].element.struct_type == nullptr)
+            {
+                return refuse(
+                    "a member that is an array of arrays (M4.5e1e2 (continuation), Part E, decision 0064 item 1)");
+            }
+            std::vector<AggEntry> entries;
+            for (const InitElem& el : elems)
+            {
+                if (el.elem >= 0 && el.index_after == leaves[k].path.size() && el.path.size() > leaves[k].path.size() &&
+                    std::equal(leaves[k].path.begin(), leaves[k].path.end(), el.path.begin()))
+                {
+                    entries.push_back(
+                        AggEntry {el.elem,
+                                  std::vector<int>(el.path.begin() + static_cast<std::ptrdiff_t>(leaves[k].path.size()),
+                                                   el.path.end()),
+                                  &el});
+                }
+            }
+            if (!read_aggregate_elems(v, g, *leaves[k].element.struct_type, leaves[k].count, entries, c_mode,
+                                      g->leaves[k].elems))
+            {
+                return false;
+            }
+        }
         // The values are known where the unit can know them (item 8): internal linkage and a `static` local, and C's external linkage with an initializer.
+        if (!local && v->source_corresp.name_linkage != nlk_internal && (!c_mode || c == nullptr))
+        {
+            make_unknown(g);
+        }
+        return true;
+    }
+
+    // The initial values of a global or `static` local array of structures (decision 0064 item 9): the listed prefix of its elements (`Global::elems`, one entry per
+    // element up to the last the braced list writes), each with one entry per leaf of the element structure, and the zero rest.  Each element is in its own braces
+    // (an element's leaves it does not write are zero); every constant is read through `constant_initializer`, never from the aggregate's folded values (P38: from 1,002
+    // elements an element under a conversion keeps no `expr`, which read_array_element refuses).  The values are known by the linkage and escape rules of an array of
+    // scalars'.  False after a rejection at its declaration.
+    bool read_struct_array_global_init(a_variable_ptr v, vir::Global* g, a_constant_ptr c, bool c_mode)
+    {
+        const a_source_position p {v->source_corresp.decl_position};
+        const bool local {g->owner != nullptr};
+        auto refuse = [&](const std::string& why)
+        {
+            reject(Diag::unsupported_declaration, p, why);
+            rejected_globals_.insert(v);
+            return false;
+        };
+        g->init_kind = vir::Global::Init::Value;
+        g->elems.clear();
+        g->leaves.clear();
+        g->rest = vir::ArrayRest::Zero;
+        std::vector<ArrSlot> slots;
+        if (c != nullptr)
+        {
+            if (c->kind != ck_aggregate)
+            {
+                return refuse("an array initializer that is not a braced list");
+            }
+            if (c->explicit_parentheses_on_aggregate)
+            {
+                return refuse("an array initialized with parentheses (M7)");
+            }
+            if (!collect_struct_array_slots(*g->type.element->struct_type, g->type.count, c, p, slots))
+            {
+                rejected_globals_.insert(v);
+                return false;
+            }
+        }
+        std::vector<AggEntry> entries;
+        for (const ArrSlot& sl : slots)
+        {
+            entries.push_back(AggEntry {static_cast<long>(sl.index), sl.leaf.path, &sl.leaf});
+        }
+        if (!read_aggregate_elems(v, g, *g->type.element->struct_type, g->type.count, entries, c_mode, g->elems))
+        {
+            return false;
+        }
+        // The values are known where the unit can know them (item 9): internal linkage and a `static` local, and C's external linkage with an initializer.
         if (!local && v->source_corresp.name_linkage != nlk_internal && (!c_mode || c == nullptr))
         {
             make_unknown(g);
@@ -9766,6 +9879,10 @@ private:
         };
         const vir::Type et {*g->type.element};
         const unsigned long long count {g->type.count};
+        if (et.is_struct() && et.struct_type != nullptr)
+        {
+            return read_struct_array_global_init(v, g, c, c_mode);
+        }
         g->init_kind = vir::Global::Init::Value;
         g->elems.clear();
         g->rest = vir::ArrayRest::Zero;
@@ -11050,6 +11167,39 @@ private:
         }
         return a;
     }
+    // Whether the element address `ea` of a subscript in a contract may be the base of a member step (decision 0064 item 7): the address of an element of
+    // a structure, over a pointer parameter (Part C1), a global or `static` array of structures (`g[e].x`), or an array member of structures reached by member
+    // steps alone from a pointer parameter, a global or the result (`p->v[e].x`, `gt.v[e].x`, `r->v[e].x`; Part C2).  A base reached through a load of a pointer is
+    // Part D's (question 306).
+    static bool contract_struct_element_base_ok(const Expr* ea)
+    {
+        if (!ea->type.is_ptr() || ea->type.pointee == nullptr || !ea->type.pointee->is_struct() ||
+            ea->kind != Expr::Kind::ElemAddr || ea->a == nullptr)
+        {
+            return false;
+        }
+        const Expr* base {ea->a};
+        if (base->kind == Expr::Kind::Formal)
+        {
+            return true;
+        }
+        if (base->kind == Expr::Kind::GlobalAddr)
+        {
+            return base->global != nullptr && base->global->type.is_array();
+        }
+        if (base->kind != Expr::Kind::MemberAddr)
+        {
+            return false;
+        }
+        std::vector<int> steps;
+        const Expr* root {vir::place_root(base, &steps)};
+        if (root == nullptr || vir::steps_have_load(steps))
+        {
+            return false;
+        }
+        return root->kind == Expr::Kind::GlobalAddr ||
+               ((root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::Result) && root->type.is_ptr());
+    }
     const Expr* contract_place_address_raw(an_expr_node_ptr n, int depth)
     {
         n = peel_place(n);
@@ -11124,12 +11274,11 @@ private:
             {
                 return nullptr;
             }
-            if (!ea->type.is_ptr() || ea->type.pointee == nullptr || !ea->type.pointee->is_struct() ||
-                ea->kind != Expr::Kind::ElemAddr || ea->a == nullptr || ea->a->kind != Expr::Kind::Formal)
+            if (!contract_struct_element_base_ok(ea))
             {
                 reject(
                     Diag::unsupported_annotation, at,
-                    "a member of an element of anything but a pointer parameter to verified structures (a global array or an array member of structures: M4.5e1e2 (continuation), Part C2)");
+                    "a member of an element of anything but a pointer parameter to verified structures, a global or `static` array of structures or an array member of structures reached by members from a pointer parameter, a global or the result in a contract (a base read from memory, `p[e].a[j]`: decision 0064 items 7 and 14; Part D, Part E)");
                 return nullptr;
             }
             place_base_type_ =
@@ -15568,10 +15717,16 @@ private:
         const Expr* root {vir::member_root(a)};
         // an element `v[i]`, `p[i]` (decision 0064 item 12): the root is the element's address over a local array or a pointer local, whose index reads no effect
         // (first_effect above); every leaf read repeats the index's own rows and takes the element's bound
-        if (root->kind == Expr::Kind::ElemAddr && root->a != nullptr &&
-            (root->a->kind == Expr::Kind::AddrOf || root->a->kind == Expr::Kind::Local))
+        if (root->kind == Expr::Kind::ElemAddr && root->a != nullptr)
         {
-            root = root->a;
+            // the element's base: a local array's address, a pointer local, a global or `static` array's address, or the address of an array member over a named object
+            // or a pointer local (`g[i]`, `t.v[i]`, `p->v[i]`; decision 0064 item 12): nothing the leaf reads can change it
+            const Expr* base {vir::member_root(root->a)};
+            if (base->kind == Expr::Kind::AddrOf || base->kind == Expr::Kind::Local ||
+                base->kind == Expr::Kind::GlobalAddr)
+            {
+                root = base;
+            }
         }
         if (root->kind != Expr::Kind::AddrOf && root->kind != Expr::Kind::Local && root->kind != Expr::Kind::GlobalAddr)
         {
@@ -15583,14 +15738,14 @@ private:
         std::vector<const Expr*> args;
         for (const vir::StructLeaf& lf : vir::struct_value_leaves(*st.struct_type))
         {
-            // an element of an array member is a leaf of its own (decision 0063 item 13): the read of `a[i]` over the member's address, its rows the element
-            // read's (bound, permission, flag)
-            const Expr* la {leaf_address(a, lf.path, l)};
-            if (lf.elem >= 0)
+            if (reject_unexpanded_leaf(lf, n->position))
             {
-                la = b_.elem_addr(la, long_const(lf.elem, l), l);
+                return nullptr;
             }
-            args.push_back(b_.deref(la, l));
+            // an element of an array member is a leaf of its own (decision 0063 item 13): the read of `a[i]` over the member's address, its rows the element
+            // read's (bound, permission, flag); for an array member of structures (decision 0064 item 12) the leaf of an element, `v[i].x`, the index between the
+            // members
+            args.push_back(b_.deref(value_leaf_address(a, *st.struct_type, lf, l), l));
         }
         return b_.aggregate(st, std::move(args), l);
     }
@@ -16215,12 +16370,18 @@ private:
             by_leaf[{el.path, el.elem}] = x;
         }
         std::vector<const Expr*> args;
+        size_t taken {0U};
         for (const vir::StructLeaf& lf : vir::struct_value_leaves(*st.struct_type))
         {
+            if (reject_unexpanded_leaf(lf, at))
+            {
+                return nullptr;
+            }
             auto it {by_leaf.find({lf.path, static_cast<long>(lf.elem)})};
             if (it != by_leaf.end())
             {
                 args.push_back(it->second);
+                ++taken;
                 continue;
             }
             const Expr* z {zero_leaf(lf.type, at)}; // a leaf the list does not mention is zero (decision 0043 item 6)
@@ -16229,6 +16390,13 @@ private:
                 return nullptr;
             }
             args.push_back(z);
+        }
+        if (taken != by_leaf.size())
+        {
+            // an initializer element that no leaf of the value view takes would be dropped as zero: never (the view and the list disagree on a leaf's path)
+            reject(Diag::unsupported_expression, at,
+                   "a braced list element that no leaf of the structure value takes (decision 0064 item 12)");
+            return nullptr;
         }
         return b_.aggregate(st, std::move(args), l);
     }
@@ -16342,7 +16510,7 @@ private:
         {
             // `v[i]` of a local array of structures and `p[i]` of a pointer to structures (decision 0064 items 1, 5 and 12): the element's address, a place
             // that a member step (`v[i].x`: the bound strictly inside) or a copy leaf reads or writes.  An array of structures whose declaration was rejected
-            // (a global or `static` local array until Part C, an element structure with an array member until Part E) still draws its own row at each use, as every
+            // (an element structure with an array member, an array of arrays, a typedef'd array of structures: Part E) still draws its own row at each use, as every
             // array of structures did before this record (the staging pins hold both rows).
             for (an_expr_node_ptr o : operands_of(e))
             {
@@ -16351,7 +16519,7 @@ private:
                 {
                     reject(
                         Diag::unsupported_expression, e->position,
-                        "an element of an array of structures whose declaration is not accepted (a global or `static` local array of structures: M4.5e1e2 (continuation), Part C; an element structure with an array member: Part E; decision 0064 item 1)");
+                        "an element of an array of structures whose declaration is not accepted (reported at its declaration: an element structure with an array member, an array of arrays or a typedef'd array of structures, M4.5e1e2 (continuation) Part E; an `owning` or marked member, M4.8; a `const` array, M4.6; decision 0064 item 1)");
                     return nullptr;
                 }
             }
@@ -19741,10 +19909,246 @@ private:
         std::vector<int> path;
         // the index inside the array member at `path` (decision 0063 item 6); -1 for an element that is a cell
         long elem {-1};
+        // where the index step stands in `path` when `elem >= 0`: after this many of its members.  `npos` (the default): after all of them, the array member being the
+        // leaf (an array of scalars, decision 0063 item 6).  Otherwise the member at `index_after - 1` is an array of structures and the rest of `path` is the leaf of
+        // that element (`t.v[i].x`: path `{v, x}`, `index_after` 1; decision 0064 item 9, Part C2)
+        size_t index_after {std::string::npos};
         a_constant_ptr c {nullptr};
         an_expr_node_ptr e {nullptr};
         a_source_position at {};
     };
+
+    // One leaf a braced list of an array of structures writes: the index of its element and the leaf (a path of the element's members).
+    struct ArrSlot
+    {
+        unsigned long long index {0U};
+        InitElem leaf;
+    };
+    // The leaves the braced list `agg` of an array of `count` elements of the structure `st` writes, in list order (decision 0064 items 5, 6 and 16): each element takes
+    // its own braced list in `collect_init_elems`' rules; brace elision around an element is rejected like the compilers except `{}` and, in C only, the lone `{0}` that
+    // is the whole initializer; a leaf written twice is rejected.  Shared by a local array's initializer and a global's or `static` local's initial value.  False after a
+    // rejection (reported).  `whole`: the list is the object's whole initializer (a local array, a global; false for the list of an array member).
+    bool collect_struct_array_slots(const vir::StructType& st, unsigned long long count, a_constant_ptr agg,
+                                    const a_source_position& at, std::vector<ArrSlot>& slots, bool whole = true)
+    {
+        const bool c_mode {il_header.source_language == sl_C};
+        unsigned long long cursor {0U};
+        bool ok {true};
+        for (a_constant_ptr c {agg->variant.aggregate.first_constant}; c != nullptr; c = c->next)
+        {
+            const a_source_position cp {c->source_corresp.decl_position.seq != 0U ? c->source_corresp.decl_position
+                                                                                  : at};
+            if (c->kind == ck_designator)
+            {
+                reject_array_designator(c, cp);
+                return false;
+            }
+            if (cursor >= count)
+            {
+                reject(Diag::unsupported_declaration, cp, "an initializer list with more elements than the array has");
+                return false;
+            }
+            if (c->kind != ck_aggregate)
+            {
+                reject(
+                    Diag::unsupported_declaration, cp,
+                    "an element of an array of structures initialized from a value (write the element's braced list; decision 0064 item 6)");
+                ok = false;
+            }
+            else
+            {
+                const bool elided {!c->explicit_braces_on_aggregate};
+                const bool sole {agg->variant.aggregate.first_constant == c && c->next == nullptr};
+                if (elided && !(c_mode && sole && whole && lone_zero_chain(c)))
+                {
+                    // item 16: C++ rejects the elided braces of an element whatever the value (the parent is an array); C accepts only the lone `{0}` that is the
+                    // whole initializer (`whole`: the array's list is the object's whole initializer, not a member's list nested in a structure's)
+                    reject(
+                        Diag::unsupported_expression, cp,
+                        c_mode
+                            ? "an element of an array of structures initialized without its own braces (brace elision, -Wmissing-braces; only the lone `{0}` that is the whole initializer elides): write the element's braces (decision 0064 item 16)"
+                            : "an element of an array of structures initialized without its own braces (brace elision, -Wmissing-braces, also `{0}`: question 304): write the element's braces (decision 0064 item 16)");
+                    ok = false;
+                }
+                else if (c_mode && elided && !lone_zero_spelling_ok(c, cp))
+                {
+                    ok =
+                        false; // item 16: the parent is an array, so clang's C flags the elision unless the zero is a literal
+                }
+                else
+                {
+                    std::vector<int> prefix;
+                    std::vector<InitElem> leaves;
+                    if (!collect_init_elems(st, prefix, c, leaves, cp, elided, elided))
+                    {
+                        ok = false;
+                    }
+                    for (InitElem& el : leaves)
+                    {
+                        slots.push_back(ArrSlot {cursor, std::move(el)});
+                    }
+                }
+            }
+            ++cursor;
+        }
+        if (!ok)
+        {
+            return false;
+        }
+        // a leaf written twice (a designated list names it again): C's overridden initializer is unevaluated in C23 and evaluated by EDG
+        {
+            std::set<std::pair<unsigned long long, std::vector<int>>> seen;
+            for (const ArrSlot& sl : slots)
+            {
+                if (!seen.insert({sl.index, sl.leaf.path}).second)
+                {
+                    reject(Diag::unsupported_declaration, sl.leaf.at,
+                           "a member initialized twice in one initializer list (decision 0043 item 6)");
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // The cell an initializer element writes: the member chain of its path from `root`, with the element index `el.elem` of an array member between the members at
+    // `el.index_after` (decision 0064 item 9: `t.v[i].x`), or after the last one (an array of scalars, decision 0063 item 6); the leaf's cell when `el.elem < 0`.
+    const Expr* init_target(const Expr* root, const InitElem& el, const SrcLoc& l)
+    {
+        if (el.elem < 0)
+        {
+            return leaf_address(root, el.path, l);
+        }
+        const size_t after {el.index_after == std::string::npos ? el.path.size() : el.index_after};
+        const Expr* a {root};
+        for (size_t k {0U}; k < el.path.size(); ++k)
+        {
+            a = b_.member_addr(a, el.path[k], l);
+            if (k + 1U == after)
+            {
+                a = b_.elem_addr(a, long_const(el.elem, l), l);
+            }
+        }
+        return a;
+    }
+    // The type of the leaf an initializer element writes (the element type when it is an element of an array member; see init_target).
+    static vir::Type init_leaf_type(const vir::StructType& st, const InitElem& el)
+    {
+        vir::Type cur {vir::Type::structure(&st)};
+        const size_t after {el.index_after == std::string::npos ? el.path.size() : el.index_after};
+        for (size_t k {0U}; k < el.path.size(); ++k)
+        {
+            if (!cur.is_struct() || cur.struct_type == nullptr || el.path[k] < 0 ||
+                static_cast<size_t>(el.path[k]) >= cur.struct_type->members.size())
+            {
+                return vir::Type::void_type();
+            }
+            cur = cur.struct_type->members[static_cast<size_t>(el.path[k])].type;
+            if (el.elem >= 0 && k + 1U == after && cur.is_array() && cur.element != nullptr)
+            {
+                cur = *cur.element;
+            }
+        }
+        return cur;
+    }
+
+    // One leaf of an array of structures an initializer writes: the element's index, the path of the element's members down to the leaf, and the element of the list.
+    struct AggEntry
+    {
+        long elem {0};
+        std::vector<int> path;
+        const InitElem* el {nullptr};
+    };
+    // The initial values of an array of structures (decision 0064 item 9) of `count` elements of the structure `est`, for a global's or `static` local's own array and for
+    // a structure global's array member: `elems` is the listed prefix, one entry per element up to the last that `entries` writes, each with one entry per leaf of
+    // `est` (struct_object_leaves order; the leaves no entry writes are zero or null).  Each constant is read as an array element's is (read_array_element); a leaf that
+    // is an enumeration without 0 must be written in every element.  False after a rejection at the declaration of `v`.
+    bool read_aggregate_elems(a_variable_ptr v, vir::Global* g, const vir::StructType& est, unsigned long long count,
+                              const std::vector<AggEntry>& entries, bool c_mode, std::vector<vir::GlobalLeaf>& elems)
+    {
+        const a_source_position p {v->source_corresp.decl_position};
+        auto refuse = [&](const std::string& why)
+        {
+            reject(Diag::unsupported_declaration, p, why);
+            rejected_globals_.insert(v);
+            return false;
+        };
+        const std::vector<vir::StructLeaf> eleaves {vir::struct_object_leaves(est)};
+        std::map<std::vector<int>, size_t> index;
+        for (size_t k {0U}; k < eleaves.size(); ++k)
+        {
+            if (eleaves[k].array)
+            {
+                return refuse(
+                    "an element structure with an array member (depth 2: M4.5e1e2 (continuation), Part E, decision 0064 items 1 and 2)");
+            }
+            index[eleaves[k].path] = k;
+        }
+        long last {-1};
+        for (const AggEntry& e : entries)
+        {
+            last = std::max(last, e.elem);
+        }
+        elems.assign(static_cast<size_t>(last + 1), vir::GlobalLeaf());
+        for (vir::GlobalLeaf& el : elems)
+        {
+            el.leaves.assign(eleaves.size(), vir::GlobalLeaf());
+            for (size_t k {0U}; k < eleaves.size(); ++k)
+            {
+                el.leaves[k].kind = eleaves[k].type.is_ptr() ? vir::GlobalInit::Null : vir::GlobalInit::Value;
+                el.leaves[k].value = "0";
+            }
+        }
+        std::set<std::pair<long, size_t>> written;
+        for (const AggEntry& e : entries)
+        {
+            const auto f {index.find(e.path)};
+            if (f == index.end() || e.elem < 0 || static_cast<unsigned long long>(e.elem) >= count)
+            {
+                return refuse(
+                    "an initializer element that is no leaf of the array's element structure (decision 0064 item 9)");
+            }
+            if (!written.insert({e.elem, f->second}).second)
+            {
+                return refuse("a member initialized twice in one initializer list (decision 0043 item 6)");
+            }
+        }
+        // a leaf the list does not write in some element is zero: an enumeration without 0 cannot be
+        for (size_t k {0U}; k < eleaves.size(); ++k)
+        {
+            unsigned long long have {0U};
+            for (const auto& w : written)
+            {
+                have += w.second == k ? 1U : 0U;
+            }
+            if (have < count && is_enum_type(eleaves[k].type) &&
+                !vir::dec::in_range("0", vir::dec::range_of(*eleaves[k].type.int_type)))
+            {
+                return refuse(
+                    "an array of structures with a member of an enumeration type whose values do not include 0, with elements the initial value does not give (they are zero; decision 0064 item 9)");
+            }
+        }
+        for (const AggEntry& e : entries)
+        {
+            const size_t k {index.at(e.path)};
+            ArrElem ae;
+            ae.index = static_cast<unsigned long long>(e.elem);
+            ae.c = e.el->c;
+            ae.e = e.el->e;
+            ae.at = e.el->at;
+            vir::GlobalLeaf elf;
+            if (!read_array_element(v, eleaves[k].type, ae, c_mode, elf))
+            {
+                return false;
+            }
+            if (elf.kind == vir::GlobalInit::Addr)
+            {
+                addr_init_[g].push_back(const_cast<vir::Global*>(elf.target));
+            }
+            elems[static_cast<size_t>(e.elem)].leaves[k] = std::move(elf);
+        }
+        return true;
+    }
 
     // The elements of the aggregate constant `agg` for struct `st` (P65 item 4): the cursor rule (a designator sets the cursor to its field, every
     // other element initializes the cursor's member and advances it), nested aggregates for nested structs, no element for an absent trailing member.
@@ -19885,6 +20289,94 @@ private:
                         Diag::unsupported_declaration, cp,
                         "a struct member initialized from a struct value in an initializer list (M8, decision 0044 item 15: initialize its leaves, or assign the member afterwards)");
                     ok = false;
+                }
+            }
+            else if (mt.is_array() && mt.element != nullptr && mt.element->is_struct())
+            {
+                // A member that is an array of structures (decision 0064 items 6, 9 and 16, Part C2): its braced list takes one nested list per element, in the rules
+                // of an array of structures (collect_struct_array_slots), each leaf written as the path of the member and the element's leaf with the index between.
+                // Brace elision is rejected like the compilers except `{}` and, in C, the lone `{0}` that is the object's whole initializer (the member's list and
+                // its first element's both elided: every leaf is zero, so no leaf is written), whose literal spelling is the rule of question 325 (the first
+                // element's parent is an array, so clang's C predicate applies).
+                const bool empty {c->kind == ck_aggregate && c->variant.aggregate.first_constant == nullptr};
+                const bool braces {c->kind == ck_aggregate && c->explicit_braces_on_aggregate};
+                const bool sole {agg->variant.aggregate.first_constant == c && c->next == nullptr};
+                if (c->kind != ck_aggregate)
+                {
+                    reject(
+                        Diag::unsupported_declaration, cp,
+                        "a member that is an array of structures initialized from a value (write the member's braced list; decision 0064 item 6)");
+                    ok = false;
+                }
+                else if (!empty && !braces && by_designator)
+                {
+                    // item 16, designated lists: in C an unbraced designated member that is an array takes a lone zero (`{.v = 0}`, a lone-zero chain below it at any
+                    // depth: both compilers are silent), which writes no leaf; anything else is rejected, and in C++ every such form is
+                    if (!(c_mode && lone_zero_chain(c)))
+                    {
+                        reject(
+                            Diag::unsupported_expression, cp,
+                            "a designated member that is an array of structures initialized without its own braces (`{.v = 0}`; -Wmissing-braces, -Wc99-designator, and in C only a lone zero is accepted): write the member's braces (decision 0064 item 16)");
+                        ok = false;
+                    }
+                }
+                else if (!empty && !braces)
+                {
+                    // the member's own braces are elided: only C's lone `{0}` that is the whole initializer, and then only as the literal `0`
+                    if (!(c_mode && sole && (designated || whole) && lone_zero_chain(c)))
+                    {
+                        if (!agg->explicit_braces_on_aggregate && (agg->explicit_cast_applied || agg->expr != nullptr))
+                        {
+                            // the folded form of a struct temporary or a compound literal in an initializer's call (as for an array member; the folded constant keeps its original expression): no braces flags at any level
+                            reject(
+                                Diag::unsupported_expression, cp,
+                                "a struct temporary with a member that is an array of structures inside the initializer of a variable (the front end folds it and drops its braces, so `T{{{1, 2}, {3, 4}}, 5}` cannot be told from the elided form; "
+                                "M8, decision 0044 item 6): assign the call's value in a statement, `int r; r = f(T{...});`");
+                            ok = false;
+                        }
+                        else
+                        {
+                            reject(
+                                Diag::unsupported_expression, cp,
+                                c_mode
+                                    ? "a member that is an array of structures initialized without its own braces (brace elision, -Wmissing-braces; only the lone `{0}` that is the whole initializer elides): write the member's braces and each element's (decision 0064 item 16)"
+                                    : "a member that is an array of structures initialized without its own braces (brace elision, -Wmissing-braces, also `{0}`: question 304): write the member's braces and each element's (decision 0064 item 16)");
+                            ok = false;
+                        }
+                    }
+                    else if (!designated && !lone_zero_spelling_ok(c, cp))
+                    {
+                        ok = false; // item 16, question 325: the lone zero must be written as the literal `0`
+                    }
+                }
+                else if (!empty && elided)
+                {
+                    // a braced member list inside an elided list: the base's rule for an array member (`read_list = !elided && ...`)
+                    reject(
+                        Diag::unsupported_expression, cp,
+                        "a member that is an array of structures inside a list whose braces are elided (brace elision, -Wmissing-braces): write the braces (decision 0064 item 16)");
+                    ok = false;
+                }
+                else if (!empty)
+                {
+                    std::vector<ArrSlot> slots;
+                    if (!collect_struct_array_slots(*mt.element->struct_type, mt.count, c, cp, slots, false))
+                    {
+                        ok = false;
+                    }
+                    else
+                    {
+                        for (ArrSlot& sl : slots)
+                        {
+                            InitElem el {std::move(sl.leaf)};
+                            std::vector<int> path {prefix};
+                            path.insert(path.end(), el.path.begin(), el.path.end());
+                            el.path = std::move(path);
+                            el.elem = static_cast<long>(sl.index);
+                            el.index_after = prefix.size();
+                            out.push_back(std::move(el));
+                        }
+                    }
                 }
             }
             else if (mt.is_array())
@@ -20085,6 +20577,7 @@ private:
                 "the two sides of a struct copy, one with a side effect and the other not a plain variable or pointer, whose order C leaves open");
             return;
         }
+        bool stable_bad {false};
         auto stable = [&](const Expr* a)
         {
             std::vector<int> path;
@@ -20099,6 +20592,22 @@ private:
                     if (x->kind == Expr::Kind::Const || x->kind == Expr::Kind::AddrOf ||
                         (x->kind == Expr::Kind::Local && x->var != nullptr && !x->var->address_taken))
                     {
+                        return x;
+                    }
+                    // the base of an element of an array member (`t.v[i]`, `p->v[i]`, `g[i]` of a global): the member's address over a named object or a pointer local,
+                    // which reads nothing and is evaluated again for each leaf (a temporary would be a pointer to an array, a type no local has)
+                    if (x->type.is_ptr() && x->type.pointee != nullptr && x->type.pointee->is_array())
+                    {
+                        const Expr* r {x->kind == Expr::Kind::GlobalAddr ? x : vir::member_root(x)};
+                        if (r->kind == Expr::Kind::AddrOf || r->kind == Expr::Kind::GlobalAddr ||
+                            (r->kind == Expr::Kind::Local && r->var != nullptr && !r->var->address_taken))
+                        {
+                            return x;
+                        }
+                        reject(
+                            Diag::unsupported_expression, at,
+                            "a structure copied from or to an element of an array member reached through a pointer read from memory (the array's address would be a pointer to an array, which has no local: M8, decision 0044 item 5)");
+                        stable_bad = true;
                         return x;
                     }
                     vir::Var* t {cx_.fn->new_local(what, x->type, l)};
@@ -20131,10 +20640,67 @@ private:
         };
         const Expr* s_place {stable(src)};
         const Expr* d_place {stable(dest)};
+        if (stable_bad)
+        {
+            return;
+        }
         // The OBJECT view (decision 0063 item 13): a cell leaf is read into a temporary and stored as before; an array member is one `ArrayCopy` of the
         // destination's member over the source's (the guard against one object and the rows are lowering's), after the cells.  A copy has no limit on the
         // elements (question 295's limit is for a value).
         const std::vector<vir::StructLeaf> leaves {vir::struct_object_leaves(*src->type.pointee->struct_type)};
+        // An array member of structures (decision 0064 item 12) is copied by leaf stores, one per leaf of every element (no `copy_arr_<E>` exists for it), read into
+        // temporaries with the other cells; past kMaxValueArrayElements such leaves it is M4.5f3's.
+        struct AggCell
+        {
+            size_t member {0U};
+            unsigned long long index {0U};
+            std::vector<int> path;
+            vir::Type type;
+            vir::Var* tmp {nullptr};
+        };
+        std::vector<AggCell> agg_cells;
+        for (size_t i {0U}; i < leaves.size(); ++i)
+        {
+            if (!leaves[i].array || !leaves[i].aggregate_element)
+            {
+                continue;
+            }
+            if (!leaves[i].element.is_struct() || leaves[i].element.struct_type == nullptr)
+            {
+                reject(
+                    Diag::unsupported_type, at,
+                    "a copy of a structure with an array member of arrays (M4.5e1e2 (continuation), Part E, decision 0064 item 1)");
+                return;
+            }
+            for (unsigned long long ix {0U}; ix < leaves[i].count; ++ix)
+            {
+                for (const vir::StructLeaf& ef : vir::struct_object_leaves(*leaves[i].element.struct_type))
+                {
+                    if (ef.array)
+                    {
+                        reject(
+                            Diag::unsupported_type, at,
+                            "a copy of a structure with an array member of structures whose elements have an array member (depth 2: M4.5e1e2 (continuation), Part E, decision 0064 item 1)");
+                        return;
+                    }
+                    agg_cells.push_back(AggCell {i, ix, ef.path, ef.type, nullptr});
+                }
+            }
+        }
+        if (agg_cells.size() > kMaxValueArrayElements)
+        {
+            reject(Diag::unsupported_type, at,
+                   "a whole-structure copy of a structure whose array members of structures hold more than " +
+                       std::to_string(kMaxValueArrayElements) +
+                       " leaves (array values: M4.5f3, decision 0064 item 12; copy the elements one by one)");
+            return;
+        }
+        auto agg_address = [&](const Expr* place, const AggCell& ac) -> const Expr*
+        {
+            const Expr* e {b_.elem_addr(leaf_address(place, leaves[ac.member].path, l),
+                                        long_const(static_cast<long>(ac.index), l), l)};
+            return leaf_address(e, ac.path, l);
+        };
         std::vector<vir::Var*> tmps(leaves.size(), nullptr);
         for (size_t i {0U}; i < leaves.size(); ++i)
         {
@@ -20146,6 +20712,12 @@ private:
             tmps[i] = t;
             out.push_back(b_.decl(t, b_.deref(leaf_address(s_place, leaves[i].path, l), l), l));
         }
+        for (size_t i {0U}; i < agg_cells.size(); ++i)
+        {
+            AggCell& ac {agg_cells[i]};
+            ac.tmp = cx_.fn->new_local("copy_agg_" + std::to_string(i), ac.type, l);
+            out.push_back(b_.decl(ac.tmp, b_.deref(agg_address(s_place, ac), l), l));
+        }
         for (size_t i {0U}; i < leaves.size(); ++i)
         {
             if (!leaves[i].array)
@@ -20153,9 +20725,13 @@ private:
                 out.push_back(b_.store(leaf_address(d_place, leaves[i].path, l), b_.local(tmps[i], l), l));
             }
         }
+        for (const AggCell& ac : agg_cells)
+        {
+            out.push_back(b_.store(agg_address(d_place, ac), b_.local(ac.tmp, l), l));
+        }
         for (const vir::StructLeaf& lf : leaves)
         {
-            if (lf.array)
+            if (lf.array && !lf.aggregate_element)
             {
                 out.push_back(b_.array_copy(leaf_address(d_place, lf.path, l), leaf_address(s_place, lf.path, l), l));
             }
@@ -20187,7 +20763,7 @@ private:
             reject(
                 Diag::unsupported_expression, at,
                 "a structure value stored into an element of an array of structures, or into a structure member of an element (`v[i] = f();`, `v[i] = (struct P){...};`, `p[i].t = f();`): "
-                "copy from a structure local instead, `struct P t = f(); v[i] = t;` (decision 0064 item 12; the value form: M4.5e1e2 (continuation))");
+                "copy from a structure local instead, `struct P t = f(); v[i] = t;` (decision 0064 item 12, question 333; the value form: M4.8)");
             return;
         }
         if (root->kind != Expr::Kind::AddrOf && root->kind != Expr::Kind::Local && root->kind != Expr::Kind::GlobalAddr)
@@ -20290,11 +20866,8 @@ private:
     // The value of one element of an initializer list (a constant is read like a scalar initializer under the front end's fold), of its member's type.
     const Expr* init_element_value(const vir::StructType& st, const InitElem& el)
     {
-        vir::Type lt {vir::struct_member_type(st, el.path)};
-        if (el.elem >= 0 && lt.is_array() && lt.element != nullptr)
-        {
-            lt = *lt.element; // an element of an array member (decision 0063 item 6)
-        }
+        // the leaf's type; an element of an array member is the array's element type, or the cell of an element that is a structure (decision 0063 item 6, 0064 item 9)
+        const vir::Type lt {init_leaf_type(st, el)};
         const Expr* x {nullptr};
         if (el.e != nullptr)
         {
@@ -20457,14 +21030,7 @@ private:
         // The store target of one element: the leaf's cell, or the element of an array member (decision 0063 item 6).
         auto target = [&](const InitElem& el, const SrcLoc& at_l) -> const Expr*
         {
-            const Expr* a {leaf_address(root, el.path, at_l)};
-            if (el.elem < 0)
-            {
-                return a;
-            }
-            return b_.elem_addr(
-                a, b_.int_const(vir::Type::integer(prog_.int_type("long", 64, true)), std::to_string(el.elem), at_l),
-                at_l);
+            return init_target(root, el, at_l);
         };
         // The array members the list does not write in full are zero-filled first (`ArrayZero`, which also sets their flags), then the written elements are
         // stored; an array member the list does not mention is zero too (C's static-object rule, item 6).  Reads of the object's own elements are rejected, so
@@ -20473,7 +21039,7 @@ private:
             std::map<std::vector<int>, unsigned long long> written;
             for (const InitElem& el : elems)
             {
-                if (el.elem >= 0)
+                if (el.elem >= 0 && el.index_after == std::string::npos)
                 {
                     ++written[el.path];
                 }
@@ -20482,6 +21048,51 @@ private:
             {
                 if (!lf.array)
                 {
+                    continue;
+                }
+                if (lf.aggregate_element)
+                {
+                    // an array member of structures (decision 0064 items 4 and 9): zero-filled whole unless the list writes every leaf of every element
+                    if (!lf.element.is_struct() || lf.element.struct_type == nullptr)
+                    {
+                        reject(
+                            Diag::unsupported_declaration, at,
+                            "a member that is an array of arrays (M4.5e1e2 (continuation), Part E, decision 0064 item 1)");
+                        return;
+                    }
+                    const std::vector<vir::StructLeaf> eleaves {vir::struct_object_leaves(*lf.element.struct_type)};
+                    std::set<std::pair<long, std::vector<int>>> got;
+                    for (const InitElem& el : elems)
+                    {
+                        if (el.elem >= 0 && el.index_after == lf.path.size() && el.path.size() > lf.path.size() &&
+                            std::equal(lf.path.begin(), lf.path.end(), el.path.begin()))
+                        {
+                            got.insert({el.elem,
+                                        std::vector<int>(el.path.begin() + static_cast<std::ptrdiff_t>(lf.path.size()),
+                                                         el.path.end())});
+                        }
+                    }
+                    if (got.size() >= lf.count * eleaves.size())
+                    {
+                        continue;
+                    }
+                    for (const vir::StructLeaf& ef : eleaves)
+                    {
+                        unsigned long long have {0U};
+                        for (const auto& g : got)
+                        {
+                            have += g.second == ef.path ? 1U : 0U;
+                        }
+                        if (have < lf.count && is_enum_type(ef.type) &&
+                            !vir::dec::in_range("0", vir::dec::range_of(*ef.type.int_type)))
+                        {
+                            reject(
+                                Diag::unsupported_declaration, at,
+                                "an array member of structures with a member of an enumeration type whose values do not include 0, with elements left out of an initializer list (they would be zero; decision 0064 item 6)");
+                            return;
+                        }
+                    }
+                    out.push_back(b_.array_zero(leaf_address(root, lf.path, l), l));
                     continue;
                 }
                 auto w {written.find(lf.path)};
@@ -26291,7 +26902,9 @@ const Encoder::StructInfo& Encoder::struct_info(a_type_ptr t)
                     refuse(fp, "an array member this version cannot read (" + who + "; " + why + ")");
                     continue;
                 }
-                mt = array_vtype(f->type);
+                // an element that is a verified structure (decision 0064 items 1 and 9, Part C2) is read for a member written with an array declarator; a typedef'd
+                // member array of structures stays rejected (array_vtype's message)
+                mt = array_vtype(f->type, written_as_array_declarator(f->type));
                 if (!mt.ok)
                 {
                     refuse(fp, "an array member this version cannot read (" + who + "; " + mt.name + ")");

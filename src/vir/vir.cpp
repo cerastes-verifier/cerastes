@@ -72,6 +72,26 @@ void collect_leaves(const StructType& s, std::vector<int>& path, const std::stri
         {
             // decision 0064 item 4: an array of structures or of arrays has no leaf in any of the three views (object_leaf_paths has them): one flagged leaf, of the array's type, that every
             // consumer reports (the object view keeps `array` and `element` so that a consumer that ignores the flag still sees an aggregate element, never a cell)
+            if (view == LeafView::Value && m.type.element->is_struct() && m.type.element->struct_type != nullptr)
+            {
+                // decision 0064 item 12 (Part C2): the value view of a member that is an array of structures: every leaf of every element is a leaf of its own, element by element, each
+                // element's leaves in declaration order (`path` through the array member to the leaf, `elem` the index, `index_after` where the index step stands)
+                const int after {static_cast<int>(path.size())};
+                for (unsigned long long i {0U}; i < m.type.count && i < 1048576U; ++i)
+                {
+                    std::vector<StructLeaf> inner;
+                    collect_leaves(*m.type.element->struct_type, path, t + "[" + std::to_string(i) + "]", false, inner,
+                                   depth + 1, view);
+                    for (StructLeaf& l : inner)
+                    {
+                        l.elem = static_cast<int>(i);
+                        l.index_after = after;
+                        out.push_back(std::move(l));
+                    }
+                }
+                path.pop_back();
+                continue;
+            }
             StructLeaf l {make_leaf(path, m.type, std::move(t), m)};
             l.aggregate_element = true;
             if (view == LeafView::Object)

@@ -240,6 +240,10 @@ struct StructLeaf
     unsigned long long count {0U};
     // struct_value_leaves only: the index of this element in the array member at `path` (`text` is `member[elem]`); -1 for every other leaf
     int elem {-1};
+    // struct_value_leaves only, decision 0064 item 12 (Part C2): an element leaf of a member that is an ARRAY OF STRUCTURES: `path` is the member path through the array member down to the
+    // element's leaf (`{v, x}`, a nested structure's members after it), `elem` the element's index, `index_after` the number of members of `path` before the index step (the array member's
+    // position in `path` plus one; -1 for every other leaf, whose index step, when it has one, is last); `text` is `t.v[i].x`
+    int index_after {-1};
     // Decision 0064 item 4 (M4.5e1e2 part A): the member is an array whose ELEMENT is a structure or an array.  None of the three views above has a leaf for it: struct_leaves and
     // struct_object_leaves return it as the one leaf of the array's type (the object view with `array` true and `element` the aggregate), struct_value_leaves as one leaf of the array's
     // type (no expansion).  Every consumer of the three views reports an internal error on such a leaf (lowering's guarded `object_leaves`, `value_leaves` and `leaves_of`) until its
@@ -787,6 +791,9 @@ struct GlobalLeaf
     // an array leaf of a struct global (object view; the fields above are then unused): the listed prefix, and what the rest is (see ArrayRest)
     std::vector<GlobalLeaf> elems;
     ArrayRest rest {ArrayRest::Zero};
+    // decision 0064 item 9 (Part C2): an ELEMENT of an array of structures (an entry of `elems`, the fields above then unused): one entry per leaf of the element structure in
+    // struct_object_leaves order (every leaf, the ones its braced list leaves out as zero; every leaf Unknown when the array's rest is unknown)
+    std::vector<GlobalLeaf> leaves;
 };
 
 struct Global

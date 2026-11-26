@@ -11,8 +11,8 @@ pointers to such pointers (<<pointers-to-pointers>>): in local variables, as
 parameters and as results, with contracts that say which objects
 a function may read or write (<<contracts>>), in loops (<<loops>>) and across
 jumps (<<leaving>>); arrays of scalars as locals, globals, `static` locals,
-structure members and C compound literals (<<arrays>>, <<array-members>>), and local arrays of structures
-(<<arrays-of-structures>>); global and `static` local variables
+structure members and C compound literals (<<arrays>>, <<array-members>>), and arrays of structures as
+locals, globals, `static` locals and structure members (<<arrays-of-structures>>); global and `static` local variables
 (<<globals>>, <<static-locals>>); and memory from `malloc`, `calloc` and `free` (<<heap>>).
 <<not-yet>> lists what is still rejected.
 
@@ -544,6 +544,28 @@ it was, so a check that the source changed fails:
 include::example$memory/struct_array_copy_error.c[tag=source]
 ----
 
+A member may also be an array of structures (`struct path { struct point v[2];
+int n; };`). Its elements' members are reached as those of any array of
+structures (`t.v[i].x`, `p->v[i].x`, <<arrays-of-structures>>), its initializer
+takes one list per element (`+{{{1, 2}, {3}}, 5}+`, with zero for what a list
+leaves out), `cerastes_owns(*p)` holds every member of every element with the
+other members, `cerastes_owns(p->v)` the array member alone, and a contract
+may then read `p->v[i].x`. Passing a pointer to the structure and a pointer to
+one of its elements to a function that owns both (`f(&t, &t.v[1])`) is reported
+at the call, as for any object named twice. For a global structure `gt`,
+`cerastes_owns(gt.v)` and `cerastes_reads(gt.v)` likewise name the array
+member alone. Such a structure is copied whole when the members of its
+elements number at most 7 in all, and passed and returned by value when those
+members and the elements of its other array members number at most 7
+together. Not supported yet, each rejected with a diagnostic: reading an
+element of a structure passed by value in a contract (`t.v[1].y` of a
+parameter `struct path t`), in C passing an element of a global structure's
+array member by value (`f(gt.v[1])`; copy it to a local first), and
+`cerastes_old(gt.v[1].x)` for a global structure. Each such structure that
+one function holds as a local adds much to the time its proof takes, and a
+function that holds a global structure with such a member and calls another
+function that holds it may run into the time limit.
+
 A structure with an array member cannot yet be allocated with `malloc`, have an
 `owning` or marked member besides, or be
 the object of `ref_to_uninit` or `must_init`; a contract cannot yet name part of
@@ -554,7 +576,7 @@ has no `requires` partner, put `cerastes::owning` on a pointer to one, or name o
 in a loop invariant's atom.
 
 Not supported yet, each rejected with a diagnostic: unions, bit-fields, arrays of
-structures and of arrays as members, `const`, `volatile` and `_Atomic` members, anonymous members, members
+arrays as members, `const`, `volatile` and `_Atomic` members, anonymous members, members
 that are `void *` or pointers to functions, `packed` structures, structures
 from system headers (such as `FILE`), structures defined inside a function, and
 in pass:[C++] every class feature beyond a C structure (member functions,
@@ -691,8 +713,8 @@ array (<<expressions>>).
 Not supported yet, each rejected with a diagnostic: a structure value stored
 into an element (`v[i] = f();`, `v[i] = (struct point){1, 2};`: copy from a
 structure local instead); an element structure with
-an array member or with an owning or marked member; arrays of structures as
-globals, `static` locals and members;
+an array member or with an owning or marked member; an array of structures
+declared through a `typedef` of the array type;
 `cerastes::uninit`, `cerastes::owning` and `cerastes::ref_to_uninit` on an
 array of structures; `p[i].x` through a pointer in a loop invariant or measure
 of a function whose contract holds no range on `p` (<<ranges-of-structures>>);
@@ -944,10 +966,9 @@ Not supported yet, each rejected with a diagnostic: designators in an array's
 initializer (`{[2] = 5}`: the front end keeps only the index's computed value,
 which cerastes cannot check as written); an element of the initializer that reads,
 writes or takes the address of the array itself; arrays of more than one
-dimension and of owning pointers, and arrays of structures other than local ones
-(<<arrays-of-structures>>); `const` arrays; a variable length; one element as a
+dimension and of owning pointers; `const` arrays; a variable length; one element as a
 contract's object (`cerastes_owns(p[i])`), a range of elements in a loop invariant, a
-range whose pointer is not a parameter, a range of structures; pointer arithmetic
+range whose pointer is not a parameter; pointer arithmetic
 (`p + 1`); and in a `forall`, an index other than `i`, `i + c` and `i - c`, arithmetic on reads
 of two arrays or two offsets (and, in loops and checks, on the second of two reads), a pointer
 argument other than a parameter (in a contract) or a pointer variable, local array or global
@@ -1092,9 +1113,17 @@ A contract cannot yet name
 part of a global array or one of its elements (`cerastes_owns_range(table, n)`,
 `&table[2]`), take its address plus an offset (`table + i`), or pass it to a
 quantifier or a `pure` function (a loop invariant and a `check` can). A `const`
-global array, a global initialized with `&table[2]` and an array of structures
+global array and a global initialized with `&table[2]`
 are not supported yet; a global array declared without a bound or a braced
 initializer (`int table[];`) is rejected, as the compilers warn about it.
+
+A global or `static` local array may hold structures (`+static struct point grid[3] = {{1, 2}, {3}};+`). Each element takes a list of its own, and what the lists
+leave out is zero, as for any object with static storage, so `grid[1].y` and
+every member of `grid[2]` are 0 here; where the initial values of a global are
+not known (<<globals>>), none of its elements' members is. `cerastes_owns(grid)`
+and `cerastes_reads(grid)` name every member of every element, a contract may
+then read `grid[i].x`, and `main` and the loops of a function that holds the
+array carry it member by member, as they carry a local array of structures.
 
 Globals of other files (`extern int count;` with no definition here) are not
 supported yet, nor is a structure global initialized with the address of another
@@ -2094,10 +2123,10 @@ These are rejected with a diagnostic, never approximated
   loop);
 * globals defined in another file, `volatile`, `_Atomic`, `const` structure,
   `const` array and thread-local globals, and `static const` locals;
-* arrays of arrays, and arrays of structures other than a function's local
-  ones (as globals, `static` locals, members, ranges in contracts and types:
-  <<arrays-of-structures>>; `int m[2][3]`, `sizeof(int[2][3])`), and an element
-  structure with an array member or an owning or marked member; a structure with an
+* arrays of arrays (`int m[2][3]`, `sizeof(int[2][3])`), an array of structures
+  named through a `typedef` or as a type (`sizeof(struct point[3])`), and an element
+  structure with an array member or an owning or marked member
+  (<<arrays-of-structures>>); a structure with an
   array member that is allocated with `malloc`, that also has an `owning` or marked
   member, or whose pointer is marked `ref_to_uninit` or `must_init`; part of a
   global array or of an array member in a contract (`cerastes_owns_range(table,

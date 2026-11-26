@@ -1050,6 +1050,8 @@ private:
         }
     }
 
+    // Element types of the member arrays of structures that a sequencing record points to (Acc::Atom::elem): they outlive the ArrLeaf they came from
+    std::deque<Type> acc_types_;
     // One array leaf of a struct object: `first` is its first slot `loc(member(X, k), 0)` (`chain_ref` of its path), `element` its element type, `count` N.
     struct ArrLeaf
     {
@@ -1439,6 +1441,33 @@ private:
             {
                 const E mb {low::dom("member", {slot, low::int_lit(std::to_string(k))})};
                 const Type& mt {s.members[k].type};
+                if (mt.is_array() && mt.element != nullptr && mt.element->is_struct())
+                {
+                    // decision 0064 items 3 and 6 (Part C2): `len(member(X, k)) == N`, the length facts of every slot of the member as one quantifier (struct_lens of an element), then per
+                    // leaf of the element, each its own quantifier over `[0, N)` with the leaf's receiver `loc(member(loc(member(X, k), j), l), 0)` as the trigger: the value
+                    // permission, the flag permission, every flag false
+                    const std::string n {std::to_string(mt.count)};
+                    m.ensures_.push_back(clause(low::bin(BinOp::Eq, low::dom("len", {mb}), low::int_lit(n))));
+                    const std::string binder {length_binder(mb)};
+                    const E jv {low::var(binder)};
+                    const E es {low::dom("loc", {mb, jv})};
+                    const E in {low::bin(BinOp::And, low::bin(BinOp::Le, low::int_lit("0"), jv),
+                                         low::bin(BinOp::Lt, jv, low::int_lit(n)))};
+                    m.ensures_.push_back(clause(low::forall_(
+                        binder, {es}, low::bin(BinOp::Implies, in, struct_lens(es, *mt.element->struct_type)))));
+                    for (const ElemLeaf& el : elem_leaves(*mt.element))
+                    {
+                        const E recv {chain_ref(es, el.path)};
+                        const std::string lsfx {use_cell_type(el.type)};
+                        for (const E& body : {low::acc(recv, "v_" + lsfx), low::acc(recv, "d_" + lsfx),
+                                              low::not_(low::field(recv, "d_" + lsfx))})
+                        {
+                            m.ensures_.push_back(
+                                clause(low::forall_(binder, {recv}, low::bin(BinOp::Implies, in, body))));
+                        }
+                    }
+                    continue;
+                }
                 if (mt.is_array())
                 {
                     // decision 0063 items 3, 6 and 15: `len(member(X, k)) == N`, then three quantifiers over `[0, N)`, each its own clause with the trigger `loc(member(X, k), j)`: the
@@ -1529,7 +1558,15 @@ private:
             }
             return c;
         };
-        m.ensures_.push_back(clause(global_facts(), prog_.globals().front().loc, "the facts of the globals"));
+        {
+            const std::vector<E> facts {global_fact_clauses()};
+            for (size_t i {0U}; i < facts.size(); ++i)
+            {
+                m.ensures_.push_back(clause(facts[i], prog_.globals().front().loc,
+                                            i == 0U ? "the facts of the globals"
+                                                    : "the length facts of the arrays of structures of the globals"));
+            }
+        }
         for (const Global& g : prog_.globals())
         {
             const E recv {global_ref(g.id)};
@@ -1539,7 +1576,7 @@ private:
             if (t.is_struct())
             {
                 E all;
-                const std::vector<StructLeaf> ls {checked_object_leaves(*t.struct_type)};
+                const std::vector<StructLeaf> ls {object_leaves(*t.struct_type)};
                 std::vector<size_t> array_leaves;
                 for (size_t i {0U}; i < ls.size(); ++i)
                 {
@@ -1632,6 +1669,12 @@ private:
     template <class Clause>
     void array_global_start_rows(const Global& g, low::LMethod& m, const Clause& clause)
     {
+        if (g.type.element->is_struct())
+        {
+            agg_array_start_rows(global_block(g.id), *g.type.element, g.type.count, g.elems, g.rest, g.loc,
+                                 "`" + g.c_name + "`", true, m, clause);
+            return;
+        }
         array_start_rows(global_block(g.id), *g.type.element, g.type.count, g.elems, g.rest, g.loc,
                          "`" + g.c_name + "`", true, m, clause);
     }
@@ -1648,8 +1691,107 @@ private:
                 g.loc, "an array leaf of a struct global whose first slot is not a member block reached program_start");
             return;
         }
+        if (al.element.is_struct())
+        {
+            agg_array_start_rows(blk, al.element, al.count, gl.elems, gl.rest, gl.loc.known() ? gl.loc : g.loc,
+                                 "`" + al.text + "`", false, m, clause);
+            return;
+        }
         array_start_rows(blk, al.element, al.count, gl.elems, gl.rest, gl.loc.known() ? gl.loc : g.loc,
                          "`" + al.text + "`", false, m, clause);
+    }
+    // The row group of an array of STRUCTURES in `program_start` (decision 0064 item 9, Part C2), each row its own `ensures`, in this order: per leaf path of the element the two
+    // quantified permissions and the flags (each over the leaf's receiver `loc(member(loc(<blk>, k), j), 0)` as its trigger); then the values, known: one conjunct per leaf of each
+    // listed element (the written constant, or zero for a leaf the element's list leaves out: the encoder gives every leaf an entry), then per leaf path one quantifier for the
+    // elements the list does not reach; unknown (linkage, escape): per leaf path the type range as one quantifier (none for a `bool`); then the liveness cell once.
+    template <class Clause>
+    void agg_array_start_rows(const E& blk, const Type& element, unsigned long long count,
+                              const std::vector<GlobalLeaf>& elems, ArrayRest rest, const SrcLoc& gloc,
+                              const std::string& what, bool with_liveness, low::LMethod& m, const Clause& clause)
+    {
+        const std::vector<ElemLeaf> leaves {elem_leaves(element)};
+        const E k {low::var("k")};
+        const E slot {low::dom("loc", {blk, k})};
+        auto quant = [&](const E& recv, long long lo, const E& body)
+        {
+            const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, low::int_lit(std::to_string(lo)), k),
+                                 low::bin(low::BinOp::Lt, k, low::int_lit(std::to_string(count))))};
+            return low::forall_("k", {recv}, low::implies(in, body));
+        };
+        for (const ElemLeaf& l : leaves)
+        {
+            const E recv {chain_ref(slot, l.path)};
+            const std::string sfx {use_cell_type(l.type)};
+            m.ensures_.push_back(clause(quant(recv, 0, low::acc(recv, "v_" + sfx)), gloc, what));
+            m.ensures_.push_back(clause(quant(recv, 0, low::acc(recv, "d_" + sfx)), gloc, what));
+            m.ensures_.push_back(clause(quant(recv, 0, cell_flag(recv, l.type)), gloc, what));
+        }
+        if (rest == ArrayRest::Unknown)
+        {
+            for (const ElemLeaf& l : leaves)
+            {
+                const E recv {chain_ref(slot, l.path)};
+                if (const E r = cell_range_inv(recv, l.type))
+                {
+                    m.ensures_.push_back(clause(quant(recv, 0, r), gloc, what));
+                }
+            }
+        }
+        else
+        {
+            for (size_t i {0U}; i < elems.size(); ++i)
+            {
+                const E eslot {low::dom("loc", {blk, low::int_lit(std::to_string(i))})};
+                if (elems[i].leaves.size() != leaves.size())
+                {
+                    internal_error(
+                        gloc,
+                        "an element of an array global of structures without one initial value per leaf reached program_start (decision 0064 item 9)");
+                    continue;
+                }
+                for (size_t li {0U}; li < leaves.size(); ++li)
+                {
+                    const GlobalLeaf& gl {elems[i].leaves[li]};
+                    const Type& lt {leaves[li].type};
+                    E value;
+                    switch (gl.kind)
+                    {
+                        case GlobalInit::Value:
+                            value = literal_of(lt, gl.value);
+                            break;
+                        case GlobalInit::Null:
+                            value = low::null_();
+                            break;
+                        case GlobalInit::Addr:
+                            value = gl.target != nullptr ? global_ref(gl.target->id) : low::null_();
+                            break;
+                        case GlobalInit::Unknown:
+                            break; // refused by check_program for a zero rest
+                    }
+                    if (value != nullptr)
+                    {
+                        m.ensures_.push_back(
+                            clause(low::bin(low::BinOp::Eq, cell_value(chain_ref(eslot, leaves[li].path), lt), value),
+                                   gl.loc.known() ? gl.loc : gloc, what));
+                    }
+                }
+            }
+            if (elems.size() < count)
+            {
+                for (const ElemLeaf& l : leaves)
+                {
+                    const E recv {chain_ref(slot, l.path)};
+                    const E zero {l.type.is_ptr() ? low::null_() : literal_of(l.type, "0")};
+                    m.ensures_.push_back(clause(quant(recv, static_cast<long long>(elems.size()),
+                                                      low::bin(low::BinOp::Eq, cell_value(recv, l.type), zero)),
+                                                gloc, what));
+                }
+            }
+        }
+        if (with_liveness)
+        {
+            m.ensures_.push_back(clause(low::acc(low::dom("lvloc", {blk}), "lv"), gloc, what));
+        }
     }
     template <class Clause>
     void array_start_rows(const E& blk, const Type& et, unsigned long long count, const std::vector<GlobalLeaf>& elems,
@@ -2181,6 +2323,27 @@ private:
         report_aggregate_element(out, st);
         return out;
     }
+    // Decision 0064 item 4 (Part C2): the object view WITHOUT the guard, for a walk that handles a member that is an array of structures (`l.array` and `l.aggregate_element`: its
+    // element is `l.element`, a structure whose leaves `elem_leaves` gives) per leaf path of the element, or passes over every array leaf (an owner walk: an array member is never
+    // an owner).  A walk that does neither calls checked_object_leaves.
+    std::vector<StructLeaf> object_leaves(const StructType& st, const std::string& root_text = "",
+                                          bool arrow = false) const
+    {
+        std::vector<StructLeaf> out {struct_object_leaves(st, root_text, arrow)};
+        for (const StructLeaf& l : out)
+        {
+            if (l.aggregate_element && !l.element.is_struct())
+            {
+                // an array of ARRAYS (a matrix member) has no rows yet (Part E): the guard of the checked view
+                errors_.push_back(Diag {
+                    st.loc,
+                    "an array of arrays (" + l.text + ": " + l.type.str() +
+                        ") reached a walk of a structure's leaves that has no rows for it (decision 0064 item 4: the leaf paths)"});
+                break;
+            }
+        }
+        return out;
+    }
     std::vector<StructLeaf> checked_value_leaves(const StructType& st, const std::string& root_text = "",
                                                  bool arrow = false) const
     {
@@ -2503,8 +2666,17 @@ private:
     void alloc_struct_site(const StructType& st, const SrcLoc& at)
     {
         out_.memory = true;
-        for (const StructLeaf& l : checked_object_leaves(st))
+        for (const StructLeaf& l : object_leaves(st))
         {
+            if (l.aggregate_element)
+            {
+                // decision 0064 item 4 (Part C2): a member that is an array of structures has one cell field per leaf of its element
+                for (const ElemLeaf& el : elem_leaves(l.element))
+                {
+                    use_cell_type(el.type);
+                }
+                continue;
+            }
             use_cell_type(l.array ? l.element : l.type);
         }
         const std::string suffix {struct_suffix(st)};
@@ -2653,14 +2825,22 @@ private:
     }
     // The cell of a leaf of the VALUE view in the struct object at `base` (decision 0063 item 13): the leaf's own cell, or for element `i` of an array member the slot `loc(member(X, k), i)`
     // (the block term of the member's first slot: no local, no bound row: `i` is inside the member by construction and `len(member(X, k)) == N` is a fact of every structure object).
-    E leaf_place(const E& base, const std::vector<int>& path, int elem)
+    // Decision 0064 item 12 (Part C2): for a leaf of an element of a member that is an array of structures (`index_after` >= 0) the slot `loc(member(X, k), i)` of the element, then the
+    // leaf's member path inside it (`loc(member(loc(member(X, k), i), j), 0)`)
+    E leaf_place(const E& base, const std::vector<int>& path, int elem, int index_after = -1)
     {
+        if (index_after >= 0 && elem >= 0 && static_cast<size_t>(index_after) <= path.size())
+        {
+            const std::vector<int> head(path.begin(), path.begin() + index_after);
+            const std::vector<int> tail(path.begin() + index_after, path.end());
+            return chain_ref(elem_slot(chain_ref(base, head), low::int_lit(std::to_string(elem))), tail);
+        }
         const E first {chain_ref(base, path)};
         return elem >= 0 ? elem_slot(first, low::int_lit(std::to_string(elem))) : first;
     }
     E leaf_place(const E& base, const StructLeaf& l)
     {
-        return leaf_place(base, l.path, l.elem);
+        return leaf_place(base, l.path, l.elem, l.index_after);
     }
     // One cell of a struct object: the Ref of a leaf, its type and its spelling.
     struct Cell
@@ -2689,8 +2869,8 @@ private:
     std::vector<Cell> obj_cells(const E& slot, const StructType& st, const std::string& root_text, bool arrow)
     {
         std::vector<Cell> out;
-        const std::vector<StructLeaf> rels {checked_object_leaves(st)};
-        const std::vector<StructLeaf> named {checked_object_leaves(st, root_text, arrow)};
+        const std::vector<StructLeaf> rels {object_leaves(st)};
+        const std::vector<StructLeaf> named {object_leaves(st, root_text, arrow)};
         for (size_t i {0U}; i < named.size(); ++i)
         {
             if (!named[i].array)
@@ -2708,8 +2888,8 @@ private:
         {
             return out;
         }
-        const std::vector<StructLeaf> rels {checked_object_leaves(st)};
-        const std::vector<StructLeaf> named {checked_object_leaves(st, root_text, arrow)};
+        const std::vector<StructLeaf> rels {object_leaves(st)};
+        const std::vector<StructLeaf> named {object_leaves(st, root_text, arrow)};
         for (size_t i {0U}; i < named.size(); ++i)
         {
             if (named[i].array)
@@ -2752,8 +2932,63 @@ private:
             }
         }
     }
+    // Whether the variable `name` is free in `e` (a structural walk; a `forall` that binds `name` hides it in its whole scope, triggers included)
+    static bool lexpr_free_var(const E& e, const std::string& name)
+    {
+        if (!e)
+        {
+            return false;
+        }
+        if (e->kind == low::LExpr::Kind::Var)
+        {
+            return e->text == name;
+        }
+        if (e->kind == low::LExpr::Kind::Forall)
+        {
+            for (const low::LVar& v : e->binders)
+            {
+                if (v.name == name)
+                {
+                    return false;
+                }
+            }
+        }
+        for (const E& x : {e->a, e->b, e->c})
+        {
+            if (lexpr_free_var(x, name))
+            {
+                return true;
+            }
+        }
+        for (const E& x : e->args)
+        {
+            if (lexpr_free_var(x, name))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The binder of a length quantifier over the slots `loc(block, <binder>)` of the slot expression `x` (decision 0064 item 3, "A length quantifier under another quantifier"): `k` where
+    // `x` does not mention `k`, else the first of `k1`, `k2`, ... that it does not mention
+    static std::string length_binder(const E& x)
+    {
+        if (!lexpr_free_var(x, "k"))
+        {
+            return "k";
+        }
+        for (size_t i {1U};; ++i)
+        {
+            const std::string name {"k" + std::to_string(i)};
+            if (!lexpr_free_var(x, name))
+            {
+                return name;
+            }
+        }
+    }
     // `len(member(X, k)) == 1` for every member block of the struct slot `slot`, recursively through nested members, then the slot facts (WF_S, decision 0043 item 8).
-    E struct_lens(const E& slot, const StructType& st)
+    // `quants`: when given, the quantifier of a member that is an array of structures is appended there and left out of the conjunction (the facts of the globals state it as a clause of its own)
+    E struct_lens(const E& slot, const StructType& st, std::vector<E>* quants = nullptr)
     {
         E r;
         std::function<void(const E&, const StructType&)> lens = [&](const E& x, const StructType& s)
@@ -2769,6 +3004,30 @@ private:
                 if (s.members[k].type.is_struct())
                 {
                     lens(member_ref(x, static_cast<int>(k)), *s.members[k].type.struct_type);
+                }
+                else if (s.members[k].type.is_array() && s.members[k].type.element != nullptr &&
+                         s.members[k].type.element->is_struct())
+                {
+                    // decision 0064 items 3 and 7 (Part C2): a member that is an array of structures states, for every slot of its block, what struct_lens states of a structure slot (each
+                    // member block's length, the nested slot facts), as one quantifier over the slot with the slot as its trigger
+                    // the binder is a name `mb` (so the slot expression `x`) does not mention: under another quantifier over `k` the slot mentions it
+                    const std::string binder {length_binder(mb)};
+                    const E kv {low::var(binder)};
+                    const E es {low::dom("loc", {mb, kv})};
+                    const E in {
+                        low::bin(low::BinOp::And, low::bin(low::BinOp::Le, low::int_lit("0"), kv),
+                                 low::bin(low::BinOp::Lt, kv, low::int_lit(std::to_string(s.members[k].type.count))))};
+                    const E q {low::forall_(
+                        binder, {es},
+                        low::bin(low::BinOp::Implies, in, struct_lens(es, *s.members[k].type.element->struct_type)))};
+                    if (quants != nullptr)
+                    {
+                        quants->push_back(q);
+                    }
+                    else
+                    {
+                        r = low::and_(r, q);
+                    }
                 }
             }
         };
@@ -2823,7 +3082,7 @@ private:
     }
     bool has_owning_leaf(const StructType& st)
     {
-        for (const StructLeaf& l : checked_object_leaves(st))
+        for (const StructLeaf& l : object_leaves(st))
         {
             if (l.owning)
             {
@@ -2841,7 +3100,7 @@ private:
             if (c != nullptr && c->kind == Stmt::Kind::Decl && c->var != nullptr && c->var->type.is_struct() &&
                 c->var->type.struct_type != nullptr)
             {
-                for (const StructLeaf& l : checked_object_leaves(*c->var->type.struct_type))
+                for (const StructLeaf& l : object_leaves(*c->var->type.struct_type))
                 {
                     if (l.owning)
                     {
@@ -2941,7 +3200,7 @@ private:
         {
             return name;
         }
-        for (const StructLeaf& l : checked_object_leaves(*root.struct_type, name, false))
+        for (const StructLeaf& l : object_leaves(*root.struct_type, name, false))
         {
             if (l.path == o.path)
             {
@@ -2960,7 +3219,7 @@ private:
         }
         else if (g.type.is_struct() && g.type.struct_type != nullptr)
         {
-            for (const StructLeaf& l : checked_object_leaves(*g.type.struct_type))
+            for (const StructLeaf& l : object_leaves(*g.type.struct_type))
             {
                 if (l.owning)
                 {
@@ -4608,9 +4867,25 @@ private:
                     const std::string bt {new_temp(low::LType::Ref)};
                     assign(out, bt, al.first);
                     const E tr {low::var(bt)};
-                    const std::string asfx {use_cell_type(al.element)};
                     const std::string amsg {"the address of an element of " + object_phrase(x, al.text) +
                                             " may still be in use when its lifetime ends"};
+                    if (al.element.is_struct())
+                    {
+                        // decision 0064 items 6 and 10 (Part C2): a member that is an array of structures, per leaf of its element in the allocation's order, the value and the flag
+                        // permission as marked rows over the bound local (`lifetime`), each joining the one list of `exhale`s
+                        for (const ElemLeaf& el : elem_leaves(al.element))
+                        {
+                            const std::string lsfx {use_cell_type(el.type)};
+                            for (const char* f : {"v_", "d_"})
+                            {
+                                const E perm {leaf_perm(tr, 0, al.count, el.path, f + lsfx)};
+                                emit_marked_row(out, perm, meta("lifetime", at, amsg));
+                                gone_arrays.push_back(perm);
+                            }
+                        }
+                        continue;
+                    }
+                    const std::string asfx {use_cell_type(al.element)};
                     const E vall {range_perm(tr, 0, al.count, "v_" + asfx)};
                     const E dall {range_perm(tr, 0, al.count, "d_" + asfx)};
                     emit_marked_row(out, vall, meta("lifetime", at, amsg));
@@ -4883,11 +5158,39 @@ private:
             return inv_read_at(e, LV {chain_ref(slot, steps), join(b.dep, i.dep)},
                                e.c_text.empty() ? place_text(*e.a) : e.c_text, guard, gdep, full);
         }
+        // decision 0064 item 10 (Part C2): `g[e].x` of a global array of structures and `t.v[e].x`, `p->v[e].x` of an array member of structures: the slot is the array's own, with the bound
+        // row (`out-of-bounds`, strict: a member step needs its slot) and the leaf's receiver; the read is framed by the loop's places (an array place per leaf in `main` or for a
+        // local, a range place's leaf for a held structure place or a held global), else `permission` at the clause: never by anything the loop does not hold
+        const Global* gbase {below.a != nullptr ? array_global_of(below.a) : nullptr};
+        const bool mbase {below.a != nullptr && member_array_elem(below) && below.a->type.pointee->element != nullptr &&
+                          below.a->type.pointee->element->is_struct()};
+        if ((gbase != nullptr || mbase) && !e.type.is_struct() && !e.type.is_array() && below.b != nullptr)
+        {
+            std::vector<int> steps;
+            member_root(e.a, &steps);
+            const LV b {lower(*below.a, env, guard, gdep, full)};
+            const LV i {lower(*below.b, env, guard, gdep, full)};
+            const unsigned long long count {gbase != nullptr ? gbase->type.count : below.a->type.pointee->count};
+            const E in {low::not_(low::bin(low::BinOp::Or, low::bin(low::BinOp::Lt, i.e, low::int_lit("0")),
+                                           low::bin(low::BinOp::Le, low::int_lit(std::to_string(count)), i.e)))};
+            const std::string place {e.c_text.empty() ? place_text(*e.a) : e.c_text};
+            obl(full, guard, gdep, in, i.dep,
+                meta("out-of-bounds", e.loc,
+                     "this loop " + inv_what_ + " reads " + quoted(place, "a member of an element of the array") +
+                         ", whose index may be outside " + quoted(place_text(*below.a), "the array")));
+            const E mblock {first_slot_block(b.e)};
+            const E slot {
+                mblock != nullptr
+                    ? low::dom("loc", {mblock, i.e})
+                    : low::dom("loc", {block_of(b.e), low::bin(low::BinOp::Add, low::dom("offset_of", {b.e}), i.e)})};
+            return inv_read_at(e, LV {chain_ref(slot, steps), join(b.dep, i.dep)}, place,
+                               guard != nullptr ? low::and_(guard, in) : in, gdep, full);
+        }
         if (!named)
         {
             internal_error(
                 e.loc,
-                "a member of an element that is not a member of an element of a named local array of structures reached a loop annotation (decision 0064 item 10: the element of a global array or of an array member is Part C2's)");
+                "a member of an element that is not a member of an element of a named array of structures reached a loop annotation (decision 0064 item 10)");
             return {inv_dummy(e.type), {}};
         }
         std::vector<int> steps;
@@ -4963,7 +5266,9 @@ private:
                                    low::bin(low::BinOp::Le, low::int_lit("0"), off)),
                          low::bin(low::BinOp::Lt, off, low::int_lit(std::to_string(ap.count))));
     }
-    E inv_range_chain(const E& q, const Type& t, const E& read, E rest)
+    // `binder`: the read is under a quantifier's binder (record 0061 item 6), so `q` is a slot term over it.  A leaf of an array or range of structures would test it by a computed `loc` term
+    // over that binder (item 11 forbids it): such a place frames no read under a binder (a read only it would frame is a `permission` error; a place of scalars still frames its own)
+    E inv_range_chain(const E& q, const Type& t, const E& read, E rest, bool binder = false)
     {
         if (t.is_struct())
         {
@@ -4975,7 +5280,7 @@ private:
             for (size_t i {inv_arrays_->size()}; i-- > 0U;)
             {
                 const ArrayPlace& ap {(*inv_arrays_)[i]};
-                if (elem_cell_suffix(ap.element) == sfx)
+                if (elem_cell_suffix(ap.element) == sfx && !(binder && ap.agg))
                 {
                     rest = low::ite(array_place_hit(ap, q), read, rest);
                 }
@@ -4988,7 +5293,7 @@ private:
         for (size_t i {inv_ranges_->size()}; i-- > 0U;)
         {
             const RangePlace& rp {(*inv_ranges_)[i]};
-            if (rp.cmp == sfx)
+            if (rp.cmp == sfx && !(binder && !rp.leaf.empty()))
             {
                 rest = low::ite(range_place_hit(rp, q), read, rest);
             }
@@ -5011,7 +5316,7 @@ private:
         E v {inv_dummy(t)};
         if (inv_places_ != nullptr)
         {
-            v = inv_range_chain(p.e, t, read, v);
+            v = inv_range_chain(p.e, t, read, v, r.fq_class >= 0);
             std::vector<const Place*> ps;
             for (const Place& pl : *inv_places_)
             {
@@ -5025,7 +5330,7 @@ private:
                 v = low::ite(inv_place_disjunct(p.e, *ps[i]), read, v);
             }
             // The flag, chain-guarded the same way (see inv_cell): an `uninitialized` obligation clause.
-            E f {inv_range_chain(p.e, t, cell_flag(p.e, t), low::bool_lit(false))};
+            E f {inv_range_chain(p.e, t, cell_flag(p.e, t), low::bool_lit(false), r.fq_class >= 0)};
             for (size_t i {ps.size()}; i-- > 0U;)
             {
                 f = low::ite(low::and_(ps[i]->wg,
@@ -5150,7 +5455,7 @@ private:
             {
                 for (const ArrayPlace& ap : *inv_arrays_)
                 {
-                    if (elem_cell_suffix(ap.element) == sfx)
+                    if (elem_cell_suffix(ap.element) == sfx && !(r.fq_class >= 0 && ap.agg))
                     {
                         const E d {array_place_hit(ap, r.ptr)};
                         any = any ? low::bin(low::BinOp::Or, any, d) : d;
@@ -5161,7 +5466,7 @@ private:
             {
                 for (const RangePlace& rp : *inv_ranges_)
                 {
-                    if (rp.cmp == sfx)
+                    if (rp.cmp == sfx && !(r.fq_class >= 0 && !rp.leaf.empty()))
                     {
                         const E d {range_place_hit(rp, r.ptr)};
                         any = any ? low::bin(low::BinOp::Or, any, d) : d;
@@ -5671,7 +5976,7 @@ private:
         array_alloc_site(*at.element, true, s.loc);
         low::LStmt c;
         c.kind = low::LStmt::Kind::Call;
-        c.name = "zero_arr_" + element_suffix(at);
+        c.name = "zero_arr_" + arr_suffix(at);
         c.args.push_back(low::var(t));
         c.args.push_back(low::int_lit(std::to_string(at.count)));
         c.check = low::Check {
@@ -7263,17 +7568,24 @@ private:
     // `loc(member(X, k), 0)` (a method's clause, no local), else e1b's rows over the variable `first` (code: the bound local)
     E arr_quant(const E& first, unsigned long long count, const std::function<E(const E&)>& body)
     {
+        return arr_quant(first, count, std::vector<int> {}, body);
+    }
+    // The same over a LEAF PATH of the element of a member array of structures (decision 0064 items 3 and 7, Part C2): the quantifier's trigger and the body's receiver are the leaf's
+    // `loc(member(loc(<block>, k), j), 0)`; an empty path is the slot itself, the text above
+    E arr_quant(const E& first, unsigned long long count, const std::vector<int>& path,
+                const std::function<E(const E&)>& body)
+    {
         const E mb {arr_block_term(first)};
         if (mb == nullptr)
         {
-            return range_quant(first, low::int_lit(std::to_string(count)), body);
+            return range_quant(first, low::int_lit(std::to_string(count)), path, body);
         }
         out_.memory = true;
         const E k {low::var("k")};
-        const E slot {low::dom("loc", {mb, k})};
+        const E recv {chain_ref(low::dom("loc", {mb, k}), path)};
         const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, low::int_lit("0"), k),
                              low::bin(low::BinOp::Lt, k, low::int_lit(std::to_string(count))))};
-        return low::forall_("k", {slot}, low::bin(low::BinOp::Implies, in, body(slot)));
+        return low::forall_("k", {recv}, low::bin(low::BinOp::Implies, in, body(recv)));
     }
     std::vector<Cell> site_cells(const AtomSite& s, const Env& env)
     {
@@ -7310,8 +7622,17 @@ private:
         }
         else
         {
-            for (const StructLeaf& l : checked_object_leaves(*t.struct_type))
+            for (const StructLeaf& l : object_leaves(*t.struct_type))
             {
+                if (l.aggregate_element)
+                {
+                    // decision 0064 item 4 (Part C2): one field per leaf of the member's element structure
+                    for (const ElemLeaf& el : elem_leaves(l.element))
+                    {
+                        out.insert(cell_suffix(el.type));
+                    }
+                    continue;
+                }
                 out.insert(elem_cell_suffix(l.array ? l.element : l.type));
             }
         }
@@ -7345,8 +7666,21 @@ private:
         {
             if (ta.is_struct() && ta.struct_type != nullptr && has_array_member(*ta.struct_type))
             {
-                const std::vector<StructLeaf> ls {checked_object_leaves(*ta.struct_type)};
-                return {{chain_ref(pa, ls.front().path), chain_ref(pb, ls.front().path)}};
+                const std::vector<StructLeaf> ls {object_leaves(*ta.struct_type)};
+                E fa {chain_ref(pa, ls.front().path)};
+                E fb {chain_ref(pb, ls.front().path)};
+                if (ls.front().aggregate_element)
+                {
+                    // decision 0064 item 7 (Part C2): the first leaf is a member array of structures: its first slot is a structure slot, no cell; the first CELL is the first leaf of its
+                    // first element (`loc(member(loc(member(p, k), 0), j), 0)`)
+                    const std::vector<ElemLeaf> el {elem_leaves(ls.front().element)};
+                    if (!el.empty())
+                    {
+                        fa = chain_ref(fa, el.front().path);
+                        fb = chain_ref(fb, el.front().path);
+                    }
+                }
+                return {{fa, fb}};
             }
             return {{pa, pb}};
         }
@@ -7367,34 +7701,59 @@ private:
     // in the forms of record 0060 item 8 over slot terms: a cell outside the part's range (`!in_range`, the pure interval separation, never `perm` under a quantifier), and two array
     // parts of one field differ at their first slots (`loc(member(X, k), 0) != loc(member(Y, k), 0)`: never a bare block comparison, which Silicon does not decide from quantified
     // permissions).  `ac`/`aa` are one site's cells and array parts, `bc`/`ba` the other's.
+    // The leaf paths of an array part's element (decision 0064 item 7, Part C2): a member array of structures has one per leaf of its element; an array of scalars is the one leaf with the
+    // empty path (the text of before)
+    std::vector<ElemLeaf> part_leaves(const ArrLeaf& l)
+    {
+        if (l.element.is_struct())
+        {
+            return elem_leaves(l.element);
+        }
+        return {ElemLeaf {{}, l.element, std::string()}};
+    }
     std::vector<E> arr_disjoint(const std::vector<Cell>& ac, const std::vector<ArrLeaf>& aa,
                                 const std::vector<Cell>& bc, const std::vector<ArrLeaf>& ba)
     {
         std::vector<E> out;
         for (const ArrLeaf& la : aa)
         {
-            for (const Cell& cb : bc)
+            for (const ElemLeaf& ea : part_leaves(la))
             {
-                if (cell_suffix(cb.type) == elem_cell_suffix(la.element))
+                for (const Cell& cb : bc)
                 {
-                    out.push_back(low::not_(in_range(cb.recv, la.first, low::int_lit(std::to_string(la.count)))));
+                    if (cell_suffix(cb.type) == cell_suffix(ea.type))
+                    {
+                        out.push_back(
+                            low::not_(leaf_meets(cb.recv, la.first, low::int_lit(std::to_string(la.count)), ea.path)));
+                    }
                 }
-            }
-            for (const ArrLeaf& lb : ba)
-            {
-                if (elem_cell_suffix(lb.element) == elem_cell_suffix(la.element))
+                for (const ArrLeaf& lb : ba)
                 {
-                    out.push_back(low::bin(low::BinOp::Ne, la.first, lb.first));
+                    for (const ElemLeaf& eb : part_leaves(lb))
+                    {
+                        // two array parts of one field differ at their first slots (the first leaf receivers for structures: a member block is a fresh term per element, so the
+                        // receivers at index 0 are one cell iff the two array blocks are one); a scalar array against a structure array has no row
+                        if (cell_suffix(eb.type) == cell_suffix(ea.type) &&
+                            la.element.is_struct() == lb.element.is_struct() && ea.path.size() == eb.path.size())
+                        {
+                            out.push_back(
+                                low::bin(low::BinOp::Ne, chain_ref(la.first, ea.path), chain_ref(lb.first, eb.path)));
+                        }
+                    }
                 }
             }
         }
         for (const ArrLeaf& lb : ba)
         {
-            for (const Cell& ca : ac)
+            for (const ElemLeaf& eb : part_leaves(lb))
             {
-                if (cell_suffix(ca.type) == elem_cell_suffix(lb.element))
+                for (const Cell& ca : ac)
                 {
-                    out.push_back(low::not_(in_range(ca.recv, lb.first, low::int_lit(std::to_string(lb.count)))));
+                    if (cell_suffix(ca.type) == cell_suffix(eb.type))
+                    {
+                        out.push_back(
+                            low::not_(leaf_meets(ca.recv, lb.first, low::int_lit(std::to_string(lb.count)), eb.path)));
+                    }
                 }
             }
         }
@@ -7833,7 +8192,7 @@ private:
             else if ((jk == AtomKind::Owns || (jk == AtomKind::Reads && kk == AtomKind::Reads)) &&
                      site_pointee(j).is_struct() && !site_pointee(k).is_struct() && j.path.empty())
             {
-                for (const StructLeaf& l : checked_object_leaves(*site_pointee(j).struct_type))
+                for (const StructLeaf& l : object_leaves(*site_pointee(j).struct_type))
                 {
                     if (!l.array && l.type == site_pointee(k))
                     {
@@ -7883,7 +8242,7 @@ private:
             {
                 continue;
             }
-            for (const StructLeaf& l : checked_object_leaves(*site_pointee(j).struct_type))
+            for (const StructLeaf& l : object_leaves(*site_pointee(j).struct_type))
             {
                 if (!l.array && l.type == t)
                 {
@@ -8285,30 +8644,46 @@ private:
                         "an array member under an initialization marker or without a requires partner reached lowering (decision 0063 item 7: M4.5e1e2)");
                     continue;
                 }
-                const Type& et {al.element};
-                const std::string asfx {use_cell_type(et)};
-                put_perm(arr_quant(al.first, al.count,
-                                   [&](const E& slot)
-                                   {
-                                       return owns ? low::acc(slot, "v_" + asfx) : low::acc(slot, "v_" + asfx, amount);
-                                   }));
-                put_perm(arr_quant(al.first, al.count,
-                                   [&](const E& slot)
-                                   {
-                                       return owns ? low::acc(slot, "d_" + asfx) : low::acc(slot, "d_" + asfx, amount);
-                                   }));
-                put_fact(arr_quant(al.first, al.count,
-                                   [&](const E& slot)
-                                   {
-                                       return cell_flag(slot, et);
-                                   }));
-                if (!et.is_bool())
+                // decision 0064 items 3 and 7 (Part C2): a member that is an array of structures takes the four lines per leaf of its element, each over the leaf's receiver; an
+                // array of scalars is the one leaf with the empty path (the text of before)
+                std::vector<ElemLeaf> parts;
+                if (al.element.is_struct())
                 {
-                    put_fact(arr_quant(al.first, al.count,
+                    parts = elem_leaves(al.element);
+                }
+                else
+                {
+                    parts.push_back(ElemLeaf {{}, al.element, std::string()});
+                }
+                for (const ElemLeaf& pl : parts)
+                {
+                    const Type& et {pl.type};
+                    const std::string asfx {use_cell_type(et)};
+                    put_perm(arr_quant(al.first, al.count, pl.path,
                                        [&](const E& slot)
                                        {
-                                           return element_range(cell_value(slot, et), et);
+                                           return owns ? low::acc(slot, "v_" + asfx)
+                                                       : low::acc(slot, "v_" + asfx, amount);
                                        }));
+                    put_perm(arr_quant(al.first, al.count, pl.path,
+                                       [&](const E& slot)
+                                       {
+                                           return owns ? low::acc(slot, "d_" + asfx)
+                                                       : low::acc(slot, "d_" + asfx, amount);
+                                       }));
+                    put_fact(arr_quant(al.first, al.count, pl.path,
+                                       [&](const E& slot)
+                                       {
+                                           return cell_flag(slot, et);
+                                       }));
+                    if (!et.is_bool())
+                    {
+                        put_fact(arr_quant(al.first, al.count, pl.path,
+                                           [&](const E& slot)
+                                           {
+                                               return element_range(cell_value(slot, et), et);
+                                           }));
+                    }
                 }
             }
         }
@@ -8539,9 +8914,16 @@ private:
         return !prog_.globals().empty();
     }
     // The pure facts of every global (decision 0041 item 4): one block of one slot whose liveness cell is `loc(b, -2)`; null without globals.
-    E global_facts()
+    // The length-facts quantifiers of the arrays of structures (an array global's slots, a struct global's member arrays) are NOT in the conjunction: `global_fact_quantifiers` returns them, one
+    // clause each in declaration order, to stand right after the facts' clause (decision 0064 item 9: the lint compares the facts' clause's conjuncts, and S48 (e) has them as clauses of their own)
+    E global_facts(std::vector<E>* quants = nullptr)
     {
         E r;
+        std::vector<E> local;
+        if (quants == nullptr)
+        {
+            quants = &local;
+        }
         for (const Global& g : prog_.globals())
         {
             const E b {global_block(g.id)};
@@ -8554,10 +8936,34 @@ private:
             // A struct global (decision 0044 item 8): the member lengths of every slot of `loc(GB_g(), 0)` and the slot facts, right after its own facts (WF_S needs them)
             if (g.type.is_struct())
             {
-                r = low::and_(r, struct_lens(global_ref(g.id), *g.type.struct_type));
+                r = low::and_(r, struct_lens(global_ref(g.id), *g.type.struct_type, quants));
+            }
+            else if (g.type.is_array() && g.type.element != nullptr && g.type.element->is_struct())
+            {
+                // decision 0064 items 3 and 9 (Part C2): an array global of structures states, for every slot of its block, what struct_lens states of a structure slot, as one quantifier
+                // over the slot (the block term `GB_g()`, no local) with the slot as its trigger
+                const std::string binder {length_binder(b)};
+                const E kv {low::var(binder)};
+                const E es {low::dom("loc", {b, kv})};
+                const E in {low::bin(low::BinOp::And, low::bin(low::BinOp::Le, low::int_lit("0"), kv),
+                                     low::bin(low::BinOp::Lt, kv, low::int_lit(std::to_string(g.type.count))))};
+                quants->push_back(low::forall_(
+                    binder, {es}, low::bin(low::BinOp::Implies, in, struct_lens(es, *g.type.element->struct_type))));
             }
         }
         return r;
+    }
+    // The clauses that state the facts of the globals: the conjunction (null without globals), then one clause per length-facts quantifier
+    std::vector<E> global_fact_clauses()
+    {
+        std::vector<E> out;
+        std::vector<E> quants;
+        if (const E facts = global_facts(&quants))
+        {
+            out.push_back(facts);
+        }
+        out.insert(out.end(), quants.begin(), quants.end());
+        return out;
     }
     // The liveness disjunct of a unit with globals (decision 0041 item 6): `lvloc(block_of(p)) == lvloc(GB_g())` for some global; null without globals.
     E global_live_disjunct(const E& p)
@@ -9482,8 +9888,13 @@ private:
         {
             // The element's key is its own (as `p[i]`'s above), the ghost value of the read one per leaf path (`ghost_name` names the path): `p[0].x` and `p[0].y` are two reads, two
             // cells.  Only a pointer parameter's element reaches here (check.cpp's `contract_struct_element`); a base under a quantifier's binder is Part F's.
-            if (fq_ != nullptr || root->a == nullptr || root->a->kind != Expr::Kind::Formal || root->b == nullptr ||
-                path.empty())
+            // decision 0064 item 7 (Part C2): the element's base may also be a global array of structures (`g[e].x`) or an array member of structures (`p->v[e].x`): its first slot is the
+            // base's own (a global's `loc(GB_g(), 0)`, a member's `loc(member(X, k), 0)`), the element the slot at the index, framed by a range atom (`owns(g)`, a range) or a structure
+            // atom's array part by `leaf_meets`; check.cpp pins the shapes
+            const bool base_ok {root->a != nullptr &&
+                                (root->a->kind == Expr::Kind::Formal || array_global_of(root->a) != nullptr ||
+                                 member_array_elem_base(*root->a))};
+            if (fq_ != nullptr || !base_ok || root->b == nullptr || path.empty())
             {
                 internal_error(
                     e.loc,
@@ -9564,6 +9975,13 @@ private:
                 {
                     continue;
                 }
+                // Record 0061 item 11 (decision 0064 item 7): under a quantifier's binder the place `p` is a slot term over the binder, and a range over structures would frame it by a
+                // computed `loc(member(...))` term over that binder, which item 11 forbids: such a site frames no read under a binder (a read only it would frame is a `permission`
+                // error; a scalar range on another parameter still frames its own)
+                if (fq_cls >= 0 && site_pointee(s).is_struct())
+                {
+                    continue;
+                }
                 // Record 0060 item 5: a range atom frames the cells of its interval: `g_i && block_of(q) == block_of(p_i) && offset_of(p_i) <= offset_of(q) < offset_of(p_i) + n_i`
                 Full scratch;
                 const LV n {lower(*s.atom->b, env, nullptr, Deps {}, scratch)};
@@ -9610,12 +10028,21 @@ private:
             {
                 for (const ArrLeaf& al : site_arrays(s, site_ref(s, env)))
                 {
-                    if (elem_cell_suffix(al.element) != sfx)
+                    // as the range over structures above: an array part of structures frames no read under a binder (its membership test is a computed `loc` term over the binder)
+                    if (fq_cls >= 0 && al.element.is_struct())
                     {
                         continue;
                     }
-                    const E in {in_range(p, al.first, low::int_lit(std::to_string(al.count)))};
-                    ds.push_back(g ? low::and_(g, in) : in);
+                    // decision 0064 item 7 (Part C2): one membership test per leaf of the element that holds the field (the slot test for an array of scalars, as before)
+                    for (const ElemLeaf& pl : part_leaves(al))
+                    {
+                        if (cell_suffix(pl.type) != sfx)
+                        {
+                            continue;
+                        }
+                        const E in {leaf_meets(p, al.first, low::int_lit(std::to_string(al.count)), pl.path)};
+                        ds.push_back(g ? low::and_(g, in) : in);
+                    }
                 }
             }
         }
@@ -10008,8 +10435,17 @@ private:
                 const Type& t {site_pointee(s)};
                 if (t.is_struct())
                 {
-                    for (const StructLeaf& l : checked_object_leaves(*t.struct_type))
+                    for (const StructLeaf& l : object_leaves(*t.struct_type))
                     {
+                        if (l.aggregate_element)
+                        {
+                            // decision 0064 item 4 (Part C2): a memory call on each leaf field of the member's element structure
+                            for (const ElemLeaf& el : elem_leaves(l.element))
+                            {
+                                r.insert(fkey(el.type));
+                            }
+                            continue;
+                        }
                         r.insert(fkey(
                             l.array
                                 ? l.element
@@ -12451,17 +12887,21 @@ private:
                     {
                         continue;
                     }
-                    const E first {low::dom("loc", {block_of(ss[zi].root), low::dom("offset_of", {ss[zi].root})})};
-                    least = least ? min_perm(min_perm(least, value_perm(first, *ss[zi].t)), flag_perm(first, *ss[zi].t))
-                                  : min_perm(value_perm(first, *ss[zi].t), flag_perm(first, *ss[zi].t));
-                    const FnAtoms& caller {atoms_of(*fn_.f)};
-                    for (int j {0}; j < caller.nreq; ++j)
+                    // decision 0064 item 7 (Part C2): a member array of structures counts the first slot of EVERY leaf path of its element (the slot itself for an array of scalars)
+                    for (const ElemLeaf& pl : leaves_of(ss[zi]))
                     {
-                        const AtomSite& cs {caller.sites[static_cast<size_t>(j)]};
-                        if ((cs.atom->atom == AtomKind::Reads || cs.atom->atom == AtomKind::ReadsRange) &&
-                            site_fields(cs).count(cell_suffix(*ss[zi].t)) != 0U)
+                        const E first {first_leaf(ss[zi], pl.path)};
+                        least = least ? min_perm(min_perm(least, value_perm(first, pl.type)), flag_perm(first, pl.type))
+                                      : min_perm(value_perm(first, pl.type), flag_perm(first, pl.type));
+                        const FnAtoms& caller {atoms_of(*fn_.f)};
+                        for (int j {0}; j < caller.nreq; ++j)
                         {
-                            least = min_perm(least, low::var(amount_name(j)));
+                            const AtomSite& cs {caller.sites[static_cast<size_t>(j)]};
+                            if ((cs.atom->atom == AtomKind::Reads || cs.atom->atom == AtomKind::ReadsRange) &&
+                                site_fields(cs).count(cell_suffix(pl.type)) != 0U)
+                            {
+                                least = min_perm(least, low::var(amount_name(j)));
+                            }
                         }
                     }
                 }
@@ -13181,11 +13621,29 @@ private:
                     k.place = al.first;
                     k.count = low::int_lit(std::to_string(al.count));
                     k.owns = site.atom->atom == AtomKind::Owns;
-                    k.field = elem_fkey(al.element);
                     k.text =
                         site_member_array(site) || al.rel.empty() || base_text.empty()
                             ? base_text
                             : (base_text[0U] == '*' ? base_text.substr(1U) + "->" + al.rel : base_text + "." + al.rel);
+                    if (al.element.is_struct())
+                    {
+                        // decision 0064 items 7, 10 and 11 (Part C2): a member array of structures is a range over structures at its first slot: one access per leaf path of its element,
+                        // each on its own field, pairing by leaf path (`leaf_in_range`)
+                        acc_types_.push_back(al.element);
+                        const Type* elem_type {&acc_types_.back()};
+                        for (const ElemLeaf& l : elem_leaves(al.element))
+                        {
+                            Acc::Atom kl {k};
+                            kl.agg = true;
+                            kl.leaf = l.path;
+                            kl.elem = elem_type;
+                            kl.field = fkey(l.type);
+                            fx.tags.push_back(MemTag {0, kl.field, true, kl.owns, path_, {}});
+                            ca.atoms.push_back(std::move(kl));
+                        }
+                        continue;
+                    }
+                    k.field = elem_fkey(al.element);
                     fx.tags.push_back(MemTag {0, k.field, true, k.owns, path_, {}});
                     ca.atoms.push_back(std::move(k));
                 }
@@ -15267,8 +15725,20 @@ private:
             else
             {
                 const std::string sfx {cell_suffix(target)};
-                for (const StructLeaf& l : checked_object_leaves(*t.struct_type))
+                for (const StructLeaf& l : object_leaves(*t.struct_type))
                 {
+                    if (l.aggregate_element)
+                    {
+                        // decision 0064 item 4 (Part C2): a member that is an array of structures is split against its first element's leaves (e1a's listed limit)
+                        for (const ElemLeaf& el : elem_leaves(l.element))
+                        {
+                            if (cell_suffix(el.type) == sfx)
+                            {
+                                out.push_back(chain_ref(chain_ref(slot, l.path), el.path));
+                            }
+                        }
+                        continue;
+                    }
                     // (an array of pointers is split against its first element only: e1a's listed limit, decision 0063 item 7)
                     if (elem_cell_suffix(l.array ? l.element : l.type) == sfx)
                     {
@@ -16120,8 +16590,6 @@ private:
                 const std::string bt {new_temp(low::LType::Ref)};
                 assign(out, bt, al.first);
                 const E tr {low::var(bt)};
-                const Type& et {al.element};
-                const std::string asfx {use_cell_type(et)};
                 const E nlit {low::int_lit(std::to_string(al.count))};
                 const E lo {low::dom("offset_of", {tr})};
                 const E hi {low::bin(BinOp::Add, lo, nlit)};
@@ -16129,88 +16597,126 @@ private:
                 const std::string msg {owns ? "returns without owning " + pl + ", which its contract promises"
                                             : "returns without the permission to read " + pl + " it borrowed"};
                 const low::Meta meta_k {perm_meta(msg, k)};
-                auto row = [&](E cond)
+                // decision 0064 items 7 and 8 (Part C2): a member array of structures has one row group per leaf of its element, over the leaf's receiver; an array of scalars is the one leaf
+                // with the empty path (the text of before)
+                for (const ElemLeaf& el : part_leaves(al))
                 {
-                    emit_assert(out, gk ? low::implies(gk, std::move(cond)) : std::move(cond), meta_k);
-                };
-                E amount;
-                if (!owns)
-                {
-                    amount = amt_of(k);
-                    const E kv {low::var("k")};
-                    for (size_t j {0U}; j < ens.size(); ++j)
+                    const Type& et {el.type};
+                    const std::string asfx {use_cell_type(et)};
+                    const bool agg {al.element.is_struct()};
+                    const E leafrecv {chain_ref(low::dom("loc", {block_of(tr), low::var("k")}), el.path)};
+                    auto row = [&](E cond)
                     {
-                        const AtomSite& sj {fa.sites[ens[j]]};
-                        if (j == k || (sj.atom->atom != AtomKind::ReadsRange && sj.atom->atom != AtomKind::Reads))
+                        emit_assert(out, gk ? low::implies(gk, std::move(cond)) : std::move(cond), meta_k);
+                    };
+                    E amount;
+                    if (!owns)
+                    {
+                        amount = amt_of(k);
+                        const E kv {low::var("k")};
+                        for (size_t j {0U}; j < ens.size(); ++j)
                         {
-                            continue;
-                        }
-                        if (sj.atom->atom == AtomKind::ReadsRange)
-                        {
-                            if (cell_suffix(site_pointee(sj)) != cell_suffix(et))
+                            const AtomSite& sj {fa.sites[ens[j]]};
+                            if (j == k || (sj.atom->atom != AtomKind::ReadsRange && sj.atom->atom != AtomKind::Reads))
                             {
                                 continue;
                             }
-                            Full sc2;
-                            const E nj {lower(*sj.atom->b, env, nullptr, Deps {}, sc2).e};
-                            const E loj {low::dom("offset_of", {root[j]})};
-                            const E inside {
-                                low::bin(BinOp::And,
-                                         low::bin(BinOp::And, low::bin(BinOp::Eq, block_of(root[j]), block_of(tr)),
-                                                  low::bin(BinOp::Le, loj, kv)),
-                                         low::bin(BinOp::Lt, kv, low::bin(BinOp::Add, loj, nj)))};
-                            amount = low::bin(BinOp::Add, amount, low::ite(low::and_(g[j], inside), amt_of(j), none));
-                            continue;
-                        }
-                        for (const Cell& cj : site_cells(sj, p[j]))
-                        {
-                            if (cell_suffix(cj.type) != cell_suffix(et))
+                            if (sj.atom->atom == AtomKind::ReadsRange)
                             {
-                                continue;
-                            }
-                            const E inside {low::bin(BinOp::And, low::bin(BinOp::Eq, block_of(cj.recv), block_of(tr)),
-                                                     low::bin(BinOp::Eq, low::dom("offset_of", {cj.recv}), kv))};
-                            amount = low::bin(BinOp::Add, amount, low::ite(low::and_(g[j], inside), amt_of(j), none));
-                        }
-                        for (const ArrLeaf& aj : site_arrays(sj, p[j]))
-                        {
-                            if (elem_cell_suffix(aj.element) != cell_suffix(et) || aj.first == al.first)
-                            {
-                                continue;
-                            }
-                            // two array parts of members meet at every slot or at none: their first slots tell (the slot term)
-                            amount = low::bin(
-                                BinOp::Add, amount,
-                                low::ite(low::and_(g[j], low::bin(BinOp::Eq, aj.first, al.first)), amt_of(j), none));
-                        }
-                    }
-                }
-                {
-                    low::LStmt ifs;
-                    std::vector<low::LStmt>& dst {gk ? ifs.then_body : out};
-                    for (const char* field : {"v_", "d_"})
-                    {
-                        emit_marked_row(dst, range_perm(tr, lo, hi, std::string(field) + asfx, amount), meta_k);
-                    }
-                    if (gk)
-                    {
-                        ifs.kind = low::LStmt::Kind::If;
-                        ifs.expr = gk;
-                        out.push_back(std::move(ifs));
-                    }
-                }
-                row(range_quant(tr, nlit,
-                                [&](const E& slot)
+                                if (agg || site_pointee(sj).is_struct())
                                 {
-                                    return cell_flag(slot, et);
-                                }));
-                if (!et.is_bool())
-                {
-                    row(range_quant(tr, nlit,
+                                    // a leaf of a member array of structures, or a range over structures: the slot of the leaf is in the other range when one of its leaves of the field is
+                                    // that cell (`range_covers_cell`)
+                                    Full sc3;
+                                    const E nj3 {lower(*sj.atom->b, env, nullptr, Deps {}, sc3).e};
+                                    if (const E cov = range_covers_cell(leafrecv, cell_suffix(et), site_pointee(sj),
+                                                                        root[j], nj3))
+                                    {
+                                        amount = low::bin(BinOp::Add, amount,
+                                                          low::ite(low::and_(g[j], cov), amt_of(j), none));
+                                    }
+                                    continue;
+                                }
+                                if (cell_suffix(site_pointee(sj)) != cell_suffix(et))
+                                {
+                                    continue;
+                                }
+                                Full sc2;
+                                const E nj {lower(*sj.atom->b, env, nullptr, Deps {}, sc2).e};
+                                const E loj {low::dom("offset_of", {root[j]})};
+                                const E inside {
+                                    low::bin(BinOp::And,
+                                             low::bin(BinOp::And, low::bin(BinOp::Eq, block_of(root[j]), block_of(tr)),
+                                                      low::bin(BinOp::Le, loj, kv)),
+                                             low::bin(BinOp::Lt, kv, low::bin(BinOp::Add, loj, nj)))};
+                                amount =
+                                    low::bin(BinOp::Add, amount, low::ite(low::and_(g[j], inside), amt_of(j), none));
+                                continue;
+                            }
+                            for (const Cell& cj : site_cells(sj, p[j]))
+                            {
+                                if (cell_suffix(cj.type) != cell_suffix(et))
+                                {
+                                    continue;
+                                }
+                                const E inside {
+                                    agg ? low::bin(BinOp::Eq, cj.recv, leafrecv)
+                                        : low::bin(BinOp::And, low::bin(BinOp::Eq, block_of(cj.recv), block_of(tr)),
+                                                   low::bin(BinOp::Eq, low::dom("offset_of", {cj.recv}), kv))};
+                                amount =
+                                    low::bin(BinOp::Add, amount, low::ite(low::and_(g[j], inside), amt_of(j), none));
+                            }
+                            for (const ArrLeaf& aj : site_arrays(sj, p[j]))
+                            {
+                                if (aj.element.is_struct() != agg || aj.first == al.first)
+                                {
+                                    continue;
+                                }
+                                for (const ElemLeaf& pj : part_leaves(aj))
+                                {
+                                    if (cell_suffix(pj.type) != cell_suffix(et) || pj.path.size() != el.path.size())
+                                    {
+                                        continue;
+                                    }
+                                    // two array parts of members meet at every slot or at none: their first slots tell (the slot term; the first leaf receiver for a member array of
+                                    // structures)
+                                    amount = low::bin(
+                                        BinOp::Add, amount,
+                                        low::ite(low::and_(g[j], low::bin(BinOp::Eq, chain_ref(aj.first, pj.path),
+                                                                          chain_ref(al.first, el.path))),
+                                                 amt_of(j), none));
+                                }
+                            }
+                        }
+                    }
+                    {
+                        low::LStmt ifs;
+                        std::vector<low::LStmt>& dst {gk ? ifs.then_body : out};
+                        for (const char* field : {"v_", "d_"})
+                        {
+                            emit_marked_row(dst, range_perm(tr, lo, hi, el.path, std::string(field) + asfx, amount),
+                                            meta_k);
+                        }
+                        if (gk)
+                        {
+                            ifs.kind = low::LStmt::Kind::If;
+                            ifs.expr = gk;
+                            out.push_back(std::move(ifs));
+                        }
+                    }
+                    row(range_quant(tr, nlit, el.path,
                                     [&](const E& slot)
                                     {
-                                        return element_range(cell_value(slot, et), et);
+                                        return cell_flag(slot, et);
                                     }));
+                    if (!et.is_bool())
+                    {
+                        row(range_quant(tr, nlit, el.path,
+                                        [&](const E& slot)
+                                        {
+                                            return element_range(cell_value(slot, et), et);
+                                        }));
+                    }
                 }
             }
         }
@@ -16468,7 +16974,7 @@ private:
     // its owner held, so `base`'s own cells are read only where `main` holds them.
     void exempt_owned_fields(const E& base, const StructType& st, const E& guard, E& r, std::vector<low::LStmt>& out)
     {
-        for (const StructLeaf& l : checked_object_leaves(st))
+        for (const StructLeaf& l : object_leaves(st))
         {
             if (!l.owning)
             {
@@ -17251,12 +17757,24 @@ private:
                     {
                         rp.amount = low::var(amount_name(site.atom->amount));
                     }
-                    rp.element = al.element;
-                    rp.sfx = use_cell_type(rp.element);
-                    rp.cmp = elem_cell_suffix(rp.element);
-                    rp.reach = writes.fields.count(rp.cmp) != 0U || !writes.globals.empty() || !writes.gleaves.empty();
                     rp.text = al.text;
-                    out.push_back(std::move(rp));
+                    // decision 0064 item 10 (Part C2): a member array of structures is one range place per LEAF of its element (the same base, count, guard and amount; the leaf's own
+                    // cell type, field and receivers), as a range over structures is; an array of scalars is the one place with the empty path (the text of before)
+                    for (const ElemLeaf& pl : part_leaves(al))
+                    {
+                        RangePlace lp {rp};
+                        lp.element = pl.type;
+                        lp.sfx = use_cell_type(lp.element);
+                        lp.cmp = elem_cell_suffix(lp.element);
+                        lp.reach =
+                            writes.fields.count(lp.cmp) != 0U || !writes.globals.empty() || !writes.gleaves.empty();
+                        if (al.element.is_struct())
+                        {
+                            lp.leaf = pl.path;
+                            lp.leaf_text = pl.text;
+                        }
+                        out.push_back(std::move(lp));
+                    }
                 }
                 continue;
             }
@@ -19267,19 +19785,31 @@ private:
                 bool first {!has_cell_leaf};
                 for (const ArrLeaf& al : leaf_arrays(ref, *cell->type.struct_type, cell->name, false))
                 {
-                    ArrayPlace ap;
-                    ap.var = cell;
-                    ap.element = al.element;
-                    ap.count = al.count;
-                    ap.loc_name = new_temp(low::LType::Ref);
-                    assign(out, ap.loc_name, al.first);
-                    ap.phrase = al.text;
-                    ap.live = first;
-                    first = false;
-                    ap.kl = "kl_" + var_name(*cell) + "_m" + std::to_string(arrays.size()) + "__" +
-                            std::to_string(loop_number);
-                    ap.reach = writes.fields.count(elem_cell_suffix(ap.element)) != 0U;
-                    arrays.push_back(std::move(ap));
+                    const std::string bound {new_temp(low::LType::Ref)};
+                    assign(out, bound, al.first);
+                    // decision 0064 item 10 (Part C2): a member array of structures is one array place per LEAF of its element over the one bound local (`agg`, `leaf`: ap_slot and
+                    // ap_perm read them); an array of scalars is the one place with the empty path (the text of before)
+                    for (const ElemLeaf& pl : part_leaves(al))
+                    {
+                        ArrayPlace ap;
+                        ap.var = cell;
+                        ap.element = pl.type;
+                        ap.count = al.count;
+                        ap.loc_name = bound;
+                        ap.phrase = al.text;
+                        if (al.element.is_struct())
+                        {
+                            ap.agg = true;
+                            ap.leaf = pl.path;
+                            ap.leaf_text = pl.text;
+                        }
+                        ap.live = first;
+                        first = false;
+                        ap.kl = "kl_" + var_name(*cell) + "_m" + std::to_string(arrays.size()) + "__" +
+                                std::to_string(loop_number);
+                        ap.reach = writes.fields.count(elem_cell_suffix(ap.element)) != 0U;
+                        arrays.push_back(std::move(ap));
+                    }
                 }
             }
         }
@@ -19293,23 +19823,58 @@ private:
                     // an array leaf of a struct global: `main` holds it from program_start; the struct global's liveness is its cell place's (the liveness-only place when it has no cell)
                     for (const ArrLeaf& al : leaf_arrays(global_ref(g.id), *g.type.struct_type, g.c_name, false))
                     {
-                        ArrayPlace ap;
-                        ap.element = al.element;
-                        ap.count = al.count;
-                        ap.loc_name = new_temp(low::LType::Ref);
-                        assign(out, ap.loc_name, al.first);
-                        ap.phrase = al.text;
-                        ap.live = false;
-                        ap.root_global = g.id;
-                        ap.kl = "kl_" + std::to_string(arrays.size()) + "__" + std::to_string(loop_number);
-                        ap.reach =
-                            writes.fields.count(elem_cell_suffix(ap.element)) != 0U || writes.globals.count(g.id) != 0U;
-                        arrays.push_back(std::move(ap));
+                        const std::string bound {new_temp(low::LType::Ref)};
+                        assign(out, bound, al.first);
+                        for (const ElemLeaf& pl : part_leaves(al))
+                        {
+                            ArrayPlace ap;
+                            ap.element = pl.type;
+                            ap.count = al.count;
+                            ap.loc_name = bound;
+                            ap.phrase = al.text;
+                            if (al.element.is_struct())
+                            {
+                                ap.agg = true;
+                                ap.leaf = pl.path;
+                                ap.leaf_text = pl.text;
+                            }
+                            ap.live = false;
+                            ap.root_global = g.id;
+                            ap.kl = "kl_" + std::to_string(arrays.size()) + "__" + std::to_string(loop_number);
+                            ap.reach = writes.fields.count(elem_cell_suffix(ap.element)) != 0U ||
+                                       writes.globals.count(g.id) != 0U;
+                            arrays.push_back(std::move(ap));
+                        }
                     }
                     continue;
                 }
                 if (!g.type.is_array())
                 {
+                    continue;
+                }
+                if (g.type.element->is_struct())
+                {
+                    // decision 0064 item 10 (Part C2): an array global of structures `main` holds is one array place per LEAF of its element over the global's bound local (the first
+                    // carries the global's one liveness conjunct); a store by name to a leaf of it reaches that array (writes.globals), any store through a pointer of the field every
+                    // place of the field
+                    bool first {true};
+                    for (const ElemLeaf& l : elem_leaves(*g.type.element))
+                    {
+                        ArrayPlace ap;
+                        ap.global = &g;
+                        ap.element = l.type;
+                        ap.count = g.type.count;
+                        ap.agg = true;
+                        ap.leaf = l.path;
+                        ap.leaf_text = l.text;
+                        ap.live = first;
+                        first = false;
+                        ap.kl = "kl_" + garr_name(g) + "_e" + std::to_string(arrays.size()) + "__" +
+                                std::to_string(loop_number);
+                        ap.reach =
+                            writes.fields.count(elem_cell_suffix(ap.element)) != 0U || writes.globals.count(g.id) != 0U;
+                        arrays.push_back(std::move(ap));
+                    }
                     continue;
                 }
                 ArrayPlace ap;
@@ -23206,6 +23771,30 @@ private:
         // Decision 0041 item 5: a global's initializer as written is checked like a named constant's (a mutable global is never folded at its uses).
         for (const Global& g : prog_.globals())
         {
+            if (g.type.is_array() && g.type.element != nullptr && g.type.element->is_struct())
+            { // decision 0064 item 9 (Part C2): each leaf of each listed element, named `g[i].x`, checked like a scalar's
+                const std::vector<ElemLeaf> leaves {elem_leaves(*g.type.element)};
+                for (size_t i {0U}; i < g.elems.size(); ++i)
+                {
+                    for (size_t li {0U}; li < g.elems[i].leaves.size() && li < leaves.size(); ++li)
+                    {
+                        const GlobalLeaf& gl {g.elems[i].leaves[li]};
+                        if ((gl.kind != GlobalInit::Value && gl.kind != GlobalInit::Unknown) || gl.init == nullptr)
+                        {
+                            continue;
+                        }
+                        NamedConst c;
+                        c.id = g.id;
+                        c.c_name = g.c_name + "[" + std::to_string(i) + "]." + leaves[li].text;
+                        c.type = leaves[li].type;
+                        c.loc = gl.loc.known() ? gl.loc : g.loc;
+                        c.init = gl.init;
+                        c.value = gl.value;
+                        named_const_check(c, out, gl.kind == GlobalInit::Value);
+                    }
+                }
+                continue;
+            }
             if (g.type.is_array())
             { // decision 0063 item 9: each listed element's initializer as written, named `g[i]`, checked like a scalar's
                 for (size_t i {0U}; i < g.elems.size() && g.type.element != nullptr; ++i)
@@ -23228,10 +23817,36 @@ private:
             }
             if (g.type.is_struct())
             { // decision 0044 item 8: each leaf's initializer element as written, named `g.x`, checked like a scalar's
-                const std::vector<StructLeaf> ls {checked_object_leaves(*g.type.struct_type, g.c_name)};
+                const std::vector<StructLeaf> ls {object_leaves(*g.type.struct_type, g.c_name)};
                 for (size_t i {0U}; i < ls.size() && i < g.leaves.size(); ++i)
                 {
                     const GlobalLeaf& gl {g.leaves[i]};
+                    if (ls[i].aggregate_element)
+                    {
+                        // decision 0064 item 9 (Part C2): each leaf of each listed element of a member array of structures, named `g.v[j].x`
+                        const std::vector<ElemLeaf> eleaves {elem_leaves(ls[i].element)};
+                        for (size_t j {0U}; j < gl.elems.size(); ++j)
+                        {
+                            for (size_t li {0U}; li < gl.elems[j].leaves.size() && li < eleaves.size(); ++li)
+                            {
+                                const GlobalLeaf& el {gl.elems[j].leaves[li]};
+                                if ((el.kind != GlobalInit::Value && el.kind != GlobalInit::Unknown) ||
+                                    el.init == nullptr)
+                                {
+                                    continue;
+                                }
+                                NamedConst c;
+                                c.id = g.id;
+                                c.c_name = ls[i].text + "[" + std::to_string(j) + "]." + eleaves[li].text;
+                                c.type = eleaves[li].type;
+                                c.loc = el.loc.known() ? el.loc : g.loc;
+                                c.init = el.init;
+                                c.value = el.value;
+                                named_const_check(c, out, el.kind == GlobalInit::Value);
+                            }
+                        }
+                        continue;
+                    }
                     if (ls[i].array)
                     {
                         // decision 0063 item 9: each listed element of an array leaf, named `g.a[i]`, as the elements of an array global are
@@ -23406,6 +24021,8 @@ private:
         std::string name;
         std::vector<int> path;
         int elem {-1}; // the index in the array member at `path` (decision 0063 item 13: the value view), else -1
+        int index_after {
+            -1}; // decision 0064 item 12: the members of `path` before the index step of an element leaf of an array of structures, else -1
     };
     std::vector<LeafVar> param_vars(const Function& f, int k) const
     {
@@ -23416,7 +24033,7 @@ private:
             for (const StructLeaf& l : checked_value_leaves(*t.struct_type))
             {
                 const std::string n {formal_name(f, k) + value_suffix(l)};
-                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem});
+                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem, l.index_after});
             }
         }
         else
@@ -23434,7 +24051,7 @@ private:
             for (const StructLeaf& l : checked_value_leaves(*f.ret.struct_type))
             {
                 const std::string n {std::string(kResult) + value_suffix(l)};
-                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem});
+                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem, l.index_after});
             }
         }
         else if (!f.ret.is_void())
@@ -23504,7 +24121,7 @@ private:
         // items 2 and 6).
         if (&f != prog_.entry())
         {
-            if (const E facts = global_facts())
+            for (const E& facts : global_fact_clauses())
             {
                 m.requires_.push_back(clause_checks(facts, f.loc, false, f.c_name));
             }
@@ -23654,7 +24271,7 @@ private:
                 for (const LeafVar& lv : fv)
                 {
                     const std::string t {new_temp(low::LType::Ref)};
-                    assign(m.body, t, leaf_place(root, lv.path, lv.elem));
+                    assign(m.body, t, leaf_place(root, lv.path, lv.elem, lv.index_after));
                     emit_assert(m.body, may_write(low::var(t), lv.type, false),
                                 meta("internal", copy.loc,
                                      "internal check: the entry copy of `" + copy.name + "` is writable"));
@@ -24076,6 +24693,13 @@ private:
             }
             if (!s.path.empty() || !s.via.empty() || site_fields(s).count(sfx) == 0U ||
                 site_marker(*cf_, s) != InitMarker::None)
+            {
+                continue;
+            }
+            // A site whose pointee is a structure (a structure atom, a range over structures, a global array of structures' whole-array range) holds the field in a member block: its cells
+            // are `loc(member(.), 0)` terms, never the slots `loc(block_of(ref), k)` of an `int` interval, so it frames no scalar application (record 0064 item 7; the application is
+            // left unframed by it and the permission diagnostic stands)
+            if (site_pointee(s).is_struct())
             {
                 continue;
             }
@@ -25876,7 +26500,7 @@ private:
         }
         if (&f != prog_.entry())
         {
-            if (const E facts = global_facts())
+            for (const E& facts : global_fact_clauses())
             {
                 m.requires_.push_back(clause_checks(facts, f.loc, false, what));
             }

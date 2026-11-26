@@ -1482,7 +1482,64 @@ numbered from 338):
   build it at the start of the next session, before Part C2's audit. **Alternative:** keep the exit 3 listed
   until M4.5e2, which gives pointers into arrays their bounds rows anyway.
 
-The next questions start at 344.
+- **344** (fail closed either way). Record 0064 item 7 lists `g[e].x`, a member of an element of a global
+  array of structures, among the reads a contract may make, but neither Part C1's nor Part C2's row of the
+  plan named it, and the encoder rejected it; `p->v[e].x`, an element of a member array under `owns(*p)`, is
+  not named by the record at all (0063 item 7 has both forms for arrays of scalars). **Answer taken:** both
+  are built in Part C2, because the lowering's contract-read path for a structure element extended to these
+  bases at small cost (framed by the whole-array atom of the global, or by the structure atom's array part),
+  each with a positive, an unframed twin and a wrong-value twin; a second index, a base reached through a
+  load and an element of a structure passed by value stay rejected. Alternative: keep both rejected with a
+  pin until M4.5e2.
+
+- **345** (fail closed: a false alarm, never a proof). `f__wf`, the check that a contract is well formed, has
+  no tie between the entry and exit values of a member of an element of a member array of structures reached
+  through a pointer: with `struct T { struct P v[2]; int n; }`, `requires reads(*p) && p->v[0].x != 0` and
+  `ensures reads(*p) && (r == 0 || r == 10 / p->v[0].x)` report `division-by-zero` at the `ensures`, under
+  `reads(p->v)` too. A scalar member (`p->n`), a nested structure's member (`p->a.x`), a parameter's range
+  (`p[e].x`) and a global array (`g[e].x`) are tied and verify. Record 0063 item 7 lists the same false alarm
+  for a member array of scalars (`reads(p->a)`, `p->a[0]`: its N1), so this is that limit carried to arrays of
+  structures, not a new one. **Answer taken:** listed in record 0064 item 7 and pinned; the positive control
+  of the `f__wf` pins for a member array was reworded so that it verifies without the tie. Alternative: give
+  `f__wf` the tie for array leaves of a structure atom, for scalars and structures at once (it changes the
+  Viper of existing programs with `reads(p->a)`, which is the owner's to approve).
+
+- **346** (fail closed: two rejections with a diagnostic). Audit round C2 (finding 4) found two forms that
+  Part C2's build rejects and record 0064 did not list, the second against the record's own words (item 7
+  named `gt.v[e].x` as a contract read and allowed element reads under `old`): `fp(gt.v[1])`, an element of a
+  member array of a GLOBAL structure passed by value (rejected with a message about "a pointer read from
+  memory", though none is read; `struct P e = gt.v[1];`, `fp(t.v[1])` of a local and `fp(g[1])` are accepted),
+  and `cerastes_old(gt.v[1].x)` (rejected, while `cerastes_old(g[1].x)`, `cerastes_old(p->v[1].y)`,
+  `cerastes_old(gt.n)` and `gt.v[1].x` outside `old` are accepted). **Answer taken:** both are listed in
+  record 0064 (items 7 and 12) and on the page, each with a pin; the record's item 7 is corrected to what the
+  build does. Lifting them is encoder work that would have needed a further audit read at the session's end;
+  which session lifts them is not decided (§3 files them for the next session's attention; they touch the
+  code Part D works in). Alternative: lift both before Commit 3. **Amended the same day:** the first form is
+  rejected in C only. The record's sentence generalised a C probe; the joined proof then found that C++
+  accepts `fp(gt.v[1])` (the C front end folds the element's address into a constant the encoder refuses,
+  the C++ front end keeps the subscript), and the second audit read (round C2b) probed the accepted C++ path
+  twenty ways without finding a wrong result. The pin is split: the `cerastes_old` row in both modes, the
+  by-value row in C only, and a C++ positive with a twin (a wrong element; a caller without `gt`'s atom)
+  tests the accepted path. The acceptance in C++ rests on those probes.
+- **347** (fail closed: a timeout is exit 3, never a proof; this session's own change caused it). To give
+  the Viper lint the shape it expects, the lowering now states the length facts of a global array of
+  structures, and of a structure global's member array, as clauses of their own after the global facts
+  (`global_fact_clauses()`), where Part C2's first build stated them inside the facts' conjunction. The
+  conjunction is the same (audit round C2b read it). But one program that had a verdict lost it: a function
+  other than `main` with `requires reads(gt) && gt.v[1].x == 3` that calls a `reads(gt)` function and checks
+  that leaf took 17 s on the build before the split and gets no verdict in 200 s after it, on a quiet box
+  (the auditor's `q05`; the orchestrator's bisect in lanes `edg` and `il`). The two-call chain over such a
+  global (`e06`) had no verdict in 200 s before the split either, and round C2 had found the same for a
+  five-leaf check before it, so the family was already fragile. No committed build accepted these programs
+  (Commit 2 rejects the type), no existing program's Viper changed, and every test and self-test case whose
+  Viper the split changes was run on a split build (15 test files, none over 60 s, and 39 cases). **Answer taken:** the split is kept, because
+  Commit 3's `src/` had to equal the snapshot the second audit read took, and a revert needed new lowering, a
+  lint rule for the fused form, a third read and reruns at the session's end; the cost is listed in record
+  0064 item 12 and on the page. **Alternative, for a later session:** the fused form (or the split only in
+  `program_start`) with a lint rule for it, measured on `build/m4.5e1e2b/audit-C2b/t/q05_reads_gt_nonmain.c`
+  and `e/e06_split_gt.c`.
+
+The next questions start at 348.
 
 ### Questions for the owner (after the planning of M4.5e1e2's continuation)
 

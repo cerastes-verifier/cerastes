@@ -24,13 +24,7 @@ void define_arrays_in_storage_rejections()
     };
 
     // ---- an array member of a struct ----
-    rc("arr_store_rej_member_array_of_structs", "decision 0059 items 1 and 2",
-       [=](Kit& k)
-       {
-           // struct T { int x; }; struct S { struct T a[2]; };
-           StructType* T {k.strukt("T", {{"x", k.i32}})};
-           k.strukt("S", {{"a", k.prog.array_of(k.st(T), 2U)}});
-       });
+    // (the member that is an array of structures, refused here until M4.5e1e2 Part C2, is accepted by check_program since its slice 1: e1e2c2_member_*)
 
     // ---- a global or `static` array: what part B still refuses ----
     rc("arr_store_rej_global_array_zero_length", "of no elements",

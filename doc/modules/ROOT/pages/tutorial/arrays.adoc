@@ -232,8 +232,10 @@ structures can do.
 A loop that changes an array in place, such as adding one to every element, needs to speak
 of each element's value on entry to the function inside its invariant (`cerastes_old` in a
 loop invariant). That, pointer arithmetic (`p + i`), and a quantifier inside another are not
-supported yet; nor are arrays of arrays, arrays of structures as globals or as members of a
-structure, or a quantifier over a member of a structure. Arrays of scalars in
+supported yet; nor are arrays of arrays, or a quantifier over a member of a structure. An
+array of structures may also be a global or a member of a structure
+(xref:memory.adoc#global-arrays[Global arrays], xref:memory.adoc#array-members[Array
+members]). Arrays of scalars in
 global and `static` storage and as members of structures are on
 xref:memory.adoc#global-arrays[Global arrays] and xref:memory.adoc#array-members[Array
 members]. xref:memory.adoc#quantifiers[Facts about every element] has the details of

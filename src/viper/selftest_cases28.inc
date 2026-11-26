@@ -100,12 +100,13 @@ void define_arrays_rejected_until_part_b()
            // struct S { int a[0]; }; (an array member is accepted from M4.5e1e1 part C: one dimension of at least one element)
            k.strukt("S", {{"a", k.prog.array_of(k.i32, 0U)}});
        });
-    rc("arr_rej_array_global_of_structs", "decision 0059 items 1 and 2",
+    rc("arr_rej_array_global_of_structs_missing_leaves", "has 0 initial values for the 1 leaves",
        [=](Kit& k)
        {
-           // struct T { int x; }; struct T g[3]; (M4.5e1e2)
+           // struct T { int x; }; struct T g[3] = {...}; with a listed element that has no value for its leaf (the global array of structures is accepted from M4.5e1e2 part C2)
            StructType* T {k.strukt("T", {{"x", k.i32}})};
-           k.prog.add_global("g", k.prog.array_of(k.st(T), 3U), k.at(), nullptr);
+           Global* g {k.prog.add_global("g", k.prog.array_of(k.st(T), 3U), k.at(), nullptr)};
+           g->elems.push_back(GlobalLeaf {});
        });
     rc("arr_rej_array_zero_length", "of no elements",
        [=](Kit& k)

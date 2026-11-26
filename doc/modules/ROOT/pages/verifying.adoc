@@ -1282,8 +1282,8 @@ The constructs that are rejected in this version are:
   defined in another file (`extern` with no definition here), arrays other than
   those xref:memory.adoc#arrays[Arrays] describes (arrays of scalars as locals,
   parameters, globals, `static` locals, structure members and compound literals in
-  C, and arrays of structures as locals: arrays of structures anywhere else and
-  arrays of arrays are not supported yet), a global
+  C, and arrays of structures as locals, globals, `static` locals and structure
+  members: arrays of arrays are not supported yet), a global
   array declared without a bound (`int a[];`), designators in
   array initializers (`{[2] = 5}`), an unused array typedef in a function (both
   compilers warn about it), classes

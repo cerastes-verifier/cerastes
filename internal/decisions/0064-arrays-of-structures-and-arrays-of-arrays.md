@@ -12,7 +12,8 @@
   section 6 of that plan: this header; items 1, 5, 7, 12, 13, 16 and 19; the table of facts (P84); the
   consequences. **The continuation's first session built Part R (its Commit 1) and Part C1 (its Commit 2:
   items 7 and 8 and the range parts of 10 for a pointer parameter's range over structures, with round R's
-  fixes); Parts C2 to F stay "decided, built by the next session" until their commits.** Written before code
+  fixes) and Part C2 (its Commit 3: item 9, the global and member parts of items 7, 10 and 12, with round
+  C1's code fixes); Parts D, E and F stay "decided, built by the next session".** Written before code
   (invariant 6) from section 7 of the plan
   (`.claude/plans/m4-5e1e2-arrays-of-structures.md`, written at a session that only planned and executed without
   re-planning). Revised by P83's and S48's decision tables (the plan's section 6; `internal/il-inventory.md`,
@@ -79,7 +80,9 @@
     (where a `restrict` declaration without a body is reported, item 19), **339** (the lone zero that is not a
     literal: the spellings the IL tells, item 16), **340** (a staging pin's row that Part C1's lift removes one
     part early), **341** (a function without a body is rejected if ANY of its declarations has the qualifier,
-    item 19) and **342** (item 5's rule is over-strict on a family no compiler flags, listed).
+    item 19), **342** (item 5's rule is over-strict on a family no compiler flags, listed) and **344** (the
+    contract reads `g[e].x` and `p->v[e].x` are built in Part C2, item 7); **343** (a structure pointer formed
+    outside what the function's atoms cover, passed on or returned: an exit 3, item 7) is open for the owner.
   - **Audit round R** (a fresh Fable auditor on the joined snapshot of Part R, `c263b457938f`; `build/m4.5e1e2b/
     auditor-report-R.md`): no wrong program verifies and no blocking finding; should-fix 1, a called function
     without a body whose declarations disagree on `restrict` is accepted (item 19, question 341); 2, item 5's
@@ -97,8 +100,37 @@
     pointer-to-structure member is accepted and right, but untested, and the lint refuses its Viper; 5,
     `f__wf`'s ghosts per leaf and slot had no must-fail test (pinned with Commit 2); 6, the lint's scope-exit
     rule is switched off by any `assert false` in the method; 7, an unlisted cost (item 7). Items 2, 3, 4 and
-    6 are code and lint fixes that land with Commit 3 (Part C2) and are read again by the audit round of Part
-    C2; until then this record says what Commit 2's build does.
+    6 are code and lint fixes that landed with Commit 3 (Part C2; items 7 and 17 say how). Audit round C2
+    reran the 31 probes of the code fixes (2 and 3: the outcomes hold, no exit 3); it did not check the lint
+    rules of 4 and 6.
+  - **Audit round C2** (a fresh Fable auditor on the snapshot of Part C2, `a044aff629b8`;
+    `build/m4.5e1e2b/auditor-report-C2.md`; 387 probes): no wrong program verifies and no blocking finding.
+    It rested on its probes and on the functions it names: most of the `lower.cpp` and `encode.cpp` diff, the
+    consumers of `leaf_arrays` and the lint diff it did not read. Seven of its probes got no verdict and are
+    not checked.
+    Should-fix 1, an exit 3 on accepted programs: the length quantifier of a member array of structures
+    reused the binder `k` under another quantifier (item 3, "A length quantifier under another quantifier":
+    fixed with Commit 3); 2, the lint at that snapshot refused Part C2's rows (fixed by the lint round that
+    followed the snapshot); 3, seven Part C2 rules without a C-level test (written with Commit 3); 4, two
+    rejections this record did not list (question 346: items 7 and 12); notes 5 to 8: a list of about a
+    thousand structure elements (item 9), costs (item 12), three messages not in source terms (item 9), three
+    page statements (corrected).
+  - **Audit round C2b** (a fresh Fable auditor, a short second read on the final snapshot `588967a05edf`,
+    which is Commit 3's `src/`; `build/m4.5e1e2b/auditor-report-C2b.md`; 78 runs): no wrong program verifies.
+    It read the `src/` diff BETWEEN the two snapshots (the clause split of the global facts' length
+    quantifiers, made after round C2's snapshot: the same conjunction at its three callers, nothing dropped
+    or doubled; the binder fix of item 3: structural and right, `k2` unreachable today and without a case),
+    the consumers of `leaf_arrays` and `exempt_owned_fields` by their branches, and part of the lint diff;
+    it probed the thirteen shapes the binder fix newly accepts and, in C++, the by-value element of item 12.
+    Its findings: 1, a verification-time regression between the two snapshots (question 347, item 12); 2 and
+    3, `fp(gt.v[1])` is accepted in C++ where this record said rejected, and right in twenty probes
+    (question 346, item 12); 4, the lint still refuses four classes of accepted shapes that no test holds;
+    5 and 6, notes. Seven of its probes got no verdict and are not checked.
+  - **What no auditor read:** the body of Part C2's diff against Commit 2 in `lower.cpp` and `encode.cpp`
+    beyond the functions the two reports name (both rounds rested on probes there: 387 and 69), the
+    self-test cases, round C1's lint rules for its findings 4 and 6, the lint lines written after round
+    C2b's snapshot (the nested-quantifier rule and three placements), and mutants of the sequencing rows
+    (the il-analyst's replay stands alone).
 - **Milestone:** M4.5e1e2.
 - **Amends:** 0012 item 11 (the lint); 0024 item 6 (array types of aggregates); 0028 items 2 and 16 (as built); 0043
 items 6, 7, 9 and 11; 0044 items 2–5 and 8; 0045 items 1 and 12; 0047 items 2, 4, 6 and 8; 0052 item 2; 0055
@@ -208,6 +240,31 @@ doc example holds.
      line of a range atom over structures or rows. They hold in 0028 item 2's model (`len` is free; a member
      block is a fresh term) and are hypotheses discharged by an allocation, by `program_start` or by a caller,
      never axioms.
+   - **A length quantifier under another quantifier** (written on 2026-11-26 before its code; audit round C2,
+     finding 1). The slot facts of a structure with a member that is an array of structures hold a quantifier
+     of their own (`forall k: Int :: { loc(member(X, j), k) } 0 <= k && k < N ==>` the element's facts), and
+     those slot facts may themselves stand under a quantifier whose binder occurs in `X`: the well-formedness
+     row of a pointer leaf under a range's binder (`reads_range(pp, n)` over `struct T **`; a range over a
+     structure with a `struct T *` member), an array of such pointers as a global, a `static` local, a member
+     or a local a loop carries, and a type that reaches itself through a pointer (`struct E { struct TT *up;
+     }; struct TT { struct E v[2]; };`). **Rule:** the binder of a length quantifier is a name that is not
+     free in its slot expression `X`: `k` where `X` does not mention `k` (every program before this rule,
+     whose Viper is unchanged), else the first of `k1`, `k2`, … that `X` does not mention; inside the
+     quantifier's body and trigger the outer binder keeps its name and its meaning (it occurs only inside
+     `X`), and the new binder occurs only as the index of `loc(member(X, j), ·)` and in its bounds. Part C2's
+     first build wrote `k` at every level, so the inner quantifier captured the outer binder inside `X`;
+     Silicon refused the unit ("duplicate identifier"), an exit 3 for every function of the file and never a
+     proof, but nothing other than that check stood behind it. The global facts' own quantifier
+     (`global_facts`) had the same fixed name and cannot nest today (an element structure with an array
+     member is rejected). **As built** (Commit 3): one helper, `length_binder(X)`, decides the name by a
+     structural walk of `X` for a free variable of that name; `struct_lens`, the global facts and
+     `alloc_struct_<T>`'s member-array block share it, and every caller of `struct_lens` (the block and
+     slot facts, the shape rows, the call and return rows) has the rule through it. No program emitted
+     before the fix changed. The thirteen shapes the audit found verify (5 to 14 s), each reports an added
+     false check, and a wrong claim per family fails. No C program can yet USE the nested fact (it would
+     need an atom through `pp[0]`, a place reached through a heap read, which contracts reject), so at C
+     level the row is tested as present and consistent, and its content by nine self-test cases
+     (`e1e2c2c_binder_*`).
    - Every member block, at any depth, has its root block's liveness cell (`member_lv`): one liveness cell per
      root, as before.
 4. **VIR** (amends 0063 item 4).
@@ -354,7 +411,20 @@ doc example holds.
    - **Element reads** `p[e].x`, `p[e].t.x`, `p[e].a[e2]` and `g[e].x` in `requires`, `ensures`, a function's
      `decreases` and under `old`, the indexes reading no memory. A read is framed by a range atom when **its
      element slot** lies in the range (0060 item 5's disjunct on `&p[e]`; the member steps then name a leaf the
-     atom holds), and by a structure atom whose place is that slot.
+     atom holds), and by a structure atom whose place is that slot. **As built in Part C2** (question 344,
+     settled with the advisor: the lowering's contract-read path for a structure element extended to these
+     bases at small cost, and 0063 item 7 has the same reads for arrays of scalars): `g[e].x` of a global or
+     `static` array of structures, framed by `owns(g)` or `reads(g)` (the whole-array range atom), and a
+     member array's element reached by pure members from a parameter, a global or, in an `ensures`, the
+     result (`p->v[e].x`, `gt.v[e].x`, `r->v[e].x`), framed by the structure atom's array part or by
+     `owns(p->v)`. Still rejected: a second index (`p[e].a[j]`, Part E), a base reached through a load (Part
+     D), an atom on one element (`owns(g[1].x)`), `&g[e]` in a contract (M4.5e2), and **an element of a
+     structure VALUE** (`t.v[1].y` of a by-value parameter, `f().v[i]`; item 12). `owns(gt.v)` and
+     `reads(gt.v)`, the member array of a GLOBAL structure alone, are accepted as `owns(p->v)` is (a write of
+     `gt.n` under them is `permission`). **Listed limit, fail closed** (audit round C2, finding 4; question
+     346, settled with the advisor; pinned): under `cerastes_old`, `g[e].x`, `p->v[e].x` and `gt.n` are
+     accepted, and `cerastes_old(gt.v[e].x)`, an element of a member array of a global structure, is
+     rejected, although the same read outside `old` is accepted.
    - `owns(g)` of a global array of aggregates is the range atom over the whole array (as 0063 built it for
      scalars); `owns(*p)` of a structure with an array member of aggregates takes that member's leaf paths with
      its other leaves; `owns(p->v)` is that member alone.
@@ -458,19 +528,33 @@ doc example holds.
        fails `permission`, never by `p`'s entry range (0060 item 11). A caller that holds one element fewer
        gets two `permission` errors at the call, the shape row and the first leaf's marked row, as 0060 item
        8 has it for a forwarder (a local array one element short: one row, which names no member).
-     - **As built at the continuation's Commit 2, to be fixed with Commit 3** (audit round C1; each fails
-       closed): (finding 2) a contract that applies a `pure` function to a scalar range beside a range over
-       structures has that range written into the application's framing as an interval of the member's
-       cells (`apply_frame` was not given the leaf path); Silicon's own check of the application stands
-       behind the guard, so an unframed application gets its two right diagnostics and then an exit 3, and
-       a framed one can only be a false alarm; the same exit 3 for a structure atom predates this record.
-       (finding 3) A `cerastes_forall` over a scalar range beside a range over structures of that member
-       type is accepted and its results are right, but the quantifier's body then holds a computed `loc`
-       term over the binder, outside 0061 item 11; the lint refuses that Viper, so no test holds the
-       combination. (finding 4) A range over a structure with a pointer-to-structure member (`struct N {
-       struct N *next; int v; }`) is accepted and behaves rightly, but the lint refuses the well-formedness
-       row of that leaf (as it does for a scalar range over `struct P **`, since M4.5e1b), so no test holds
-       it either.
+     - **Fixed with the continuation's Commit 3** (audit round C1, findings 2 to 4; each failed closed at
+       Commit 2): (finding 2) `apply_frame` skips every site whose pointee is a structure (a range over
+       structures, a structure atom, `owns(g)` of a global array of structures), so a `pure` application
+       beside one is framed by scalar sites only: an unframed application is one `permission` error with no
+       exit 3 after it (the older structure-atom form gave that exit 3 on the base), and no existing
+       program's Viper changed. (finding 3) A read under a binder is no longer framed by a range over
+       structures or by the array part of a structure atom (`contract_read`, and the loop-invariant path):
+       framed by a scalar range it verifies, framed only by the structure site it is `permission`, and the
+       quantifier's body holds no computed `loc` term over the binder. Members under the binder are Part F.
+       (finding 4) A range over a structure with a pointer-to-structure member (`struct N { struct N *next;
+       int v; }`) and a scalar range over `struct P **` have self-test cases and a test pair
+       (`tests/memory/range_struct_pointer_member.c`), and the lint admits exactly the well-formedness row
+       the lowering writes for such a leaf. Pinned beside them: `owns_block` beside a range over structures
+       is rejected (`negative/range_struct_reject_owns_block.c`); a `pure` application and a `forall` beside
+       each storage (`range_struct_pure_beside.c`, `range_struct_forall_beside.c`, each with an unframed and
+       a wrong-value twin).
+     - **Listed false alarm** (question 345, settled with the advisor; M4.8, with 0063 item 7's): `f__wf`
+       does not tie the entry and exit ghosts of a member of an element of a MEMBER array of structures
+       reached through a pointer. With `struct T { struct P v[2]; int n; }`, `requires reads(*p) &&
+       p->v[0].x != 0` and `ensures reads(*p) && (r == 0 || r == 10 / p->v[0].x)` report `division-by-zero`
+       at the `ensures`, under `reads(p->v)` too; a contract that states the guard in the clause that
+       divides verifies. A scalar member (`p->n`), a nested structure's member (`p->a.x`), a parameter's
+       range (`p[e].x`) and a global array (`g[e].x`) are tied. Only weaker, since ghosts are keyed with the
+       state: 0063 item 7 lists the same for a member array of scalars (its N1). Pinned by
+       `tests/memory/negative/struct_member_array_struct_wf_tie_false_alarm.c`; the ghosts themselves (one
+       per leaf path and slot) by `struct_member_array_struct_wf.c` and its `_wf_division` twin, whose
+       cross-state row waits for the tie.
      - **Cost, listed** (audit round C1, finding 7; fail closed: a timeout is exit 3; M4.8's cost items): a
        function that holds two `reads_range` atoms over ONE structure type and has a loop is slow. Under a
        loaded box, a loop that only reads took 81 s, and its twin whose loop writes through one of the
@@ -497,7 +581,19 @@ doc example holds.
    quantifier per leaf. Every element constant is read through `constant_value` (P38; P83 (f): the loss of `expr`
    is keyed to the outermost list, so a list of 1,002 elements or more loses it for every leaf below it, whatever
    the nesting, and such a leaf under an implicit conversion is rejected by `constant_value`'s own rule). A `static` local array of
-   aggregates is such a global with its implicit atom.
+   aggregates is such a global with its implicit atom. **As built in Part C2** for arrays of structures:
+   `Global::elems` holds one entry per element up to the last element the list writes, each with one
+   `GlobalLeaf` per leaf of the element (an omitted leaf zero or null), and `rest` (zero or unknown); a
+   structure global's member that is an array of structures is that leaf's `elems` and `rest`; both escape
+   directions set every entry and the rest to unknown; `struct P *pg = g;` is `loc(GB_g(), 0)`. An array of
+   structures declared through a typedef or as a type operand stays rejected (Part E, with the computed
+   types of item 13). **Listed** (audit round C2, notes 5 and 7; each fail closed): an initializer list of
+   about a thousand two-leaf elements with no converted leaf (1,003 measured; 300 verify in 29 s) is
+   accepted by the encoder and gets no verdict, because Silicon's own stack overflows on `program_start`'s
+   2,017 `ensures` clauses: exit 3, "Silicon did not produce a verdict" (with a converted leaf the list is
+   rejected at the declaration by P38's limit, as designed). Three messages are not yet in source terms: a
+   place in a global structure's member array prints as `(&gt.v[0])[1].x`; "passes `gt.v[0].y` and a range
+   to `gq`"; a write under `reads` says "the object it points to may have ended".
 10. **Loops** (amends 0059 item 8, 0060 item 11, 0063 item 10). An array of aggregates the function holds is,
     **per leaf path,** an array place (a local, a global in `main`) or a range place (a parameter's range, a
     held global elsewhere, a held structure place's member), with 0059 item 8's entry rows, conjuncts and
@@ -507,6 +603,12 @@ doc example holds.
     field, and a call whose `requires` owns a cell of that field reach every place of the field (0043 item 11).
     **Listed false alarm:** a loop that writes `v[i].x` cannot keep `v[k].y` by the automatic conjunct when
     both are of one field; a written quantified invariant keeps it (Part F), and the precise rule is M4.8's.
+    **As built in Part C2:** a member that is an array of structures, once its first slot is bound to a
+    local, is a range over structures with a literal count, so its leaves are the places Part C1 gave a
+    parameter's range; a loop that writes `t.v[i].x` loses `v[k].y` and the structure's own `int` cells
+    alike (the same listed false alarm). A loop invariant or measure may read `g[e].x`, `t.v[e].x` and
+    `p->v[e].x`, framed only by places the loop holds: in a function that holds no atom on `g`, and after
+    `p = q;`, the read is `permission`.
 11. **Sequencing** (0039 item 3, 0059 item 9, 0063 item 11). Object keys gain the index steps: `v[0].x` and
     `v[1].x`, and `v[i].x` and `v[i].y`, are different objects; two unsequenced accesses to the same leaf path
     of one array, one a write, with indexes that are not all constants, get the path-precise `unsequenced` row;
@@ -542,7 +644,40 @@ doc example holds.
     member is an array of structures is a value by its value view: every leaf of every element is one Viper
     value, and `kMaxByValueArrayElements` (7) counts those leaves; a whole-structure copy of it is leaf stores
     and `copy_arr_<t>` calls per element — **rejected beyond 7 such leaves until M4.5f3** (no trusted
-    `copy_arr_<E>` is added here). An array is never a value. **A structure value stored into an element**
+    `copy_arr_<E>` is added here). An array is never a value. **As built in Part C2:** the value view gives
+    each leaf of each element as one leaf (`path` through the array member to the leaf, `elem` the index,
+    in element order), a by-value parameter or result one Viper value per such leaf
+    (`<p>_m0_m0_e1`-style names), and a whole-structure copy reads every leaf of every element into
+    temporaries before the first store; 7 leaves are accepted and 8 rejected at the parameter, the result
+    and the copy. **A contract cannot read an element of such a structure VALUE** (`t.v[1].y` of a by-value
+    parameter, `f().v[i]`): rejected (`unsupported_annotation`; M4.5f3, with array values), where 0063 item
+    13 reads `s.a[i]` of a by-value parameter for an array of scalars. **Cost, listed** (fail closed: a
+    timeout is exit 3; M4.8's cost items, with item 6's): each structure local that holds a member array of
+    structures adds about 45 s to its function's proof on the loaded box (one such local 15 to 23 s, two
+    59 to 61 s, six in one `main` no verdict in 300 s); a call of a function with `reads(gt)` of a global
+    structure with such a member, followed by one `check` of five of its leaves, got no verdict in 560 s
+    (with one leaf: 9 s), and so did one call with three or four atoms over such a structure, a range and a
+    global (audit round C2, note 6). **Listed limit, fail closed** (audit round C2, finding 4; question
+    346; pinned): an element of a member array of a GLOBAL structure passed by value (`fp(gt.v[1])`) is
+    rejected IN C, with a message that speaks of "a pointer read from memory" although none is read;
+    `struct P e = gt.v[1];`, `fp(t.v[1])` of a local and `fp(g[1])` of a global array are accepted. **In
+    C++ the same call is accepted** (found by the joined proof, probed by audit round C2b): the C front end
+    folds the element's address into an address constant, which `object_value` refuses, and the C++ front
+    end keeps the subscript. The accepted path reads each leaf of the element under the caller's
+    permission, with the bounds, permission and flag rows before the call (the right value verifies, a
+    wrong element or leaf fails, a symbolic index is checked, a function without `gt`'s atom is
+    `permission`, a call beside it that may change the element is `unsequenced`: twenty probes), and has a
+    C++ test pair. **Cost that this session's own change added, listed** (audit round C2b, finding 1;
+    question 347, settled with the advisor; fail closed): giving the length facts of a global their own
+    clauses, which the lint's shape asks for, moved the quantifier of a structure global's member array out
+    of the middle of the facts' conjunction, and the prover then no longer finishes one measured program: a
+    function other than `main` with `requires reads(gt) && gt.v[1].x == 3` that calls a `reads(gt)`
+    function and checks that leaf took 17 s on the build before the split and gets no verdict in 200 s
+    after it (the same call from `main` took 9 s before and 13 s after). The two-call chain `main -> mid -> rd` over
+    such a global got no verdict in 200 s before the split either, so the family was fragile already; the
+    split is kept because Commit 3's `src/` is the snapshot the second read took, and no committed build
+    accepted these programs before. The alternative for a later session is the fused form with a lint rule
+    for it. **A structure value stored into an element**
     (`v[i] = f();`, `v[i] = (struct P){1, 2};`) is not a copy between objects and stays rejected, with a
     message of its own, until M4.8 (audit round 2, issue 5; question 333, a default of the continuation's
     plan: 0044 item 5's rules for a structure `Store` are not extended to an element here); `struct P t =
@@ -719,11 +854,19 @@ doc example holds.
     - **As built through Part C1** (the continuation's Commit 2): leaf rows in a range atom's `requires`
       and `ensures` and in a call's rows; the length-facts row of a range, and its tie to every leaf row;
       the `reads_range` amount as a minimum over each leaf of the first slot; a scope exit's rows tied to
-      its allocation's (receiver, field) set (the first session's audit 2, issue 7). **Known gaps:** that
-      scope-exit rule is switched off for a method that holds an `assert false` anywhere, which every
-      method with a result does (audit round C1, finding 6: a method that drops an array's exit whole is
-      not refused; fixed with Commit 3); the row for the well-formedness of a pointer-to-structure leaf is
-      refused (finding 4, above). **Not inspected by any rule, by design** (audit round C1, note 8): the
+      its allocation's (receiver, field) set (the first session's audit 2, issue 7). **Fixed with Commit 3**
+      (audit round C1, findings 6 and 4): the scope-exit rule reads the rows before every `goto l_end` and
+      before the end label, and an `assert false` in the method hides nothing (at Commit 2 it switched the
+      rule off, so a method that dropped an array's exit whole was not refused); the well-formedness row of
+      a pointer-to-structure leaf is admitted as the lowering writes it. **As built through Part C2**
+      (Commit 3): the length facts of a global array of structures and of a structure global's member array
+      are clauses of their own after the global facts' clause, each followed by its row group in
+      `program_start`; the well-formedness row of a pointer to a structure with a member array of
+      structures, in a `requires`, an `ensures`, an `assert` and an `f__wf` prior; `struct P *pg = g;` as a
+      pointer to a structure global; the `Perm`-local minimum over a member array's leaf amounts. **Limits
+      of these rules, listed** (each admits a weaker assumption only): the pointer-to-structure row may
+      state fewer member lengths than the pointee has; with one pointer field any element shape is admitted
+      for `pg`. **Not inspected by any rule, by design** (audit round C1, note 8): the
       pairing rows of a call, the `? :` terms of a marked amount, a cell's sum row and the contract-read
       framing disjunction, each of which Silicon checks again (a wrong one is a false alarm or an exit 3:
       a marked row consumes and gives nothing, and the amount a callee receives is bound by Silicon's own
