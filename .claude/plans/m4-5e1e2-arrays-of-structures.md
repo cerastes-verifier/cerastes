@@ -1,5 +1,14 @@
 # Plan: M4.5e1e2 — Arrays of structures and arrays of arrays (record 0064)
 
+**Superseded for everything not yet built (2026-11-25, after its first session).** That session built Parts A
+and B from this plan, ran P83 and S48 in full, and closed at split point 1. **Parts C to F, and the rejection
+of `restrict` the owner decided afterwards (question 326), run from
+`.claude/plans/m4-5e1e2b-arrays-of-structures.md`**, which the owner asked for in place of "no second
+planning": record 0064 was revised in eleven items after this plan was written (its section 7 below is no
+longer the record's text), every line number of sections 4 and 8 has moved, and questions 320, 322, 325 and
+326 are answered there. This file stays as the history of Parts A and B, of the probes and of the spike; its
+sections 5, 6 and 8 to 13 are not to be executed again.
+
 **Written on 2026-11-25 at a session that only planned, after M4.5e1e1.** It supersedes section 14 of
 `.claude/plans/m4-5e1e1-arrays-of-scalars.md` ("a short planning of its own"): **M4.5e1e2 does not plan again.**
 Its probes and spikes run first (section 6), each with a decision table that says what is built for each outcome.

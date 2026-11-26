@@ -268,17 +268,33 @@ of the global, `same(p)`, a guarded atom).
   36; Commit 2 at 7 h 48; the full check's first run from 7 h 52 to 8 h 46 (red); the fix committed and the second run
   started at 8 h 51 and ended green at 9 h 45.
 
-**First step for the next session:** the owner reviews handoff §8 (four open questions; 326 first) and merges or
-pushes the branch (handoff §2). Then the continuation: `claude --agent orchestrator --effort high`, first message
-`M4.5e1e2, from Part C`. It runs the plan's Step 0 again on the new base (worktree, lanes, baseline, R1 and R3; no
-P83, no S48: every row has run) and goes on from Part C's line in the plan's "Order of work", with the audit
-rounds numbered on from 3.
+**After the session** (2026-11-25, 02:00 UTC on the 26th): **the continuation was planned, at a session that
+only planned** (the owner asked for a plan in place of question 310's "no second planning"; nothing was built or
+run, and the tree's facts in the plan are read, not run, by four read-only surveys at `f313023`). The plan is
+`.claude/plans/m4-5e1e2b-arrays-of-structures.md`, committed on a new branch, `m4.5e1e2b-arrays-of-structures`
+(worktree `.claude/worktrees/m4.5e1e2b`, source only), made from this branch's tip because `main` does not hold
+this session's commits yet. **The owner answered the four open questions in the question dialog:** 326 "Reject
+restrict (Recommended)" (every `restrict` parameter is rejected; the 17 files that change outcome are approved
+and listed in the plan's Flips R; a model of `restrict` is an M8 entry); 320 "Accept it in Part E
+(Recommended)" (`int (*a)[3]` as a parameter); 322's second half "Reject them too (Recommended)" (the address
+tests on arrays of scalars); 325 "Probe, reject if the IL can tell" (the lone zero that is not a literal). The
+plan runs the `restrict` rejection first (Part R), cuts the first plan's Part C in two (C1: ranges over
+structures in contracts; C2: static storage and members), then D, E and F, sized at 3,700 to 6,700 `src/`
+lines: two or three more sessions under the 12-hour rule. Its defaults 331 to 336 are for the owner's review
+(handoff §8). **The one wrong program that still verifies on this branch** (two ranges of the same count 0
+beside a global the contract holds) **stays until Part R lands.**
+
+**First step for the next session:** the owner merges or pushes (handoff §2: both branches fast-forward
+`main`). Then the continuation: `claude --agent orchestrator --effort high`, first message `M4.5e1e2
+continuation (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`. It starts at that plan's section 5 (Step 0:
+the base must contain `aebf158` and the plan; the worktree's submodules and bootstrap; the first session's
+reports copied; the lanes; the baseline; R1, R3 and R4; the probe P84; no P83 and no S48), then Part R.
 
 ## History (one row per session; the full entries are in `git show 1fcc43b:internal/status.md`)
 
 | Session | Date | Branch, merge | Records | Outcome |
 |---|---|---|---|---|
-| M4.5e1e2 (first session) Arrays of structures in code; `restrict` | 2026-11-25 | `m4.5e1e2-arrays-of-structures` (not merged at the session's end) | 0064, for the items built (0012, 0037, 0043, 0059, 0060, 0063 amended) | Parts A and B of six: leaf paths and the traps closed; automatic local arrays of structures in code; question 304's rejection as the compilers measure it; `restrict` found unsound on `main` by audit: every form found but the last is rejected, one is recorded open and unsound (item 19, question 326 for the owner); S48 in full (79 fixtures); closed at split point 1 under the 12-hour rule, Parts C–F to the continuation |
+| M4.5e1e2 (first session) Arrays of structures in code; `restrict` | 2026-11-25 | `m4.5e1e2-arrays-of-structures` (not merged at the session's end) | 0064, for the items built (0012, 0037, 0043, 0059, 0060, 0063 amended) | Parts A and B of six: leaf paths and the traps closed; automatic local arrays of structures in code; question 304's rejection as the compilers measure it; `restrict` found unsound on `main` by audit: every form found but the last is rejected, one is recorded open and unsound (item 19, question 326 for the owner); S48 in full (79 fixtures); closed at split point 1 under the 12-hour rule, Parts C–F to the continuation, which was planned afterwards (`.claude/plans/m4-5e1e2b-arrays-of-structures.md`; the owner: reject `restrict`) |
 | M4.5e1e1 Arrays of scalars in structures and static storage | 2026-11-25 | `m4.5e1e1-arrays-of-scalars`, PR #37 `76fc7b1` | 0063 (0012, 0024, 0028, 0041, 0043, 0044, 0059, 0060, 0061, 0062 amended) | global and `static` arrays, array members, array typedefs and `sizeof`, C array literals, structure copies and by-value passing up to 7 array elements; a compound-literal sequencing hole open since M4.5c2a closed; questions 301–309, no cut; the full check run by the owner after the session (green) |
 | M4.5e1d Pure functions and the exact sum | 2026-11-24/25 | `m4.5e1d-pure-functions`, `68384d1` (fast-forward) | 0062 (0006, 0010, 0011, 0012, 0013, 0024, 0025, 0037, 0041, 0042, 0044, 0061 amended) | a `pure` function that is called or has a contract as a Viper function with its definition check; self-recursion with `decreases`; applications in checks, contracts, calls and loop invariants; the exact sum verifies; testing moved to the x86-64 box; Silicon's prover cap; questions 273–286, no cut |
 | M4.5e1c Quantifiers | 2026-11-23/24 | `m4.5e1c-quantifiers` | 0061 (0006, 0011, 0028, 0029, 0037, 0038, 0041, 0059, 0060 amended) | `cerastes_forall` with an inlined `pure` body in contracts, loop invariants and checks; `f__wf` variant M; the fill loop, max, the carrays port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260); questions 253–263 (256–263 built overnight, for review) |

@@ -1,82 +1,84 @@
-# Handoff after M4.5e1e2's first session (2026-11-25) — the continuation runs next, from Part C of the same plan
+# Handoff after the planning of M4.5e1e2's continuation (2026-11-25) — the continuation runs next, from a plan of its own
 
 The next session reads this file after `CLAUDE.md` and its plan. `status.md` has the formal entry of the last finished
-session (M4.5e1e2's first: Parts A and B of six). This file adds what a cold start would otherwise have to rediscover,
-and holds only what is live (owner, 2026-10-26).
+session (M4.5e1e2's first: Parts A and B of six) and what happened after it. This file adds what a cold start would
+otherwise have to rediscover, and holds only what is live (owner, 2026-10-26).
 
-**What the next session needs here:** §1, §2, §3 "From M4.5e1e2's first session", the rules of §4 and §6, and §8
-(four questions open for the owner, 326 first; 321–324, 327 and 328 settled with the advisor, for review).
+**What the next session needs here:** §1, §2, the rules of §4 and §6, and §8 (no question is open; the
+continuation plan's defaults 331–336 and the advisor's rulings 321–324 and 327–330 are for the owner's review).
+What §3 held for it is in its plan, section 13.
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
 M4.5e1b's (both 2026-11-11), at M4.5e1c's (2026-11-23), at M4.5e1d's (2026-11-24), at M4.5e1e's and at M4.5e1e2's
-(both 2026-11-25), each at the owner's request. **The text before M4.5e1e2's first session is `git show
-f07d80a:internal/handoff.md`**; the ones before it are named there. Each note below keeps its origin in brackets.
-Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan's
-"Inputs".
+(both 2026-11-25), and at the planning of M4.5e1e2's continuation (2026-11-25), each at the owner's request. **The
+text before this planning is `git show f313023:internal/handoff.md`**; the ones before it are named there. Each
+note below keeps its origin in brackets. Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes
+a session consumes move into its plan's "Inputs".
 
 ## 1. State
 
-- **Wrong programs verify on `main` today (found by audit rounds 1 and 2 of M4.5e1e2; question 326).** C's
-  `restrict` promises that an object modified through the parameter is reached only through pointers based on it;
-  cerastes accepted `restrict` whenever the contract owned the object, and the function could still reach the object
-  by another route: `int g; int f(int *restrict p)` with `owns(*p)`, whose body tests `p == &g`, writes `*p`, writes
-  `g` and returns `*p`, verified with an `ensures` true only of the aliased value, while `gcc -O2` returns another
-  (C23 6.7.3.1p4: undefined). Round 1 and two probe rounds found the routes through a global's name, a callee that
-  owns the global, and a pointer a callee hands back; round 2 then found two more that the first fix missed (the
-  global named inside a callee's own body; a range atom whose count can be 0, which excludes nothing). **The branch
-  `m4.5e1e2-arrays-of-structures` rejects every form found up to its last audit read** (record 0064 item 19: fail
-  closed, over-strict for several shapes C allows). **That last read found one more, which is NOT fixed and still
-  verifies on the branch:** `int f(int *restrict p, int *q, int n)` with `requires(owns_range(p, n) &&
-  owns_range(q, n) && owns(g) && p == &g && q == &g)`, body `p[0] = 1; q[0] = 2; return p[0];`, called with `n ==
-  0`: both ranges are empty, the permission comes from `owns(g)`, which the body never names, and the function
-  verifies `r == 2` where `gcc -O2` and `clang -O2` return 1 (item 19, "KNOWN, OPEN AND UNSOUND"; the advisor's
-  stop rule for the session: no third fix cycle). **The rule is an enumeration and is not argued complete: three
-  audit reads in one day each found a form the rule then in force missed.** `main` has all of them until the
-  branch is merged. The complete rule is the owner's (§8, question 326).
+- **Wrong programs verify on `main` today, and one still verifies on the session branches, until Part R of the
+  continuation lands** (found by the audits of M4.5e1e2's first session; question 326, **answered: `restrict` is
+  rejected altogether**). C's `restrict` promises that an object modified through the parameter is reached only
+  through pointers based on it; cerastes accepted `restrict` whenever the contract owned the object, and the
+  function could still reach the object by another route: `int g; int f(int *restrict p)` with `owns(*p)`, whose
+  body tests `p == &g`, writes `*p`, writes `g` and returns `*p`, verified with an `ensures` true only of the
+  aliased value, while `gcc -O2` returns another (C23 6.7.3.1p4: undefined). The first session's branch rejects
+  every form its audits found but the last (record 0064 item 19, as it stands at `f313023`: an enumeration of
+  routes, over-strict for several shapes C allows). **That last form is NOT fixed and verifies on both session
+  branches:** `int f(int *restrict p, int *q, int n)` with `requires(owns_range(p, n) && owns_range(q, n) &&
+  owns(g) && p == &g && q == &g)`, body `p[0] = 1; q[0] = 2; return p[0];`, called with `n == 0`: both ranges are
+  empty, the permission comes from `owns(g)`, which the body never names, and the function verifies `r == 2`
+  where `gcc -O2` and `clang -O2` return 1. Three audit reads in one day each found a form the rule then in
+  force missed. **The owner's decision (2026-11-25): every `restrict` parameter is rejected with a diagnostic
+  that says to drop the keyword; the continuation builds it first (its plan's Part R), and a model of `restrict`
+  is an M8 entry.** `main` has every form until the branches are merged.
 - **M4.5e1e2's first session** (2026-11-25; record 0064, accepted for the items built) is on the branch
-  `m4.5e1e2-arrays-of-structures` (worktree `.claude/worktrees/m4.5e1e2`), branched from `main` = `f07d80a` (which `origin/main` also holds since the owner's push during the session):
-  Commit 1 `571fe59` (the record, the spike), Commit 2 `b9e1ab9` (Parts A and B, the `restrict` rule, the pages),
-  `aebf158` (one self-test case corrected after the first run of the full check) and
-  the closing commit. It landed **Part A** (leaf paths, the traps closed) and **Part B** (automatic local arrays of
-  structures in code, and question 304's rejection as the compilers measure it). **The full check
-  (`CERASTES_LONG=1`, on the box) is green at `aebf158`**, the session's last commit that touches anything but
-  `internal/` and `plan.md`; its first run, at `b9e1ab9`, was red on one new self-test case, corrected in `aebf158`.
-- **M4.5e1e2 is not finished: Parts C, D, E and F are the continuation's**, from the same plan
-  (`.claude/plans/m4-5e1e2-arrays-of-structures.md`), with no second planning (question 310). The session closed at
-  split point 1 under the 12-hour rule; nothing was cut. Every spike row has run (S48: 79 fixtures, every decision
-  table on its first branch), so the continuation runs no P83 and no S48.
-- **The box:** this session's lanes `~/cerastes-e1e2/{base,il,edg,work,audit}` (containers `cerastes-e1e2-<lane>`,
-  image `cerastes-e1d:26.04`); `work` holds the final tree built. `scripts/box_lane.sh`'s defaults still name
-  `cerastes-e1e1`: a session sets `CERASTES_BOX_DIR` and `CERASTES_BOX_PREFIX` (this session kept them in
-  `build/m4.5e1e2/box.env`, sourced before every call). The box was under other users' load (20–140) for most of the
-  session; times measured there are upper bounds.
+  `m4.5e1e2-arrays-of-structures` (worktree `.claude/worktrees/m4.5e1e2`), tip `f313023`, branched from `main` =
+  `origin/main` = `f07d80a`: Commit 1 `571fe59` (the record, the spike), Commit 2 `b9e1ab9` (Parts A and B, the
+  `restrict` rule, the pages), `aebf158` (one self-test case corrected after the first run of the full check) and
+  the closing commits. It landed **Part A** (leaf paths, the traps closed) and **Part B** (automatic local arrays
+  of structures in code, and question 304's rejection as the compilers measure it). **The full check
+  (`CERASTES_LONG=1`, on the box) is green at `aebf158`**, the last commit that touches anything but `internal/`,
+  `plan.md` and `.claude/plans/`; its first run, at `b9e1ab9`, was red on one new self-test case.
+- **The continuation is planned** (2026-11-25, at a session that only planned: nothing was built or run). The
+  owner asked for a plan in place of question 310's "no second planning", because the first session revised the
+  record in eleven items, moved every line number of the first plan, and left four questions open. **The plan is
+  `.claude/plans/m4-5e1e2b-arrays-of-structures.md`**, on the branch `m4.5e1e2b-arrays-of-structures` (worktree
+  `.claude/worktrees/m4.5e1e2b`, **source only: no submodules, no build**), which is the first session's branch
+  plus the planning commits. In order: **Part R** (`restrict` rejected; questions 322 and 325), **C1** (ranges
+  over structures in contracts), **C2** (static storage and members), **D** (the leftovers of a structure with an
+  array member), **E** (arrays of arrays), **F** (quantifiers); 3,700 to 6,700 `src/` lines, so **two or three
+  more sessions** under the 12-hour rule, each started from that plan. Every spike row has run (S48: 79 fixtures,
+  every decision table on its first branch), so no P83 and no S48 run again; one small probe, P84, is new.
+- **The box:** the lanes `~/cerastes-e1e2/{base,il,edg,work,audit}` (containers `cerastes-e1e2-<lane>`, image
+  `cerastes-e1d:26.04`) are the first session's and are reused; `work` holds its final tree built.
+  `scripts/box_lane.sh`'s defaults still name `cerastes-e1e1` (the continuation's Step 0 makes it refuse to run
+  without its two variables, and keeps them in `build/m4.5e1e2b/box.env`). The box was under other users' load
+  (20–140) for most of the first session; times measured there are upper bounds.
 - **CI:** unchanged (question 176 the owner's). **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website and **the EDG pin**
   `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Merge the branch; it does not wait for question 326.** On `restrict` the branch is strictly safer than `main`:
-   it rejects every unsound form found but one, and `main` accepts them all. Local `main` and
-   `origin/main` are both at `f07d80a`, the branch's base, so `git merge --ff-only m4.5e1e2-arrays-of-structures` on
-   `main` and a push are all it takes (never reset or rebase). Then decide 326 (§8). The full check was run on the box and is green at `aebf158` (the status entry
-   has both runs).
-2. **Answer or leave §8's open questions:** 320 (needed before Part E's array-of-rows parameters), 322's second
-   half, 325, 326. Review the advisor's rulings 321–324, 327 and 328 and the orchestrator's settlements listed in
-   `internal/status.md`.
-3. **Start the continuation:** `claude --agent orchestrator --effort high`, first message `M4.5e1e2, from Part C`.
-   Branch `m4.5e1e2b-arrays-of-structures`, worktree `.claude/worktrees/m4.5e1e2b`, `build/m4.5e1e2b/`, lanes
-   `~/cerastes-e1e2` (reuse them: ship the new base to each lane and rebuild; take a new baseline). **Its base is
-   the commit that holds this session's commits** (`main` after the merge of step 1; if `main` has not been merged
-   yet, the tip of `m4.5e1e2-arrays-of-structures`): the plan's Step 0 says "the commit of `main` that holds this
-   plan", which is `f07d80a` and has no Parts A and B, so the continuation checks that its base contains `aebf158`
-   and **stops and says so if neither `main` nor the branch does**. It runs the plan's Step 0 again on that base
-   (worktree, lanes, baseline, R1 and R3) and goes on from Part C's line in the plan's "Order of work"; audit
-   rounds number on from 3. Questions start at 331.
-4. **Remove, when convenient:** e1d's and e1e1's worktrees and merged branches (as before); this session's
-   `.claude/worktrees/m4.5e1e2-audit`; the refs `refs/tmp/e1e2-*`. Keep `.claude/worktrees/m4.5e1e2/build/m4.5e1e2/`
-   until the continuation has started: it holds every agent report, both audit reports, the auditors' probes
-   (`audit1/`), the `restrict` probes (`s0/restrict/`, `restrict2/`), the compiler matrices (`s0/`) and the
-   orchestrator's state log. On the box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
+1. **Merge; nothing waits for it, and nothing it waits for.** `main` and `origin/main` are at `f07d80a`; the
+   first session's branch and the continuation's branch are each a fast-forward of it, the second containing the
+   first. `git merge --ff-only m4.5e1e2b-arrays-of-structures` on `main` and a push bring both (never reset or
+   rebase). On `restrict` the branches are strictly safer than `main`: they reject every unsound form found but
+   one, and `main` accepts them all. The full check is green at `aebf158`; the commits after it change no code.
+2. **Review, when convenient (none blocks the continuation):** the continuation plan's defaults 331–336 (§8,
+   "Questions for the owner"); the advisor's rulings 321–324 and 327–330 and the orchestrator's settlements in
+   `internal/status.md`; the first plan's defaults 313–319; the advisor's rulings 301–309 from M4.5e1e1.
+3. **Start the continuation:** `claude --agent orchestrator --effort high`, first message `M4.5e1e2 continuation
+   (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`. Its branch and worktree exist; its Step 0 (the plan's
+   section 5) checks that the base contains `aebf158` and the plan, merges `main` into the branch if `main` has
+   moved (a merge, never a rebase), sets up the worktree's submodules and build, copies the first session's
+   reports, reuses the lanes and takes a new baseline. Questions start at 337.
+4. **Remove, when convenient:** e1d's and e1e1's worktrees and merged branches (as before); the first session's
+   `.claude/worktrees/m4.5e1e2-audit`; the refs `refs/tmp/e1e2-*`. **Keep
+   `.claude/worktrees/m4.5e1e2/build/m4.5e1e2/` until the continuation's Step 0 has copied it** (every agent
+   report, the three audit reports, the auditors' probes, the `restrict` probes, the compiler matrices, the
+   orchestrator's state log). On the box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
 5. **CI** (question 176): unchanged.
 
 ## 3. Open notes, by the session that consumes them
@@ -84,64 +86,29 @@ Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a sess
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
 
-**From M4.5e1e2's first session** (record 0064; `build/m4.5e1e2/` in the session worktree has every report):
-- **The continuation, before Part C:** read record 0064 as it stands (items 4, 5, 6, 7, 11, 12, 16 and 19 were
-  revised after the plan was written; the plan's section 7 is no longer its text), `build/m4.5e1e2/
-  il-analyst2-report-3.md` (Part B's lowering: `elem_leaves`, `leaf_slot`, `leaf_perm`, `array_place_hit`'s leaf
-  hit, which Part A guards remain for Parts C and E) and `edg-backend-report-{4,5,6}.md` (the encoder: which
-  rejections name "Part C" or "Part E" and must be lifted there).
-- **Part C must build item 7's pairing rows as the record now writes them** (per pair of leaf paths, one
-  `parent_of(block_of(·))` per member step; the slot row for two ranges, never the block row; a nested-slot site by
-  its slot): the plan's section 7 and the fixtures `s48_c_formP*.vpr` show the superseded forms; `s48_c2_*.vpr`
-  show the current ones. [audit round 1, issues 3 and 4]
-- **Part C lifts three Part A guards** (`site_fields`, `element_range`, `elem_fkey`) and must then give the general
-  path to the walkers they dominate: `entry_checks`, `result_splits`, `given_result_splits`, `ens_amount`,
-  `exclusive_pair`, `wf_keep_facts`, `site_pointer_written`, `flag_follows`, `note_global_member_write`, `need_lb`
-  (`lower.cpp`). [audit round 1, issue 9]
-- **The `restrict` predicate's "reaches" is by a global's whole type** and shares `holds_cell` with
-  `restrict_backed`: Part C's `g[i].x` and Part E's rows go through it; do not add a second walker. [item 19]
-- **Part E:** the parameter spelling `T (*a)[M]` stays rejected until question 320 is answered (only a parameter
-  whose written type is an array declarator is accepted; the front end keeps the written type in `declared_type`);
-  typedef'd spellings (`row *a`, `row a[]`) must be probed before they are lifted; depth 3 is admitted (S48 (m));
-  the depth-2 copy `v[i] = v[j]` took 35 s in the spike (its tests go under the budget's rule 3); the trusted
-  methods' names must identify the element type exactly (`alloc_arr_row_int_3`); the single report for `int
-  a[][3]` (today two rows, pinned by `array_param_reject_array_of_arrays.c`) comes with that pin's flip.
-- **Tests for the continuation:** loop tests over arrays of structures use two-leaf structures and at most one or
-  two arrays per function (question 328: 1 to 5 arrays of two-leaf structures in one function take 7, 11, 17, 36 and 65 s on the box, and five mixed ones timed out); several `assert false` in one vacuity twin only if
-  no path passes two of them (Silicon stops a path at its first failing assert); `box_lane.sh ship` leaves
-  untracked files in a lane (two retired pins survived one and cost a re-run): `git status --short` in the lane
-  must be empty before a joined proof; a snapshot name must be fresh for every ship (a re-used name fails silently
-  on a non-fast-forward fetch).
+**From M4.5e1e2's first session** (record 0064). **What the continuation needs has moved into its plan**
+(`.claude/plans/m4-5e1e2b-arrays-of-structures.md`, section 13, with the should-fix items its audits left placed
+in Parts C1 and C2); the reports are in `.claude/worktrees/m4.5e1e2/build/m4.5e1e2/`, which the continuation's
+Step 0 copies. What stays here is for other sessions:
 - **M4.8:** loop reach by field for arrays of structures (question 318; pinned
-  `array_struct_loop_keep_false_alarm.c`); the cost of several arrays of structures in one function (question 328);
-  an element structure with an `owning` or marked member; `uninit` on an array of aggregates (so that
-  `--strict-init` can hold a local array of structures without an initializer); the three shapes the `restrict`
-  rule rejects although C allows them, if the owner keeps the syntactic rule.
-- **Should-fix items of the last audit read not taken:** issue 7, the encoder's diagnostic at the
-  `restrict_backed` call site says the OTHER parameter's atom may be empty also where it is `p`'s own range that
-  may be (`owns_range(p, n) && owns(*q)`; two ranges with counts 0 and 1): a wrong text on a correct rejection;
-  `vir::restrict_pair_reason` has the right one and `check.cpp` prints it; moot if the owner takes question 326's
-  option (c). In C++ an element that reads its own array (`struct P v[2] = {{1, 2}, {v[0].x, 3}};`) is rejected
-  with item 16's brace-elision message although every brace is written (fail closed; the right message is "used
-  in its own initializer", as C prints). Issue 9: these rules are pinned only by hand-built VIR cases, with no C
-  test: item 19's clause (iv) for a structure value with a pointer leaf and for an application; the pair rule's
-  rejecting readings (`n >= 0`, positivity under `||` or of another count, a constant-expression count,
-  `owns_block`) and its accepted spellings `0 < n`, `n >= 1`, `1 <= n`. The `held` exemption admits any range
-  atom rooted at a global without checking that its count is the array's length: unreachable today, and M4.5e2,
-  which lifts ranges on part of a global array, must narrow it to the whole-array atom (note 11).
-- **M8's warning sweep:** the scalar-array address tests (question 322) and the non-literal lone zero (question
-  325), if the owner leaves them.
-- **Should-fix items of audit round 2 not taken, with their reasons:** issue 7, the lint does not tie a scope
-  exit's rows to the allocation (blanking every `exhale forall` of an array's scope exit leaves the file "clean"):
-  record 0064 item 6 allows "the lint or a self-test case", the self-test pin
-  (`e1e2b_scope_exits_give_what_the_allocation_gave`, a text check over the emitted Viper) stands, and the lint
-  rule belongs with Part C's lint work (leaf rows in contracts and `bound_locals`), where the same grammar is
-  extended; issue 8, the prefix match of the Sequencer's `struct_store_leaves` has no case with `t.v[0].x` inside
-  a value stored to `t`: unreachable until Part C lifts array members of structures, which adds the case.
-  Round 2's note 13 lists two more walkers Part C must give the general path (`check.cpp`'s structure-global
-  leaves and `Aggregate`; the old view's users in `lower.cpp`, loud through `leaves_of`). Still without a fixture
-  from item 7: a `reads` site in the nested pairings, a cell held by a fraction, a forwarded atom of the element's
-  own type (the audit's probes decide them; Part C adds tests).
+  `array_struct_loop_keep_false_alarm.c`); the cost of several arrays of structures in one function (question
+  328: 1 to 5 arrays of two-leaf structures in one function take 7, 11, 17, 36 and 65 s on the box, and five mixed
+  ones timed out); an element structure with an `owning` or marked member; `uninit` on an array of aggregates (so
+  that `--strict-init` can hold a local array of structures without an initializer); a structure value stored
+  into an element (`v[i] = f();`, question 333); an application over a pointer into an array of structures in a
+  loop invariant (a false alarm: `inv_interval_frame` skips leaf places); `&p[0]` in a truth test, rejected
+  though GCC is silent on it (question 335).
+- **M4.6:** what a library declaration with `restrict` parameters (`memcpy`) needs, since every `restrict`
+  parameter is rejected (question 332).
+- **M8:** a model of `restrict` (question 326; `plan.md`'s M8 entry), with `-Wrestrict` (GCC flags `f(a, a)` at
+  `-Wall`; no rule) and the reassigned parameter (`p = q;` then accesses through `p`: the compilers measured
+  agree with the model, and C23 6.7.3.1 is arguable on it); the lone zero that is not a literal (question 325),
+  if the continuation's probe P84 (a) finds that the IL cannot tell it.
+- **Any session that writes tests over arrays of structures:** two-leaf structures and at most two such arrays
+  in one function; several `assert false` in one vacuity twin only if no path passes two of them (Silicon stops
+  a path at its first failing assert); `box_lane.sh ship` leaves untracked files in a lane (`git status --short`
+  there must be empty before a joined proof), and a snapshot name must be fresh for every ship (a re-used name
+  fails silently on a non-fast-forward fetch).
 
 **From M4.5e1e1** (record 0063; its plan's sections 14 and 15; the audit reports `build/m4.5e1e1/auditor-report-*.md`
 go with the session's worktree):
@@ -690,7 +657,8 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
   2026-11-10); **from M4.5e1e1 every question goes to the advisor first, and to the owner only if the advisor
   cannot settle it** (owner, 2026-11-25; §8). **A session's plan assigns the work** (owner, 2026-11-11: the
   orchestrator does not decide the ensemble): section 2 of M4.5e1e1's and M4.5e1e2's plans is the model, and from
-  M4.5e1e2 the plan also holds each agent's briefing, ready to send (its section 13; owner, 2026-11-25). At most
+  M4.5e1e2 the plan also holds each agent's briefing, ready to send (owner, 2026-11-25; section 12 of the
+  continuation's plan is the latest). At most
   three Sonnet agents are alive at once. Every role is a chain of instances, each started from its predecessor's
   state file (`build/<session>/<role>-state.md`): M4.5e1e1 needed four of each role, the auditor included (a fresh
   auditor per round). The il-analyst is replaced, never resumed, after the spikes and wherever the plan says
@@ -713,8 +681,8 @@ function-pointer typedef (`typedef void (*fp)(int *p CERASTES_MUST_INIT);`) reac
 - **x86-64:** the EDG suites on the x86-64 host are their own session, but any x86-64 test run a session needs goes
   to `matt@clang4.cpp.al` automatically (owner, 2026-10-29: not Docker multi-arch on the Mac, which is only the
   fallback when the host is down).
-- **Records and plans:** a record takes the next free number when it is written (0063 is M4.5e1e1's; 0064 is the
-  next, M4.5e1e2's unless M4.5e1f runs first). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
+- **Records and plans:** a record takes the next free number when it is written (0064 is M4.5e1e2's; 0065 is the
+  next). The approved plan is saved as `.claude/plans/<milestone>-<topic>.md` (plan.md, "Session
   protocol"); a sub-session that plans again after its spikes saves that plan the same way.
 - **What a worktree takes with it** (owner, 2026-11-09, question 193): session tools and spike summaries are
   committed. `vprdiff.py` and `regen.py` were lost with d2b1's worktree and again with d2b2a's, and so was S39's
@@ -726,7 +694,7 @@ Finished sessions: `plan.md`'s Done table has a row each, `.claude/plans/` their
 `internal/status.md` their results and the commits it names. The warning sweep (was M4.4e) is an M8 entry in
 `plan.md`.
 
-**Pending side sessions** (none blocks M4.5e1e2):
+**Pending side sessions** (none blocks M4.5e1e2's continuation):
 - **The EDG box session** (§4.1, pending since M4.2c).
 - **The vlibc `<stdlib.h>` shim session** (owner, 2026-11-09, question 170: "Follow recommendation using a vlibc
   session"). With clang 20 and 18, vlibc's `<stdlib.h>` shim meets glibc's declarations with an incompatible linkage
@@ -779,8 +747,11 @@ with them) against 1,500–2,200, with one cut; M4.5e1d +3,654/−195 (+5,721 wi
 check against `lower.cpp` calibrated on what e1c landed), with no cut, in 11.5 hours; M4.5e1e1 +4,944/−439 (+7,596 with
 them) against 2,940–5,525, with no cut, in under eight hours without the box check (its commits: plumbing with
 global arrays and computed types 2,280, array members 2,116, structure values 665). M4.5e1e2's estimate
-(4,700–8,450 in six parts; its plan's section 1) is calibrated on those commits and on three read-only surveys of
-the tree at `45d26bc`.
+(4,700–8,450 in six parts) was calibrated on those commits and on three read-only surveys of the tree at
+`45d26bc`; its first session landed +2,387/−306 (+4,852 with the self-test cases; about 330 of them the
+`restrict` rules) against 1,400–2,400 for Parts A and B, in 9 h 50 with the box check run twice. The
+continuation's estimate (3,700–6,700 for Parts C1, C2, D, E and F, a net removal for Part R) is the first plan's
+raised by a fifth, with four read-only surveys of the tree at `f313023`.
 
 **Pre-approved** (owner): a session may retire or re-expect exactly the rejection pins its plan lists (its "Flips"),
 and no others; a pin whose construct stays rejected keeps its `expect:` line, and only its message and `Pins:`
@@ -797,13 +768,16 @@ its own with its record, twins, docs, audits and one box `check.sh`:
 | **e1c** (done 2026-11-24, record 0061) | `cerastes_forall` in contracts, loop invariants and checks; the fill loop, max, the `carrays.c` port, the tutorial chapter; S45 (r) for e1f; Part D cut to M4.5e2 (question 260) | `.claude/plans/m4-5e1c-quantifiers.md`; `internal/status.md` |
 | **e1d** (done 2026-11-25, record 0062) | read `pure` functions as Viper functions with their contracts and definition checks, self-recursion with `decreases`, calls of `pure` functions in checks, contracts and loop invariants, the exact sum | `.claude/plans/m4-5e1d-pure-functions.md`; `internal/status.md` |
 | **e1e1** (done 2026-11-25, record 0063) | arrays of scalars as globals and `static` locals, as members of structures, as compound literals; 0024 item 6 lifted for array types of scalars; structure values with array members (question 291, its Part E) | `.claude/plans/m4-5e1e1-arrays-of-scalars.md`, complete: P82 and S47 with decision tables, a test budget, no second planning |
-| **e1e2** (planned in full 2026-11-25, record 0064; two sessions likely, question 310) | arrays of structures in code, in contracts and in storage (`v[i].x`, `p[i].x`, ranges over structures, globals, members); the six leftovers of a structure with an array member (questions 292–294, 306, partnerless and written atoms); arrays of arrays (`int m[2][3]`, array-of-rows parameters, depth 2); quantifiers and `pure` applications over members and member arrays; question 304's rejection; the tutorial section | `.claude/plans/m4-5e1e2-arrays-of-structures.md`, complete: P83 and S48 with decision tables, a test budget, the briefings, the 12-hour rule with split points, no second planning |
+| **e1e2** (record 0064; **Parts A and B done 2026-11-25**; the rest planned in full the same day) | done: leaf paths with the traps closed, automatic local arrays of structures in code (`v[i].x`, `p[i].x`, copies, loops), question 304's rejection as measured. To do, from the continuation's plan: `restrict` rejected (question 326) with questions 322 and 325; ranges over structures in contracts; global, `static` and member arrays of structures; the six leftovers of a structure with an array member (questions 292–294, 306, partnerless and written atoms); arrays of arrays (array-of-rows parameters in three spellings, question 320; depth 3); quantifiers and `pure` applications over members and member arrays; the tutorial section | `.claude/plans/m4-5e1e2b-arrays-of-structures.md` for what is left (Parts R, C1, C2, D, E, F; a test budget, the briefings, the 12-hour rule with split points; probe P84 only); `.claude/plans/m4-5e1e2-arrays-of-structures.md` is the history of Parts A and B, P83 and S48 |
 | **e1f** | range call rows: the minimum read amount over a range (238), `owns_range`'s row order D (242) | section 10: planned after e1c, from its spike S45 (r); §3 "M4.5e1f" |
 
 No sub-session plans again after its spikes any more: the owner had e1b, e1c, e1d, e1e1 and e1e2 each planned in
 full (2026-11-11, 2026-11-23, 2026-11-24 and twice on 2026-11-25), each probe and spike with a table of what is
 built per outcome. A plan too large for one session is run under the 12-hour rule (question 310): the parts not
-begun run from the same plan in a continuation session.
+begun run from the same plan in a continuation session. **One exception so far** (owner, 2026-11-25): after
+M4.5e1e2's first session the owner had the rest planned again, since that session revised its record in eleven
+items, found a soundness hole outside its scope and left four owner questions; the continuation's sessions run
+from that second plan, with no third planning.
 
 **M4.5e2 Pointer arithmetic** (needs e1a and e1b; may run before e1e and e1f; its `malloc(n * sizeof(struct S))`
 waits for e1e2). `p + i`, `p - i`, `p - q`, relational
@@ -1051,6 +1025,14 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   `check.sh` does, in the half's own proof and again in the preflight**; and the preflight also runs the steps of
   `check.sh` that follow the self-test (the walker oracle, the tree checks), so that the one check cannot stop
   before them.
+- **The planning of the continuation** (2026-11-25, one session that only planned, about an hour and a half):
+  the handoff, the first plan, record 0064 and the three audit reports read in full by the planner; four read-only
+  surveys in parallel (the encoder's gates, the lowering's sites and guards, tests with lint and docs, every use of
+  `restrict`), each asked for file-and-line tables with "not found" in place of a guess, each spot-checked against
+  the tree; then the owner's dialog, which needed the `restrict` survey's exact file list (invariant 1: the owner
+  approves the files whose outcome a decision changes, so the list goes into the question). **A plan cites the
+  record's items and carries only the amendments; it does not restate the record** (the first plan's section 7
+  was out of date within hours of its session's start).
 - **What keeps a session short:** fixed scope with stop rules; the owner's decisions and pre-approved expectation
   changes asked up front, each with a concrete default; the record written while the probes' results come in, audited in
   the background; three agents with disjoint files; single-file runs during the work; questions to the advisor
@@ -1172,11 +1154,12 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 ## 8. Questions for the owner
 
-**Four questions are open, from M4.5e1e2's first session: 326, 320, 322 (its second half) and 325; they are at the
-end of this section, each with a recommended default.** Questions 310–312 were answered at M4.5e1e2's planning and
-304 inline before it; 313–319 are the defaults M4.5e1e2's plan builds on and 301–309 the advisor's rulings in
-M4.5e1e1, both still for the owner's review; 321–324, 327 and 328 are the advisor's rulings in M4.5e1e2's first
-session, for review (at the end). An answer is written inline, as before. Answered
+**No question is open.** The four that M4.5e1e2's first session left (326, 320, 322's second half, 325) were
+answered by the owner at the planning of its continuation (below). **For the owner's review, none blocking:**
+331–336, the defaults the continuation's plan builds on (at the end of this section, each with its alternative);
+321–324 and 327–330, the advisor's rulings in M4.5e1e2's first session; 313–319, the defaults of M4.5e1e2's first
+plan; 301–309, the advisor's rulings in M4.5e1e1. Questions 310–312 were answered at M4.5e1e2's planning and 304
+inline before it. An answer is written inline, as before. Answered
 questions 1–246 are recorded in the decision records, the session plans, `internal/status.md` and the earlier
 handoffs:
 `git show 2430529:internal/handoff.md` §8 digests questions 65–187, `git show 262edb3:internal/handoff.md` has
@@ -1184,8 +1167,8 @@ handoffs:
 asked: their answers are below), `git show bdf3581:internal/handoff.md` §8 has 238–246 as asked, with the
 owner's inline answers to 238–242, and `git show 9ab9a1e:internal/handoff.md` §8 has 247–263 as asked. Records
 0055–0058 hold what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3. Questions 264–272 are
-M4.5e1d's planning's, 273–289 its session's, 290–300 M4.5e1e's planning's, 301–309 M4.5e1e1's and 310–319
-M4.5e1e2's planning's, below.
+M4.5e1d's planning's, 273–289 its session's, 290–300 M4.5e1e's planning's, 301–309 M4.5e1e1's, 310–319
+M4.5e1e2's planning's, 320–330 its first session's and 331–336 its continuation's planning's, below.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).
@@ -1216,7 +1199,7 @@ M4.5e1e2's planning's, below.
 
 Other answers that steer a later session are in that session's notes (§3, §4) or its plan: 66, 79, 189, 194, 196,
 212, 215, 216, 222, 225, 246, 249, 262 and 267 (M4.8), 78 (M4.6), 120, 229, 236, 237, 253, 255, 259, 260, 261,
-265, 266 and 287 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 290–309 (M4.5e1e1's plan and record 0063), 304 and 310–319 (M4.5e1e2's plan, sections 1 and 15), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
+265, 266 and 287 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 290–309 (M4.5e1e1's plan and record 0063), 304 and 310–336 (M4.5e1e2's two plans and record 0064), 326 and 332 (M8 and M4.6), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
 256–258 and 263 (M4.5e1c's plan and record 0061), 238 and 242 (M4.5e1f), 252 and 264–272 (M4.5e1d's plan), 269
 (M6), 230, 234 and 241 (M8).
 
@@ -1275,7 +1258,8 @@ so no existing outcome changes.
   how should sessions run from its one complete plan? **"12-hour rule (Recommended)"**: the order arrays of
   structures (code, then contracts and storage) → the leftovers of questions 292–294 and 306 → arrays of arrays →
   quantifiers; at each commit the next part starts unless the remaining work would pass twelve hours; parts not
-  begun run from the same plan in a second session, with no second planning; nothing is cut to hold a session short.
+  begun run from the same plan in a second session, with no second planning; nothing is cut to hold a session short
+  (the owner had the continuation planned again all the same, 2026-11-25: its sessions run from that second plan).
   The alternatives were two sessions with a fixed stop after the leftovers, and the leftovers last.
 - **311** Has the full `CERASTES_LONG=1 scripts/check.sh` run green on M4.5e1e1 since its session closed without it?
   **"Yes, it was green"**. M4.5e1e2's Step 0 makes no check of its base.
@@ -1303,31 +1287,40 @@ rejection with a diagnostic and a pin, or a listed false alarm, never a wrong pr
 
 **M4.5e1e2's questions (2026-11-25, its execution session).** Each went to the Fable advisor first.
 
-**Open, for the owner:**
-- **320** (fail closed either way: a rejection stays, nothing wrong verifies). `tests/memory/negative/
-  array_reject_pointer_to_array.c` pins the **parameter** `int f(int (*p)[3])` as rejected (record 0059 item 1,
-  "a pointer to an array: M8"). M4.5e1e2's plan lists that pin as unchanged (its section 10, Flips D) and, in the
-  same plan, accepts that spelling as an array-of-rows parameter in Part E (its section 1, record 0064 item 13,
-  question 315): the planning read the pin as a local. Flipping an existing `expect:` line outside the plan's
-  Flips is the owner's (invariant 1), and dropping the spelling for good is a cut the plan does not list. **Until
-  answered:** only a parameter whose written type is an array declarator (`int a[][3]`, `int a[2][3]`) is
-  accepted; `int (*a)[3]` stays rejected with the pin untouched (the front end keeps the written type, so the
-  two are told apart). **Recommended:** accept the spelling in Part E as the plan's scope says, retiring the pin
-  for a positive of the same program with an error twin (the plan's Flips A treatment), and add a pin for a
-  pointer to an array as a local, which stays M8's. Alternative: keep the pointer spelling rejected until M8.
-
-- **326** (**unsound, and on `main` today**; found by audit round 1, not introduced by M4.5e1e2). C's `restrict`
-  beside a global the body reaches by name verifies a program C leaves undefined:
-  `int g; int f(int *restrict p)` with `owns(*p)`, whose body tests `p == &g`, writes `*p = 1`, then `g = 2`, and
-  returns `*p`, verifies with `ensures r == 0 || r == 2`, while `gcc -O2` returns 1 (C23 6.7.3.1p4). Record 0037
-  item 2's argument ("an access to `*p`'s object through a pointer not based on `p` cannot verify") covers other
-  parameters only. M4.5e1e2 builds a fail-closed rejection for every form found but the last (its record 0064 and audit round 2
-  have the rule and what it leaves); **the complete rule for `restrict` is the owner's** (see "Questions for the
-  owner" at the session's close).
-- **325** (not unsoundness). clang's C warns `-Wmissing-braces` at `-Wall` on a lone zero that is not an integer
-  literal (`{(0)}`, `{'\0'}`, `{false}`, `{NULL}`, an enumerator) wherever its rule for `{0}` applies; cerastes
-  accepts these by their value, as before. No existing test or doc example holds one. **Recommended:** leave them
-  to M8's warning sweep (rejecting them needs the front end to tell a literal `0` from `(0)` or an enumerator).
+**Answered by the owner at the planning of M4.5e1e2's continuation (2026-11-25, the question dialog).** Each
+had gone to the Fable advisor first, in the first session, and was the owner's.
+- **326** (**unsound, and on `main` today**; found by audit round 1 of M4.5e1e2's first session, not introduced
+  by it). C's `restrict` beside another route to the same object verifies a program C leaves undefined (§1 has
+  two of the programs; record 0064 item 19 at `f313023` has every form found and the enumeration that rejected
+  all but the last). The question was what the continuation builds: reject every `restrict` parameter; keep the
+  enumeration and add the auditor's rule for the one open form; or a session of its own for a path-precise rule
+  first. **"Reject restrict (Recommended)"**: every `restrict` parameter is rejected with a diagnostic that says
+  to drop the keyword (dropping it changes nothing for a program with defined behaviour); the acceptance rules
+  of records 0037, 0040, 0043, 0044, 0045, 0047, 0052, 0054, 0060 and 0064 item 19 are withdrawn and their code
+  removed; it is the continuation's first part, with an audit read of its own. **The owner approved the 17
+  files whose outcome changes** (invariant 1): 8 positives under `tests/memory/` become rejection pins
+  (`block_restrict.c`, `owning_restrict.c`, `range_restrict.c`, `restrict_body_owns_global.c`,
+  `restrict_body_pair_ok.c`, `restrict_owned.c`, `struct_global_restrict.c`, `struct_value_restrict.c`) and their
+  9 error twins under `tests/memory/negative/` are retired; the 33 pins that already reject `restrict` and
+  `forall_reject_f_restrict.c` keep their rows, and one that moves comes to the owner first. A path-precise
+  model of `restrict` is an M8 entry (`plan.md`).
+- **320** (fail closed either way). The pin `tests/memory/negative/array_reject_pointer_to_array.c` rejects the
+  **parameter** `int f(int (*p)[3])`, and M4.5e1e2's first plan both listed that pin as unchanged and scoped the
+  spelling as an array-of-rows parameter. **"Accept it in Part E (Recommended)"**: the pin is retired for a
+  positive of the same program with an error twin, and a new pin records that a pointer to an array as a local
+  stays rejected (M8). The alternative was to keep the pointer spelling rejected until M8.
+- **322, its second half** (not unsoundness: a warning shape). A truth test or null comparison of an element's
+  address on an array of scalars (`if (&a[1])`, `&a[1] == NULL`, `&p[1] != NULL`, `&s.a[i]`, `&p->a[i]`): GCC
+  warns `-Waddress` at `-Wall`, clang is silent, cerastes has accepted them since M4.5e1a, and the first session
+  rejects the same tests on arrays of structures. **"Reject them too (Recommended)"**: one rule for every
+  element address, by the tag `array_address_null_test`, in the continuation's first part; an existing file
+  whose outcome changes comes to the owner first (three passes found none). The alternative was M8's sweep.
+- **325** (not unsoundness: a warning shape). A lone zero that is not the literal `0` where `{0}` elides braces
+  (`{(0)}`, `{'\0'}`, `{false}`, `{NULL}`, an enumerator): clang's C warns `-Wmissing-braces` at `-Wall`, GCC is
+  silent, cerastes accepts them by their value. **"Probe, reject if the IL can tell"**: the continuation's Step
+  0 runs one IL probe (P84 (a)); if the IL tells the token `0` from the other spellings they are rejected like
+  the compilers in its first part, and if not the entry goes to M8's sweep. The recommendation had been to
+  leave them to M8 without a probe.
 
 **Settled with the advisor in M4.5e1e2, for the owner's review:**
 - **321** (not unsoundness: an over-acceptance of warning shapes). Question 304's rejection was planned as "C++'s
@@ -1344,8 +1337,8 @@ rejection with a diagnostic and a pin, or a listed false alarm, never a wrong pr
   an element's address (`if (m[0])`, `&v[1] == NULL`); no rule covered it. **Answer taken:** rejected for rows and
   for element addresses of arrays of aggregates (`array_address_null_test`, record 0064 item 5), built from the
   matrix's cells. **The same forms on an array of scalars (`if (&a[1])`, `&a[1] == NULL`) are accepted since
-  M4.5e1a and are left unchanged: whether to reject them is the owner's** (see "Questions for the owner" at the
-  session's close, with the measured set and the count of existing files). Alternative: one rule now for every
+  M4.5e1a and are left unchanged: whether to reject them was the owner's** (answered above: "Reject them too"; the
+  continuation's Part R builds it). Alternative: one rule now for every
   element address.
 - **323** (fail closed: a cost, never a proof). The spike's copy `v[i] = v[j]` between two elements whose
   structure has an array member verified, with its guard decided, in 34.5 s and 35.2 s on the box, over the
@@ -1391,49 +1384,44 @@ rejection with a diagnostic and a pin, or a listed false alarm, never a wrong pr
   taken:** the case was corrected (it asserts one fact) and the check run a second time on the fix commit.
   Alternative: close the session with the check red.
 
-The next questions start at 331.
+**The defaults the continuation's plan builds on (2026-11-25, its planning), for the owner's review** (the
+planner's; each fail closed: a rejection with a diagnostic and a pin, or a matter of process, never a wrong
+proof; answer inline, or leave them):
+- **331** (process). The first plan's Part C is two parts in the continuation, each with a commit, an audit
+  round and a split point: C1 (ranges over structures in contracts), then C2 (static storage and members).
+  Alternative: one part, as the first plan had it.
+- **332** (fail closed: a rejection). The `restrict` rejection covers a declaration without a body as well as
+  a definition. No test, doc example or vlibc header has such a declaration today; M4.6 decides what `memcpy`'s
+  declaration needs. Alternative: accept and ignore `restrict` on a declaration without a body now (its contract
+  is trusted anyway).
+- **333** (fail closed: a rejection stays). A structure value stored into an element (`v[i] = f();`, `v[i] =
+  (struct P){1, 2};`) stays rejected until M4.8; the user writes `struct P t = f(); v[i] = t;`. Alternative:
+  lift it in Part C2 with record 0044 item 5's rules.
+- **334** (test mechanics). The 33 pins that already reject `restrict` in particular situations stay, although
+  each now pins the one rule; only their `Pins:` comments change. Alternative: retire all but one per spelling,
+  which is the owner's under invariant 1.
+- **335** (fail closed: over-strict by one form). Question 322's rule is the predicate the first session built
+  for arrays of structures, so `&p[0]` in a truth test or a null comparison is rejected with the other indexes
+  although GCC is silent on that one form. Alternative: accept `&p[0]` on a pointer, for scalars and structures
+  alike.
+- **336** (process). `scripts/box_lane.sh` refuses to run without its two lane variables instead of falling
+  back to M4.5e1e1's lanes.
 
-### Questions for the owner (M4.5e1e2's first session)
+The next questions start at 337.
 
-Each is explained above under its number; this is the list to answer, most urgent first.
+### Questions for the owner (after the planning of M4.5e1e2's continuation)
 
-1. **326, `restrict` (unsound on `main`; on the branch every form found but the last is rejected, and that one still
-   verifies).**
-   Record 0064 item 19 rejects `restrict` on a parameter `p` when the function's body (i) names or takes the
-   address of a global or `static` local the parameter could point into (or that holds a pointer to such an
-   object), (ii) calls a function whose contract holds one, (iii) calls a function that can hand back such a
-   pointer (a pointer result, a structure result with a pointer leaf, an out-parameter), or (iv) passes such a
-   pointer, `p` included, to any function; (i) and (ii) are exempt when the function's own contract holds the
-   whole object without a condition; and an atom counts as excluding `p`'s object only when it is sure to hold
-   something (a range whose count may be 0 does not). It rejects several shapes C allows (a body that only reads
-   the global; `same(p)`; `set(p, 3)` and every helper that takes the pointer; `malloc` in the body). **It is an
-   enumeration of routes, and three audit reads in one day each found a form the rule then in force missed; the
-   third's is NOT fixed and verifies on the branch today** (two ranges with the same count of 0 beside a global
-   the contract holds and the body never names; §1 has the program; the auditor's candidate rule is to pair every
-   contract atom on a reaching global with the parameter's backing atom whether or not the body names it). One
-   more gap is known for the complete rule (an access based on `p` beyond `p`'s own atom, which M4.5e2's pointer
-   arithmetic would open). **Decide:** (a) keep this syntactic rule until M8 models `restrict`; (b) replace
-   it by a path-precise rule (every access based on `p` stays inside `p`'s atom, every other access outside it),
-   which needs a design, a soundness argument in `internal/soundness/` and a session of its own; (c) **reject
-   `restrict` altogether until then (recommended: it is the only option that does not rest on an enumeration;
-   `restrict` is a promise to the optimizer that a verified program can drop without changing its meaning; it
-   retires or re-expects the positives among the 59 test files that use it, which is the owner's under
-   invariant 1)**. If (a) is kept, the argument for why the enumeration is complete is owed before M4.5e2.
-2. **320, the parameter spelling `int (*a)[3]`** (fail closed either way; needed before Part E).
-   `tests/memory/negative/array_reject_pointer_to_array.c` pins that parameter as rejected, and M4.5e1e2's plan lists
-   the pin as unchanged while its scope accepts the spelling. **Recommended:** accept it in Part E as the plan's
-   scope says, retiring the pin for a positive of the same program with an error twin, and add a pin for a pointer
-   to an array as a local (M8). Alternative: keep the pointer spelling rejected until M8.
-3. **322, second half: a truth test or null comparison of an element's address on an array of scalars** (not
-   unsoundness). GCC warns `-Waddress` at `-Wall` on `if (&a[1])`, `&a[1] == NULL`, `&p[1] != NULL` (any index but a
-   literal 0 on a pointer), `&s.a[i]`, `&p->a[i]`; clang is silent; cerastes has accepted them since M4.5e1a. This
-   session rejects the same tests on arrays of structures (`array_address_null_test`). No existing test or doc
-   example holds a scalar form (three passes over `tests/` and the examples). **Recommended:** reject them too, by
-   the same tag, in the continuation's first part (one rule for every element address; zero existing files change).
-   Alternative: leave them to M8's warning sweep.
-4. **325, a lone zero that is not an integer literal** (not unsoundness). clang's C warns `-Wmissing-braces` at
-   `-Wall` on `{(0)}`, `{'\0'}`, `{false}`, `{NULL}` and an enumerator wherever its rule for `{0}` applies; GCC is
-   silent; cerastes accepts them by their value. No existing file holds one. **Recommended:** leave them to M8's
-   warning sweep (rejecting them needs the front end to tell a literal `0` from `(0)` or an enumerator, which may
-   need an EDG change: question 69). Alternative: reject every lone zero that is not the token `0`, if the IL can
-   tell.
+**Nothing here blocks the continuation; it can start as it is.** Each item is explained above under its number.
+
+1. **The merge and the push** (§2, step 1): `main` still accepts every unsound `restrict` form, and both session
+   branches fast-forward it. **Recommended:** `git merge --ff-only m4.5e1e2b-arrays-of-structures` on `main`,
+   then push, before or after the continuation starts.
+2. **331–336, the continuation plan's defaults** (above). **Recommended:** leave them; each is the fail-closed
+   or the cheaper choice, and each alternative is named. The one that changes what users can write is 333
+   (`v[i] = f();` stays rejected until M4.8): say so before the session reaches Part C2 if it should be lifted
+   there.
+3. **321–324 and 327–330, the advisor's rulings in M4.5e1e2's first session** (above). **Recommended:** let them
+   stand. 329's two `restrict` clauses and 326's enumeration are removed by the rejection of `restrict`; 321 and
+   327 made cerastes reject more brace-elision forms than question 304 named, as the compilers measure them.
+4. **313–319 and 301–309**, the earlier defaults and rulings still awaiting review. **Recommended:** let them
+   stand; 316 (`restrict` backed by a range over structures) is moot now.
