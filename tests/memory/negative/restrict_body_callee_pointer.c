@@ -4,8 +4,8 @@
 // expect: rejected cerastes-unsupported_annotation @ L68
 // mode: c23
 // c-only: restrict does not exist in C++20 (EDG, clang++ and g++ refuse it, decision 0037 item 2)
-// twin: tests/memory/restrict_body_owns_global.c
-// Pins: 0064 item 19 (question 326), clause (iii): a restrict parameter in a function that calls a function that can hand the body a pointer reaching the pointee's field: a call's pointer result (probe c3c / e2: getg() ensures r == &g; the base verifies it, its twin fails), an int * result whose value is based on p (same(p): over-strict by design, C says it is based on p), an out-parameter (probe a2: getp(&q)) and a structure result with a pointer leaf (probe b: geth().q). Each is rejected at its function head; (iii) has no exemption
+// twin: tests/memory/restrict_dropped.c
+// Pins: 0064 item 19 (question 326), clause (iii): a restrict parameter in a function that calls a function that can hand the body a pointer reaching the pointee's field: a call's pointer result (probe c3c / e2: getg() ensures r == &g; the base verifies it, its twin fails), an int * result whose value is based on p (same(p): over-strict by design, C says it is based on p), an out-parameter (probe a2: getp(&q)) and a structure result with a pointer leaf (probe b: geth().q). Each is rejected at its function head; (iii) has no exemption [0064 item 19, question 326: every restrict parameter is now rejected by that one rule, whatever the contract; this pin's row keeps its tag and line and its condition no longer matters]
 // Pre-registered from record 0064 item 19 (probes c3c, c3a, a2, b), before any run: rejected
 #include <cerastes.h>
 

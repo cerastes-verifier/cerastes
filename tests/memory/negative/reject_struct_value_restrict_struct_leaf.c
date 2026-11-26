@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L16
 // c-only: restrict and compound literal objects do not exist in C++
 // twin: tests/memory/struct_local.c
-// Pins: 0044 item 11 (0037 item 2): a restrict int * beside a by-value struct with a struct S * leaf whose S has an int leaf: a pointer passed in it is not based on the restrict parameter, rejected
+// Pins: 0044 item 11 (0037 item 2): a restrict int * beside a by-value struct with a struct S * leaf whose S has an int leaf: a pointer passed in it is not based on the restrict parameter, rejected [0064 item 19, question 326: every restrict parameter is now rejected by that one rule, whatever the contract; this pin's row keeps its tag and line and its condition no longer matters]
 #include <cerastes.h>
 
 struct S {

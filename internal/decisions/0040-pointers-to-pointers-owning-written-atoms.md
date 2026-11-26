@@ -145,7 +145,7 @@ P8 (written atoms on Silicon), P62 (the IL of this record's shapes) and S30 (Sil
      5), so the user's later clauses may read `*p` under `p != NULL` (0037 item 7's framing). The clause is an
      ordinary atom with guard `p != NULL` (0037 items 5–10 apply: amounts, calls, entry, returns), positioned at the
      attribute for diagnostics. It counts as 0037 item 2's `owns` conjunct for `restrict` (`restrict_backed` runs after
-     the desugaring).
+     the desugaring). **(Withdrawn by record 0064 item 19 as rewritten on 2026-11-26, M4.5e1e2's continuation, question 326: every `restrict` parameter is rejected, and this clause's code is removed.)**
    - **Merged with an explicit atom** (question 75): when the same clause list already holds `owns(*p)` as a top-level
      conjunct (guard `true`) or `p == NULL || owns(*p)` (guard `p != NULL`), `owning` adds nothing to that list: the
      explicit atom implies `owning`'s clause, and the place keeps one atom, at the explicit atom's position (so a read

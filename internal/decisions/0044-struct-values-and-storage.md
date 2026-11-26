@@ -217,7 +217,7 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
     `int` leaf, at any depth) is one of the places beside which a `restrict T*` parameter is rejected, since a pointer
     passed in it is not based on the `restrict` parameter; so is a struct global named by the contract (`owns(g)` with an
     `int *` leaf in `g`), which 0043 item 10's global rule already covers. The check also runs after the implicit atoms of
-    `static` locals (item 9) are added.
+    `static` locals (item 9) are added. **(Withdrawn by record 0064 item 19 as rewritten on 2026-11-26, M4.5e1e2's continuation, question 326: every `restrict` parameter is rejected, and this clause's code is removed.)**
 12. **Loop invariants and measures that read through a loaded pointer** (P69; audit S5). Only `**pp` is rejected in a
     loop invariant or measure, by its spelling (0040 item 5); `p->q->x`, `*p->q` and `*gp` have always reached the loop's
     read chains (0038 item 6), unpinned, and a by-value parameter's `*s.q` joins them. They are accepted, by this argument:

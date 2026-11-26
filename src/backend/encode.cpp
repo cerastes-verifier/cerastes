@@ -58,7 +58,7 @@ struct VType
     std::string name;                   // the type as the program spells it, for messages
     Diag diag {Diag::unsupported_type}; // the diagnostic when !ok
     bool silent {false}; // !ok and already reported at the declaration (an enumeration, decision 0018 item 2)
-    // ok, a pointer parameter's own `restrict` (allow_restrict): decision 0037 item 2 decides whether it is accepted
+    // ok, a pointer parameter's own `restrict` (allow_restrict): decision 0064 item 19 rejects the function (function_of)
     bool restrict_q {false};
     // !ok because this typeref has a non-type template argument (0024 item 6): reported once per function
     a_type_ptr computed_at {nullptr};
@@ -1847,12 +1847,12 @@ private:
         return addr == nullptr ? nullptr : finish(e, b_.deref(addr, loc_of(e->position)));
     }
 
-    // Decision 0064 item 5 (question 322; the matrix M of P83 (h)): whether `n` (after the front end's own conversions) is the address of an element of an array
-    // of aggregates, or of a member of one: `&v[i]` and `&p[i]` whose element is a structure, and `&v[i].x`, `&v[i].t.x`, `&p[i].x`, `&t.v[i].x` (a chain of `.` over
-    // such an element: GCC's -Waddress at -Wall flags every one; `&p[0]` alone is rejected with the others, over-strict by that one form).  A chain through `->` is
-    // another object's address and is not.  The same tests on an element address of an array of SCALARS stay accepted (question 322).  `*base` is the spelling of
-    // the array or pointer that is indexed, for the message.
-    bool struct_element_address(an_expr_node_ptr n, std::string* base)
+    // Decision 0064 item 5 (question 322; the matrix M of P83 (h)): whether `n` (after the front end's own conversions) is an address formed by an index, whatever the
+    // element: `&a[i]` of a named array, `&p[i]` of a pointer, `&t.a[i]` and `&p->a[i]` of an array member, `&m[i]` of a row, and a chain of `.` over such an element
+    // (`&v[i].x`, `&v[i].t.x`, `&p[i].x`, `&t.v[i].x`).  GCC's -Waddress at -Wall flags every one of them but `&p[0]` alone, which is rejected with the others (one predicate,
+    // over-strict by that one form, question 335).  A chain through `->` over an element (`&v[i].q->x`) is another object's address and is not.  `*base` is the
+    // spelling of the array or pointer that is indexed, for the message.
+    bool index_address(an_expr_node_ptr n, std::string* base)
     {
         n = peel_generated_conversions(n);
         if (n == nullptr || n->kind != enk_operation || n->variant.operation.kind != eok_address_of)
@@ -1874,7 +1874,7 @@ private:
             }
             x = peel_place(ops[0U]);
         }
-        if (!is_subscript_node(x) || x->type == nullptr || !is_struct_kind(skip_typerefs(x->type)))
+        if (!is_subscript_node(x) || x->type == nullptr)
         {
             return false;
         }
@@ -1909,12 +1909,12 @@ private:
         return true;
     }
 
-    // A truth test or a null comparison of an array's address (decision 0059 item 10): the address is never null.  Decision 0064 item 5: so is the address of an
-    // element of an array of structures or of a member of one.
+    // A truth test or a null comparison of an array's address (decision 0059 item 10): the address is never null.  Decision 0064 item 5: so is every address
+    // formed by an index, whatever the element (index_address).
     bool detect_array_address_test(an_expr_node_ptr operand, const char* what)
     {
         an_expr_node_ptr decay {peel_generated_conversions(operand)};
-        if (std::string base; struct_element_address(decay, &base))
+        if (std::string base; index_address(decay, &base))
         {
             detected_.insert(decay);
             reject_args(Diag::array_address_null_test, operand->position,
@@ -2228,6 +2228,44 @@ private:
         return in->kind == ck_aggregate && !in->explicit_braces_on_aggregate && lone_zero_chain(in, depth + 1);
     }
 
+    // Decision 0064 item 16 (question 325, built by question 339; C only): the lone zero that elides braces where clang's C warns (-Wmissing-braces) unless it is
+    // written as an integer literal.  `c` is the elided aggregate chain, or the lone element itself.  The literal test peels every compiler-generated cast from the
+    // innermost element (`0u`, `0L` and `0ULL` sit under one, as does the null pointer `0`); it is a literal when the constant it reaches keeps no `expr` (`1 - 1`,
+    // `-0`, `+0` and `(int)0` keep theirs), carries `is_simple_zero` (`0`) or `non_arithmetic` (`0x0`, `00`, `0b0` and the suffixed zeros: il_def.h 4846, 4853), is not a
+    // named constant's definition (an enumerator: il_def.h 4931) and is not of type `bool` (`false`).  `'\0'` carries neither flag and `NULL` is an explicit cast.  A
+    // parenthesis leaves no trace in the IL, so `(0)` is accepted like `0` (listed for M8).  Rejects (unsupported_expression) and returns false otherwise.
+    bool lone_zero_spelling_ok(a_constant_ptr c, const a_source_position& at)
+    {
+        for (int guard {0};
+             c != nullptr && c->kind == ck_aggregate && c->variant.aggregate.first_constant != nullptr && guard < 32;
+             ++guard)
+        {
+            c = c->variant.aggregate.first_constant;
+        }
+        a_constant_ptr in {c};
+        bool literal {c != nullptr && c->kind == ck_integer && !c->local_expr_ref};
+        if (literal && c->expr != nullptr)
+        {
+            an_expr_node_ptr e {peel_generated_conversions(c->expr)};
+            literal = e != nullptr && e->kind == enk_constant && e->variant.constant.ptr != nullptr;
+            in = literal ? e->variant.constant.ptr : nullptr;
+        }
+        if (literal)
+        {
+            a_type_ptr t {in->type != nullptr ? skip_typerefs(in->type) : nullptr};
+            literal = in->kind == ck_integer && in->expr == nullptr && !in->local_expr_ref &&
+                      (in->is_simple_zero || in->non_arithmetic) && !in->is_named_constant_definition &&
+                      !(t != nullptr && t->kind == tk_integer && t->variant.integer.bool_type);
+        }
+        if (!literal)
+        {
+            reject(
+                Diag::unsupported_expression, at,
+                "a lone zero that elides the braces of a subaggregate and is not written as the integer literal `0` (`'\\0'`, an enumerator, `1 - 1`, `false`, `NULL`, `nullptr`, `-0`, `(int)0`: -Wmissing-braces in clang's C, which is silent on `0`): write `0`, or the braces (decision 0064 item 16, question 325)");
+        }
+        return literal;
+    }
+
     // The initializer of an array local whose element is a verified structure (decision 0064 items 5 and 6, Part B): each element takes its own braced list in
     // `collect_init_elems`' rules (a partial list, `{}` and a designated list of the element's members included); an element the list does not mention, and a leaf an
     // element's list leaves out, is zero (`Var::zero_filled`, then the written leaves' stores).  In C every element of the whole list is evaluated before the first
@@ -2284,6 +2322,11 @@ private:
                             ? "an element of an array of structures initialized without its own braces (brace elision, -Wmissing-braces; only the lone `{0}` that is the whole initializer elides): write the element's braces (decision 0064 item 16)"
                             : "an element of an array of structures initialized without its own braces (brace elision, -Wmissing-braces, also `{0}`: question 304): write the element's braces (decision 0064 item 16)");
                     ok = false;
+                }
+                else if (c_mode && elided && !lone_zero_spelling_ok(c, cp))
+                {
+                    ok =
+                        false; // item 16: the parent is an array, so clang's C flags the elision unless the zero is a literal
                 }
                 else
                 {
@@ -2727,8 +2770,8 @@ private:
     // `allow_ptr`: a pointer type to a bool, an integer, an enumeration or such a pointer (decisions 0032 item 2, 0040 item 2) is a VIR pointer type: the type of a
     // local that is not itself address-taken and of an expression.  Everywhere else (a parameter or result, `check_signature`; the
     // places that read only scalars) a pointer is as unsupported as before.
-    // `allow_restrict` (a parameter, decision 0037 item 2): a `restrict` on the pointer itself is noted in `restrict_q` instead of rejected; the
-    // contract decides afterwards (function_of).  `extra_quals` are the top-level qualifiers the parameter list keeps beside the type.
+    // `allow_restrict` (a parameter): a `restrict` on the pointer itself is noted in `restrict_q` instead of rejected here;
+    // function_of rejects the function (decision 0064 item 19).  `extra_quals` are the top-level qualifiers the parameter list keeps beside the type.
     VType vtype(a_type_ptr type, bool allow_ptr = false, bool allow_restrict = false,
                 a_type_qualifier_set extra_quals = 0U)
     {
@@ -3407,8 +3450,6 @@ private:
     }
     std::set<a_routine_ptr> signature_ok_;
     vir::Var literal_sentinel_; // names a compound literal in a `return_local_address` message
-    // where function_of was asked for each function: the place a `restrict` rejection is reported
-    std::map<const vir::Function*, a_source_position> restrict_at_;
 
     // ---- `[[cerastes::owning]]` on parameters (decisions 0029 item 1, 0040 item 3; P52) --------------------------------------------------
     struct OwningParam
@@ -5767,7 +5808,6 @@ private:
         fns_[r] = f;
         f->pure = pure_reading_.count(r) !=
                   0U; // record 0062: a read `pure` function is neither a verified method nor a trusted one
-        restrict_at_[f] = at;
         std::vector<int> restricted;
         // A definition's own parameter variables carry the qualifiers too (C++ strips the top-level ones from the parameter type, P58).
         std::vector<a_type_qualifier_set> var_quals;
@@ -5845,80 +5885,25 @@ private:
         {
             tie_not_invalidating(r, f);
         }
-        // Decision 0037 item 2: `restrict` on a pointer parameter is accepted only when the contract owns its pointee and returns it.
-        for (int k : restricted)
+        // Decision 0064 item 19 (question 326): a `restrict` pointer parameter is rejected, once per function, at its head, naming every such parameter.
+        // The qualifier is read where it was read before (a definition's own parameters, else the declaration's): `restrict` only on a prototype of a function
+        // the unit defines without it stays accepted.
+        if (!restricted.empty())
         {
-            int other {-1};
-            if (const std::string hazard {vir::restrict_hazard(*f, k)}; !hazard.empty())
-            { // decision 0043 item 10 (audit B2)
-                restrict_reported_.insert(f);
-                reject(Diag::unsupported_annotation, at,
-                       "a `restrict` parameter `" +
-                           (f->params[static_cast<size_t>(k)].name.empty() ? "arg" + std::to_string(k + 1)
-                                                                           : f->params[static_cast<size_t>(k)].name) +
-                           "`: " + hazard +
-                           " (decision 0043 item 10: `restrict` stays rejected here until M8 models it)");
-                continue;
-            }
-            if (vir::restrict_backed(*f, k, &other))
+            std::string names;
+            for (const int k : restricted)
             {
-                continue;
+                const vir::Param& param {f->params[static_cast<size_t>(k)]};
+                names += (names.empty() ? "`" : ", `") +
+                         (param.name.empty() ? "arg" + std::to_string(k + 1) : param.name) + "`";
             }
-            restrict_reported_.insert(f);
-            auto pname = [&](int i)
-            {
-                return f->params[static_cast<size_t>(i)].name.empty() ? "arg" + std::to_string(i + 1)
-                                                                      : f->params[static_cast<size_t>(i)].name;
-            };
-            if (other < 0)
-            {
-                reject(Diag::unsupported_annotation, at,
-                       "a `restrict` parameter `" + pname(k) + "` whose contract does not own `*" + pname(k) +
-                           "` (or `" + pname(k) + "[0..n)`, `owns_range`) in its `requires` and its `ensures`");
-            }
-            // permissions follow cells, not provenance: another pointer to the cell could be written through (decision
-            // 0037 item 2)
-            else
-            {
-                reject(
-                    Diag::unsupported_annotation, at,
-                    "a `restrict` parameter `" + pname(k) + "` beside `" + pname(other) +
-                        "`, whose contract does not own or read `*" + pname(other) +
-                        "` (or its range, `owns_range`, `reads_range`) as an atom that is surely non-empty: a range whose count may be 0 excludes nothing (decision 0064 item 19, the pair rule)");
-            }
+            reject(
+                Diag::unsupported_annotation, at,
+                std::string {restricted.size() == 1U ? "the parameter " : "the parameters "} + names + " of \"" +
+                    f->c_name + "\" " + (restricted.size() == 1U ? "is" : "are") +
+                    " `restrict`: cerastes does not model `restrict`; dropping the keyword does not change what a program with defined behaviour does, so drop it to verify the function (decision 0064 item 19)");
         }
         return f;
-    }
-
-    // Decision 0064 item 19 (question 326): the functions whose `restrict` was already rejected (one report per function), the functions whose body was encoded
-    // without a rejection, and the body's check.  It runs once every function's VIR is complete and the implicit atoms of `static` locals are added
-    // (recheck_restrict_after_static_atoms: those atoms are held by the function and its callers, and are the exemption of item 19), which is the state check_program
-    // sees; a callee's VIR function is made, with its contract, at the first call that names it, and may be defined after its caller.  The walker is
-    // vir::restrict_body_reason's (vir.cpp, beside restrict_backed), which check_program calls again as the backstop; the encoder reports it at the function's head,
-    // in source terms (invariants 3 and 7).
-    std::set<const vir::Function*> restrict_reported_;
-    std::vector<std::pair<vir::Function*, a_source_position>> complete_bodies_;
-    void report_restrict_bodies()
-    {
-        for (const auto& [f, at] : complete_bodies_)
-        {
-            bool any {false};
-            for (const vir::Param& p : f->params)
-            {
-                any = any || p.is_restrict;
-            }
-            if (!any || restrict_reported_.count(f) != 0U)
-            {
-                continue;
-            }
-            if (const std::string why {vir::restrict_body_reason(prog_, *f)}; !why.empty())
-            {
-                restrict_reported_.insert(f);
-                auto head {restrict_at_.find(f)}; // the position the other `restrict` rejections of the function use
-                reject(Diag::unsupported_annotation, head != restrict_at_.end() ? head->second : at,
-                       why); // the reason names the parameter, the function and the decision
-            }
-        }
     }
 
     // ---- contracts --------------------------------------------------------------------------------------------
@@ -6313,7 +6298,7 @@ private:
                 reject(
                     Diag::unsupported_annotation, at,
                     "\"" + name +
-                        "\" has a `restrict` parameter (decision 0043 item 10: `restrict` stays rejected until M8 models it)");
+                        "\" has a `restrict` parameter (decision 0064 item 19: cerastes does not model `restrict`; drop the keyword)");
                 return false;
             }
             const vir::Type* leaf {&pt.t};
@@ -9763,38 +9748,6 @@ private:
     // reaches it through the encoder's call edges, as one atom per local in `requires` and in `ensures` (a set per function: a recursive function reaches
     // itself).  `Program::entry` is skipped (it holds them from `program_start`), and a `noreturn` function gets no `ensures` atom.  Run after every body is
     // encoded and before anything lowers or checks a contract.
-    // Decision 0044 item 11: the implicit atoms of `static` locals are contract atoms like any other, so the `restrict` rule (decision 0043 item 10) is checked
-    // again once they are added: a `restrict int *` beside a `static` struct local with an `int *` leaf.
-    void recheck_restrict_after_static_atoms()
-    {
-        for (const auto& [r, f] : fns_)
-        {
-            if (f == nullptr)
-            {
-                continue;
-            }
-            for (size_t k {0U}; k < f->params.size(); ++k)
-            {
-                if (!f->params[k].is_restrict)
-                {
-                    continue;
-                }
-                const std::string hazard {vir::restrict_hazard(*f, static_cast<int>(k))};
-                if (hazard.empty())
-                {
-                    continue;
-                }
-                restrict_reported_.insert(f);
-                auto at {restrict_at_.find(f)};
-                reject(Diag::unsupported_annotation,
-                       at != restrict_at_.end() ? at->second : r->source_corresp.decl_position,
-                       "a `restrict` parameter `" +
-                           (f->params[k].name.empty() ? "arg" + std::to_string(k + 1U) : f->params[k].name) + "`: " +
-                           hazard + " (decision 0043 item 10: `restrict` stays rejected here until M8 models it)");
-            }
-        }
-    }
-
     void add_static_local_atoms()
     {
         std::map<const vir::Function*, std::vector<vir::Global*>> by_owner;
@@ -10439,7 +10392,7 @@ private:
         {
             an_expr_node_ptr d {peel_generated_conversions(n)};
             return decayed_array_variable(d) != nullptr || array_member_of_decay(d) != nullptr ||
-                   struct_element_address(d, nullptr);
+                   index_address(d, nullptr);
         };
         if ((op == vir::BinaryOp::Eq || op == vir::BinaryOp::Ne) &&
             ((decays(ops[0U]) && is_zero_constant(peel_generated_conversions(ops[1U]))) ||
@@ -12632,7 +12585,7 @@ private:
                 reject(
                     Diag::unsupported_annotation, at,
                     quoted +
-                        " has a `restrict` parameter (decision 0043 item 10: `restrict` stays rejected until M8 models it)");
+                        " has a `restrict` parameter (decision 0064 item 19: cerastes does not model `restrict`; drop the keyword)");
                 return false;
             }
             ForallFn::Param pm;
@@ -19641,6 +19594,12 @@ private:
                                 : "a nested struct initialized without its own braces, in a structure of two or more members (brace elision, -Wmissing-braces, also `{0}`: question 304): write the inner braces (decision 0064 item 16)");
                         ok = false;
                     }
+                    else if (c_mode && elision && !designated && st.members.size() >= 2U &&
+                             !lone_zero_spelling_ok(c, cp))
+                    {
+                        ok =
+                            false; // item 16 (question 325): the C++ predicate applies, and the lone zero is not a literal
+                    }
                     else if (!collect_init_elems(*mt.struct_type, prefix, c, out, cp,
                                                  elided || elision || designated_elision, whole && elision,
                                                  designated || (by_designator && !c->explicit_braces_on_aggregate)))
@@ -19663,6 +19622,7 @@ private:
                 // question 303: clang++ warns on the others at -Wall).  A C++20 designated list's empty placeholder is no elision.
                 bool read_list {false};
                 bool designated_unbraced {false};
+                bool spelling_rejected {false};
                 if (c->kind == ck_aggregate)
                 {
                     const bool empty {c->variant.aggregate.first_constant == nullptr};
@@ -19687,9 +19647,20 @@ private:
                         // element (`{.u = 0}`: GCC is silent); in C++ the array's parent must be a structure of one member, at any depth of the elided chain
                         // (question 303; the frozen base also refused a chain of only members, which neither compiler flags)
                         read_list = sole && zero && (c_mode ? (designated || whole) : st.members.size() < 2U);
+                        // item 16 (question 325): in C, where the C++ predicate applies, the lone zero must be written as a literal
+                        if (read_list && c_mode && !designated && st.members.size() >= 2U &&
+                            !lone_zero_spelling_ok(in0, cp))
+                        {
+                            read_list = false;
+                            spelling_rejected = true;
+                        }
                     }
                 }
-                if (!read_list && !elided && !agg->explicit_braces_on_aggregate && agg->explicit_cast_applied)
+                if (spelling_rejected)
+                {
+                    ok = false;
+                }
+                else if (!read_list && !elided && !agg->explicit_braces_on_aggregate && agg->explicit_cast_applied)
                 {
                     // the folded form of a struct temporary in an initializer's call: no braces flags at any level, so the written `S{{1, 2}, 3}` cannot be told from `S{1, 2, 3}`
                     reject(
@@ -23204,7 +23175,6 @@ private:
         {
             report_goto_problems(f);
             report_sequence_problems(f);
-            complete_bodies_.push_back({f, r->source_corresp.decl_position});
             settle_strict_init(f);
         }
         cx_ = Ctx();
@@ -26500,8 +26470,6 @@ void Encoder::run(const IlEntities& ents)
         encode_body(r);
     }
     add_static_local_atoms(); // decision 0041 item 12: before any contract is read to classify calls or loops
-    recheck_restrict_after_static_atoms(); // decision 0044 item 11
-    report_restrict_bodies();              // decision 0064 item 19
     require_measures_in_cycles();
     check_pure_cycles(); // record 0062 item 10
     check_block_static_assertions(ents);

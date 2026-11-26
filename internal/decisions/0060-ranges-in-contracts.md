@@ -324,10 +324,8 @@ outcome to the branch of the plan's decision table it took.
     both lists, as the backing atom; every other parameter of the pointee type needs an `owns`, `reads`, `owns_range`
     or `reads_range` of its own. **(Amended by record 0064 item 19, M4.5e1e2, 2026-11-25: a range atom whose
     count can be 0 holds nothing and excludes nothing, and `restrict` beside such a range verified wrong
-    programs. The backing atom and each other covering atom now count as a pair only when both are surely
-    non-empty or both are ranges with structurally equal counts: "the pair rule". One form is known to be
-    left open and unsound: two ranges with the same, possibly zero, count beside a global the contract holds
-    and the body never names; record 0064 item 19 has the program.)**
+    programs; the first version's "pair rule" still left one form open. The item as rewritten on 2026-11-26
+    (M4.5e1e2's continuation, question 326) withdraws this acceptance: every `restrict` parameter is rejected.)**
 
 15. **Array parameters.** `T a[]` and `T a[N]` are pointer parameters; a written bound is checked as a local array's is
     (0059 item 2) and otherwise ignored; `sizeof` of one is rejected like the compilers (a new tag); the matrix's other

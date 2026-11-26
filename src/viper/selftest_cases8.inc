@@ -620,24 +620,6 @@ void define_pointer_contracts()
            k.trusted(f);
            k.fail("permission", where);
        });
-
-    // ---- restrict (item 2): accepted with owns, backstop in check_program ----
-    lc("ptr_restrict_owns",
-       "int g(int *restrict p) requires(p == NULL || owns(*p)) ensures(p == NULL || owns(*p)): accepted",
-       [=](Kit& k)
-       {
-           Function* f {k.fn("g", k.i32, {{"p", PT(k)}})};
-           f->params[0U].is_restrict = true;
-           const auto isnull = [&]()
-           {
-               return k.eq(FP(k, f, 0), k.nul(PT(k)));
-           };
-           k.req(f, k.lor(isnull(), owns(k, f, 0, 0)));
-           k.ens(f, k.lor(isnull(), owns(k, f, 0, 0)));
-           const Var* p {f->param_var(0)};
-           f->body = k.blk({k.iff(k.eq(k.pn(p), k.nul(PT(k))), k.blk({k.ret(N(k, "0"))})), k.ret(k.deref(k.pn(p)))});
-           k.done(f);
-       });
 }
 
 void define_pointer_contract_rejections()
@@ -707,26 +689,6 @@ void define_pointer_contract_rejections()
        {
            Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
            k.req(f, k.b.atom(AtomKind::Owns, k.deref(FP(k, f, 0)), 0, k.at()));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("ptr_rej_restrict_without_owns", "restrict",
-       [=](Kit& k)
-       {
-           Function* f {k.fn("f", k.vd, {{"p", PT(k)}})};
-           f->params[0U].is_restrict = true;
-           k.req(f, k.b.atom(AtomKind::Reads, FP(k, f, 0), 0, k.at()));
-           k.ens(f, k.b.atom(AtomKind::Reads, FP(k, f, 0), 0, k.at()));
-           f->body = k.blk({});
-           k.done(f);
-       });
-    rc("ptr_rej_restrict_other_parameter_without_atom", "restrict",
-       [=](Kit& k)
-       {
-           Function* f {k.fn("f", k.vd, {{"p", PT(k)}, {"q", PT(k)}})};
-           f->params[0U].is_restrict = true;
-           k.req(f, k.b.atom(AtomKind::Owns, FP(k, f, 0), 0, k.at()));
-           k.ens(f, k.b.atom(AtomKind::Owns, FP(k, f, 0), 0, k.at()));
            f->body = k.blk({});
            k.done(f);
        });

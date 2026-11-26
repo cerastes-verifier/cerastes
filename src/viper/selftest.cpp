@@ -1555,6 +1555,7 @@ void define_quantifier_loops();
 #include "selftest_cases33.inc"
 #include "selftest_cases34.inc"
 #include "selftest_cases35.inc"
+#include "selftest_cases36.inc"
 
 namespace {
 
@@ -1864,8 +1865,7 @@ int main(int argc, char** argv)
     define_struct_array_values();
     define_array_literals();
     define_aggregate_element_guards();
-    define_restrict_body_cases();
-    define_restrict_fix_cases();
+    define_restrict_backstop_cases();
     define_array_of_structures_lowering();
     define_array_of_structures_loops();
     define_array_of_structures_pairs_and_copies();
@@ -1964,7 +1964,6 @@ int main(int argc, char** argv)
     }
     bad += check_array_views();
     bad += check_leaf_paths();
-    bad += check_restrict_reach();
     std::printf("cerastes-vir-selftest: %zu lowering cases written to %s, %zu rejection cases checked, %d problems\n",
                 lowering_cases().size(), dir.c_str(), reject_cases().size(), bad);
     return bad == 0 ? 0 : 1;

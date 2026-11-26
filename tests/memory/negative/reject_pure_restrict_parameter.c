@@ -2,7 +2,7 @@
 // mode: c23
 // c-only: restrict does not exist in C++20 (EDG, clang++ and g++ refuse it, decision 0037 item 2)
 // twin: tests/memory/pure_check_local_array.c
-// Pins: 0062 item 1 (0037 item 2): restrict on a read pure function's parameter is rejected with the tag it has on any function (M4.5f1); forall_reject_f_restrict.c is the same rejection at a forall
+// Pins: 0062 item 1 (0037 item 2): restrict on a read pure function's parameter is rejected with the tag it has on any function (M4.5f1); forall_reject_f_restrict.c is the same rejection at a forall [0064 item 19: unchanged: a pure function's and a quantifier function's restrict parameter keep this rejection (0043 item 10, 0061 item 3), checked before item 19's]
 // Pre-registered from record 0062 (Part B), before the code: rejected. C only (restrict is not C++); the tag and the line are question-160 candidates (the function's own line)
 #include <cerastes.h>
 

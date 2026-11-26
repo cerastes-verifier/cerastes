@@ -13,7 +13,7 @@
 #                          into refs/tmp/<name>; prints the ref.  With paths: only those paths differ from
 #                          <base> (use it when other agents have uncommitted work in the same worktree)
 #   setup <lane>           make the lane (a cp -a of the seed lane, CERASTES_BOX_SEED) if it is missing,
-#                          and a container cerastes-e1e1-<lane> from the image (docker run --init)
+#                          and a container <CERASTES_BOX_PREFIX><lane> from the image (docker run --init)
 #   ship <lane> <ref>      bundle <ref> (a branch or a ref such as refs/tmp/<name>), copy the bundle to the
 #                          box, fetch it into the lane and check it out DETACHED with -f: the lane is a
 #                          mirror, its uncommitted work is discarded
@@ -26,25 +26,35 @@
 # Each leg prints its wall time on stderr (box_lane: <leg> <n>s).  --dry-run prints the commands, one per
 # line after "+ ", and runs nothing.
 #
-# Environment (defaults): CERASTES_BOX (matt@clang4.cpp.al), CERASTES_BOX_KEY (~/.ssh/id_rsa),
-# CERASTES_BOX_DIR (cerastes-e1e1, under the box's home), CERASTES_BOX_PREFIX (cerastes-e1e1-, the
-# container name prefix), CERASTES_BOX_IMAGE (cerastes-e1d:26.04), CERASTES_BOX_SEED (the box path that
-# `setup` copies; default ~/<CERASTES_BOX_DIR>/work), CERASTES_BOX_JOBS (32).
+# Environment.  Required, no default (every subcommand but --self-test and --help refuses to run without
+# them, so a session never builds in another session's lanes by forgetting its box.env):
+# CERASTES_BOX_DIR (the lanes' directory under the box's home) and CERASTES_BOX_PREFIX (the container name
+# prefix, ending in "-").  Optional (defaults): CERASTES_BOX (matt@clang4.cpp.al), CERASTES_BOX_KEY
+# (~/.ssh/id_rsa), CERASTES_BOX_IMAGE (cerastes-e1d:26.04), CERASTES_BOX_SEED (the box path that `setup`
+# copies; default ~/<CERASTES_BOX_DIR>/work), CERASTES_BOX_JOBS (32).
 
 set -euo pipefail
 
 box="${CERASTES_BOX:-matt@clang4.cpp.al}"
 key="${CERASTES_BOX_KEY:-$HOME/.ssh/id_rsa}"
-dir="${CERASTES_BOX_DIR:-cerastes-e1e1}"
-prefix="${CERASTES_BOX_PREFIX:-cerastes-e1e1-}"
+dir="${CERASTES_BOX_DIR:-}"
+prefix="${CERASTES_BOX_PREFIX:-}"
 image="${CERASTES_BOX_IMAGE:-cerastes-e1d:26.04}"
-seed="${CERASTES_BOX_SEED:-\$HOME/$dir/work}"
+seed=""
 jobs="${CERASTES_BOX_JOBS:-32}"
 dry=0
 
 die() {
   echo "box_lane.sh: $*" >&2
   exit 2
+}
+
+# The two variables that name a session's lanes have no default: a missing one is an error, not another
+# session's lanes.
+require_lane_env() {
+  [[ -n "$dir" ]] || die "CERASTES_BOX_DIR is not set (source the session's box.env first)"
+  [[ -n "$prefix" ]] || die "CERASTES_BOX_PREFIX is not set (source the session's box.env first)"
+  seed="${CERASTES_BOX_SEED:-\$HOME/$dir/work}"
 }
 
 usage() {
@@ -210,6 +220,7 @@ self_test() {
     git add f
     git -c user.name=t -c user.email=t@t commit -q -m init
     echo y > g
+    export CERASTES_BOX_DIR=d CERASTES_BOX_PREFIX=p-
     [[ "$(bash "$self" snap t1)" == "refs/tmp/t1" ]] && [[ "$(bash "$self" snap t2 HEAD -- g)" == "refs/tmp/t2" ]] &&
       [[ "$(git ls-tree -r --name-only refs/tmp/t1 | tr '\n' ' ')" == "f g " ]] &&
       [[ "$(git ls-tree -r --name-only refs/tmp/t2 | tr '\n' ' ')" == "f g " ]]
@@ -218,10 +229,34 @@ self_test() {
     fail=1
   }
   rm -rf "$scratch"
-  out="$(CERASTES_BOX=b@h bash "$self" --dry-run build 'Bad Lane' 2>&1 || true)"
+  out="$(CERASTES_BOX=b@h CERASTES_BOX_DIR=d CERASTES_BOX_PREFIX=p- bash "$self" --dry-run build 'Bad Lane' 2>&1 || true)"
   want="box_lane.sh: lane name must be lower-case letters and digits: 'Bad Lane'"
   if [[ "$out" != "$want" ]]; then
     printf 'box_lane.sh --self-test: bad lane differs\n--- want\n%s\n--- got\n%s\n' "$want" "$out" >&2
+    fail=1
+  fi
+  # a missing CERASTES_BOX_DIR or CERASTES_BOX_PREFIX is refused (exit 2) before anything runs
+  local var rc other
+  for var in CERASTES_BOX_DIR CERASTES_BOX_PREFIX; do
+    rc=0
+    if [[ "$var" == CERASTES_BOX_DIR ]]; then
+      other=CERASTES_BOX_PREFIX=p-
+    else
+      other=CERASTES_BOX_DIR=d
+    fi
+    out="$(env -u CERASTES_BOX_DIR -u CERASTES_BOX_PREFIX "$other" \
+      bash "$self" --dry-run ship edg refs/tmp/x 2>&1)" || rc=$?
+    want="box_lane.sh: $var is not set (source the session's box.env first)"
+    if [[ "$rc" != 2 || "$out" != "$want" ]]; then
+      printf 'box_lane.sh --self-test: %s unset: want exit 2 and the message\n--- want\n%s\n--- got (exit %s)\n%s\n' \
+        "$var" "$want" "$rc" "$out" >&2
+      fail=1
+    fi
+  done
+  rc=0
+  out="$(env -u CERASTES_BOX_DIR -u CERASTES_BOX_PREFIX bash "$self" --dry-run run work true 2>&1)" || rc=$?
+  if [[ "$rc" != 2 ]]; then
+    printf 'box_lane.sh --self-test: run with neither variable: want exit 2, got %s\n' "$rc" >&2
     fail=1
   fi
   if [[ "$fail" == 0 ]]; then
@@ -244,6 +279,10 @@ set -- "${args[@]+"${args[@]}"}"
 }
 sub="$1"
 shift
+case "$sub" in
+  -h | --help | --self-test) ;;
+  *) require_lane_env ;;
+esac
 case "$sub" in
   -h | --help) usage ;;
   --self-test) self_test ;;

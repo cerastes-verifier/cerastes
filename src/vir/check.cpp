@@ -1288,8 +1288,8 @@ private:
         }
     }
 
-    // Decision 0037 items 5, 6 and 2: the atoms of the contract stand in allowed positions, are numbered, and pair up; `restrict` is backed by
-    // an `owns` that the `ensures` returns.
+    // Decision 0037 items 5 and 6: the atoms of the contract stand in allowed positions, are numbered, and pair up; a parameter that carries the flag `restrict` is refused (decision 0064
+    // item 19).
     static void collect_atoms(const Expr* e, std::set<const Expr*>& all)
     {
         if (e == nullptr)
@@ -1550,33 +1550,15 @@ private:
                                      " (decision 0041 item 12)");
             }
         }
-        // `restrict` (item 2): backed by an `owns` that the `ensures` returns.
+        // decision 0064 item 19 (question 326), the backstop: cerastes does not model `restrict`, and the encoder refuses a parameter that carries it at the C line before a program
+        // reaches this point.  A program that arrives here with the flag set is refused, so no code path can verify one.
         for (size_t k {0U}; k < f.params.size(); ++k)
         {
-            int other {-1};
-            if (f.params[k].is_restrict && !restrict_backed(f, static_cast<int>(k), &other))
+            if (f.params[k].is_restrict)
             {
-                const std::string pair {other >= 0 ? restrict_pair_reason(f, static_cast<int>(k)) : std::string()};
-                err(f.params[k].loc,
-                    !pair.empty()
-                        ? pair
-                        : "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
-                              "' is `restrict` without `owns(*p)` or `owns_range(p, n)` in its `requires` and `ensures` (decision 0037 item 2, record 0060 item 14)");
+                err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
+                                         "' is `restrict`, which cerastes does not model (decision 0064 item 19)");
             }
-        }
-        // decision 0064 item 19 (question 326): what the body of a function with a `restrict` parameter can reach (the encoder reports it first, at the C line)
-        if (const std::string why {restrict_body_reason(prog_, f)}; !why.empty())
-        {
-            SrcLoc at {f.loc};
-            for (const Param& p : f.params)
-            {
-                if (p.is_restrict)
-                {
-                    at = p.loc;
-                    break;
-                }
-            }
-            err(at, why);
         }
         init_markers(f, sites, block_sites);
         not_invalidating_markers(f, sites, block_sites);

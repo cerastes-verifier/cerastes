@@ -868,8 +868,8 @@ struct Param
     Type type;
     SrcLoc loc;
     std::string c_type_name; // the C/C++ spelling of the type, for messages (empty: use type.str())
-    // `T *restrict p` (decision 0037 item 2): accepted only when the `requires` holds `owns(*p)` as a top-level conjunct or as `p == NULL ||
-    // owns(*p)` and the `ensures` returns the same atom; check_program repeats the rule as a backstop (the encoder reports it first).
+    // `T *restrict p`: cerastes does not model `restrict` (decision 0064 item 19, question 326).  The encoder refuses a function that has such a parameter, and check_program
+    // refuses any parameter that carries the flag, as a backstop.
     bool is_restrict {false};
     // `[[cerastes::ref_to_uninit]]` / `[[cerastes::must_init]]` on a pointer parameter (decision 0042 item 4).  Set by the encoder before the
     // contract is read, so a written read of the pointee is rejected there.
@@ -1172,7 +1172,7 @@ std::vector<AtomSite> loop_atoms(const Stmt& s);
 // pointer the invariant reads (a `Local` pointer variable, or a place reached from one or from a global through loads and members), `atom->amount` is -1.
 std::vector<AtomSite> loop_block_atoms(const Stmt& s);
 // The shape of a site's guards for pointer parameter `param`: none (the atom is a top-level conjunct, or an arm of `&&`), exactly `param == NULL` being false
-// (`param == NULL || atom`, with C's `bool_to_int`/`to_bool` wrapping of the comparison accepted), or anything else.  restrict_backed and the encoder's
+// (`param == NULL || atom`, with C's `bool_to_int`/`to_bool` wrapping of the comparison accepted), or anything else.  The encoder's
 // merge of `[[cerastes::owning]]` with an explicit atom (decision 0040 item 3) read it.
 enum class GuardShape
 {
@@ -1183,38 +1183,6 @@ enum class GuardShape
 GuardShape atom_guard_shape(const AtomSite& s, int param);
 // The number of ghost amounts of `f` (the atoms of its `requires`).
 int requires_atom_count(const Function& f);
-// Whether `f`'s contract backs `restrict` on parameter `param` (decision 0037 item 2): an `Owns` atom of that parameter in the `requires`, the `Owns`
-// atom with the same `amount` in the `ensures`, and, for EVERY OTHER pointer parameter of the same pointee type, an `Owns` or `Reads` atom of its own
-// in the `requires` (permissions follow cells, not provenance: without it a second pointer to the same cell could be written through).  Each atom is
-// unguarded or guarded by exactly `q == NULL` being false (`q == NULL || owns(*q)`).  Record 0060 item 14: an `OwnsRange` atom of the parameter (and its `ensures` partner of the
-// same kind) backs `restrict` like the `Owns`, and a range atom of another parameter covers it like an `Owns` or `Reads` atom does.  The atoms must already be numbered.  When it is false,
-// `*offender` (if given) is the other parameter that has no atom, or -1 when `param`'s own `owns` is the missing part.
-bool restrict_backed(const Function& f, int param, int* offender = nullptr);
-// Decision 0064 item 19, the pair rule (audit round 2, blocking 2; amends 0037 item 2, 0043 item 10 and 0060 item 14): `restrict_backed` is also false, with `*offender` the OTHER parameter, when
-// `param`'s backing atom and the covering atom of another pointer parameter that reaches its pointee are not a pair: both surely non-empty (a cell or structure atom, or a range atom whose count is an
-// integer constant of at least 1 or has `n > 0`, `0 < n`, `n >= 1` or `1 <= n` as a top-level conjunct of the `requires`, matched by `same_pure_expr`), or both range atoms with structurally equal
-// counts.  This is that rejection's reason in source terms (with the counts' spellings), "" when `restrict_backed` has no objection of this kind.
-std::string restrict_pair_reason(const Function& f, int param);
-// Decision 0064 item 19 (question 326; audit round 1, blocking 1): what the BODY of a function with a `restrict` parameter can reach.  "" when the item has no objection (and
-// at once for a function without a `restrict` parameter or without a body), otherwise the reason, in source terms, for the first offending construct of the first `restrict`
-// parameter that has one, ending with "(decision 0064 item 19)": (i) the body (statements, expressions, loop invariants, measures and checks) names or takes the address of a
-// global or `static` local that reaches the parameter's pointee field; (ii) it calls a function whose `requires` or `ensures` (written atoms and the implicit atoms of `static`
-// locals alike) has an atom rooted at such a global; (iii) it calls a function whose result is a pointer, or an aggregate with a pointer leaf, that reaches the field, or one of whose
-// parameters points to an object that holds such a pointer; (iv) it passes to ANY function, with or without a body, by a call or an application, an argument that is a pointer reaching the field
-// or a structure value with such a pointer leaf (audit round 2, blocking 1 and issue 3).  Exempt from (i) and (ii) only: a global the function's own contract holds WHOLE and UNGUARDED by `owns` or
-// `reads` (a top-level conjunct of the `requires`, the implicit atom of a `static` local included; of a global array, the whole-array atom) PROVIDED it pairs with the parameter's backing atom (the pair rule
-// above: both surely non-empty, or ranges of equal counts); a partial atom, a guarded one, or one that does not pair exempts nothing.  "Holds" and "reaches"
-// are the predicate of restrict_backed's walker over leaf paths.  check_program calls it as the backstop; the encoder calls it once the body is encoded.
-std::string restrict_body_reason(const Program& program, const Function& fn);
-// Why `restrict` on pointer parameter `param` is refused whatever its contract owns (decision 0043 item 10, audit B2): empty when nothing is in the way.
-// The pointee of `param` is a struct (M8), or another pointer parameter's object or a global that an atom of the contract names can hold a pointer to the same
-// type (`int **`, a struct with an `int *` leaf or struct-pointer leaves that reach one, an `int *` global): a pointer loaded from there is not based on
-// `param`, so a write through it could alias `*param`.  A by-value struct parameter whose leaves can hold such a pointer (an `int *` leaf, or a `struct U *` leaf whose `U`
-// has an `int` leaf, at any depth) is one of those places too (decision 0044 item 11).  restrict_backed is false when this is not empty (the encoder reports it
-// first).  The message names the offender in source terms.  Decision 0045 item 10: an atom whose place is reached through loads or pointer leaves (`*gp`, `**pp`,
-// `*s.q`) is judged by its innermost root (place_root): a global by its type, the result by the function's result type, a Formal by the loop over the parameters;
-// any other root of such a place fails closed.  restrict_backed never counts such an atom (it requires the atom's operand to BE the Formal).
-std::string restrict_hazard(const Function& f, int param);
 // Whether the expression reads the heap: it contains a `Deref`, an `Atom` or an `Apply` (record 0062 item 4: an application counts as a read, whatever its
 // callee reads; an `Old` of one included).
 bool reads_heap(const Expr& e);

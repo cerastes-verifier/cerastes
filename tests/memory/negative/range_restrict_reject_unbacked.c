@@ -1,8 +1,8 @@
 // expect: rejected cerastes-unsupported_annotation @ L10
 // mode: c23
 // c-only: restrict does not exist in C++20 (decision 0037 item 2)
-// twin: tests/memory/range_restrict.c
-// Pins: 0060 item 14: a restrict parameter p beside another parameter of its pointee type with no atom (q): q could alias p, so the contract does not own what restrict promises: rejected at the function
+// twin: tests/memory/restrict_dropped.c
+// Pins: 0060 item 14: a restrict parameter p beside another parameter of its pointee type with no atom (q): q could alias p, so the contract does not own what restrict promises: rejected at the function [0064 item 19, question 326: every restrict parameter is now rejected by that one rule, whatever the contract; this pin's row keeps its tag and line and its condition no longer matters]
 // Pre-registered from record 0060 item 14 (Part E), before the code
 #include <cerastes.h>
 #include <stddef.h>

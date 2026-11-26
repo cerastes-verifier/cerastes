@@ -8,8 +8,8 @@
 // expect: rejected cerastes-unsupported_annotation @ L110
 // mode: c23
 // c-only: restrict does not exist in C++20 (EDG, clang++ and g++ refuse it, decision 0037 item 2)
-// twin: tests/memory/restrict_body_owns_global.c
-// Pins: 0064 item 19 (question 326), clause (i): a restrict parameter in a function whose body names, or takes the address of, a global or static local that holds the pointee's field, unless the contract holds it whole and unguarded: a global by name (probe x07, c1a), an element of a global array (x05), a member of a structure global (x09's kind), a local int *q = &g (x08, c1b), a local structure holding &g (c1d), the read-only body (c6c: over-strict by design, C allows it), a partial atom owns(g.x) with p == &g.y tested in the body (d4b), and a guarded atom (c == 0 || owns(g)) (d5: over-strict, left out of the exemption). Each is rejected at its function head. Every alias branch of the first five and of d4b is live on the base (the twins with the other value fail)
+// twin: tests/memory/restrict_dropped.c
+// Pins: 0064 item 19 (question 326), clause (i): a restrict parameter in a function whose body names, or takes the address of, a global or static local that holds the pointee's field, unless the contract holds it whole and unguarded: a global by name (probe x07, c1a), an element of a global array (x05), a member of a structure global (x09's kind), a local int *q = &g (x08, c1b), a local structure holding &g (c1d), the read-only body (c6c: over-strict by design, C allows it), a partial atom owns(g.x) with p == &g.y tested in the body (d4b), and a guarded atom (c == 0 || owns(g)) (d5: over-strict, left out of the exemption). Each is rejected at its function head. Every alias branch of the first five and of d4b is live on the base (the twins with the other value fail) [0064 item 19, question 326: every restrict parameter is now rejected by that one rule, whatever the contract; this pin's row keeps its tag and line and its condition no longer matters]
 // Pre-registered from record 0064 item 19 (the base verifies each of them: reports 4, rounds 1 and 2), before any run: rejected
 #include <cerastes.h>
 

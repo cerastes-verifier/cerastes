@@ -134,7 +134,7 @@ Written block invariants and owners in memory use the same carriers.
      A re-keying commit that changes no output comes first (`vprdiff`: none differ).
    - **`restrict`** (audit item 13). A site through a load does not back `restrict` on its root formal, because its
      block is not the formal's pointee. Only a site whose place is the formal itself backs it (0052 item 6(d)). A site
-     rooted at a global counts in `restrict_hazard` like an atom on that global.
+     rooted at a global counts in `restrict_hazard` like an atom on that global. **(Withdrawn by record 0064 item 19 as rewritten on 2026-11-26, M4.5e1e2's continuation, question 326: every `restrict` parameter is rejected, and this clause's code is removed.)**
    - **The leak exemption** at the end label (0047 item 7) reads each `ensures` site's pointer in the post-state, framed
      by the atoms before it, as the site guard of 0052 item 6(b) does.
    - **Calls and returns.** A site through a load at a call is 0047 item 4's rows on the pointer the callee's place

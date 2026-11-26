@@ -854,11 +854,18 @@ the function, and the `return` of a pure function that `cerastes_forall` names, 
   `a != 0`), which is always true or always false (clang's
   `-Wpointer-bool-conversion` and `-Wtautological-pointer-compare`, GCC's
   `-Waddress`);
-* a truth test or a null comparison of the address of an element of an array of
-  structures, or of a member of such an element (`if (&v[1])`, `&v[1].x == NULL`,
-  `&p[1] != NULL` for a pointer to a structure), which is never null (GCC's
-  `-Waddress`): `array_address_null_test`. The same test on an element of an
-  array of integers or pointers (`&a[1] == NULL`) is accepted for now;
+* a truth test or a null comparison of an address formed with an index: of an
+  element of an array, of an element a pointer is indexed to, or of a member of
+  such an element (`if (&a[1])`, `&v[1].x == NULL`, `&p[1] != NULL`,
+  `&s.a[i] == NULL`), which is never null (GCC's `-Waddress`):
+  `array_address_null_test`. `&p[0]` is rejected with the other indexes,
+  although GCC does not warn about that one form, and so is a test that a
+  macro writes (`assert(&a[1] != NULL)`), on which the compilers are silent;
+  `p == NULL` for a pointer variable and a comparison of two addresses
+  (`&a[1] == q`) are ordinary comparisons. For an array with static storage
+  and a constant index (`&table[2]` of a global), the front end folds the
+  address into a constant: such a test is rejected as `unsupported_expression`
+  instead, and in C this version still accepts it as the condition of an `if`;
 * a braced initializer that leaves out the braces of an inner structure or array
   (`-Wmissing-braces`, which clang reports in both languages and GCC in C):
 ** a list of values (`struct line l = {1, 2, 3, 4};`, `struct point v[2] = {1,
@@ -868,6 +875,12 @@ the function, and the `return` of a pure function that `cerastes_forall` names, 
    `+struct point v[2] = {0};+`), but a list inside the initializer whose `0`
    leaves out braces is rejected (`+struct w { struct line l; int k; } x =
    {{0}};+`), as GCC reports it;
+** in C, that zero must be written as an integer literal (`0`, `0u`, `0x0`, a
+   macro that expands to one) where the braces it leaves out belong to an
+   element of an array or to a member of a structure with two or more members:
+   `+{'\0'}+`, `+{false}+`, `+{NULL}+`, an enumerator, `+{1 - 1}+` and `+{(int)0}+`
+   are rejected there (`unsupported_expression`), as clang reports them; a
+   parenthesized `+{(0)}+` is still accepted, although clang reports it too;
 ** in pass:[C++], `+{0}+` is rejected when a structure or array whose braces it
    leaves out is an element of an array or a member of a structure with two or
    more members (`+struct point v[2] = {0};+`, and `+{0}+` for a structure whose
@@ -1289,7 +1302,8 @@ The constructs that are rejected in this version are:
   that vlibc covers (`annotation_reserved_library`).
 * *Types:* pointers other than those xref:memory.adoc[Memory and ownership]
   describes (`void *` other than an allocation's result converted at once and
-  the argument of `free`, `restrict` other than on a C parameter the contract owns,
+  the argument of `free`, `restrict` (on a parameter: cerastes does not model it;
+  drop the keyword),
   and pointers to unions, to functions and to structures that are not supported
   are rejected, and so are
   pointer conversions other than adding `const` to the object pointed to; its

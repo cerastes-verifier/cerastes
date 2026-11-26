@@ -258,54 +258,30 @@ A few more rules:
   it back in its `ensures` keeps the object. If that object is a local variable
   of the caller, the caller cannot end its lifetime: the closing brace of the
   variable's block is reported as xref:error-messages.adoc#_lifetime[`lifetime`].
-* In C, a `restrict` pointer parameter is accepted when the contract owns its
-  object and gives it back and none of the rules below finds another way for
-  the function to reach that object. cerastes does not prove the promise
-  `restrict` makes; it rejects the ways of breaking it that it knows.
-  `restrict` promises that an object modified through the parameter is
-  reached only through pointers based on it, and the compilers optimize on that
-  promise; owning the object does not keep the promise by itself, because the
-  function may reach the same object by another name. So `restrict` is rejected
-  (`unsupported_annotation`):
-** when another parameter, or a global the contract names, could hold a pointer
-   of the same type (a pointer to a pointer, a structure with a pointer member,
-   a pointer global): a pointer read from there is not based on the `restrict`
-   one;
-** when another pointer parameter that could point into the same object has no
-   atom of its own, or when one of the two atoms is a range that may be empty
-   (`cerastes_owns_range(q, n)` with nothing saying `n > 0`): an empty range
-   owns nothing, so it does not keep the two apart. Two ranges with the same
-   count are accepted, and so is a range whose contract says `n > 0`. *Known
-   and open:* two ranges with the same count are accepted even when that count
-   may be 0 and the contract also holds a global of that type; with both
-   pointers equal to the global's address and a count of 0, such a function
-   verifies although the compilers may compile it differently;
-** when the function's body names, or takes the address of, a global or
-   `static` local that the parameter could point into (a global of the same
-   type, an element of a global array, a member of a structure global) or that
-   holds a pointer to such an object, unless the contract holds that whole
-   object by `cerastes_owns` or `cerastes_reads` without a condition and the
-   parameter's own atom is known not to be empty (one object, or a range with
-   `n > 0` or a constant count): the two are then known to be different
-   objects;
-** when the body calls a function whose contract holds such a global, with the
-   same exception;
-** when the body calls a function that can hand back a pointer of that kind: a
-   pointer result, a structure result with a pointer member, or a parameter
-   through which the callee stores a pointer (`int **out`);
-** when the body passes the parameter, or any other pointer of that kind, to
-   another function: what that function's body does with it is not looked at.
-
-+
-These rules look only at what the contract says and at what the body names,
-calls and passes on, so they also reject programs C allows: a body that only
-reads such a global, a call such as `same(p)` whose result is based on the
-parameter, a helper that takes the pointer (`set(p, 3)`), `malloc` of a type
-the parameter could point into,
-and a contract that holds the global under a condition. Drop `restrict` there:
-it changes what a compiler may assume, not what the program means when the
-promise holds. The rules are a list of the ways cerastes knows a function can
-reach the object by another route; they are not a proof that there is no other.
+* A `restrict` pointer parameter is rejected (`unsupported_annotation`, reported
+  at the head of the function's definition, in a message that names each such
+  parameter; in pass:[C++], where compilers spell the keyword `+__restrict+`, as
+  a type, `unsupported_type`): cerastes does not model `restrict`. The keyword promises that an
+  object modified through the parameter is reached only through pointers based
+  on it, and a compiler may reorder accesses on that promise. Owning the object does not keep the
+  promise, because ownership belongs to the object and not to the pointer: a
+  function may hold the permission it needs and still reach the same object by
+  another name (a global, a second parameter, a pointer that a called function
+  hands back), and C leaves such a function undefined although each of its
+  accesses is one its contract allows. Drop the keyword to verify the
+  function: for a program with defined behaviour `restrict` changes what a
+  compiler may assume, not what the program does. The proof is then of the
+  program without the keyword, so the program that is compiled must not have it
+  either: hiding it from cerastes alone proves nothing about the compiled one. A function that the file
+  only declares (no body) is rejected the same way where cerastes first reads
+  its signature: at the first call of it in the file, or, for some signatures
+  (a pointer to a structure among them), at the declaration itself whether or
+  not it is called. A declaration that is neither called nor read in that way
+  is not reported; nothing is verified against it. Where two declarations of a
+  function without a body disagree about the keyword, this version does not
+  report it yet. `restrict` written only on a declaration, before or after the
+  definition, of a function that the file defines without it is accepted: C
+  attaches the promise to the definition, and that definition makes none.
 * The address of a parameter may be taken (`int *q = &a;`): the parameter is
   then an object in memory, like a local.
 * A contract may own an object on one path and only read it on another
@@ -616,8 +592,9 @@ zero (`false`, a null pointer) for the rest, as C says, so `table[2]` above is
 element to zero. Without an initializer no element has a value until it is
 written. An index that is a
 constant outside the array (`a[4]` of `int a[4]`), a truth test of an array
-(`if (a)`) and, in C, a list longer than its array are rejected, as the
-compilers warn about them (xref:verifying.adoc#_shapes_the_compilers_warn_about[Shapes
+(`if (a)`) or of the address of an element (`if (&a[1])`, `&a[1] == NULL`: the
+address is never null) and, in C, a list longer than its array are rejected, as
+the compilers warn about them (xref:verifying.adoc#_shapes_the_compilers_warn_about[Shapes
 the compilers warn about]).
 
 `&a[i]` is a pointer to one element, and a function that owns one object
@@ -812,13 +789,7 @@ element that had one. A function that gives the elements their values in a loop
 says which ones the loop has written with an invariant over every element
 (<<quantifiers>>), and its `must_init` then holds; without one it is reported as not kept.
 `cerastes::owning(n)` on a parameter is `p == NULL || cerastes_owns_range(p, n)`
-(xref:annotations.adoc#_owning_parameters[Owning parameters]), and `restrict` on a
-parameter is accepted when its contract owns its range, as for one object
-(<<contracts>> has the conditions: beside another pointer parameter, or a
-global the contract holds that the body names or that a called function's
-contract holds, the range must be known not to be empty, by `n > 0` in the
-`requires` or by a constant count, or both parameters must be ranges with the
-same count; the same section names a case this does not catch).
+(xref:annotations.adoc#_owning_parameters[Owning parameters]).
 
 [#array-parameters]
 === Array parameters
@@ -2140,15 +2111,15 @@ These are rejected with a diagnostic, never approximated
   allocator; `cerastes_owns_vlibc_block` is the spelling for vlibc's), and
   `vlibc_malloc`, `vlibc_calloc` and `cerastes_owns_vlibc_block` in pass:[C++]
   (<<vlibc-allocator,vlibc's allocator>>);
-* `restrict` except on a C parameter whose contract owns its object;
 * `void *` other than an allocation's result converted at once to `T *` and
   the argument of `free` (<<heap>>), and pointers to unions, to functions and to
   structures that are not supported;
-* `restrict` beside a parameter or global that can hold a pointer of the same
-  type (a pointer to a pointer, a structure with a pointer member, a pointer
-  global), in a function whose body names or calls its way to an object the
-  parameter could point into (<<contracts,Pointer parameters and
-  contracts>>), and on a pointer to a structure;
+* `restrict`: on a parameter it is rejected because cerastes does not model the
+  promise it makes, and dropping the keyword does not change a program with
+  defined behaviour (<<contracts,Pointer parameters and contracts>>); on a
+  local, a global, a member, a result or the object a pointer points to it is
+  rejected as a type; in the type of a cast or of a compound literal it is
+  accepted and promises nothing;
 * conversions between pointer types other than adding `const` to the object
   pointed to, comparisons of order and arithmetic on pointers.
 

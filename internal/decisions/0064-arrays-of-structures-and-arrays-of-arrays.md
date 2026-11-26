@@ -1,9 +1,16 @@
 # 0064 — Arrays of structures and arrays of arrays (M4.5e1e2)
 
 - **Status:** accepted for the items its first session built (2026-11-25, M4.5e1e2: items 2 to 6 and 10 to 12
-  as far as automatic local arrays of structures in code go, item 16, item 17's first rules, item 19); **the
-  rest is decided and is built by the continuation** (item 7 to 9 and the range, global and member parts of 10
-  and 12: Part C; item 15: Part D; item 13 and depths 2 and 3: Part E; item 14: Part F). Written before code
+  as far as automatic local arrays of structures in code go, item 16, item 17's first rules, and item 19 in its
+  first version, which the continuation withdraws); **the rest is decided and is built by the continuation,
+  from a plan of its own** (`.claude/plans/m4-5e1e2b-arrays-of-structures.md`, written on 2026-11-25 at a
+  session that only planned, at the owner's request, in place of question 310's "no second planning"; its parts
+  in order: **Part R**, item 19 rewritten — every `restrict` parameter rejected — with item 5's rule for every
+  element address and item 16's lone zero as P84 (a) decides; **Part C1**, items 7 and 8 and the range parts of
+  10; **Part C2**, item 9 and the global and member parts of 10 and 12; **Part D**, item 15; **Part E**, item 13
+  and depths 2 and 3; **Part F**, item 14). **Amended on 2026-11-26, before Part R's code** (invariant 6), from
+  section 6 of that plan: this header; items 1, 5, 7, 12, 13, 16 and 19; the table of facts (P84); the
+  consequences. Written before code
   (invariant 6) from section 7 of the plan
   (`.claude/plans/m4-5e1e2-arrays-of-structures.md`, written at a session that only planned and executed without
   re-planning). Revised by P83's and S48's decision tables (the plan's section 6; `internal/il-inventory.md`,
@@ -38,18 +45,53 @@
     its first run, listed in status), 176 (the owner handles CI), 277 (a twin with several real errors lists every
     one), 285 and 299 (a test slow on the box only because of what it must refute goes to `tests/long/` with a
     short twin).
-  - Questions of this session (`internal/handoff.md` §8): **open for the owner: 320** (the parameter spelling
-    `T (*a)[M]`, item 13), **322's second half** (the address tests on arrays of scalars, item 5), **325** (a
-    lone zero that is not a literal, item 16) and **326** (`restrict`: the complete rule, item 19); settled with
-    the advisor: **321** and **327** (item 16 is the measured rule of both compilers, designated lists
-    included), **322** (the address tests of item 5), **323** (the depth-2 copy is built; its time is recorded,
-    item 12), **324** (25 fixtures over the spike's cap), **328** (the cost of several arrays of structures in
-    one function, item 6), **329** (item 19's clause (iv) and pair rule).
+  - Questions of the first session (`internal/handoff.md` §8): four were the owner's and were **answered at the
+    planning of the continuation (2026-11-25, the question dialog):** **326** (`restrict`, unsound on `main` and
+    with one form open on the first session's branch) "Reject restrict (Recommended)": every `restrict`
+    parameter is rejected with a diagnostic that says to drop the keyword, the acceptance rules of records
+    0037, 0040, 0043, 0044, 0045, 0047, 0052, 0054, 0060 and this record's first item 19 are withdrawn and
+    their code removed, exactly 17 test files change outcome (8 positives become rejection pins, their 9 error
+    twins are retired), and a model of `restrict` is an M8 entry (item 19); **320** (the parameter spelling `T
+    (*a)[M]`) "Accept it in Part E (Recommended)" (item 13); **322, second half** (a truth test or null
+    comparison of an element's address on an array of scalars) "Reject them too (Recommended)" (item 5);
+    **325** (a lone zero that is not the literal `0`) "Probe, reject if the IL can tell" (item 16; P84 (a)).
+    Settled with the advisor in the first session: **321** and **327** (item 16 is the measured rule of both
+    compilers, designated lists included), **322** (the address tests of item 5 on arrays of aggregates),
+    **323** (the depth-2 copy is built; its time is recorded, item 12), **324** (25 fixtures over the spike's
+    cap), **328** (the cost of several arrays of structures in one function, item 6), **329** (the first item
+    19's clause (iv) and pair rule, withdrawn with it), **330** (one self-test case corrected after the first
+    run of the full check).
+  - Defaults the continuation's plan builds on, for the owner's review (each fail closed or a matter of
+    process; `internal/handoff.md` §8): **331** Part C is two parts, C1 (ranges over structures in contracts)
+    and C2 (static storage and members), each with a commit, an audit round and a split point; **332** the
+    `restrict` rejection covers a declaration without a body as well as a definition (item 19; question 338
+    says where: at its first call, and one the unit never calls is not reported); **333** a
+    structure value stored into an element (`v[i] = f();`) stays rejected until M4.8 (item 12); **334** the 33
+    pins that already reject `restrict` stay, with only their `Pins:` comments changed; **335** `&p[0]` in a
+    truth test or null comparison is rejected with the other indexes, for scalars and structures alike (item
+    5); **336** `scripts/box_lane.sh` refuses to run without its two lane variables; **337** the harness's
+    twin rules shape the 17 files' flips: the 8 re-expected files move to `tests/memory/negative/`, a new
+    positive with the keyword dropped and its error twin stand for the rule, and the 14 pins whose `twin:`
+    line named one of the 8 name the new positive.
+  - Questions of the continuation's sessions (`internal/handoff.md` §8), each settled with the advisor: **338**
+    (where a `restrict` declaration without a body is reported, item 19), **339** (the lone zero that is not a
+    literal: the spellings the IL tells, item 16), **340** (a staging pin's row that Part C1's lift removes one
+    part early), **341** (a function without a body is rejected if ANY of its declarations has the qualifier,
+    item 19) and **342** (item 5's rule is over-strict on a family no compiler flags, listed).
+  - **Audit round R** (a fresh Fable auditor on the joined snapshot of Part R, `c263b457938f`; `build/m4.5e1e2b/
+    auditor-report-R.md`): no wrong program verifies and no blocking finding; should-fix 1, a called function
+    without a body whose declarations disagree on `restrict` is accepted (item 19, question 341); 2, item 5's
+    rule misses a folded constant address as the condition of an `if` in C (item 5); 3, question 339's rule had
+    no page statement and one call site without a test row (item 16); notes 4 to 8 in items 5, 16 and 19. The
+    record and the pages were made true of that build before Commit 1; the code and test fixes land with the
+    continuation's Commit 2 and are read again by the audit round of Part C1.
 - **Milestone:** M4.5e1e2.
 - **Amends:** 0012 item 11 (the lint); 0024 item 6 (array types of aggregates); 0028 items 2 and 16 (as built); 0043
 items 6, 7, 9 and 11; 0044 items 2–5 and 8; 0045 items 1 and 12; 0047 items 2, 4, 6 and 8; 0052 item 2; 0055
 items 2, 3 and 5; 0058 item 4; 0059 items 1–4, 6, 8 and 9; 0060 items 1, 3–5, 8, 9, 11–13 and 15; 0061 items 1, 3
-and 6; 0062 item 4; 0063 items 1, 2, 4–10 and 13–15; 0037 item 2, 0043 item 10 and 0060 item 14 (`restrict`, item 19).
+and 6; 0062 item 4; 0063 items 1, 2, 4–10 and 13–15; and, their `restrict` clauses withdrawn by item 19: 0037
+item 2, 0040 item 3, 0043 item 10, 0044 item 11, 0045 item 13, 0047 item 4, 0052 item 6 (d), 0054 item 2 and 0060
+item 14.
 
 ## Context
 
@@ -82,7 +124,12 @@ holds a construct rejected today; where an existing function is touched, the tex
 without the new constructs is the same, and `vprdiff` shows it after every part. **Accepted forms that become rejections:**
 item 16's measured elision rule (the owner's answer to question 304, as measured: question 321), in C++ and, for
 nested lists, in C. Step 0 found no existing test or doc example whose outcome it changes; one that does at Part
-B's joined proof goes to the owner before it is touched (the plan's Flips G).
+B's joined proof goes to the owner before it is touched (the plan's Flips G). **In the continuation the same
+holds with one listed exception** (the continuation plan's section 3, rule 1, and its Flips R): the 17 test files
+the owner approved with question 326 lose their Viper (8 become rejections, 9 are retired); and two more
+accepted forms become rejections, item 19's `restrict` parameters and item 5's address tests on arrays of
+scalars, and item 16's lone zero that is not a literal (question 339), none of which any other existing test or
+doc example holds.
 
 1. **Scope.**
    - **In:**
@@ -103,8 +150,8 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
        in a loop invariant on such a place.
      - **(A) Arrays of arrays** (Part E): `T m[N][M]` as a local, a global, a `static` local and a member;
        `m[i][j]`, `&m[i][j]`, a row `m[i]` used as a pointer; `sizeof(m)`, `sizeof(m[0])`, `sizeof(int[2][3])`,
-       typedefs of such types; nested braced initializers; **array-of-rows parameters** (`int a[][3]`, `int
-       a[2][3]`; the same type spelled `int (*a)[3]` only once question 320 is answered, item 13) with `owns_range(a, n)` over rows, `a[i][j]`, and `m`
+       typedefs of such types; nested braced initializers; **array-of-rows parameters** in the three spellings
+       `int a[][3]`, `int a[2][3]` and `int (*a)[3]` (question 320, item 13) with `owns_range(a, n)` over rows, `a[i][j]`, and `m`
        passed to one; nested loops; and the other depth-2 path, an array of structures whose member is an array
        (`v[i].a[j]`, `p[i].a[j]`).
      - **(Q) Quantifiers and `pure` applications** (Part F): under a binder, a member of a structure element
@@ -116,12 +163,11 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
 
    | Construct | Lifted by |
    |---|---|
-   | an array or a range whose element structure has an `owning` or marked member; an array of owning pointers; `owning`, `ref_to_uninit` or `uninit` on an array of aggregates; `restrict` backed by a range over structures | M4.8 |
+   | an array or a range whose element structure has an `owning` or marked member; an array of owning pointers; `owning`, `ref_to_uninit` or `uninit` on an array of aggregates; a structure value stored into an element (`v[i] = f();`, `v[i] = (struct P){1, 2};`: question 333, item 12) | M4.8 |
    | `malloc(n * sizeof(struct S))`, `calloc(n, sizeof(struct S))`, `realloc`; a range on part of an array (`owns_range(&v[1], n)`, `owns_range(g, n)`, `owns_range(p->v, n)`, a row `m[i]` as a range's base in a contract); an atom on one element (`owns(p[i])`, `owns(v[i].x)`); `&p[i]`, `&p[i].x` and `&m[i][j]` in a contract; a range whose base is not a pointer parameter; a range atom in a loop invariant; `p + i` | M4.5e2 |
    | under a binder: a second index (`p[i].a[j]`, `m[i][j]`), a row `m[r]` or `&v[1]` as the pointer argument; a memory-reading argument (`p->q->a`) | M4.5e2 |
    | a `forall` inside a `forall`; the positions 0061 item 1 leaves to M4.8 | M4.8 |
    | a leaf path of depth 4 or more (`int d[2][2][2][2]`, a matrix of structures whose member is a matrix); depth 3 (`int c[2][3][4]`, an array of structures whose member is a matrix) is admitted by S48 (m) and built in Part E | M8 |
-   | a parameter written as a pointer to an array (`int (*a)[3]`): pending question 320, rejected until the owner answers | the owner (question 320); M8 otherwise |
    | a pointer to an array anywhere but a parameter (`int (*p)[3]` as a local, a member, a result; `&m[i]`, `&a`; a cast to one); `sizeof(char(*)[4])` | M8 |
    | a structure value that holds more than 7 array-element leaves, passed or returned by value (0063 item 13; a copy has no limit); an array as a value | M4.5f3 |
    | a read `pure` function over a structure or a global (0062 item 1) | M4.5f1 |
@@ -167,7 +213,8 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
      unrecorded; walks that count an array by its element; nest walkers that skip elements; a structure element
      compared as one field), each masked only by a refusal upstream, and three positions only the encoder
      refuses. Part A makes each an internal error or gives it the general path, closes the three positions in
-     `check.cpp`, and pins every guard with a self-test case (the plan's section 8, Part A's table).
+     `check.cpp`, and pins every guard with a self-test case (the first plan's section 8, Part A's table; the
+     guards that still stand, and the part that lifts each, are in the continuation plan's sections 4 and 7).
      **Audit round 1 added to that table** (issues 2 and 9): `restrict_backed`'s `reaches` walker
      (`vir.cpp`), which decides whether another parameter's object can hold a cell of a `restrict`
      parameter's pointee and which read an array member of aggregates as one leaf of the structure's or
@@ -219,11 +266,32 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
      decay, which the tag already covers, and on `&E[i].x`): a row `m[i]`; `&E[i]` whose element is a
      structure or a row, for `E` a named array, a member array or a pointer (`&v[i]`, `&t.v[i]`, `&p[i]` on a
      `struct P *p`, `&m[i][j]`); `&E[i].x`. GCC is silent on `&p[0]` alone (and on `p` and `&*p`); the rule
-     rejects `&p[0]` with the other indexes (over-strict by that one cell, fail closed, listed). **The same
-     tests on an element address of an array of scalars** (`if (&a[1])`, `&a[1] == NULL`, `&p[1] == NULL` on an
-     `int *p`, `&s.a[i]`, `&p->a[i]`), which GCC flags too and the base has accepted since M4.5e1a, **are
-     unchanged here and are the owner's** (question 322: rejecting them changes programs accepted before this
-     record; not unsoundness; no existing test or doc example holds one).
+     rejects `&p[0]` with the other indexes (over-strict by that one cell, fail closed, listed). **The rule
+     covers every address formed by an index** (question 322's second half, the owner, 2026-11-25: "Reject them
+     too"; built in the continuation's Part R): `&E[i]` and `&E[i].x` for `E` a named array, an array member or
+     a pointer, **whatever the element**, so also on an array of scalars — `if (&a[1])`, `&a[1] == NULL`, `&p[1]
+     != NULL` on an `int *p`, `&s.a[i]`, `&p->a[i]` — which GCC flags too and the base accepted from M4.5e1a
+     until Part R. It is one predicate, by the one tag `array_address_null_test`: `&p[0]` on a pointer is
+     rejected with the other indexes for scalars and structures alike, over-strict by the one cell GCC is
+     silent on (question 335, listed). Not unsoundness: a warning shape, rejected like the compilers; no
+     existing test or doc example holds one (the first session's three passes; Part R's `rejections.py` and
+     `vprdiff` runs check it again), and an existing file whose outcome changes goes to the owner before it is
+     touched. **An address the front end folds to a constant is under the rule too** (audit round R,
+     should-fix 2): a constant index into an array of static storage (`&ga[2]`, a `static` local array's
+     element, `&gs.a[1]`) reaches the encoder as a `ck_address` constant whose kept `expr` is the written
+     `&E[i]`, and the predicate reads through it. **As built at the continuation's Commit 1** it does not: in C
+     such an address as the condition of an `if` is accepted (`if (&ga[2])`; it verified on the base too; GCC
+     flags it; sound, the address is never null and the proof says so), and in its other positions (`!&ga[1]`,
+     `&ga[1] != NULL`, an operand of `?:` or `&&`, an initializer) and everywhere in C++ it is rejected, but
+     under `unsupported_expression` ("taking an address … in an expression the compiler folded to a constant").
+     Commit 2 rejects the `if` form (`array_address_null_test`, pinned) and leaves every row that already
+     rejects with its tag and line. **Over-strict beyond `&p[0]`, listed** (audit round R, note 4; question
+     342): a test written through a macro (`assert(&a[1] != NULL)`, `ISNULL(&a[1])`, `TRUTH(&a[1])`), on which
+     GCC and clang are silent in both modes, and `&a[1] == (int *)0` in C, which only g++ flags; the rule
+     rejects them, the base accepted them for arrays of scalars, and no existing test or doc example holds
+     one. Fail closed; the precise set (the front end does not record that a test came from a macro) is M8's
+     warning sweep. **Not under this rule, accepted, and listed for M8** (note 5): the same tests on an
+     address formed without an index (`&s.x == NULL`, `if (&ps->y)`, `if (&x)`), which both compilers flag.
 6. **Local arrays of aggregates** (amends 0059 items 3 and 6, 0043 item 6, 0063 item 6).
    - **Allocation:** one trusted method per element type, `alloc_arr_<E>(n)`, in `alloc_arr_<t>`'s shape: the block's length and liveness facts, item 3's length facts, and
      per leaf path full permission to the value field and to the flag field (each its own quantifier) with every
@@ -336,8 +404,8 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
        `struct S *` parameter is a false alarm.
    - **Amounts** (0060 item 6): a `reads_range`'s amount is the minimum over each leaf path's first slot, the
      liveness cell and the caller's own read amounts of those fields (question 238's listed limit applies).
-   - **Rejected** (`unsupported_annotation`): item 1's M4.5e2 rows; `restrict` backed by a range over
-     structures; two atoms on one parameter that overlap (`owns_range(p, n) && owns(*p)`).
+   - **Rejected** (`unsupported_annotation`): item 1's M4.5e2 rows; two atoms on one parameter that overlap
+     (`owns_range(p, n) && owns(*p)`). (`restrict` beside any atom is rejected by item 19.)
 8. **Calls and returns** (amends 0060 items 8 and 9, 0063 item 8). A range atom's rows are per leaf path: the
    shape row once (with the length facts), then e1b's marked rows (value, then flag) and its flag and range rows
    for each leaf, over the bound argument; the messages in source terms ("calls `f`, which needs `p[0..n)`: the
@@ -388,8 +456,9 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
     and `copy_arr_<t>` calls per element — **rejected beyond 7 such leaves until M4.5f3** (no trusted
     `copy_arr_<E>` is added here). An array is never a value. **A structure value stored into an element**
     (`v[i] = f();`, `v[i] = (struct P){1, 2};`) is not a copy between objects and stays rejected, with a
-    message of its own (audit round 2, issue 5; the continuation may lift it with 0044 item 5's rules for a
-    structure `Store`); `struct P t = f(); v[i] = t;` is the way to write it. **S48 (g):** the guard between two elements of one
+    message of its own, until M4.8 (audit round 2, issue 5; question 333, a default of the continuation's
+    plan: 0044 item 5's rules for a structure `Store` are not extended to an element here); `struct P t =
+    f(); v[i] = t;` is the way to write it. **S48 (g):** the guard between two elements of one
     array is decided by Silicon in both directions and is needed (without it the copy's `requires` fails once);
     the copy `v[i] = v[j]` of `struct W { int a[4]; int n; }` elements verified in 34.5 s and 35.2 s on the
     box, over the spike's 30 s line: it is built (question 323), and Part E's tests of it are timed under the
@@ -397,13 +466,22 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
 13. **Arrays of arrays** (amends 0060 item 15, 0063 item 14). A row is an array object in its own block; a
     matrix's leaf path has two index steps, and so has an array member of an element structure (`v[i].a[j]`).
     - **Array-of-rows parameters.** `T a[][M]`, `T a[N][M]` and `T (*a)[M]` declare a parameter of type pointer
-      to a row. **The spelling `T (*a)[M]` is pending question 320 and stays rejected until the owner
-      answers:** `tests/memory/negative/array_reject_pointer_to_array.c` pins exactly that parameter as
-      rejected (0059 item 1, M8), the plan lists that pin as unchanged while its scope accepts the spelling,
-      and flipping it is the owner's (invariant 1). The interim rule is fail closed: **a parameter is accepted
-      only when its written type (the parameter type's `declared_type`, P83 (d)) is an array declarator**;
-      a spelling through a typedef (`row *a`, `row a[]`) is probed by Part E before it is lifted, and rejected
-      otherwise. Such a parameter is accepted with `owns_range(a, n)` or `reads_range(a, n)` over `n` rows (item 7), `a[i][j]`
+      to a row. **`T (*a)[M]` is accepted as `T a[][M]` and `T a[N][M]` are** (question 320, the owner,
+      2026-11-25: "Accept it in Part E"): the three spellings share one adjusted type (P83 (d)), and the pin
+      `tests/memory/negative/array_reject_pointer_to_array.c`, which rejected exactly that parameter (0059
+      item 1), is retired by Part E for a positive of the same program with an error twin, with a new pin for
+      a pointer to an array as a local. The first session's interim rule (a parameter accepted only when its
+      written type is an array declarator) is withdrawn. **A spelling through a typedef** (`typedef int
+      row[3];` with `row *a`, `row a[]`, `row a[2]`) **is accepted as `int (*a)[3]` is** (P84 (b), its first
+      branch): the three give one adjusted pointer over one `tk_typeref` (`row`) whose type is the row's
+      `tk_array` entry, with the bound field for field that of the spelling without a typedef (a literal, a
+      product, an enumerator; both modes; an alias declared with `using` alike). The reader peels that one
+      typeref and reads the bound as written, under 0063 item 14's typedef rule (a typedef declared in a
+      verified file, its bound checked where it is written; one from a system header stays rejected). A
+      reader that did not peel would reject, never misread. A qualified row (`const row *a`) reaches the
+      encoder as a fresh array of `const int` with no typeref above it, the shape of `const int (*)[N]`,
+      and follows the rule that spelling has. A pointer to an array as a local, a member, a result or under `&` stays M8's (item 1).
+      Such a parameter is accepted with `owns_range(a, n)` or `reads_range(a, n)` over `n` rows (item 7), `a[i][j]`
       in code and in contracts, and a row `a[i]` used as a pointer. The outer bound of `T a[N][M]` is checked as
       written and is no promise (0060 item 15); the inner bound is part of the type. A matrix passed to such a
       parameter is its decay, bound to a local. `sizeof(a)` of such a parameter is rejected
@@ -427,8 +505,8 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
       loaded); `p->q->a` stays rejected (M4.5e2). The class's block is the member's or the global's block term
       in a contract line, and its bound local in code.
 15. **The leftovers of a structure with an array member** (amends 0063 items 1 and 7). Each site below takes
-    the object view (a cell leaf as before, an array leaf with 0063's quantified lines), and audit round 4 gives
-    a verdict per site of the plan's section 8 table.
+    the object view (a cell leaf as before, an array leaf with 0063's quantified lines), and the audit round of
+    Part D gives a verdict per site of the continuation plan's section 7 table.
     - **Heap storage** (question 292; amends 0047 items 2, 4, 6 and 8). `malloc(sizeof(struct S))`,
       `calloc(1, sizeof(struct S))` and `free` take a structure with array members: the typed view's `ensures`
       and `owns_block` state the member lengths and hold each array leaf by its quantified permissions and
@@ -478,14 +556,33 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
       v[2] = {0}`, a matrix), and **C's lone `{0}` over a structure whose first member is a structure that
       begins with an array is accepted** (both compilers are silent): the base rejects it in both modes with
       a message that says C accepts it (`collect_init_elems`' `read_list` under the elided recursion; Step
-      0's R2), a defect this item fixes for C. **Unchanged from the base, and not decided here** (audit round
-      1, issue 5; question 325): the lone zero written otherwise than as an integer literal — `{(0)}`,
-      `{'\0'}`, an enumerator, `{1 - 1}`, `{false}`, `{NULL}`, `{nullptr}`, `{-0}`, `{(int)0}` — which the
-      base accepts by its value and on which clang's C warns `-Wmissing-braces` at `-Wall` wherever its C++
-      predicate applies (GCC is silent; the matrix M held only the literal); and a designated element whose
-      `0` elides (`{.p = 0}`: both compilers silent, accepted as before). Rejecting the non-literal spellings
-      changes programs accepted before this record and needs the front end to tell a literal `0` from an
-      enumerator or `(0)`: it is the owner's.
+      0's R2), a defect this item fixes for C. **The lone zero written otherwise than as an integer literal**
+      (audit round 1, issue 5; question 325, the owner, 2026-11-25: "Probe, reject if the IL can tell") —
+      `{(0)}`, `{'\0'}`, an enumerator, `{1 - 1}`, `{false}`, `{NULL}`, `{nullptr}`, `{-0}`, `{+0}`, `{(int)0}`
+      — which the base accepts by its value and on which clang's C warns `-Wmissing-braces` at `-Wall`
+      wherever its C++ predicate applies (GCC is silent; the matrix M held only the literal; clang's C is
+      silent on `0`, `0u`, `0L`, `0x0`, `00`, `0b0`, `0ULL` and on a macro that expands to such a literal):
+      **the probe P84 (a) took its middle branch, and the rule is built for the spellings the IL tells**
+      (question 339, settled with the advisor by that row's default; the continuation's Part R). **The
+      literal test:** peel every compiler-generated cast from the lone element; it is a literal zero when the
+      innermost constant keeps no `expr`, carries `is_simple_zero` (`0`) or `non_arithmetic` (`0x0`, `00`,
+      `0b0`, and the suffixed zeros `0u`, `0L`, `0ULL`, which sit under a generated cast), is not a named
+      constant's definition (an enumerator) and is not of type `bool`. **The rule, in C only:** where the
+      whole initializer is an undesignated lone zero that elides braces and this item's C++ predicate applies
+      (an elided subaggregate whose parent is an array or a structure of two or more members), a zero that
+      fails the literal test is rejected (`unsupported_expression`, pinned): `{'\0'}`, an enumerator, `{1 -
+      1}`, `{false}`, `{NULL}`, `{nullptr}`, `{-0}`, `{+0}`, `{(int)0}`. **Not told by the IL, still accepted
+      by their value, and listed for M8's warning sweep:** `{(0)}`, `{((0))}`, `{(0u)}`, a macro whose
+      body is `(0)` and `{__extension__ 0}` (audit round R, note 6) — no field of a constant or an expression node records a parenthesis, and the source
+      columns that differ are layout, not an IL field (the owner's condition). Outside the rule, unchanged
+      and listed for M8 with them: a designated element (`{.p = '\0'}`; `{.p = 0}` is accepted as before,
+      both compilers silent in C) and a zero inside a nested list, which the probe did not run (audit round R
+      measured the designated cells: clang's C flags `{.p = '\0'}` and `{.t = '\0'}` and is silent on `{.p =
+      0}`; they stay accepted). **The rule's three call sites** are an elided element of an array, a nested
+      structure in a parent of two or more members, and an array member in such a parent; the first two are
+      pinned at Commit 1 and the third, with a global, a `static` local and a compound literal, by Commit 2
+      (audit round R, should-fix 3: the behaviour matches clang's C on every cell measured, 65 in all). Not unsoundness: a warning shape, rejected like the compilers. No existing test
+      or doc example may change outcome by it; one that does goes to the owner before it is touched.
     - **Designated lists** (96 shapes, each designated form beside its plain control, then 62 forms with
       every warning either compiler prints without a flag or at `-Wall` recorded by name). A designator does
       not change `-Wmissing-braces`: a **braced** designated value whose `0` elides (`struct W w = {.t =
@@ -532,124 +629,98 @@ B's joined proof goes to the owner before it is touched (the plan's Flips G).
       class trigger with member steps (item 14).
     - Each rule with a refusing twin in `scripts/test_lint_viper.py`.
 18. **Categories and tags:** none new. **Facts:** P83, S48.
-19. **`restrict` and what the body can reach** (question 326; audit round 1, blocking 1; amends 0037 item 2 and
-    0043 item 10). **Not of this record's arrays: a hole in the base, narrowed here because Part C would widen
-    it, and not closed: one form is known to verify still (below)** (a global array of structures adds `g[i].x` by name).
-    - **The hole.** 0037 item 2 argues that "an access to `*p`'s object through a pointer not based on `p`
-      cannot verify", and 0043 item 10 extended its conditions to the function's parameters, atoms and the
-      globals its contract names. Both look at the contract only. Permissions belong to cells, not to
-      provenance: a function that owns `*p` may reach the same cell by any other name the body can obtain, and
-      a test `p == &g` (in the body or in the `requires`) makes that path live. On the base these verify,
-      each with an `ensures` true only of the aliased value, each with its twin (`ensures` of the other value)
-      failing, and `gcc -O2` or `clang -O2` returning another value than the model (C23 6.7.3.1p4: undefined):
-      `*p = 1; g = 2; return *p;` with `p == &g` (a global by name; also `&g4[1]`, a member of a structure
-      global, a `static` local reached where the function's contract does not hold it); the same through a
-      local `int *q = &g` or a local structure holding `&g`; through a callee whose contract owns `g` (the
-      body names no global); through a call's pointer result (`int *getg(void)` with `ensures r == &g`);
-      through an out-parameter (`getp(&q)`); through a structure result with a pointer leaf (`geth().q`); and
-      with a partial atom (`owns(g.x)` in the contract, `p == &g.y` tested in the body). Already rejected on
-      the base: an alias through a loaded pointer, a member pointer, a pointer global, and a second parameter
-      with no atom, only `live`, or a guarded atom (0037 item 2, 0043 item 10).
-    - **The rule (fail closed; `unsupported_annotation` at the function, as the other `restrict` rejections).**
-      Let `p` be a `restrict` parameter and F the set of leaf fields of its pointee (every leaf, by VIR field).
-      An object **holds F** when one of its leaf paths has a field of F, and **reaches F** when it holds F or
-      holds a pointer from which a pointer to a cell of F can be formed, at any depth — the one predicate of
-      `restrict_backed`'s `reaches` walker over leaf paths (item 4), not a second walker. `restrict` on `p` is
-      rejected when the function's body
-      (i) names, or takes the address of, a global or `static` local that reaches F;
-      (ii) calls a function whose contract (its `requires` or `ensures`, written atoms and the implicit atoms
-      of `static` locals alike) has an atom rooted at a global or `static` local that reaches F; or
-      (iii) calls a function that can hand the body a pointer reaching F: its result is a pointer, or a
-      structure with a pointer leaf, that reaches F, or one of its parameters is a pointer to an object that
-      holds a pointer reaching F (an out-parameter `int **out`, a pointer to a structure with such a leaf); or
-      (iv) **passes to any function, with or without a body, called or applied, an argument that is a pointer
-      reaching F or a structure value with such a pointer leaf** (audit round 2, blocking 1 and issue 3:
-      `p` itself, a pointer derived from it, `&q` of a local pointer, a pointer to a structure with a pointer
-      leaf; the same `reaches` predicate on the argument's type). A callee's permission to a cell of F can
-      then come neither from an argument nor, by (ii), from an atom on static storage: no callee, at any
-      depth, holds a permission to `*p`'s object, so nothing a callee's body names can reach it. Without
-      (iv) these verified: `f` passes `p` to `static void c(int *x)` with `owns(*x)`, whose own body tests `x
-      == &g` and writes `g`; the same through a callee's callee; a callee that only reads `g`; a bodiless
-      callee.
-      **Exempt from (i) and (ii) only:** an object the function's own contract holds **whole and unguarded**
-      by `owns` or `reads` (a written `owns(g)` or `reads(g)` as a top-level conjunct of the `requires`; the
-      implicit atom of a `static` local), **provided the pair rule below holds between that atom and `p`'s
-      backing atom**: the alias `p == &g` is then excluded by the permissions, and the probes show its branch
-      dead (a check placed first in it verifies). A partial atom
-      (`owns(g.x)`) and a guarded one (`c == 0 || owns(g)`) do not exempt: the first leaves `p == &g.y` live;
-      the second is dead on the base only through a call-site row, and is left out of the exemption.
-      (iii) has no exemption.
-    - **The pair rule: an atom excludes only what it is sure to hold** (audit round 2, blocking 2; amends
-      0060 item 14 as well). 0037 item 2 and 0043 item 10 accept `restrict` on `p` when `p` is backed by an
-      atom and every other parameter that reaches F holds a whole atom of its own, "proved distinct from `p`
-      by the permissions". A range atom whose count can be 0 holds nothing and proves nothing: `owns(*p) &&
-      owns_range(q, n) && q == p` called with `n == 0`, `restrict p` backed by `owns_range(p, n)` beside
-      `owns(*q) && p == q`, two `restrict` ranges with counts 0 and 1, and `owns_range(p, n) && owns(g) && p ==
-      &g` all verified, the access through the other pointer using the one permission there is. **Rule:**
-      `p`'s backing atom and each other atom that must exclude it (another parameter's covering atom; a held
-      global's, in the exemption above) are accepted as a pair only when **both are surely non-empty** — a
-      cell or structure atom (`owns(*x)`, `reads(*x)`, `owns(g)`), or a range atom whose count is an integer
-      constant of at least 1 or has, as a top-level conjunct of the `requires`, `n > 0`, `0 < n`, `n >= 1` or
-      `1 <= n` for that very count expression — **or both are range atoms with structurally equal counts**
-      (0060 item 3's equality: they are empty together, and then neither of the two gives an access).
-      Otherwise `restrict` on `p` is rejected. A `restrict` parameter alone, with no other covering atom,
-      needs no pair (`p == NULL || owns_range(p, n)`). **As built, a held global's atom is paired with `p`'s
-      backing atom only where the exemption is asked for**, that is when the body names the global or a
-      callee's contract holds it; a contract atom on a global that the body never names is not paired.
-    - **KNOWN, OPEN AND UNSOUND (the last audit read, blocking 1; not fixed in this session, by the advisor's
-      stop rule; question 326).** The equal-counts arm is wrong when a third atom gives the access: `int g;
-      int f(int *restrict p, int *q, int n)` with `requires(owns_range(p, n) && owns_range(q, n) && owns(g) &&
-      p == &g && q == &g)`, body `p[0] = 1; q[0] = 2; return p[0];`, called as `f(&g, &g, 0)`, **verifies**
-      with `ensures r == 2` (its twin `r == 1` fails, so the path is live), and `gcc -O2` and `clang -O2`
-      return 1. Both ranges are empty, so the pair passes; the permission comes from `owns(g)`, which nothing
-      looks at because the body never names `g`. It predates this record (it verifies on M4.5e1e1's build).
-      The auditor's candidate rule, not built and not argued complete: every `requires` atom rooted at a
-      global or `static` local that reaches F must pair with `p`'s backing atom by the both-surely-non-empty
-      arm, whether or not the body names the object (by reading it flips no test). Related shapes are not
-      expressible today (`p == &gs.x` and `p == h` in a contract are rejected). Reassigning the parameter
-      (`p = q;` and then accesses through `p`) verifies too; the compilers measured agree with the model
-      there, and C23 6.7.3.1 is arguable on it; it is outside the enumeration. A whole-array atom of a global array (`owns(g)`
-      of `int g[4]`, lowered as a range of the constant count) is surely non-empty.
-    - **Over-strict, by design, listed:** a body that only reads such a global while nothing modifies `*p`'s
-      object (C allows it); a callee whose pointer result is based on its argument (`int *same(int *x)` with
-      `ensures r == x`, called as `same(p)`); a guarded atom on the global; by (iv), every call that passes
-      `p` or another pointer reaching F on (`set(p, 3)`, `free(p)`, a helper that takes the pointer); by
-      (iii), `malloc` and `calloc` of the pointee's type in the body, although a fresh block cannot be `*p`'s
-      object; a global of another C type with the same VIR field (`long long` beside `long *restrict p`); two
-      range atoms whose counts differ in spelling though equal in value. Each is rejected.
-    - **What the rule is and is not.** It closes every form found before the last audit read, and that
-      read found one more, above (audit round 1's
-      `build/m4.5e1e2/audit1/x0*.c`; the probes of `build/m4.5e1e2/s0/restrict/` and `restrict2/`, the
-      test-mutator's report 4; audit round 2's `build/m4.5e1e2/audit2/A/`, which found the callee-body and
-      empty-range forms after clauses (i) to (iii) were built) and is **not argued complete: three audit reads in one day each found a form the rule then in force
-      missed.** It is an enumeration of the routes by which an access
-      not based on `p` can reach `*p`'s object — another parameter (0037, 0043, the pair rule), a name of
-      static storage in the body (i), a callee (ii and iv: no callee holds a permission to F), a pointer
-      handed back by a callee (iii) — and an enumeration can be incomplete. Known and left to the owner's
-      rule: an access based on `p` beyond `p`'s own atom (`p[1]` held through another parameter's atom), which
-      only `pointer-comparison` and the rejection of `&p[i]` in contracts block today and which M4.5e2's
-      pointer arithmetic opens (audit round 2, note 9); `-Wrestrict` (GCC flags `f(a, a)` at `-Wall`; no
-      rule). A local's own cell and a fresh heap block cannot be `*p`'s
-      object. The complete argument, and any relaxation (a path-precise row at every access not based on `p`
-      in place of the rejections), are the owner's (question 326).
-    - **As built, two clauses overlap or cannot be reached from C** (the last audit read, issue 9): the half
-      of (iii) for a callee parameter that points to a structure with a pointer leaf is subsumed by (iv) (any
-      argument for such a parameter is itself a pointer reaching F); (ii) for an atom that is in a callee's
-      `ensures` only is a backstop with a hand-built VIR case, since record 0052 item 2a already rejects such
-      a contract on a global at its declaration. The diagnostic at the encoder's `restrict_backed` call site
-      names the other parameter's atom as the one that may be empty also where it is `p`'s own range that may
-      be (issue 7: a wrong text on a correct rejection; the encoder does not print `restrict_pair_reason`
-      yet).
-    - **Where.** One predicate beside `restrict_backed` in `vir.cpp`, over the encoded function and its
-      callees' signatures and contracts, called by `check.cpp` (the backstop) and by the encoder once the body
-      is encoded, which reports the diagnostic at the C line (invariants 3 and 7). 0037 item 2's sentence "So
-      an access to `*p`'s object through a pointer not based on `p` cannot verify" is withdrawn.
-    - **Tests:** one must-fail pin per verified probe form, and positives that stay accepted (`owns(g)` and
-      `reads(g)` beside `owns(*p)`; the existing `struct_global_restrict.c`). Step 0's scan: of the 44
-      functions under `tests/` with a `restrict` parameter and a body, six name a global (one positive, which
-      holds it by `owns(g)`, its error twin, and four rejection pins) and one, a rejection pin, calls a
-      function; no doc example uses `restrict`. An existing file whose outcome changes at the joined proof goes
-      to the owner before it is touched.
+19. **`restrict`: every `restrict` parameter is rejected** (question 326, the owner, 2026-11-25: "Reject
+    restrict"; this item was rewritten on 2026-11-26, before the code of the continuation's Part R; amends 0037
+    item 2, 0040 item 3, 0043 item 10, 0044 item 11, 0045 item 13, 0047 item 4, 0052 item 6 (d), 0054 item 2
+    and 0060 item 14). **Not of this record's arrays: a hole in the base,** found by audit round 1 of the first
+    session. The first version of this item, which that session built, is `git show
+    f313023:internal/decisions/0064-arrays-of-structures-and-arrays-of-arrays.md`, with the programs that
+    verified wrongly.
+    - **The rule.** A pointer parameter qualified `restrict` (spelled `restrict`, `__restrict`, `__restrict__`,
+      `int p[restrict]` or through a typedef) is rejected, `unsupported_annotation`, at the function's head (the
+      position the earlier `restrict` rejections used), once per function, naming every such parameter: on a
+      definition, and on a declaration without a body (question 332). **Where each is reported** (question
+      338, settled with the advisor; the facts are edg-backend's report 3 of the continuation, 20 single-file
+      runs): a definition, called or not, a `static` one included, at its own head line. **A declaration
+      without a body where the encoder first reads its signature:** at the first call of it in the unit (one
+      row, at that call; a second call, in the same function or another, adds none), as every rejection of a
+      bodiless routine's signature is placed; or at the declaration itself when its signature is read early
+      whether or not it is called (a structure result or a pointer-to-structure parameter, a parameter marker,
+      `not_invalidating`, a block atom in its contract). **A bodiless `restrict` prototype that the unit never
+      calls and that none of those reads early draws no diagnostic:** it is neither verified nor called, so no
+      result rests on it (fail closed). An eager rejection of every such prototype is not built: it would
+      reject a unit for a declaration it only includes and never uses (a header's, M4.6). **Which declaration
+      counts for a function without a body** (audit round R, should-fix 1; question 341, settled with the
+      advisor, fail closed): it is rejected when ANY of its declarations in the unit gives a parameter the
+      qualifier, in C and in C++, reported as above. The front end's merged type of two declarations that
+      differ in a parameter's top-level qualifiers carries none, so the encoder reads each declaration's own
+      written type. **As built at the continuation's Commit 1** it reads only the merged type: a called
+      function without a body that is declared once with `restrict` and once without it (in either order, or
+      with a differing `const`), and in C++ one declared plain first and with `__restrict` second, is
+      accepted. Not unsound (no body is verified, the contract is trusted either way, and C gives a
+      prototype's `restrict` no meaning); it also verified on the base. Commit 2 builds the rule, with a pin
+      per form the audit found. **The qualifier is
+      read where it is read today:** from the definition's own parameters when the unit holds the definition, from the declaration
+      otherwise. So `restrict` written only on a prototype of a function that the unit defines without it,
+      before or after the definition, stays accepted, as it is today: C attaches the promise to the block of the definition (6.7.3.1), and
+      that definition makes none. The message says what to do: "cerastes does not model `restrict`; dropping
+      the keyword does not change what a program with defined behaviour does, so drop it to verify the
+      function". `restrict` on a local, a global, a member, a pointee or a result, and C++'s `__restrict`,
+      stay `unsupported_type` as before (0032 item 2, 0037 item 15). A `pure` function's and a quantifier
+      function's `restrict` parameter keep their own rejections (0043 item 10, 0061 item 3); a `pure` function
+      that has no contract and that nothing reads is not encoded at all, so its `restrict` parameter draws
+      nothing (audit round R, note 7h). **The one form of the keyword still accepted** (note 7d; also on the
+      base; listed for M8 with the model): the type of a cast or of a compound literal, `(int *restrict)p` and
+      `*(int *restrict){p} = 1;`. No declared identifier designates such an object, so C23 6.7.3.1 attaches no
+      promise to it by the auditor's reading, and one program run under both compilers at `-O0` and `-O2`
+      agrees with the model; accepted, not shown wrong. **What the proof is of** (note 7b): the program
+      without the keyword. A unit that hides the keyword from cerastes only (`#define restrict` under
+      `__CERASTES__`) verifies as if it were dropped, and says nothing of the program compiled with it.
+    - **Why.** `restrict` promises that an object modified through the parameter is reached only through
+      pointers based on it (C23 6.7.3.1), and a compiler may reorder accesses on that promise. Permissions
+      belong to cells, not to provenance, so owning `*p` does not keep the promise: the function may reach the
+      same cell by another name. Records 0037, 0043, 0044, 0052, 0060 and this item's first version accepted
+      `restrict` under conditions that enumerate the routes to another name; three audit reads in one day each
+      found a route the rule then in force missed, and one form still verified when the first session closed:
+      `int g; int f(int *restrict p, int *q, int n)` with `requires(owns_range(p, n) && owns_range(q, n) &&
+      owns(g) && p == &g && q == &g)`, body `p[0] = 1; q[0] = 2; return p[0];`, called as `f(&g, &g, 0)`,
+      verified `r == 2` where `gcc -O2` and `clang -O2` return 1 (two ranges of the same count 0 beside a
+      global the contract holds and the body never names). An enumeration is not a proof. Removing the keyword
+      removes only undefined behaviour, so the rejection costs a user one word.
+    - **What it withdraws.** The acceptance of 0037 item 2, 0040 item 3 (`owning` as the `owns` conjunct), 0043
+      item 10, 0044 item 11, 0045 item 13, 0047 item 4 and 0052 item 6 (d) (block sites), 0054 item 2, 0060
+      item 14, and this item's first version: its clauses (i) to (iv), the exemption and the pair rule. With
+      them goes the `reaches` walker of `restrict_backed` that item 4 names: once no `restrict` parameter is
+      accepted, no later part has a `restrict` rule to keep in step.
+    - **Where.** The encoder rejects in `function_of`; `check.cpp` refuses any parameter that carries the flag
+      (the backstop, with a self-test case); `vir.cpp`'s `restrict` functions go. `lower.cpp` never read the
+      flag: an accepted `restrict` added nothing to the Viper, so removing the acceptance changes no other
+      program's Viper.
+    - **What changes for programs accepted before.** Every function that verified with a `restrict` parameter
+      is rejected until the keyword is dropped. **The owner approved exactly 17 test files** (invariant 1; the
+      continuation plan's Flips R): 8 positives become rejection pins, one row per function with a `restrict`
+      parameter at its head line (`block_restrict.c`, `owning_restrict.c`, `range_restrict.c`,
+      `restrict_body_owns_global.c`, `restrict_body_pair_ok.c`, `restrict_owned.c`, `struct_global_restrict.c`,
+      `struct_value_restrict.c`), and their 9 error twins are retired. The 33 pins that already reject on a
+      `restrict` line and `forall_reject_f_restrict.c` keep their `expect:` rows: the new rejection has the tag
+      and the position the old ones had; one whose tag or line moves goes to the owner before it is touched.
+      The harness's twin rules (question 337) move the 8 into `tests/memory/negative/` and give the rule a new
+      positive, `tests/memory/restrict_dropped.c` (the same functions with the keyword dropped, as the message
+      tells a user to write them), with an error twin; the 14 pins whose `twin:` line named one of the 8 name
+      it instead. No doc example, no vlibc header and not `cerastes.h` uses `restrict`.
+    - **Tests:** the positive and its twin above; `restrict_reject_declaration.c` (a prototype with a
+      `restrict` parameter and a contract, no body, called: rejected; and the form that stays accepted, a
+      `restrict` prototype before a definition without the keyword), with a row for each spelling the rule
+      names (`__restrict`, `__restrict__`, `int p[restrict]`, a typedef'd restricted pointer, a plain prototype
+      before a `restrict` definition, a second parameter alone, an uncalled `static` definition, a bodiless
+      declaration called twice, and one read early at its declaration): each draws its row on the build (the
+      same report; no spelling verifies); three hand-built VIR rejection cases for
+      `check.cpp`'s backstop (a `restrict` parameter with `owns`; with a range; on a function with no body),
+      which replace the 60 `restrict` cases of the first version and of records 0037 and 0060 (22 accepted, 38
+      rejected) and the reachability check `check_restrict_reach`.
+    - **Later.** A model of `restrict` (every access based on `p` inside `p`'s atom, every other access outside
+      it, with a soundness argument in `internal/soundness/`) is an M8 entry. M4.6 decides what a library
+      declaration with `restrict` parameters (`memcpy`) needs when vlibc's `<string.h>` arrives.
 
 
 ## Facts and the branches taken
@@ -683,6 +754,8 @@ revised. (To be filled from P83 and S48.)
 | S48 (m) depth 3 | `int c[2][3][4]` with a permission over three bound variables, three nested loops and three bound rows: verified in 10.2 s; `c[1][2][4]` fails alone at the third bound; the vacuity twin one error; 3 fixtures, 9.7–10.7 s at load 4–6, no load dependence seen | depth 3 admitted (every program under 30 s) | 2 |
 | S48 after audit round 1 | 25 fixtures on top of the cap (question 324): the pairing rows above (8); the trusted `zero_arr_<E>` per leaf path of a nested structure and over two bound variables with `alloc_arr_row_int_3(n)` (6: satisfiable, and it fixes the values); a vacuity twin for rows (c), (d), (g), (i), (k), (l) and (n) (11: every `assert false` reached reports, none is vacuous). 24 passed at the first run; one vacuity twin was split because Silicon stops a path at its first failing assert | evidence completed (audit round 1, issue 6) | 6, 7 |
 | Step 0 R1–R3 | R1: every pin of the plan's section 10 has the outcome it lists (30 Flips D rows unchanged; no extra or absent row); one pin contradicts the plan's scope (`array_reject_pointer_to_array.c` is a parameter: question 320). R2: 174 probes, 340 runs: nothing of item 1's "In" list verifies before this record; C's `{0}` over a nested structure that begins with an array is rejected on the base in both modes (the suspected defect, confirmed); 12 staging pins (38 rows) added. R3: 2,569 rejection runs recorded (2,593 with the pins) | the plan's rule; question 320 to the owner | 13, 16 |
+| P84 (a) the lone zero's spelling (the continuation's Step 0; question 325) | In an initializer where `{0}` elides braces the leaf is a `ck_integer` constant under compiler-generated casts to the member's type. A literal zero's innermost constant keeps no `expr` and carries `is_simple_zero` (`0`) or `non_arithmetic` (`0x0`, `00`, `0b0`; the suffixed zeros under a generated cast); `is_simple_zero` alone is not the literal flag (`+0`, `(int)0`, a `const` variable and an enumerator carry it with a kept `expr` or a named-constant flag). Told by a field: `'\0'` (C23: no flag, no `expr`, no `orig_type`), an enumerator, `1 - 1`, `false` (by the inner constant's type), `-0`, `+0`, `(int)0`, `NULL`, `nullptr`. **Not told:** `(0)`, `((0))`, `(0u)`, a macro whose body is `(0)` (no field records a parenthesis; only positions differ). A macro that expands to `0` is the literal. The same classes in six positions (global and local, an array of structures, a matrix, a nested structure), in compound literals, and under every leaf type tried; the Mac's and the box's front ends agree | the middle branch ("it tells some"): the told spellings are rejected in C under item 16's predicate, the `(0)` family listed for M8 (question 339, the advisor) | 16 |
+| P84 (b) typedef'd row parameters (the continuation's Step 0) | `typedef int row[3];` with `row *a`, `row a[]` and `row a[2]`: one adjusted `tk_pointer` over a `tk_typeref` (`row`) whose `typeref_type` is the row's `tk_array`; the `declared_type` tells the spelling (the pointer; a `tk_array` with no bound constant; a `tk_array` of 2); the row's bound is field for field that of `int (*a)[3]`, `int a[][3]` and `int a[2][3]` (a literal: no `expr` in C23, a generated `unsigned long` cast in C++20; `2 * 3` keeps `eok_multiply`; an enumerator its named constant); `using` aliases the same; a qualified row is a fresh `tk_array` of `const int` with no typeref; the Mac's and the box's front ends agree on every field | first branch: the typedef'd spellings are accepted in Part E, the reader peeling one `tk_typeref` | 13 |
 
 ## Consequences
 
@@ -697,5 +770,12 @@ revised. (To be filled from P83 and S48.)
   arrays outside parameters and depth 4 or more for M8.
 - Programs accepted before this record keep their Viper and maps byte for byte; the forms item 16 lists (in
   C++, and for nested lists in C) become rejections, and no existing test or doc example holds one.
+- **Programs that verified with a `restrict` parameter are rejected until the keyword is dropped** (item 19;
+  the continuation's Part R): 8 tests, which become rejection pins with their 9 error twins retired, and no doc
+  example. Wrong programs that `restrict` let verify (on `main` every form the first session's audits found; on
+  that session's branch one) no longer verify.
+- **The address tests of item 5 on arrays of scalars are rejected** (question 322; Part R): a truth test or a
+  null comparison of `&a[i]`, `&p[i]`, `&s.a[i]` or `&p->a[i]`; no existing test or doc example holds one, by
+  the first session's three passes.
 - **A session that closes at a split point** accepts this record for the items built; the others stay "decided,
   built by the continuation".

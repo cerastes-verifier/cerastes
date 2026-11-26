@@ -5,8 +5,8 @@
 // expect: rejected cerastes-unsupported_annotation @ L96
 // mode: c23
 // c-only: restrict does not exist in C++20 (EDG, clang++ and g++ refuse it, decision 0037 item 2)
-// twin: tests/memory/restrict_body_owns_global.c
-// Pins: 0064 item 19 (question 326; audit round 2), clause (iv): a restrict parameter p passed to a callee: whose BODY names the global and tests x == &g (probe b1; the base verified it, with an ensures true only of the aliased value), whose body calls a function that owns the global (b3, a callee's callee), whose body only reads the global (b5), that has no body (b4), and the over-strict shape set(p, 3), a helper that only writes through its parameter (listed in the record: every call that passes p on is rejected). Each is rejected at its function head, as clauses (i) to (iii); the contract of the callee never reaches the global of the caller
+// twin: tests/memory/restrict_dropped.c
+// Pins: 0064 item 19 (question 326; audit round 2), clause (iv): a restrict parameter p passed to a callee: whose BODY names the global and tests x == &g (probe b1; the base verified it, with an ensures true only of the aliased value), whose body calls a function that owns the global (b3, a callee's callee), whose body only reads the global (b5), that has no body (b4), and the over-strict shape set(p, 3), a helper that only writes through its parameter (listed in the record: every call that passes p on is rejected). Each is rejected at its function head, as clauses (i) to (iii); the contract of the callee never reaches the global of the caller [0064 item 19, question 326: every restrict parameter is now rejected by that one rule, whatever the contract; this pin's row keeps its tag and line and its condition no longer matters]
 // Pre-registered from record 0064 item 19 as revised by audit round 2 (probes b1, b3, b4, b5), before any run: rejected (tag as restrict_body_callee_global.c)
 #include <cerastes.h>
 

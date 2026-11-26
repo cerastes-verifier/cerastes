@@ -1415,7 +1415,58 @@ proof; answer inline, or leave them):
   deleting the keyword from them, which changes no outcome but leaves eight tests that no longer test what
   their names say.
 
-The next questions start at 338.
+**Settled with the advisor in M4.5e1e2's continuation, for the owner's review** (the session of 2026-11-26;
+numbered from 338):
+- **338** (fail closed: a rejection either way; the one form accepted silently is neither verified nor
+  called). Record 0064 item 19 says a `restrict` parameter is rejected "at the function's head", on a
+  declaration without a body too (default 332). As built, a definition's diagnostic is at its head, but a
+  declaration without a body is read lazily, as before Part R: its diagnostic is at the first call of it in the
+  unit (one row, however often it is called), or at the declaration when its signature is read early (a
+  structure result or a pointer-to-structure parameter, a parameter marker, `not_invalidating`, a block atom
+  in its contract); a bodiless `restrict` prototype that the unit never calls and that nothing reads early
+  draws no diagnostic. **Answer taken:** keep that, and say it in item 19, in the page and in the tests (a row
+  per placement and per spelling of the keyword; 20 single-file runs on the build found no spelling that
+  verifies). An eager rejection of every such prototype was not built: it would reject a unit for a
+  declaration it only includes and never uses (a header's `memcpy`, M4.6), and a flip of that kind would be
+  the owner's. Alternative: the eager loop in the encoder's declaration pass.
+- **339** (not unsoundness: a warning shape; fail closed either way). Question 325's probe, P84 (a), took its
+  middle branch: the front end's IL tells a literal zero from `'\0'`, an enumerator, `1 - 1`, `false`, `NULL`,
+  `nullptr`, `-0`, `+0` and `(int)0` by fields of the constant, but no field records a parenthesis, so `(0)`,
+  `((0))`, `(0u)` and a macro whose body is `(0)` look like the literal. **Answer taken** (the plan's default
+  for that branch): in C, an undesignated lone zero that is the whole initializer and elides braces where
+  record 0064 item 16's predicate applies is rejected (`unsupported_expression`) when the IL shows it is not a
+  literal; the parenthesized spellings stay accepted and are listed for M8's warning sweep with the probe's
+  evidence, and so are designated elements and zeros inside nested lists, which the probe did not run.
+  Alternative: build nothing and send the whole entry to M8.
+
+- **340** (fail closed: the file stays rejected by its other row). The staging pin
+  `tests/memory/negative/forall_reject_member_array_code.c` has two rows at L52 (`forall_function` and
+  `unsupported_annotation`), and the plan's Flips A retires both in Part F. The second row is the old rejection
+  of `owns_range` over structures on that line, which Part C1's lift removes. **Answer taken:** Part C1 retires
+  exactly that one row (its line kept by a comment), as a pre-approved flip made one part early; the
+  `forall_function` row stays for Part F; any other row that moves at Part C1's joined proof is a new question.
+  Alternative: the owner decides.
+- **341** (fail closed; not unsoundness: no body is verified and the contract is trusted either way). Audit
+  round R found that a called function without a body whose declarations disagree on `restrict` (one with the
+  keyword, one without, in either order; in C++ plain first and `__restrict` second) is accepted: the front
+  end's merged type drops the qualifier. The record had no rule for which declaration counts. **Answer
+  taken:** a function without a body is rejected if any of its declarations in the unit gives a parameter the
+  qualifier, in both modes, reported lazily as question 338 has it; built with Commit 2, a pin per form the
+  audit found; Commit 1's build still accepts the disagreeing form, and the record and the page say so.
+  Alternative: state the rule as built (only the merged type counts).
+- **342** (fail closed: over-strict; for the owner's review because it widens question 335 from one form to a
+  family). Item 5's rule (a truth test or null comparison of an address formed by an index) also rejects a
+  test written through a macro (`assert(&a[1] != NULL)`, `ISNULL(&a[1])`) and, in C, `&a[1] == (int *)0`.
+  Neither compiler flags these (only g++ the cast form, in C++), and before Part R cerastes accepted them for
+  arrays of scalars. No existing test or doc example holds one. **Answer taken:** listed as over-strict in
+  record 0064 item 5 and on the page, for M8's warning sweep (the front end does not record that a test came
+  from a macro). Alternative: narrow the predicate now.
+- **Listed with them, from audit round R** (no question; for the owner's eye): the one form of `restrict`
+  still accepted is the type of a cast or of a compound literal (`(int *restrict)p`, `*(int *restrict){p}`),
+  which C23 6.7.3.1 gives no promise by the auditor's reading and which one compiled program confirms; not
+  shown wrong, on the base too, an M8 entry with the model of `restrict` (record 0064 item 19).
+
+The next questions start at 343.
 
 ### Questions for the owner (after the planning of M4.5e1e2's continuation)
 
