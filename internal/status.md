@@ -280,7 +280,7 @@ and listed in the plan's Flips R; a model of `restrict` is an M8 entry); 320 "Ac
 tests on arrays of scalars); 325 "Probe, reject if the IL can tell" (the lone zero that is not a literal). The
 plan runs the `restrict` rejection first (Part R), cuts the first plan's Part C in two (C1: ranges over
 structures in contracts; C2: static storage and members), then D, E and F, sized at 3,700 to 6,700 `src/`
-lines: two or three more sessions under the 12-hour rule. Its defaults 331 to 336 are for the owner's review
+lines: two or three more sessions under the 12-hour rule. Its defaults 331 to 337 are for the owner's review
 (handoff §8). **The one wrong program that still verifies on this branch** (two ranges of the same count 0
 beside a global the contract holds) **stays until Part R lands.**
 

@@ -5,7 +5,7 @@ session (M4.5e1e2's first: Parts A and B of six) and what happened after it. Thi
 otherwise have to rediscover, and holds only what is live (owner, 2026-10-26).
 
 **What the next session needs here:** §1, §2, the rules of §4 and §6, and §8 (no question is open; the
-continuation plan's defaults 331–336 and the advisor's rulings 321–324 and 327–330 are for the owner's review).
+continuation plan's defaults 331–337 and the advisor's rulings 321–324 and 327–330 are for the owner's review).
 What §3 held for it is in its plan, section 13.
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
@@ -66,14 +66,14 @@ a session consumes move into its plan's "Inputs".
    first. `git merge --ff-only m4.5e1e2b-arrays-of-structures` on `main` and a push bring both (never reset or
    rebase). On `restrict` the branches are strictly safer than `main`: they reject every unsound form found but
    one, and `main` accepts them all. The full check is green at `aebf158`; the commits after it change no code.
-2. **Review, when convenient (none blocks the continuation):** the continuation plan's defaults 331–336 (§8,
+2. **Review, when convenient (none blocks the continuation):** the continuation plan's defaults 331–337 (§8,
    "Questions for the owner"); the advisor's rulings 321–324 and 327–330 and the orchestrator's settlements in
    `internal/status.md`; the first plan's defaults 313–319; the advisor's rulings 301–309 from M4.5e1e1.
 3. **Start the continuation:** `claude --agent orchestrator --effort high`, first message `M4.5e1e2 continuation
    (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`. Its branch and worktree exist; its Step 0 (the plan's
    section 5) checks that the base contains `aebf158` and the plan, merges `main` into the branch if `main` has
    moved (a merge, never a rebase), sets up the worktree's submodules and build, copies the first session's
-   reports, reuses the lanes and takes a new baseline. Questions start at 337.
+   reports, reuses the lanes and takes a new baseline. Questions start at 338.
 4. **Remove, when convenient:** e1d's and e1e1's worktrees and merged branches (as before); the first session's
    `.claude/worktrees/m4.5e1e2-audit`; the refs `refs/tmp/e1e2-*`. **Keep
    `.claude/worktrees/m4.5e1e2/build/m4.5e1e2/` until the continuation's Step 0 has copied it** (every agent
@@ -1025,7 +1025,7 @@ VeriFast; notes on stdout with `expect: note` lines; the agreement definition an
   `check.sh` does, in the half's own proof and again in the preflight**; and the preflight also runs the steps of
   `check.sh` that follow the self-test (the walker oracle, the tree checks), so that the one check cannot stop
   before them.
-- **The planning of the continuation** (2026-11-25, one session that only planned, about an hour and a half):
+- **The planning of the continuation** (one session that only planned, 2026-11-26 01:31 to about 02:25 UTC):
   the handoff, the first plan, record 0064 and the three audit reports read in full by the planner; four read-only
   surveys in parallel (the encoder's gates, the lowering's sites and guards, tests with lint and docs, every use of
   `restrict`), each asked for file-and-line tables with "not found" in place of a guess, each spot-checked against
@@ -1156,7 +1156,7 @@ Each session's acceptance commands are in its plan (`.claude/plans/`); the resul
 
 **No question is open.** The four that M4.5e1e2's first session left (326, 320, 322's second half, 325) were
 answered by the owner at the planning of its continuation (below). **For the owner's review, none blocking:**
-331–336, the defaults the continuation's plan builds on (at the end of this section, each with its alternative);
+331–337, the defaults the continuation's plan builds on (at the end of this section, each with its alternative);
 321–324 and 327–330, the advisor's rulings in M4.5e1e2's first session; 313–319, the defaults of M4.5e1e2's first
 plan; 301–309, the advisor's rulings in M4.5e1e1. Questions 310–312 were answered at M4.5e1e2's planning and 304
 inline before it. An answer is written inline, as before. Answered
@@ -1168,7 +1168,7 @@ asked: their answers are below), `git show bdf3581:internal/handoff.md` §8 has 
 owner's inline answers to 238–242, and `git show 9ab9a1e:internal/handoff.md` §8 has 247–263 as asked. Records
 0055–0058 hold what each of 194–223 decided; the ones that steer M4.8 are re-filed in §3. Questions 264–272 are
 M4.5e1d's planning's, 273–289 its session's, 290–300 M4.5e1e's planning's, 301–309 M4.5e1e1's, 310–319
-M4.5e1e2's planning's, 320–330 its first session's and 331–336 its continuation's planning's, below.
+M4.5e1e2's planning's, 320–330 its first session's and 331–337 its continuation's planning's, below.
 
 **Standing answers that later sessions act on:**
 - **69:** the upstream EDG merge and the pin move wait for the box session (§4.1).
@@ -1199,7 +1199,7 @@ M4.5e1e2's planning's, 320–330 its first session's and 331–336 its continuat
 
 Other answers that steer a later session are in that session's notes (§3, §4) or its plan: 66, 79, 189, 194, 196,
 212, 215, 216, 222, 225, 246, 249, 262 and 267 (M4.8), 78 (M4.6), 120, 229, 236, 237, 253, 255, 259, 260, 261,
-265, 266 and 287 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 290–309 (M4.5e1e1's plan and record 0063), 304 and 310–336 (M4.5e1e2's two plans and record 0064), 326 and 332 (M8 and M4.6), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
+265, 266 and 287 (M4.5e2, and M4.5f1 and M4.5f2 for 266), 290–309 (M4.5e1e1's plan and record 0063), 304 and 310–337 (M4.5e1e2's two plans and record 0064), 326 and 332 (M8 and M4.6), 226–228 and 233 (M4.5e1's plan), 232, 239, 247–252, 254,
 256–258 and 263 (M4.5e1c's plan and record 0061), 238 and 242 (M4.5e1f), 252 and 264–272 (M4.5e1d's plan), 269
 (M6), 230, 234 and 241 (M8).
 
@@ -1406,8 +1406,16 @@ proof; answer inline, or leave them):
   alike.
 - **336** (process). `scripts/box_lane.sh` refuses to run without its two lane variables instead of falling
   back to M4.5e1e1's lanes.
+- **337** (test mechanics; no `expect:` row of an existing pin changes). The harness wants a must-fail test
+  under `negative/` with a `twin:` line that names a test that verifies, and 14 of the pins that already reject
+  `restrict` name one of the 8 re-expected files as their twin. So the 8 move to `tests/memory/negative/`, a
+  new positive `tests/memory/restrict_dropped.c` (the same functions with the keyword dropped, as the
+  diagnostic tells a user to write them) with an error twin stands for the rule, and those 14 pins and the 8
+  name it in their `twin:` line (the plan's Flips R lists the 14). Alternative: keep the 8 as positives by
+  deleting the keyword from them, which changes no outcome but leaves eight tests that no longer test what
+  their names say.
 
-The next questions start at 337.
+The next questions start at 338.
 
 ### Questions for the owner (after the planning of M4.5e1e2's continuation)
 
@@ -1416,10 +1424,11 @@ The next questions start at 337.
 1. **The merge and the push** (§2, step 1): `main` still accepts every unsound `restrict` form, and both session
    branches fast-forward it. **Recommended:** `git merge --ff-only m4.5e1e2b-arrays-of-structures` on `main`,
    then push, before or after the continuation starts.
-2. **331–336, the continuation plan's defaults** (above). **Recommended:** leave them; each is the fail-closed
+2. **331–337, the continuation plan's defaults** (above). **Recommended:** leave them; each is the fail-closed
    or the cheaper choice, and each alternative is named. The one that changes what users can write is 333
    (`v[i] = f();` stays rejected until M4.8): say so before the session reaches Part C2 if it should be lifted
-   there.
+   there. 337 touches the headers of existing tests (a `twin:` line in 14 pins, and the 8 approved files move
+   into `negative/`): it is what the harness requires of the flips you approved.
 3. **321–324 and 327–330, the advisor's rulings in M4.5e1e2's first session** (above). **Recommended:** let them
    stand. 329's two `restrict` clauses and 326's enumeration are removed by the rejection of `restrict`; 321 and
    327 made cerastes reject more brace-elision forms than question 304 named, as the compilers measure them.

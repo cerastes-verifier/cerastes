@@ -30,7 +30,7 @@ worktree is source only, with no submodules and no build), `build/m4.5e1e2b/`, t
 `~/cerastes-e1e2/{base,il,edg,work,audit}` (the first session's, reused), snapshot refs `refs/tmp/e1e2b-*`,
 record `internal/decisions/0064-arrays-of-structures-and-arrays-of-arrays.md` (no new record), probe **P84**, the
 chapter `## M4.5e1e2` of `internal/il-inventory.md`, self-test cases in `src/viper/selftest_cases36.inc`,
-questions from **337** (331 to 336 are this planning's defaults, section 14).
+questions from **338** (331 to 337 are this planning's defaults, section 14).
 
 ## 1. Context
 
@@ -53,7 +53,8 @@ questions from **337** (331 to 336 are this planning's defaults, section 14).
     (Recommended)"**. Every `restrict` parameter is rejected with a diagnostic that says to drop the keyword;
     the acceptance rules of records 0037, 0043, 0044, 0052, 0060 and 0064 item 19 are withdrawn and their code
     removed; it is built as the continuation's first part with its own audit read; **the owner approved exactly
-    17 files** (section 9, Flips R: 8 positives become rejection pins, their 9 error twins are retired); a
+    17 files** (section 9, Flips R: 8 positives become rejection pins, their 9 error twins are retired; what
+    the harness's twin rules add to that is question 337); a
     path-precise model of `restrict` is an M8 entry. The alternatives were to keep the enumeration and close
     the known form, and a path-precise session first.
   - **320** (the parameter spelling `int (*a)[3]`): **"Accept it in Part E (Recommended)"**: the pin
@@ -131,7 +132,7 @@ the twelve-hour rule closes it; the parts not begun then run from this same plan
 | Role (model) | Owns | Never touches |
 |---|---|---|
 | **Orchestrator** (Fable, `high`; the main session) | Step 0's first item; record 0064's amendments, written before code from section 6; the vprdiff verdict per part; the user pages in `doc/` and the tutorial section; status, handoff, `plan.md`'s Done row or sessions row; the amendment lines in the amended records; every commit; briefing (section 12), resuming and replacing the agents; `build/m4.5e1e2b/orchestrator-state.md` (kept current, times from `date -u`) | `src/`, `tests/`, `scripts/` (their owners make every change there, the small ones too) |
-| **edg-backend** (Sonnet) | `src/backend/**`, `src/driver/**`; the build system, `scripts/box_lane.sh`, the box lanes and the baseline; **the joined build of each part** with `scripts/regen_vpr.py` and `scripts/vprdiff.py` on it; `internal/encoding.md`, the developer guide's paragraph | `tests/`, `scripts/lint_viper.py`, `src/vir`, `src/viper` |
+| **edg-backend** (Sonnet) | `src/backend/**`, `src/driver/**`; the build system, `scripts/box_lane.sh`, `scripts/check.sh` (its `VIR_CASES_MIN`, set at Commit 1 and in the preflight), the box lanes and the baseline; **the joined build of each part** with `scripts/regen_vpr.py` and `scripts/vprdiff.py` on it; `internal/encoding.md`, the developer guide's paragraph | `tests/`, `scripts/lint_viper.py`, `src/vir`, `src/viper` |
 | **il-analyst** (Sonnet; **a fresh instance per part**: `-R` for P84, Part R and Part C1, `-C2`, `-D`, `-E`, `-F`) | `src/vir/**` (`vir.h`, `vir.cpp`, `check.cpp`, `lower.cpp`, `lowered.*`), `src/viper/**`, `src/viper/selftest_cases36.inc`; the probes of P84 under `build/m4.5e1e2b/p84/` and their paragraph in the chapter `## M4.5e1e2` of `internal/il-inventory.md` | `src/backend`, `tests/` |
 | **test-mutator** (Sonnet) | `tests/**` (tests, twins, pins, exactly the Flips of section 9), `tests/mutants-equivalent.txt`, compiler measurements, `scripts/run_tests.py`, `scripts/lint_viper.py`, `scripts/rejections.py` and their self-tests, the example files under `doc/modules/ROOT/examples/` | `src/` |
 | **soundness-auditor** (Fable, `xhigh`, read-only) | one round per commit that touches `src/` (section 7: rounds R, C1, C2, D, E, F, named by their part), each on a snapshot commit in `.claude/worktrees/m4.5e1e2b-audit` and the box's `audit` lane, each before its part's commit; **a fresh instance per round**, briefed with the earlier reports | everything (never edits) |
@@ -217,7 +218,7 @@ session makes is in the table below with its reason, and a run that is not there
 3. **Every new test is timed at its first run, on the box.** Over 60 s: reported in the part's report. Over
    120 s: a smaller program, or `tests/long/` with a short default-tier twin (question 285's rule), settled
    with the advisor at that part, not at the end.
-4. **Counts are capped** (section 8: 157 test files in all). One positive and one error twin per rule of the
+4. **Counts are capped** (section 8: 160 test files in all). One positive and one error twin per rule of the
    record, one pin per rejected row. An audit's requested pins and twins come on top; a part that needs more
    than its cap for another reason goes to the advisor.
 5. **The VIR self-test.** `cerastes-vir-selftest` writes every case without Silicon (seconds) and the lint
@@ -520,7 +521,7 @@ Record 0064 as it stands at `f313023` is the rule text for Parts C to F. The orc
 amendments and no others before Part R's code; an audit round's blocking finding amends it again.
 
 - **The header.** The status line says what the continuation builds from which plan; the owner's answers of
-  this planning (326, 320, 322, 325); the defaults 331 to 336; "the plan's section 8" in items 4 and 15 becomes
+  this planning (326, 320, 322, 325); the defaults 331 to 337; "the plan's section 8" in items 4 and 15 becomes
   "the continuation plan's section 7", and "audit round 4" in item 15 becomes "the audit round of Part D".
   **Amends** gains 0040 item 3, 0044 item 11, 0045 item 13, 0047 item 4, 0052 item 6 (d), 0054 item 2 and 0060
   item 14 (their `restrict` clauses, withdrawn by item 19).
@@ -547,7 +548,11 @@ amendments and no others before Part R's code; an audit round's blocking finding
   - **The rule.** A pointer parameter qualified `restrict` (spelled `restrict`, `__restrict`, `__restrict__`,
     `int p[restrict]` or through a typedef) is rejected, `unsupported_annotation`, at the function's head (the
     position the earlier `restrict` rejections used), once per function, naming every such parameter: on a
-    definition, and on a declaration without a body (question 332). The message says what to do: "cerastes
+    definition, and on a declaration without a body (question 332). **The qualifier is read where it is read
+    today:** from the definition's own parameters when the unit holds the definition, from the declaration
+    otherwise. So `restrict` written only on a prototype of a function that the unit defines without it
+    stays accepted, as it is today: C attaches the promise to the block of the definition (6.7.3.1), and
+    that definition makes none. The message says what to do: "cerastes
     does not model `restrict`; dropping the keyword does not change what a program with defined behaviour
     does, so drop it to verify the function". `restrict` on a local, a global, a member, a pointee or a
     result, and C++'s `__restrict`, stay `unsupported_type` as before (0032 item 2, 0037 item 15). A `pure`
@@ -588,7 +593,7 @@ the record's items say what each must do.**
 
 | Part | edg-backend | il-analyst | test-mutator |
 |---|---|---|---|
-| **R** `restrict` rejected; questions 322 and 325 | `function_of` 5787–5889: one rejection per function for its `restrict` parameters (item 19's message, tag and position), in place of the `restrict_hazard` and `restrict_backed` calls; `report_restrict_bodies` 5901–5922, `recheck_restrict_after_static_atoms` 9768–9796 and their members and calls go; `vtype` 2849–2857, `pure_function_rules` 6306 and `read_forall_function` 12625 keep their rejections (texts re-pointed). **Question 322:** `struct_element_address` 1855–1910 and `detect_array_address_test` 1914–1935 take an element of any type and a `->` chain (`&p->a[i]`); the diagnostic's words. **Question 325,** if P84 (a) says so: the C clause in `collect_init_elems` 19530 and `lone_zero_chain` 2216. `internal/encoding.md` 1101–1103, 1614, 1859 | **il-analyst-R.** `V`/`H`: every function only the `restrict` rules call goes (`may_hold_pointer_to` 1965, `holds_cell`, `reaches_cell`, `value_hands_pointer`, the pair rule, `restrict_backing`, `restrict_covering`, `restrict_hazard`, `restrict_pairs`, `restrict_backed`, `restrict_pair_reason`, `RestrictScan`, `restrict_body_reason`; `-Werror` names any left unused); the flag `is_restrict` stays. `C`: 1557–1573 becomes the backstop (any parameter with the flag is refused, naming item 19); 1029 and 5313 keep refusing. Self-tests: section 9, Flips S | Flips R (the 17 files; the `Pins:` comments of the 34 pins that stay); the pins of question 322 and, if built, 325; `rejections.py --base` against R4 |
+| **R** `restrict` rejected; questions 322 and 325 | `function_of` 5787–5889: one rejection per function for its `restrict` parameters (item 19's message, tag and position), in place of the `restrict_hazard` and `restrict_backed` calls; `report_restrict_bodies` 5901–5922, `recheck_restrict_after_static_atoms` 9768–9796 and their members and calls go; `vtype` 2849–2857, `pure_function_rules` 6306 and `read_forall_function` 12625 keep their rejections (texts re-pointed). **Question 322:** `struct_element_address` 1855–1910 and `detect_array_address_test` 1914–1935 take an element of any type and a `->` chain (`&p->a[i]`); the diagnostic's words. **Question 325,** if P84 (a) says so: the C clause in `collect_init_elems` 19530 and `lone_zero_chain` 2216. `internal/encoding.md` 1101–1103, 1614, 1859 | **il-analyst-R, on edg-backend's snapshot** (the encoder calls `vir::restrict_hazard`, `restrict_backed` and `restrict_body_reason`, so the tree does not build until those calls are gone: "Order of work", step 2). `V`/`H`: every function only the `restrict` rules call goes (`may_hold_pointer_to` 1965, `holds_cell`, `reaches_cell`, `value_hands_pointer`, the pair rule, `restrict_backing`, `restrict_covering`, `restrict_hazard`, `restrict_pairs`, `restrict_backed`, `restrict_pair_reason`, `RestrictScan`, `restrict_body_reason`), **found by a search for each one's callers across `src/`** (the compiler does not name an unused function that `vir.h` declares); the flag `is_restrict` stays. `C`: 1557–1573 becomes the backstop (any parameter with the flag is refused, naming item 19); 1029 and 5313 keep refusing. Self-tests: section 9, Flips S | Flips R (the 17 files; the new positive `restrict_dropped.c` and its error twin; in the 34 pins that stay, the `Pins:` comment and, in 14 of them, the `twin:` line); the pins of question 322 and, if built, 325; `run_tests.py --check-headers`; `rejections.py --base` against R4 |
 | **C1** ranges over structures in contracts | `spec_range_atom` 11652; `owning_count` 4923; `contract_element_address` 1252, `contract_place_address_raw` 10867 and `contract_field_chain` 16198 (`p[e].x` in a contract); `subscript_address` 1555–1566 (`p[e].x` in a loop invariant or measure, where the loop carries `p`'s range; with only a structure atom on `p` it stays rejected, the message saying to write `p->x`); a marker whose atom is a range over structures (`read_marker`); the C++ message for an element that reads its own array (the handoff's untaken should-fix: "used in its own initializer", as C prints) | **il-analyst-R** (the same instance goes on from Part R; replaced at its half's proof if its context is low). `C`: `range_atom_operands` 1655–1658; the `ElemAddr` case 4192 and 4200; the contract root rules of `Deref` 3683 and `MemberAddr` 3946 through `place_root`'s `ElemAddr` step (`V` 1690); `atom_place` (`V` 1732). `L`: **Part C1's table below**; the range helpers take a leaf path (`range_perm`, `range_quant`, `in_range`, `range_shape`, `arr_quant`: the same text as today for a scalar element); the pairing rows as item 7 writes them (`overlap_pairs` 7298, `arr_disjoint` 7331); the guards `elem_fkey`, `element_range`, `site_fields` and `inv_member_elem`'s lifted, each walker they dominate given the general path | Part C1's tests; the lint's range-atom rows per leaf path (`parse_range_quantifier_full`, `range_atom_row_problem`, `_range_acc`, the loop conjuncts) and **the rule that ties a scope exit's rows to its allocation** (audit round 2, issue 7); Flips A (C1); the doc examples and the tutorial's examples |
 | **C2** static storage and members | `array_vtype` 587 for a global (`global_array_vtype` 863), a `static` local (`static_local_decl` 9654, `add_static_local_atoms` 9798) and a member (`struct_info` 25976): the flag `aggregate_elements` where the part gives rows; `read_array_global_init` 9547 and `read_array_element` 9453 for structure elements (through `collect_init_elems`; both escape directions per leaf); `struct_initializer` 20089 and `read_struct_global_init` 9214 for a member that is an array of structures (through `aggregate_array_initializer`); `place_address` 16124; the value view in `object_value` 15313, `aggregate_value` 15907, `signature_vtype` 478 and `copy_struct` 19785 (item 12's limit of 7 over leaves, `vir_value_array_elements` 9106); `collect_array_elems` 2016's text | **il-analyst-C2.** `C`: `array_local_type` 535 and `array_reason` 544 for a member and a global; `struct_type` 413, `global` 607, `global_array` 746; the Sequencer's `struct_store_leaves` with the index steps of an array member of aggregates, and its pin (audit round 2, issue 8). `L`: `program_start_method` 1486 with `array_start_rows` 1655 and `global_facts` 8462 (item 9's row group per leaf path); `struct_lens` 2756 and `alloc_struct_method` 1391 for a member that is an array of aggregates; `leaf_arrays` 2704, `site_arrays` 7194, `ArrLeaf` 1054, `arr_block_term` 7228; `atom` 7960 for `owns(*p)` and `owns(p->v)` with such a member; `held_keys` 17181 and `loop_places` 17239 (a global in `main`, a held global elsewhere, a held structure's member); the guard `report_aggregate_element` 2162 lifted from each of the 40 callers of `checked_object_leaves` and `checked_value_leaves` that the part gives rows, kept on the others; the value-view sites (`param_vars` 22845, `result_vars` 22864, `elem_value` 10925, `leaf_span` 123, `struct_store` 5409, `note_global_member_write` 16777); the walkers audit round 2's note 13 names (a structure global's leaves and `Aggregate` in `check.cpp`; the old view's users, loud through `leaves_of` 2141) | Part C2's tests; the lint's `array_global_group`, `struct_allocation_problem` and `struct_wf_lens_problem` for members and globals of structures; Flips A (C2) |
 | **D** the leftovers | the gates of section 4's Part D list: `allocation_view` 18421, `heap_call` 18556, **`heap_view` 18239–18304 on the object view** (its guard goes), `spec_block_atom` 18639, `invariant_block_atom` 18733; `struct_info` 25882, 25931 and 26102; `read_marker` 3787, `apply_function_markers` 4563, `read_variable_markers` 14661; `reject_array_behind_load` 10783; `finish_atoms` 13557; `invariant_atom` 11784; `pointer_to_array_struct`'s one level | **il-analyst-D.** `C`: `array_with_marked` 513, `atoms` 1480, `init_markers` 1884, the `Atom` case 3837, 3852, 3863, 3919 and 3925, the `ElemAddr` case 4146, each lifted with its rule. `L`: **Part D's table below** | Part D's tests; the lint's typed views, `owns_block` lines, `free` rows and marked closures with an array leaf; Flips A (D) |
@@ -615,10 +620,15 @@ a split point leaves the pins of the parts it did not begin as they are.
 
 **Order of work.**
 1. **Step 0** (section 5), with the record's amendments.
-2. **Part R.** edg-backend, il-analyst-R and the test-mutator in parallel; the orchestrator rewrites the
-   `restrict` paragraphs of the pages (section 10). Advisor checkpoint 1. **Audit round R** (a short read),
-   **Commit 1**: the record as amended, P84's paragraph, Part R, its flips and pages. il-analyst-R starts
-   Part C1 as soon as its Part R half is in the snapshot; it does not wait for the round.
+2. **Part R, its halves in this order** (they are not independent: the encoder and `check.cpp` call the
+   functions that go). (i) edg-backend, after its Step 0 task, removes the encoder's calls into
+   `vir::restrict_*` and writes the rejection; its snapshot is `refs/tmp/e1e2b-r1`. il-analyst-R runs P84
+   meanwhile and prepares `check.cpp`'s backstop and the three cases. (ii) il-analyst-R, on that snapshot,
+   removes `check.cpp`'s calls and the functions. (iii) The joined proof. The test-mutator makes Flips R and
+   writes Part R's tests beside (i) and (ii); the orchestrator rewrites the `restrict` paragraphs of the
+   pages (section 10). Advisor checkpoint 1. **Audit round R** (a short read), **Commit 1**: the record as
+   amended, P84's paragraph, Part R, its flips and pages. il-analyst-R starts Part C1 as soon as its Part R
+   half is in the joined snapshot; it does not wait for the round.
 3. **Part C1.** **Audit round C1. Commit 2. Split point 1.**
 4. **Part C2** (il-analyst-C2 may start from round C1's snapshot while the round runs, and applies its
    fixes). **Audit round C2. Commit 3. Split point 2.**
@@ -726,20 +736,21 @@ goes on from that part's line in "Order of work".
 
 ## 8. Tests (`tests/memory/`, scalar-only ones in `tests/scalar/`, negatives in the area's `negative/`; `.c` in `c23, c++20`; each positive has a twin failing for one reason at one line)
 
-**At most 157 new test files in all**, the part's cap in brackets: one positive and one error twin per rule of
+**At most 160 new test files in all**, the part's cap in brackets: one positive and one error twin per rule of
 the record, one pin per rejected row of item 1's table; a rule that two shapes exercise the same way gets one
 of them. A test's expectation is pre-registered from the record before its first run (question 160 for
 corrections, each listed in status). Section 3's rule 9 shapes every test that holds an array of aggregates.
 
-- **Part R [7].** `array_address_scalar_reject.c`: one row per measured form of question 322 (`if (&a[1])`,
+- **Part R [9].** `array_address_scalar_reject.c`: one row per measured form of question 322 (`if (&a[1])`,
   `&a[1] == NULL`, `&p[1] != NULL`, `!&s.a[i]`, `&p->a[i] == NULL`, `&p[0] != NULL`), with a positive that
   holds the forms that stay accepted (`p == NULL` of a pointer variable, `&a[1] == q` against another
   pointer, `a[1] == 0`). If
   P84 (a) builds question 325: `struct_init_reject_nonliteral_zero_c.c` (one row per spelling) and a positive
-  with the literal spellings clang accepts (`0u`, `0x0`, a macro that is `0`). One new pin:
-  `restrict_reject_declaration.c` (a prototype with a `restrict` parameter and a contract, no body, called).
-  The 8 re-expected files are Flips R, not new tests.
-- **Part C1 [32].** `range_struct_*`. `owns_range` over structures in a callee that writes `p[i].x`,
+  with the literal spellings clang accepts (`0u`, `0x0`, a macro that is `0`). The positive `restrict_dropped.c` and its error twin `restrict_dropped_post.c` (Flips R). One
+  new pin, `restrict_reject_declaration.c` (a prototype with a `restrict` parameter and a contract, no body,
+  called), which also holds the form that stays accepted: a `restrict` prototype before a definition
+  without the keyword. The 8 re-expected files are Flips R, not new tests.
+- **Part C1 [33].** `range_struct_*`. `owns_range` over structures in a callee that writes `p[i].x`,
   `reads_range` in one that reads, each called with a local array (twins: a write under `reads_range`,
   `permission`; `n` past the array; a caller that does not hold the array). Element reads in a `requires`,
   an `ensures` with `old`, a `decreases` (twins: `postcondition`; unframed, `permission`). **The alias
@@ -752,7 +763,8 @@ corrections, each listed in status). Section 3's rule 9 shapes every test that h
   (twins); a loop after a callee wrote through the range (the value is not kept: a twin). A call that
   forwards `(p, n)`. `owning(n)` on a parameter of structures. A marker over a range of structures (a filler
   of two elements; twin: one member left unwritten, `uninitialized`). The listed false alarm `&p[n]` passed
-  as a `struct S *` (a pin named `…_false_alarm.c`). Pins: `owns_range(&v[1], n)`, `owns(p[i])`,
+  as a `struct S *` (a pin named `…_false_alarm.c`). `array_struct_reject_own_init.cpp` (C++'s message for an
+  element that reads its own array). Pins: `owns_range(&v[1], n)`, `owns(p[i])`,
   `owns(v[i].x)`, `&p[i]` in a contract, a range atom in a loop invariant, a range over a result (M4.5e2); a
   range whose element structure has an `owning` member (M4.8).
 - **Part C2 [26].** `global_array_struct_*`, `struct_member_array_struct_*`. `struct S g[3] = {{1, 2}, {3}}`
@@ -799,9 +811,10 @@ corrections, each listed in status). Section 3's rule 9 shapes every test that h
   unframed, `permission`). A global array in a contract under `reads(g)` (twin). `pure` applications
   `sum(p->a, 4)` in an `ensures` and `first(g, 4)` in a `requires` (twins). Pins: `p[i].a[j]` and `m[i][j]`
   under a binder, a row `m[r]` as the argument, `p->q->a` (M4.5e2).
-- **VIR self-test:** the session's cases in `src/viper/selftest_cases36.inc`; `VIR_CASES_MIN` set to the final
-  count in the preflight (Part R retires accepted cases, so the count may dip below 2512 at Commit 1: it is
-  set to that commit's count there and raised again by each part; status says so).
+- **VIR self-test:** the session's cases in `src/viper/selftest_cases36.inc`; `VIR_CASES_MIN`
+  (`scripts/check.sh`, edg-backend's) is set to the final count in the preflight. Part R retires accepted
+  cases, so the count dips below 2512 at Commit 1: edg-backend sets it to that commit's count there, and
+  status says so.
 - **Byte identity:** `scripts/vprdiff.py` against the baseline after each part (section 3, rule 1).
 
 ## 9. Flips (pre-approved with this plan; any other changed outcome goes to the owner)
@@ -813,23 +826,40 @@ with several rows, a lifted row keeps its line number with a comment in place of
 `tests/memory/negative/` unless given.
 
 - **R. `restrict`, approved by the owner at this planning** (question 326; exactly these 17 files).
-  - **Re-expected from `verified` to `rejected cerastes-unsupported_annotation`** (`tests/memory/`; one row
-    per function that has a `restrict` parameter, at the function's head line; the `native-ok` line stays
-    where the harness allows it beside a rejection and goes otherwise; the `Pins:` comment names item 19):
+  - **Re-expected from `verified` to `rejected cerastes-unsupported_annotation`, and moved to
+    `tests/memory/negative/` under the same names** (the harness wants a must-fail test of this area under
+    `negative/`, with a `twin:` line; `tests/README.md`, "Twins"). One row per function that has a `restrict`
+    parameter, at the function's head line; the `native-ok` line goes unless the harness takes it beside a
+    rejection; the `Pins:` comment names item 19; the `twin:` line names the new positive below.
     `block_restrict.c` (L10), `owning_restrict.c` (L8), `range_restrict.c` (L10, L18, L27),
     `restrict_body_owns_global.c` (L11, L20), `restrict_body_pair_ok.c` (L18, L26, L36, L46, L55),
-    `restrict_owned.c` (L8, L18), `struct_global_restrict.c` (L14), `struct_value_restrict.c` (L12). **The
-    tag and the rejection are approved; a row that lands on another line than the head of its function is
-    reported by the test-mutator before the file is edited and settled with the advisor.**
+    `restrict_owned.c` (L8, L18), `struct_global_restrict.c` (L14), `struct_value_restrict.c` (L12); a line
+    shifts by what the header gains or loses. **The tag and the rejection are approved; a row that lands
+    anywhere but the head of its function is reported by the test-mutator before the file is edited and
+    settled with the advisor.**
   - **Retired** (the error twins of the above; a rejection pin has no error twin): `block_restrict_post.c`,
     `owning_restrict_post.c`, `range_restrict_wrong_post.c`, `restrict_body_owns_global_wrong.c`,
     `restrict_body_pair_ok_wrong.c`, `restrict_body_reads_global_wrong.c`, `restrict_owned_post.c`,
     `struct_global_restrict_post.c`, `struct_value_restrict_post.c`.
-  - **Unchanged by design: the 33 pins that already reject on a `restrict` line, and
-    `forall_reject_f_restrict.c`.** The new rejection has the tag and the position the old ones had, so each
-    keeps its `expect:` rows; only the message and the `Pins:` comment change. **If R4's rows and Part R's
-    `rejections.py` run differ in a tag or a line for any of the 34, that file goes to the owner before it is
-    touched** (invariant 1). Whether to thin these pins, which now pin one rule 34 times, is question 334.
+  - **The planning derived the 17 twice:** by its survey, and by a search of `tests/` for every file with
+    `restrict` in code and no `rejected` row, which returns these 17 and no other.
+  - **A new positive, which the rule needs** (invariant 2) **and the harness needs** (a `twin:` must name a
+    test that verifies, and 14 pins name one of the 8): `tests/memory/restrict_dropped.c`, the functions of
+    `restrict_owned.c` and `range_restrict.c` with the keyword dropped, as the diagnostic tells a user to
+    write them (`verified`, `native-ok`, both modes), with its error twin
+    `negative/restrict_dropped_post.c` (a wrong postcondition, both modes).
+  - **Unchanged in their `expect:` rows by design: the 33 pins that already reject on a `restrict` line, and
+    `forall_reject_f_restrict.c`.** The new rejection has the tag and the position the old ones had. What
+    changes in them is the message, the `Pins:` comment and, **in the 14 whose `twin:` line names one of the
+    8, that line, which becomes `tests/memory/restrict_dropped.c`** (question 337): `restrict_body_pair.c`,
+    `reject_struct_value_restrict_static_atom.c`, `reject_restrict_reads.c`,
+    `reject_restrict_owns_block_load.c`, `reject_restrict_cpp.cpp`, `reject_restrict_none.c`,
+    `reject_restrict_owns_block_global.c`, `restrict_body_callee_arg.c`, `restrict_body_global.c`,
+    `restrict_body_callee_pointer.c`, `restrict_body_callee_global.c`, `restrict_body_reach_forms.c`,
+    `reject_struct_global_restrict_ptr_leaf.c`, `range_restrict_reject_unbacked.c`. **If R4's rows and Part
+    R's `rejections.py` run differ in a tag or a line for any of the 34, that file goes to the owner before
+    it is touched** (invariant 1). Whether to thin these pins, which now pin one rule 34 times, is question
+    334.
 - **S. The VIR self-test** (hand-built cases, not `expect:` lines; status lists each). Part R: the 23 accepted
   `restrict` cases and the 38 rejected ones (section 4 has their files and lines) are replaced by three
   rejection cases for the backstop (a `restrict` parameter with `owns`; with a range; on a function with no
@@ -861,10 +891,10 @@ with several rows, a lifted row keeps its line number with a comment in place of
   operand), **it goes to the owner before it is touched** (invariant 1).
 - **C. Stay rejected; only the message or the `Pins:` comment changes:** `struct_array_reject_result_decay.c`
   (it names "M4.5e1e2/M4.5f3" and becomes M4.5f3's alone); `array_struct_reject_more.c` and
-  `array_struct_reject_more_c.c`'s `v[i] = f();` rows (M4.8, question 333; in the `.c` both-modes file the
-  C++ rows for an element that reads its own array move back from `array_struct_reject_more_c.c` if Part C1's
-  message fix makes both modes report one tag: that move is a question-160 correction of a first-session
-  test, listed in status); `array_param_reject_array_of_arrays.c`'s comment "naming e1e" and
+  `array_struct_reject_more_c.c`'s `v[i] = f();` rows (M4.8, question 333). Both files keep every row where
+  it is: Part C1's fix of the C++ message for an element that reads its own array is pinned by a new file,
+  `array_struct_reject_own_init.cpp`, and if that fix changes a row of an existing file, the file goes to
+  the owner first; `array_param_reject_array_of_arrays.c`'s comment "naming e1e" and
   `tests/scalar/negative/reject_typedef_function_array_param.c`'s "e1e" (M4.7), if they survive Flips A; the
   rows whose comment says "to confirm at the joined run"; a row a cut re-points.
 - **D. Unchanged:** `global_array_reject_expressions.c` L31, L37, L41, L47; `struct_array_reject_annotations.c`
@@ -936,7 +966,7 @@ question does not block.
   wrong program verified, a trusted contract the auditor does not accept); a part already begun that would
   pass the twelve-hour cap; anything the advisor says is the owner's.
 - **Each answer the advisor settles is logged** in `internal/handoff.md` §8 under "Settled with the advisor in
-  M4.5e1e2's continuation, for the owner's review": numbered from 337, the soundness statement first, the
+  M4.5e1e2's continuation, for the owner's review": numbered from 338, the soundness statement first, the
   answer taken, the alternative. The status entry lists them.
 - **While the owner is away,** a question that is the owner's waits; the session goes on with everything it
   does not block. The overnight rule (build the fail-closed recommendation and log it) applies only if the
@@ -1034,10 +1064,12 @@ ship-build-run round trip. Take the baseline in the `base` lane before any chang
 scripts/regen_vpr.py and the VIR self-test's output into build/e1e2b-base/. Keep frozen binaries in `work`
 (build/e1e2b-frozen/). Report 1: the lanes, the round-trip time, the baseline's counts.
 
-Task 2, Part R, your half (plan section 7, row R; record items 19, 5 and 16). Every function with a
-`restrict` parameter is rejected once, at the position the old `restrict` rejections used, with the tag
-unsupported_annotation and item 19's message; the calls into vir's restrict functions and the two later
-passes go. Then question 322's rule for every element address, and question 325's rule if the orchestrator
+Task 2, Part R, your half (plan section 7, row R; record items 19, 5 and 16). Yours comes first: the
+il-analyst removes vir's restrict functions on your snapshot, and the tree does not build before your calls
+into them are gone. Every function with a `restrict` parameter is rejected once, at the position the old
+`restrict` rejections used, with the tag unsupported_annotation and item 19's message; the calls into vir's
+restrict functions and the two later passes go. Cut the snapshot refs/tmp/e1e2b-r1 as soon as that much
+builds and tell the orchestrator, then go on. Then question 322's rule for every element address, and question 325's rule if the orchestrator
 tells you P84 (a) allows it. Proof: your build; scripts/rejections.py with --base shows, for the 34 pins that
 already reject `restrict`, the same tag and line as before (the message may differ), new rows only for the 8
 files of Flips R, and nothing else changed. Report 2: what you removed and added, the proof's output, and any
@@ -1062,11 +1094,16 @@ Task 1, P84 (plan section 5, item 4): the two probes, front end only. A claim ab
 file and line with an excerpt you produced; never round up. Report 1: for each row, which branch of its table
 it took, with the evidence.
 
-Task 2, Part R, your half (plan section 7, row R; plan section 9, Flips S). Remove from vir.cpp and vir.h
-every function that only the restrict rules call; the flag is_restrict stays. check.cpp refuses any
-parameter that carries the flag. Replace the restrict self-test cases by the three backstop cases. Proof:
-the build with -Werror; the VIR self-test's output identical to the baseline's for every case that is not a
-restrict case; the three new cases through scripts/run_tests.py --expect-passed. Report 2, then go on.
+Task 2, Part R, your half (plan section 7, row R; plan section 9, Flips S). It starts from edg-backend's
+snapshot refs/tmp/e1e2b-r1, in which the encoder no longer calls vir's restrict functions: the orchestrator
+tells you when it exists, and until then you prepare check.cpp's backstop and the cases without removing
+anything the encoder still calls. Then remove check.cpp's calls and, from vir.cpp and vir.h, every function
+that only the restrict rules call. Find them by searching for each function's callers across src/: the
+compiler does not report an unused function that vir.h declares. The flag is_restrict stays, and check.cpp
+refuses any parameter that carries it. Replace the restrict self-test cases by the three backstop cases.
+Proof: the whole tree builds with -Werror; the VIR self-test's output is identical to the baseline's for
+every case that is not a restrict case; the three new cases pass through scripts/run_tests.py
+--expect-passed. Report 2, then go on.
 
 Task 3, Part C1 (plan section 7, row C1 and Part C1's table; record items 7, 8 and 10). Three things carry
 the soundness of this part, so say in your report how each is met:
@@ -1127,9 +1164,12 @@ Read: the plan's sections 1, 3, 5 (item 3), 8 and 9; record 0064 items 5, 7, 16,
 Task 1, Step 0 on the frozen build (plan section 5, item 3): R1, R3 and R4. Report 1: each run's result
 against what the plan's section 9 says, row by row, and anything that differs.
 
-Task 2, Part R. Make Flips R exactly as section 9 lists them: 8 files re-expected, 9 retired; in the 34 pins
-that stay, only the `Pins:` comment. If a row of the 8 lands on another line than the head of its function,
-or a tag or line of the 34 differs from R4, report it before you edit that file. Write Part R's new tests
+Task 2, Part R. Make Flips R exactly as section 9 lists them: 8 files re-expected and moved to
+tests/memory/negative/, 9 retired, the new positive restrict_dropped.c with its error twin; in the 34 pins
+that stay, only the `Pins:` comment and, in the 14 that section 9 names, the `twin:` line. No `expect:` row
+of the 34 changes. If a row of the 8 lands anywhere but the head of its function, or a tag or line of the 34
+differs from R4, report it before you edit that file. scripts/run_tests.py --check-headers must pass on the
+result. Write Part R's new tests
 (section 8), each expectation registered before its first run. If the first session's compiler matrix (under
 build/m4.5e1e2b/prev/) lacks a cell for a scalar form of question 322, measure that cell (clang and GCC, both
 modes, no flag and -Wall) and report the table.
@@ -1303,5 +1343,10 @@ rejections.py --base against section 9 | the part's tests, once, timed>), and wh
     form. Alternative: accept `&p[0]` on a pointer for scalars and structures alike.
   - **336** `scripts/box_lane.sh` refuses to run without its two lane variables instead of falling back to
     M4.5e1e1's lanes.
+  - **337** The harness's twin rules shape Flips R: the 8 re-expected files move to `tests/memory/negative/`,
+    a new positive `tests/memory/restrict_dropped.c` (the keyword dropped) with an error twin stands for the
+    rule, and the 14 existing pins whose `twin:` line named one of the 8 name it instead. No `expect:` row
+    of an existing pin changes. Alternative: keep the 8 as positives by deleting the keyword from them,
+    which changes no outcome but leaves eight tests that no longer test what their names say.
 - **Open questions: none.** A question that arises in the session goes to the advisor first (section 11); the
-  session's questions start at 337.
+  session's questions start at 338.
