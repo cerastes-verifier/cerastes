@@ -38,8 +38,12 @@ its plan's "Inputs".
   contracts, markers and `owning(n)`); **Commit 3 `46f34fb`, Part C2** (arrays of structures as globals, `static`
   locals and members of structures, with initial values, `owns(g)`, contract reads `g[e].x` and `p->v[e].x`,
   loops, whole-structure copies and by-value passing up to 7 values); then the closing commits, which change
-  only `internal/` and `plan.md`. Three audit rounds (a fresh Fable auditor each) found no
-  wrong program that verifies. **The full check (`CERASTES_LONG=1`, on the box, run once) is green at Commit 3 `46f34fb`** (17,172 tests passed, 0 failed; the VIR self-test 2,739 cases), the last commit that touches anything but `internal/` and `plan.md`.
+  only `internal/` and `plan.md`. Four audit reads (a fresh Fable auditor each: rounds R, C1 and
+  C2, and a short second read, C2b, of Part C2's final snapshot) found no wrong program that verifies. **The
+  two reads of Part C2 rested on probes** (387 and 69) and on the functions they name: no auditor read the
+  body of Part C2's diff in `lower.cpp` and `encode.cpp` beyond those, its self-test cases, or the lint
+  lines written after the last snapshot (record 0064's header, "What no auditor read"; the status entry,
+  "Audits"). **The full check (`CERASTES_LONG=1`, on the box, run once) is green at Commit 3 `46f34fb`** (17,172 tests passed, 0 failed; the VIR self-test 2,739 cases), the last commit that touches anything but `internal/` and `plan.md`.
 - **What is left of M4.5e1e2: Parts D, E and F,** from the same plan, without a new planning (question 310's
   12-hour rule; the session closed at the plan's split point after Commit 3 because Part D with its audit
   round and the close-out would have passed twelve hours). **Part D:** what M4.5e1e1 left for a structure with
@@ -54,7 +58,9 @@ its plan's "Inputs".
   ends in exit 3 instead of a diagnostic. Nothing is reported as verified. It predates this session.
 - **The box:** the lanes `~/cerastes-e1e2/{base,il,edg,work,audit}` (containers `cerastes-e1e2-<lane>`, image
   `cerastes-e1d:26.04`) are reused by the next session; `base` holds the baseline at `ae622e5` (the next
-  session's Step 0 takes a new one at its own base), `work` the last joined build of Part C2.
+  session's Step 0 takes a new one at its own base), `work` the last joined build of Part C2. The check lane
+  `~/cerastes-s8/p-ubuntu-26.04` sits detached at `46f34fb`, with this session's `check-e1e2b-c3.log`,
+  `.exit` and `.start` beside the earlier sessions' logs.
   `scripts/box_lane.sh` now refuses to run without its two lane variables (`build/<session>/box.env`). The box
   was under other users' load (50 to 100) for most of the session; times measured there are upper bounds, and
   the full check, 55 minutes on a quiet box, took 56 minutes at a load of about 3.
@@ -89,7 +95,7 @@ its plan's "Inputs".
    session's `.claude/worktrees/m4.5e1e2` and `.claude/worktrees/m4.5e1e2-audit` and the refs
    `refs/tmp/e1e2-*`; this session's refs `refs/tmp/e1e2b-*`. **Keep
    `.claude/worktrees/m4.5e1e2b/build/m4.5e1e2b/` until the next session's Step 0 has copied it** (every agent
-   report, the three audit reports and the auditors' probes under `audit-{R,C1,C2}/`, the briefings as sent,
+   report, the four audit reports and the auditors' probes under `audit-{R,C1,C2,C2b}/`, the briefings as sent,
    the orchestrator's state log). On the box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
 6. **CI** (question 176): unchanged.
 
@@ -99,7 +105,7 @@ One line per note, its origin in brackets (session and audit item); the full wor
 Notes that a session consumes move into its plan's "Inputs".
 
 **From the first session of M4.5e1e2's continuation** (record 0064; the reports are in
-`.claude/worktrees/m4.5e1e2b/build/m4.5e1e2b/`: `auditor-report-{R,C1,C2}.md`, the agents' reports, the state
+`.claude/worktrees/m4.5e1e2b/build/m4.5e1e2b/`: `auditor-report-{R,C1,C2,C2b}.md`, the agents' reports, the state
 log):
 - **The next session (Parts D, E, F), beyond its plan's section 13:**
   - **The sequencing rows have nothing behind them.** For a call that holds a range over structures, a member
@@ -147,6 +153,10 @@ log):
     `build/m4.5e1e2b/audit-C2b/t/q05_reads_gt_nonmain.c` (17 s with the length quantifier inside the facts'
     conjunction, no verdict in 200 s with clauses of its own) and `build/m4.5e1e2b/audit-C2b/e/e06_split_gt.c`
     (no verdict in 200 s either way), with round C2's `m02` (`audit-C2/m/`).
+  - **`internal/encoding.md` does not yet describe two things Commit 3 built last** (edg-backend's file; its
+    last update predates both): the global facts' length quantifiers as clauses of their own
+    (`global_fact_clauses()`) and the binder rule for a length quantifier under another quantifier
+    (`length_binder`; record 0064 item 3). The next session's edg-backend adds them with its first part.
 - **M4.5e2:** `&g[e]` and `&p[e]` in a contract; an atom on one element of an array of structures
   (`owns(g[1].x)`); question 343's row, if the owner places it there (§8).
 - **M4.5f3:** a contract read of an element of a structure passed by value (`t.v[1].y` of a parameter `struct

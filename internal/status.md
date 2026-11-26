@@ -42,8 +42,11 @@ went to the Fable advisor first.
 **The session closed at split point 2** (question 310's 12-hour rule; the advisor, checkpoint 3 at Commit 2):
 after Commit 2 the sum for Part C2 (its lowering, encoder half and tests existed; left were the joined proofs, the
 flips and first run, round C1's fixes, audit round C2 with its fixes, and the two-hour close-out) came to
-about 10 hours, so Part C2 went on. Part D was not begun: its build, its audit round and the close-out after
-Commit 3 (at 7 h 39) would have passed twelve hours. Parts D, E and F run from the same plan in a further
+about 10 hours, so Part C2 went on. **Part D was not begun; that was decided with the advisor at Commit 2 and
+not taken again at Commit 3.** Its sum from Commit 3 (at 7 h 39), by the plan's rates: 800 to 1,500 `src/`
+lines at about 400 an hour (2 h to 3 h 45), an audit round (60 to 90 minutes; this session's took 46, 88 and
+50 with a second read of 37), a fix cycle (30 to 70 minutes; round C2's took 80 with its second read) and the
+two-hour close-out: 5 h 30 to 8 h 25, which ends between 13 h 10 and 16 h. Parts D, E and F run from the same plan in a further
 session (handoff §2, step 4).
 
 **Done** (commits on `m4.5e1e2b-arrays-of-structures`, local, no Claude trailer):

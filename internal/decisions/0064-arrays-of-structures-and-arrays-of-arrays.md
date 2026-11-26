@@ -1,6 +1,9 @@
 # 0064 — Arrays of structures and arrays of arrays (M4.5e1e2)
 
-- **Status:** accepted for the items its first session built (2026-11-25, M4.5e1e2: items 2 to 6 and 10 to 12
+- **Status:** accepted for the items built so far: those of the continuation's first session (2026-11-26:
+  Parts R, C1 and C2, named below: items 5, 16 and 19 as amended, items 7 to 9, and the range, global and
+  member parts of items 10 and 12, with item 17's rules through Part C2; the full check green at its Commit 3
+  `46f34fb`), and those its first session built (2026-11-25, M4.5e1e2: items 2 to 6 and 10 to 12
   as far as automatic local arrays of structures in code go, item 16, item 17's first rules, and item 19 in its
   first version, which the continuation withdraws); **the rest is decided and is built by the continuation,
   from a plan of its own** (`.claude/plans/m4-5e1e2b-arrays-of-structures.md`, written on 2026-11-25 at a
