@@ -1,0 +1,90 @@
+// a local array of structures with an array member: v[1].a[2] written and read back
+// expect: verified
+// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an automatic array of struct P with n elements (n >= 1): a fresh block of n slots whose elements are structures, the length facts of every slot, every leaf of every element uninitialized with full permission (each leaf's permissions as quantifiers of their own), the block's liveness token (decision 0064 item 6)
+method alloc_arr_struct_0_P(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> ((len(member(loc(block_of(r), k), 0)) == 1) && (len(member(loc(block_of(r), k), 1)) == 3))
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } ((0 <= k) && (k < n)) ==> acc(loc(member(loc(block_of(r), k), 0), 0).v_int)
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } ((0 <= k) && (k < n)) ==> acc(loc(member(loc(block_of(r), k), 0), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } ((0 <= k) && (k < n)) ==> (!loc(member(loc(block_of(r), k), 0), 0).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(block_of(r), k), 1), j) } (((0 <= k) && (k < n)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(r), k), 1), j).v_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(block_of(r), k), 1), j) } (((0 <= k) && (k < n)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(r), k), 1), j).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(block_of(r), k), 1), j) } (((0 <= k) && (k < n)) && ((0 <= j) && (j < 3))) ==> (!loc(member(loc(block_of(r), k), 1), j).d_int)
+  decreases _
+
+// cerastes:trusted-contract allocation of a local of type struct P: a fresh one-slot block whose members are blocks, a cell member of length 1 and an array member of its length, every leaf and every element uninitialized with full permission (each array member's permissions as quantifiers of their own), and the block's liveness token (decisions 0043 item 4, 0063 item 6)
+method alloc_struct_0_P() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)
+  ensures len(member(r, 1)) == 3
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 3)) ==> acc(loc(member(r, 1), j).v_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 3)) ==> acc(loc(member(r, 1), j).d_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 3)) ==> (!loc(member(r, 1), j).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// C/C++ function `f`
+method f_f__0()
+  decreases
+{
+  var v_v__0: Ref
+  var t__0: Ref
+  var t__1: Ref
+  v_v__0 := alloc_arr_struct_0_P(2)
+  assert !(((offset_of(v_v__0) + 0) < 0) || (len(block_of(v_v__0)) <= (offset_of(v_v__0) + 0)))
+  t__0 := loc(member(loc(block_of(v_v__0), offset_of(v_v__0) + 0), 0), 0)
+  assert !((perm(t__0.v_int) != write) || (perm(t__0.d_int) != write))
+  t__0.v_int := 7
+  t__0.d_int := true
+  assert !(((offset_of(v_v__0) + 1) < 0) || (len(block_of(v_v__0)) <= (offset_of(v_v__0) + 1)))
+  assert !((2 < 0) || (len(member(loc(block_of(v_v__0), offset_of(v_v__0) + 1), 1)) <= 2))
+  t__1 := loc(member(loc(block_of(v_v__0), offset_of(v_v__0) + 1), 1), 2)
+  assert !((perm(t__1.v_int) != write) || (perm(t__1.d_int) != write))
+  t__1.v_int := 5
+  t__1.d_int := true
+  assert !(((offset_of(v_v__0) + 1) < 0) || (len(block_of(v_v__0)) <= (offset_of(v_v__0) + 1)))
+  assert !((2 < 0) || (len(member(loc(block_of(v_v__0), offset_of(v_v__0) + 1), 1)) <= 2))
+  assert perm(loc(member(loc(block_of(v_v__0), offset_of(v_v__0) + 1), 1), 2).v_int) > none
+  assert loc(member(loc(block_of(v_v__0), offset_of(v_v__0) + 1), 1), 2).d_int
+  assert loc(member(loc(block_of(v_v__0), offset_of(v_v__0) + 1), 1), 2).v_int == 5
+  assert forall k: Int :: { loc(member(loc(block_of(v_v__0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(block_of(v_v__0), k), 0), 0).v_int)
+  assert forall k: Int :: { loc(member(loc(block_of(v_v__0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(block_of(v_v__0), k), 0), 0).d_int)
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(v_v__0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(v_v__0), k), 1), j).v_int)
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(v_v__0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(v_v__0), k), 1), j).d_int)
+  assert perm(lvloc(block_of(v_v__0)).lv) == write
+  exhale forall k: Int :: { loc(member(loc(block_of(v_v__0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(block_of(v_v__0), k), 0), 0).v_int)
+  exhale forall k: Int :: { loc(member(loc(block_of(v_v__0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(block_of(v_v__0), k), 0), 0).d_int)
+  exhale forall k: Int, j: Int :: { loc(member(loc(block_of(v_v__0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(v_v__0), k), 1), j).v_int)
+  exhale forall k: Int, j: Int :: { loc(member(loc(block_of(v_v__0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(v_v__0), k), 1), j).d_int)
+  exhale acc(lvloc(block_of(v_v__0)).lv)
+  label l_end
+}

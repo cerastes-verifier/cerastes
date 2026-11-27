@@ -1,0 +1,163 @@
+32	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+32	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+33	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+33	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+34	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+34	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+35	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+35	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+36	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+36	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+37	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+37	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+38	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+38	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+39	not.wellformed	internal	b6_gu.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+39	postcondition.violated	internal	b6_gu.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+44	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+44	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+45	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+45	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+46	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+46	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+47	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for `gu`
+47	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for `gu`
+48	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for `gu.m`
+48	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for `gu.m`
+49	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for `gu.m`
+49	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for `gu.m`
+50	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for `gu.m`
+50	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for `gu.m`
+51	not.wellformed	internal	b6_gu.c	3	10	internal check: well-formedness of the trusted contract of program_start for `gu.m`
+51	postcondition.violated	internal	b6_gu.c	3	10	internal check: Silicon's own check of the trusted contract of program_start for `gu.m`
+52	not.wellformed	internal	b6_gu.c	4	17	internal check: well-formedness of the trusted contract of program_start for `su`
+52	postcondition.violated	internal	b6_gu.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `su`
+53	not.wellformed	internal	b6_gu.c	4	17	internal check: well-formedness of the trusted contract of program_start for `su.m`
+53	postcondition.violated	internal	b6_gu.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+54	not.wellformed	internal	b6_gu.c	4	17	internal check: well-formedness of the trusted contract of program_start for `su.m`
+54	postcondition.violated	internal	b6_gu.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+55	not.wellformed	internal	b6_gu.c	4	17	internal check: well-formedness of the trusted contract of program_start for `su.m`
+55	postcondition.violated	internal	b6_gu.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+56	not.wellformed	internal	b6_gu.c	4	28	internal check: well-formedness of the trusted contract of program_start for `su.m`
+56	postcondition.violated	internal	b6_gu.c	4	28	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+57	not.wellformed	internal	b6_gu.c	4	31	internal check: well-formedness of the trusted contract of program_start for `su.m`
+57	postcondition.violated	internal	b6_gu.c	4	31	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+58	not.wellformed	internal	b6_gu.c	4	34	internal check: well-formedness of the trusted contract of program_start for `su.m`
+58	postcondition.violated	internal	b6_gu.c	4	34	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+59	not.wellformed	internal	b6_gu.c	4	39	internal check: well-formedness of the trusted contract of program_start for `su.m`
+59	postcondition.violated	internal	b6_gu.c	4	39	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+60	not.wellformed	internal	b6_gu.c	4	42	internal check: well-formedness of the trusted contract of program_start for `su.m`
+60	postcondition.violated	internal	b6_gu.c	4	42	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+61	not.wellformed	internal	b6_gu.c	4	45	internal check: well-formedness of the trusted contract of program_start for `su.m`
+61	postcondition.violated	internal	b6_gu.c	4	45	internal check: Silicon's own check of the trusted contract of program_start for `su.m`
+66	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd`
+67	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd`
+68	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd`
+69	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd`
+70	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+71	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+72	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+73	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+74	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+75	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+76	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+77	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+78	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+79	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+80	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+81	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+82	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+83	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+84	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+85	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+86	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+87	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+88	not.wellformed	internal	b6_gu.c	7	5	internal check: well-formedness of the contract of `rd`
+89	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd`
+89	postcondition.violated	internal	b6_gu.c	6	5	internal check: Silicon's own check of the postcondition of `rd`
+90	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+90	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+91	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+91	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+92	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+92	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+93	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+93	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+94	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+94	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+95	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+95	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+96	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+96	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+97	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+97	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+98	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+98	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+99	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+99	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+100	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+100	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+101	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+101	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+102	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+102	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+103	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+103	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+104	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+104	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+105	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+105	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+106	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+106	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+107	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+107	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+108	not.wellformed	internal	b6_gu.c	8	5	internal check: well-formedness of the contract of `rd`
+108	postcondition.violated	internal	b6_gu.c	8	5	internal check: Silicon's own check of the postcondition of `rd`
+112	assert.failed	out-of-bounds	b6_gu.c	10	17	reads `gu.m[1][0]`, whose first index may be outside `gu.m`
+113	assert.failed	out-of-bounds	b6_gu.c	10	17	reads `gu.m[1][0]`, whose second index may be outside `gu.m[1]`
+114	assert.failed	permission	b6_gu.c	10	17	reads `gu.m[1][0]` without owning it: a callee may have kept its object
+115	assert.failed	uninitialized	b6_gu.c	10	17	`gu.m[1][0]` may be read here before it is given a value
+117	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu`, which its contract promises	b6_gu.c:8:this is the postcondition
+118	assert.failed	internal	b6_gu.c	10	3	internal check: WF of a pointer parameter
+119	assert.failed	internal	b6_gu.c	10	3	internal check: a pointer parameter points into its block
+120	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu`, which its contract promises	b6_gu.c:8:this is the postcondition
+121	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu`, which its contract promises	b6_gu.c:8:this is the postcondition
+122	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu`, which its contract promises	b6_gu.c:8:this is the postcondition
+123	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu`, which its contract promises	b6_gu.c:8:this is the postcondition
+124	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu`, which its contract promises	b6_gu.c:8:this is the postcondition
+126	assert.failed[insufficient.permission]	permission	b6_gu.c	10	3	returns without owning `gu.m`, which its contract promises	b6_gu.c:8:this is the postcondition
+127	assert.failed[insufficient.permission]	permission	b6_gu.c	10	3	returns without owning `gu.m`, which its contract promises	b6_gu.c:8:this is the postcondition
+128	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu.m`, which its contract promises	b6_gu.c:8:this is the postcondition
+129	assert.failed	permission	b6_gu.c	10	3	returns without owning `gu.m`, which its contract promises	b6_gu.c:8:this is the postcondition
+131	assert.failed	missing-return	b6_gu.c	11	1	control may reach the end of `rd` without returning a value
+137	not.wellformed	internal	b6_gu.c	13	5	internal check: well-formedness of the contract of `main`
+137	postcondition.violated	internal	b6_gu.c	13	5	internal check: Silicon's own check of the postcondition of `main`
+142	call.precondition	internal	b6_gu.c	13	5	internal check: Silicon's own check of the call of program_start
+143	assert.failed	out-of-bounds	b6_gu.c	15	14	writes `gu.m[0][1]`, whose first index may be outside `gu.m`
+144	assert.failed	out-of-bounds	b6_gu.c	15	14	writes `gu.m[0][1]`, whose second index may be outside `gu.m[0]`
+146	assert.failed	permission	b6_gu.c	15	14	writes `gu.m[0][1]` without owning it: a callee may have kept its object
+149	assert.failed	out-of-bounds	b6_gu.c	16	14	writes `su.m[1][2]`, whose first index may be outside `su.m`
+150	assert.failed	out-of-bounds	b6_gu.c	16	14	writes `su.m[1][2]`, whose second index may be outside `su.m[1]`
+151	assert.failed	out-of-bounds	b6_gu.c	16	23	reads `su.m[1][2]`, whose first index may be outside `su.m`
+152	assert.failed	out-of-bounds	b6_gu.c	16	23	reads `su.m[1][2]`, whose second index may be outside `su.m[1]`
+153	assert.failed	permission	b6_gu.c	16	23	reads `su.m[1][2]` without owning it: a callee may have kept its object
+154	assert.failed	uninitialized	b6_gu.c	16	23	`su.m[1][2]` may be read here before it is given a value
+155	assert.failed	overflow	b6_gu.c	16	27	signed `int` addition may overflow
+157	assert.failed	permission	b6_gu.c	16	14	writes `su.m[1][2]` without owning it: a callee may have kept its object
+160	assert.failed	out-of-bounds	b6_gu.c	17	25	reads `su.m[1][2]`, whose first index may be outside `su.m`
+161	assert.failed	out-of-bounds	b6_gu.c	17	25	reads `su.m[1][2]`, whose second index may be outside `su.m[1]`
+162	assert.failed	permission	b6_gu.c	17	25	reads `su.m[1][2]` without owning it: a callee may have kept its object
+163	assert.failed	uninitialized	b6_gu.c	17	25	`su.m[1][2]` may be read here before it is given a value
+164	assert.failed	out-of-bounds	b6_gu.c	17	44	reads `su.m[0][0]`, whose first index may be outside `su.m`
+165	assert.failed	out-of-bounds	b6_gu.c	17	44	reads `su.m[0][0]`, whose second index may be outside `su.m[0]`
+166	assert.failed	permission	b6_gu.c	17	44	reads `su.m[0][0]` without owning it: a callee may have kept its object
+167	assert.failed	uninitialized	b6_gu.c	17	44	`su.m[0][0]` may be read here before it is given a value
+168	assert.failed	permission	b6_gu.c	17	58	reads `su.n` without owning it: `main` needs `reads(su.n)` or `owns(su.n)` in its contract
+169	assert.failed	uninitialized	b6_gu.c	17	58	`su.n` may be read here before it is given a value
+170	assert.failed	check	b6_gu.c	17	3	this `check` may not hold
+173	assert.failed	missing-return	b6_gu.c	19	1	control may reach the end of `main` without returning a value
+179	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd (well-formedness)`
+180	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd (well-formedness)`
+181	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd (well-formedness)`
+182	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd (well-formedness)`
+183	not.wellformed	internal	b6_gu.c	6	5	internal check: well-formedness of the contract of `rd (well-formedness)`

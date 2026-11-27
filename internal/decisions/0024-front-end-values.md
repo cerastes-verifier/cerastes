@@ -195,3 +195,5 @@ rejected).
 *2026-11-24, amended by 0062 (M4.5e1d): item 2 — a block-scope static assertion in a read `pure` function's body is checked as in code; the region of an unread `pure` function and of a predicate stays exempt (0062 item 3).*
 
 *2026-11-25, amended by 0063 (M4.5e1e1): item 6 — array types of scalars are accepted wherever every bound in them is read as written: typedefs and aliases declared in a verified file, `typeof` and `decltype`, the type operand of `sizeof` and `_Alignof`; a wrapped bound is an `overflow` error at the bound; an array type reached through a typedef of a system header stays rejected (0063 item 14).*
+
+*2026-11-27, amended by 0064 (M4.5e1e2, Part E): item 6 — array types of arrays (`int[2][3]`) and of structures are accepted in the computed positions (typedefs and aliases declared in a verified file, `typeof`, `decltype`, the type operand of `sizeof` and `_Alignof`, a static assertion) wherever an object of that type is accepted, every bound read as written; a matrix of structures, a `const` matrix and three or more dimensions stay rejected there as their objects are (0064 item 13).*

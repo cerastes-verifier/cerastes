@@ -1,0 +1,240 @@
+30	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+31	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+32	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+33	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+34	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+35	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+36	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+37	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+38	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+38	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+39	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+39	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+40	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+40	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+41	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+41	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+42	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+42	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+43	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+43	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+44	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+44	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+45	not.wellformed	internal	src/ct_member_copy.c	9	11	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+45	postcondition.violated	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+50	not.wellformed	internal	src/ct_member_copy.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+50	postcondition.violated	internal	src/ct_member_copy.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+51	not.wellformed	internal	src/ct_member_copy.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+51	postcondition.violated	internal	src/ct_member_copy.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+52	not.wellformed	internal	src/ct_member_copy.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+52	postcondition.violated	internal	src/ct_member_copy.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+53	not.wellformed	internal	src/ct_member_copy.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+53	postcondition.violated	internal	src/ct_member_copy.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+54	not.wellformed	internal	src/ct_member_copy.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+54	postcondition.violated	internal	src/ct_member_copy.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+55	not.wellformed	internal	src/ct_member_copy.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+55	postcondition.violated	internal	src/ct_member_copy.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+56	not.wellformed	internal	src/ct_member_copy.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+56	postcondition.violated	internal	src/ct_member_copy.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+61	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+61	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+62	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+62	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+63	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+63	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+64	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+64	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+65	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+65	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+66	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+66	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+67	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+67	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+68	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+68	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+69	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+69	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+70	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+70	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+71	not.wellformed	internal	src/ct_member_copy.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+71	postcondition.violated	internal	src/ct_member_copy.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+76	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp`
+77	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp`
+78	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp`
+79	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp`
+80	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+81	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+82	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+83	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+84	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+85	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+86	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+87	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+88	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+89	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+90	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+91	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+92	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+93	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+94	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+95	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+96	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+97	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+98	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+99	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+100	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+101	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+102	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+103	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+104	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+105	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+106	not.wellformed	internal	src/ct_member_copy.c	6	5	internal check: well-formedness of the contract of `cp`
+107	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+107	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+108	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+108	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+109	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+109	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+110	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+110	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+111	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+111	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+112	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+112	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+113	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+113	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+114	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+114	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+115	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+115	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+116	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+116	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+117	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+117	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+118	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+118	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+119	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+119	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+120	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+120	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+121	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+121	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+122	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+122	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+123	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+123	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+124	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+124	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+125	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+125	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+126	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+126	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+127	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+127	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+128	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+128	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+129	not.wellformed	internal	src/ct_member_copy.c	7	5	internal check: well-formedness of the contract of `cp`
+129	postcondition.violated	internal	src/ct_member_copy.c	7	5	internal check: Silicon's own check of the postcondition of `cp`
+146	assert.failed	null-dereference	src/ct_member_copy.c	9	11	dereferences `p`, which may be null
+147	assert.failed	out-of-bounds	src/ct_member_copy.c	9	11	reads `p->v[j]`, whose index may be outside `p->v`
+148	assert.failed	permission	src/ct_member_copy.c	9	11	reads `p->v[j].n` without owning it: the object it points to may have ended
+149	assert.failed	uninitialized	src/ct_member_copy.c	9	11	`p->v[j].n` may be read here before it is given a value
+151	assert.failed	null-dereference	src/ct_member_copy.c	9	11	dereferences `p`, which may be null
+152	assert.failed	out-of-bounds	src/ct_member_copy.c	9	11	writes `p->v[i]`, whose index may be outside `p->v`
+154	assert.failed	permission	src/ct_member_copy.c	9	11	writes `p->v[i].n` without owning it: the object it points to may have ended
+157	assert.failed	null-dereference	src/ct_member_copy.c	9	11	dereferences `p`, which may be null
+158	assert.failed	out-of-bounds	src/ct_member_copy.c	9	11	reads `p->v[i]`, whose index may be outside `p->v`
+159	assert.failed	null-dereference	src/ct_member_copy.c	9	11	dereferences `p`, which may be null
+160	assert.failed	out-of-bounds	src/ct_member_copy.c	9	11	reads `p->v[j]`, whose index may be outside `p->v`
+166	assert.failed	permission	src/ct_member_copy.c	9	11	copies `p->v[j].a`, whose elements the function may not hold (a callee may have kept them)
+167	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	9	11	copies `p->v[j].a`, whose elements the function may not hold (a callee may have kept them)
+168	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	9	11	copies `p->v[j].a`, whose elements the function may not hold (a callee may have kept them)
+169	assert.failed	uninitialized	src/ct_member_copy.c	9	11	copies `p->v[j]`, whose member `p->v[j].a` may hold an element without a value
+170	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	9	11	writes `p->v[i].a` without owning every element of it: the object it belongs to may have ended
+171	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	9	11	writes `p->v[i].a` without owning every element of it: the object it belongs to may have ended
+173	assert.failed	internal	src/ct_member_copy.c	9	11	internal check: the two arrays of a copy are distinct blocks
+174	call.precondition	internal	src/ct_member_copy.c	9	11	internal check: Silicon's own check of the copy of an array member
+176	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `*p`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+177	assert.failed	internal	src/ct_member_copy.c	10	1	internal check: WF of a pointer parameter
+178	assert.failed	internal	src/ct_member_copy.c	10	1	internal check: a pointer parameter points into its block
+179	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `*p`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+180	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `*p`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+181	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `*p`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+182	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `*p`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+183	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `*p`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+185	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+186	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+187	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+188	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+189	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+190	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+191	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+192	assert.failed	permission	src/ct_member_copy.c	10	1	returns without owning `p->v`, which its contract promises	src/ct_member_copy.c:7:this is the postcondition
+198	not.wellformed	internal	src/ct_member_copy.c	11	5	internal check: well-formedness of the contract of `loc`
+198	postcondition.violated	internal	src/ct_member_copy.c	11	5	internal check: Silicon's own check of the postcondition of `loc`
+221	call.precondition	internal	src/ct_member_copy.c	13	12	internal check: Silicon's own check of the allocation of `t`
+222	assert.failed	out-of-bounds	src/ct_member_copy.c	13	20	reads `t.v[0]`, whose index may be outside `t.v`
+223	assert.failed	out-of-bounds	src/ct_member_copy.c	13	20	writes `t.v[0].a[0]`, whose index may be outside `t.v[0].a`
+225	assert.failed	permission	src/ct_member_copy.c	13	20	writes `t.v[0].a[0]` without owning it: the object it points to may have ended
+228	assert.failed	out-of-bounds	src/ct_member_copy.c	13	23	reads `t.v[0]`, whose index may be outside `t.v`
+229	assert.failed	out-of-bounds	src/ct_member_copy.c	13	23	writes `t.v[0].a[1]`, whose index may be outside `t.v[0].a`
+231	assert.failed	permission	src/ct_member_copy.c	13	23	writes `t.v[0].a[1]` without owning it: the object it points to may have ended
+234	assert.failed	out-of-bounds	src/ct_member_copy.c	13	26	reads `t.v[0]`, whose index may be outside `t.v`
+235	assert.failed	out-of-bounds	src/ct_member_copy.c	13	26	writes `t.v[0].a[2]`, whose index may be outside `t.v[0].a`
+237	assert.failed	permission	src/ct_member_copy.c	13	26	writes `t.v[0].a[2]` without owning it: the object it points to may have ended
+240	assert.failed	out-of-bounds	src/ct_member_copy.c	13	29	reads `t.v[0]`, whose index may be outside `t.v`
+241	assert.failed	out-of-bounds	src/ct_member_copy.c	13	29	writes `t.v[0].a[3]`, whose index may be outside `t.v[0].a`
+243	assert.failed	permission	src/ct_member_copy.c	13	29	writes `t.v[0].a[3]` without owning it: the object it points to may have ended
+246	assert.failed	out-of-bounds	src/ct_member_copy.c	13	33	writes `t.v[0]`, whose index may be outside `t.v`
+248	assert.failed	permission	src/ct_member_copy.c	13	33	writes `t.v[0].n` without owning it: the object it points to may have ended
+251	assert.failed	out-of-bounds	src/ct_member_copy.c	13	39	reads `t.v[1]`, whose index may be outside `t.v`
+252	assert.failed	out-of-bounds	src/ct_member_copy.c	13	39	writes `t.v[1].a[0]`, whose index may be outside `t.v[1].a`
+254	assert.failed	permission	src/ct_member_copy.c	13	39	writes `t.v[1].a[0]` without owning it: the object it points to may have ended
+257	assert.failed	out-of-bounds	src/ct_member_copy.c	13	42	reads `t.v[1]`, whose index may be outside `t.v`
+258	assert.failed	out-of-bounds	src/ct_member_copy.c	13	42	writes `t.v[1].a[1]`, whose index may be outside `t.v[1].a`
+260	assert.failed	permission	src/ct_member_copy.c	13	42	writes `t.v[1].a[1]` without owning it: the object it points to may have ended
+263	assert.failed	out-of-bounds	src/ct_member_copy.c	13	45	reads `t.v[1]`, whose index may be outside `t.v`
+264	assert.failed	out-of-bounds	src/ct_member_copy.c	13	45	writes `t.v[1].a[2]`, whose index may be outside `t.v[1].a`
+266	assert.failed	permission	src/ct_member_copy.c	13	45	writes `t.v[1].a[2]` without owning it: the object it points to may have ended
+269	assert.failed	out-of-bounds	src/ct_member_copy.c	13	48	reads `t.v[1]`, whose index may be outside `t.v`
+270	assert.failed	out-of-bounds	src/ct_member_copy.c	13	48	writes `t.v[1].a[3]`, whose index may be outside `t.v[1].a`
+272	assert.failed	permission	src/ct_member_copy.c	13	48	writes `t.v[1].a[3]` without owning it: the object it points to may have ended
+275	assert.failed	out-of-bounds	src/ct_member_copy.c	13	52	writes `t.v[1]`, whose index may be outside `t.v`
+277	assert.failed	permission	src/ct_member_copy.c	13	52	writes `t.v[1].n` without owning it: the object it points to may have ended
+281	assert.failed	permission	src/ct_member_copy.c	13	58	writes `t.k` without owning it: the object it points to may have ended
+284	assert.failed	out-of-bounds	src/ct_member_copy.c	14	10	reads `t.v[0]`, whose index may be outside `t.v`
+285	assert.failed	permission	src/ct_member_copy.c	14	10	reads `t.v[0].n` without owning it: the object it points to may have ended
+286	assert.failed	uninitialized	src/ct_member_copy.c	14	10	`t.v[0].n` may be read here before it is given a value
+288	assert.failed	out-of-bounds	src/ct_member_copy.c	14	10	writes `t.v[1]`, whose index may be outside `t.v`
+290	assert.failed	permission	src/ct_member_copy.c	14	10	writes `t.v[1].n` without owning it: the object it points to may have ended
+293	assert.failed	out-of-bounds	src/ct_member_copy.c	14	10	reads `t.v[1]`, whose index may be outside `t.v`
+294	assert.failed	out-of-bounds	src/ct_member_copy.c	14	10	reads `t.v[0]`, whose index may be outside `t.v`
+299	assert.failed	permission	src/ct_member_copy.c	14	10	copies `t.v[0].a`, whose elements the function may not hold (a callee may have kept them)
+300	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	14	10	copies `t.v[0].a`, whose elements the function may not hold (a callee may have kept them)
+301	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	14	10	copies `t.v[0].a`, whose elements the function may not hold (a callee may have kept them)
+302	assert.failed	uninitialized	src/ct_member_copy.c	14	10	copies `t.v[0]`, whose member `t.v[0].a` may hold an element without a value
+303	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	14	10	writes `t.v[1].a` without owning every element of it: the object it belongs to may have ended
+304	assert.failed[insufficient.permission]	permission	src/ct_member_copy.c	14	10	writes `t.v[1].a` without owning every element of it: the object it belongs to may have ended
+305	assert.failed	internal	src/ct_member_copy.c	14	10	internal check: the two arrays of a copy are distinct blocks
+306	call.precondition	internal	src/ct_member_copy.c	14	10	internal check: Silicon's own check of the copy of an array member
+307	assert.failed	out-of-bounds	src/ct_member_copy.c	15	18	reads `t.v[1]`, whose index may be outside `t.v`
+308	assert.failed	out-of-bounds	src/ct_member_copy.c	15	18	reads `a[2]`, whose index may be outside `t.v[1].a`
+309	assert.failed	permission	src/ct_member_copy.c	15	18	reads `a[2]` without owning it: the object it points to may have ended
+310	assert.failed	uninitialized	src/ct_member_copy.c	15	18	`a[2]` may be read here before it is given a value
+312	assert.failed	lifetime	src/ct_member_copy.c	15	3	the address of `t.k` may still be in use when its lifetime ends
+314	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	15	3	the address of an element of `t.v` may still be in use when its lifetime ends
+315	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	15	3	the address of an element of `t.v` may still be in use when its lifetime ends
+316	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	15	3	the address of an element of `t.v` may still be in use when its lifetime ends
+317	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	15	3	the address of an element of `t.v` may still be in use when its lifetime ends
+318	assert.failed	lifetime	src/ct_member_copy.c	15	3	the address of `t` may still be in use when its lifetime ends
+326	assert.failed	lifetime	src/ct_member_copy.c	16	1	the address of `t.k` may still be in use when its lifetime ends
+328	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	16	1	the address of an element of `t.v` may still be in use when its lifetime ends
+329	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	16	1	the address of an element of `t.v` may still be in use when its lifetime ends
+330	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	16	1	the address of an element of `t.v` may still be in use when its lifetime ends
+331	assert.failed[insufficient.permission]	lifetime	src/ct_member_copy.c	16	1	the address of an element of `t.v` may still be in use when its lifetime ends
+332	assert.failed	lifetime	src/ct_member_copy.c	16	1	the address of `t` may still be in use when its lifetime ends
+339	assert.failed	missing-return	src/ct_member_copy.c	16	1	control may reach the end of `loc` without returning a value
+345	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp (well-formedness)`
+346	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp (well-formedness)`
+347	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp (well-formedness)`
+348	not.wellformed	internal	src/ct_member_copy.c	5	6	internal check: well-formedness of the contract of `cp (well-formedness)`

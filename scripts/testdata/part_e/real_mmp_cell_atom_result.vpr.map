@@ -1,0 +1,55 @@
+30	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+30	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+31	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+31	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+32	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+32	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+33	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+33	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+34	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+34	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+35	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+35	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+36	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+36	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+37	not.wellformed	internal	qq03_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+37	postcondition.violated	internal	qq03_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+42	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+42	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+43	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+43	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+44	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+44	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+45	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+45	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+46	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+46	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+47	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+47	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+48	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+48	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+49	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+49	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+50	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+50	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+51	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+51	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+52	not.wellformed	internal	qq03_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+52	postcondition.violated	internal	qq03_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+57	not.wellformed	internal	qq03_348.c	6	66	internal check: well-formedness of the contract of `g`
+57	postcondition.violated	internal	qq03_348.c	6	66	internal check: Silicon's own check of the postcondition of `g`
+64	call.precondition	internal	qq03_348.c	6	92	internal check: Silicon's own check of the precondition of `mk`
+65	assert.failed	lifetime	qq03_348.c	6	92	uses the pointer after the object it points to may have ended
+67	assert.failed	null-dereference	qq03_348.c	6	101	dereferences `p`, which may be null
+69	assert.failed	permission	qq03_348.c	6	101	writes `p->n` without owning it: the object it points to may have ended
+72	assert.failed	null-dereference	qq03_348.c	6	114	dereferences `p`, which may be null
+73	assert.failed	permission	qq03_348.c	6	114	reads `p->n` without owning it: the object it points to may have ended
+74	assert.failed	uninitialized	qq03_348.c	6	114	`p->n` may be read here before it is given a value
+77	assert.failed	missing-return	qq03_348.c	6	119	control may reach the end of `g` without returning a value
+84	not.wellformed	internal	qq03_348.c	6	11	internal check: well-formedness of the contract of `mk`
+84	postcondition.violated	internal	qq03_348.c	6	11	internal check: Silicon's own check of the postcondition of `mk`
+85	not.wellformed	internal	qq03_348.c	6	11	internal check: well-formedness of the contract of `mk`
+85	postcondition.violated	internal	qq03_348.c	6	11	internal check: Silicon's own check of the postcondition of `mk`
+86	not.wellformed	internal	qq03_348.c	6	20	internal check: well-formedness of the contract of `mk`
+86	postcondition.violated	internal	qq03_348.c	6	20	internal check: Silicon's own check of the postcondition of `mk`
+91	not.wellformed	internal	qq03_348.c	6	11	internal check: well-formedness of the contract of `mk (well-formedness)`

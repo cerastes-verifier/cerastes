@@ -15,6 +15,7 @@
 //
 // Each lowering rule has at least one case that must verify and one that must fail (invariant 2).
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -1556,6 +1557,7 @@ void define_quantifier_loops();
 #include "selftest_cases34.inc"
 #include "selftest_cases35.inc"
 #include "selftest_cases36.inc"
+#include "selftest_cases37.inc"
 
 namespace {
 
@@ -1879,6 +1881,37 @@ int main(int argc, char** argv)
     define_array_of_structures_lowering();
     define_array_of_structures_loops();
     define_array_of_structures_pairs_and_copies();
+    define_part_e_pointer_to_array_rejections();
+    define_part_e_value_rejections();
+    define_part_e_local_matrix_cases();
+    define_part_e_local_matrix_rejections();
+    define_part_e_row_guard_cases();
+    define_part_e_row_parameter_code_cases();
+    define_part_e_row_parameter_contract_cases();
+    define_part_e_row_range_cases();
+    define_part_e_row_pairing_cases();
+    define_part_e_row_body_cases();
+    define_part_e_loop_cases();
+    define_part_e_global_matrix_cases();
+    define_part_e_matrix_member_cases();
+    define_part_e_matrix_member_refusals();
+    define_part_e_matrix_member_contract_cases();
+    define_part_e_struct_array_leaf_cases();
+    define_part_e_struct_array_leaf_range_cases();
+    define_part_e_nested_matrix_cases();
+    define_part_e_struct_array_leaf_global_cases();
+    define_part_e_member_struct_array_leaf_cases();
+    define_part_e_member_struct_array_leaf_refusals();
+    define_part_e_global_member_struct_array_leaf_cases();
+    define_part_e_struct_array_leaf_unreached_cases();
+    define_part_e_struct_array_leaf_copy_cases();
+    define_part_e_member_struct_array_leaf_copy_cases();
+    define_part_e_struct_array_leaf_sequencer_cases();
+    define_part_e_audit_e3a_cases();
+    define_part_e_deep_value_cases();
+    define_part_e_deep_copy_cases();
+    define_part_e_reads_reads_call_cases();
+    define_part_e_split_matrix_cases();
     int bad {0};
     for (const Case& c : lowering_cases())
     {
@@ -1892,6 +1925,10 @@ int main(int argc, char** argv)
     for (const Reject& r : reject_cases())
     {
         Kit k;
+        if (std::getenv("CERASTES_CASE_TRACE") != nullptr)
+        {
+            std::fprintf(stderr, "CASE %s\n", r.name.c_str());
+        } // TRACE-TEMP
         r.build(k);
         const std::vector<Diag> d {check_program(k.prog)};
         if (r.where == Reject::Where::Raw)
@@ -1974,6 +2011,7 @@ int main(int argc, char** argv)
     }
     bad += check_array_views();
     bad += check_leaf_paths();
+    bad += check_value_cells();
     std::printf("cerastes-vir-selftest: %zu lowering cases written to %s, %zu rejection cases checked, %d problems\n",
                 lowering_cases().size(), dir.c_str(), reject_cases().size(), bad);
     return bad == 0 ? 0 : 1;

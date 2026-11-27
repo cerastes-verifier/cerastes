@@ -1,6 +1,45 @@
 # 0064 — Arrays of structures and arrays of arrays (M4.5e1e2)
 
-- **Status:** accepted for the items built so far: **item 15 (Part D) by the continuation's second session
+- **Status:** accepted for the items built so far: **item 13 (Part E, arrays of arrays) through two
+  dimensions, by the continuation's third session (2026-11-26/27; its Commit 5): matrices as automatic
+  locals, array-of-rows parameters in the three spellings and through a typedef, global and `static` local
+  matrices, matrix members of structures in every storage with their contract reads, computed types of
+  arrays of arrays and of structures; an element structure with an array member of scalars (`v[i].a[j]`) as
+  a local, under a parameter's range, as a global and a `static` local and as a member; the element copy;
+  with items 2, 5, 6, 7, 9, 10, 11 and 12 as amended for them (questions 358 to 394, `internal/handoff.md`
+  §8); **and item 12's structure values of depth 2 by its Commit 6: a structure with a matrix member, or
+  with a member array of structures that have an array member, passed, returned and copied as a whole
+  value cell by cell under the limit of 7, the cells enumerated once (`vir::value_cells`) for the encoder
+  and the lowering.** NOT built, and rejected by the encoder with pins: three dimensions (item 2: the next
+  session's first step, before Part F), a matrix of structures (question 363), a contract read of a cell
+  of such a value and a cell of a returned one (question 364), and the listed rejections of questions 377
+  and 381 to 384. **Commit 5's tree has two defects that Commit 6 fixes** (each fail closed, an internal error,
+  exit 3, found after that commit by the cases and probes written for item 12): a structure whose FIRST
+  member is a matrix, under `owns(*p)` beside `reads(*q)` or `owns(*q)` of two pointers in one function
+  (`overlap_pairs` asked a row for the leaves of a structure element); and a CALL of a function whose
+  contract has two `reads` atoms of a structure with a matrix member, wherever the matrix stands
+  (`call_atoms` asked a row for a cell's field). The earlier audit rounds' two-pointer probes used an owned
+  and a read pointer to a structure whose matrix is not its first member, and one `reads` atom at a call.
+  **A third defect of that family is in Commit 5 and in Commit 6, and Commit 7 fixes it** (fail closed, exit 3; found by the
+  short audit read of Commit 6's tree, in code older than that commit): a structure with a matrix member
+  in a function that needs a pointer split, that is, beside a pointer to a scalar whose target is not
+  known (`int q04(const struct U2 *p, int *q)` with `reads(*p)`; a structure local beside `int *r =
+  pick(&x);`; a pointer loaded from memory; and a by-value call, stored result or whole copy of such a
+  structure that also has a pointer member or pointer cells): `split_candidates` asked a row for the
+  leaves of a structure element. A structure whose member is an array of structures with an array member
+  was not affected. With Commit 7 the split's candidate for a matrix member is the first cell of its first
+  row, as for a local matrix (the split is the no-op branch of record 0037 item 3, which tells Silicon
+  which cell an unknown pointer may be; it adds precision and carries no verdict, and for an array it
+  names the first cell only: the other cells are record 0059's listed limit), and
+  those programs get their ordinary verdicts (the first example is a `lifetime` error: it compares a
+  pointer that no atom covers, as it would for a structure without a matrix). Four audit rounds read Part E (E1 on the local and parameter forms, E2a on
+  loops, ties, global matrices and the first member form, E3a on members under atoms, global structures,
+  contract reads, `v[i].a[j]` and the ties of question 376, E3b on the member form of `v[i].a[j]`, the
+  copy, the Sequencer's key and the four rejections taken on E3a's findings): no wrong program verified in
+  any round; none asked a change of the lowering or the encoder after the last join (E3b: findings in tests, the record and the pages only). A short read S4 took Commit 6's tree in full (no wrong program verified; it found the
+  third defect), and a shorter one S5 took Commit 7's fix (no wrong program verified; no verdict rests on
+  the split; its should-fix items, none taken into this commit, are in handoff §8, questions 393 and 394
+  and the list after them). The full check is green at its Commit 7 `0a4eb26` (18,190 tests).** item 15 (Part D) by the continuation's second session
   (2026-11-26: the leftovers of a structure with an array member, for array members of scalars; two audit
   rounds and a short read, below; the full check green at its Commit 4 `86442ce`);** those of the continuation's first session (2026-11-26:
   Parts R, C1 and C2, named below: items 5, 16 and 19 as amended, items 7 to 9, and the range, global and
@@ -19,8 +58,13 @@
   items 7 and 8 and the range parts of 10 for a pointer parameter's range over structures, with round R's
   fixes) and Part C2 (its Commit 3: item 9, the global and member parts of items 7, 10 and 12, with round
   C1's code fixes). The continuation's second session built Part D (its Commit 4: item 15, with the fixes
-  of audit rounds D1 and D2) and closed at the plan's split point; Parts E and F (items 13 and 14, with
-  item 12's clause for Part E's structure values) stay "decided, built by the next session".** Written before code
+  of audit rounds D1 and D2) and closed at the plan's split point, leaving Parts E and F for a further
+  session (Part E's state is the first sentence of this status line; Part F, item 14, stays "decided,
+  built by a later session").** **Amended on
+  2026-11-26 at the start of the continuation's third session, before Part E's code** (invariant 6): item
+  12 (what the limit of 7 counts) and item 13 (a declaration without a body, `restrict` with a row
+  parameter, `Ptr(Array)`, the types with no object behind them, the shapes outside the plan's test
+  list). Written before code
   (invariant 6) from section 7 of the plan
   (`.claude/plans/m4-5e1e2-arrays-of-structures.md`, written at a session that only planned and executed without
   re-planning). Revised by P83's and S48's decision tables (the plan's section 6; `internal/il-inventory.md`,
@@ -274,6 +318,7 @@ doc example holds.
    | under a binder: a second index (`p[i].a[j]`, `m[i][j]`), a row `m[r]` or `&v[1]` as the pointer argument; a memory-reading argument (`p->q->a`) | M4.5e2 |
    | a `forall` inside a `forall`; the positions 0061 item 1 leaves to M4.8 | M4.8 |
    | a leaf path of depth 4 or more (`int d[2][2][2][2]`, a matrix of structures whose member is a matrix); depth 3 (`int c[2][3][4]`, an array of structures whose member is a matrix) is admitted by S48 (m) and built in Part E | M8 |
+   | a matrix of structures (`struct P m[2][2]`, a row parameter `struct P a[][2]`): no spike fixture covers a row of structures (question 363, item 13) | for the owner to place |
    | a pointer to an array anywhere but a parameter (`int (*p)[3]` as a local, a member, a result; `&m[i]`, `&a`; a cast to one); `sizeof(char(*)[4])` | M8 |
    | a structure value that holds more than 7 array-element leaves, passed or returned by value (0063 item 13; a copy has no limit); an array as a value | M4.5f3 |
    | a read `pure` function over a structure or a global (0062 item 1) | M4.5f1 |
@@ -288,6 +333,14 @@ doc example holds.
    function otherwise; "the bound of `m`", "the second bound of `m`"). `owning`, `ref_to_uninit` and `uninit` on
    an array of aggregates are rejected (`unsupported_annotation`, M4.8; `uninit` stays accepted on a local array
    of scalars, 0059 item 11, so under `--strict-init` a local array of aggregates needs an initializer: listed).
+   **An element's array member stands directly in the element** (audit round E3a, finding 3, 2026-11-27;
+   question 382): an element structure may have array members of scalars (`struct P { int n; int a[3]; }
+   v[2]`, Part E), and an element structure that holds such a structure BY VALUE (`struct N { struct P p;
+   int k; } v[2]`, `v[i].p.a[j]`) is rejected by the encoder at the declaration, in every storage (a local,
+   a global, a `static` local, a member, a range over it) and in every computed-type position
+   (`sizeof(struct N[2])`, a typedef of the array type), `unsupported_type`, M4.5e2: neither this record
+   nor the plan's test list names the shape and the lowering does not build it. A pin holds a row per
+   storage. For the owner's review.
 3. **Layout** (0028 items 2 and 16, as decided in M4.5a).
    - Element `i` of the array block `B` is the slot `loc(B, i)`. For a structure element, its member `k` is the
      block `member(loc(B, i), k)`, exactly as 0043 item 3 and 0063 item 3 lay out a structure at any slot. For an
@@ -429,6 +482,26 @@ doc example holds.
      one. Fail closed; the precise set (the front end does not record that a test came from a macro) is M8's
      warning sweep. **Not under this rule, accepted, and listed for M8** (note 5): the same tests on an
      address formed without an index (`&s.x == NULL`, `if (&ps->y)`, `if (&x)`), which both compilers flag.
+     **A ROW is under the rule as an element address is, and the read-through of a folded address is no
+     longer limited to C** (the continuation's third session, Part E; found by the encoder's own probes and a
+     sweep the advisor asked for, 166 one-function programs in both modes). A row compared with a null
+     constant (`m[0] == 0`, `0 != m[0]`, `m[0] != (int *)0`) verified on the first Part E builds, and so
+     did, with a CONSTANT index into a matrix of static storage, the truth tests `if (g[1])`, `g[1] && c`,
+     `c || g[1]`, a `check` and a loop invariant in C, and a `check` and a loop invariant in C++ (where
+     the front end keeps an annotation's address argument as an address constant too); the last also held
+     for the one-dimensional `&ga[1]` of a global array in a C++ `check` or invariant since Part R (the
+     read-through was gated to C). None was unsound (the address is never null and the proof said so);
+     each is a program this item rejects. As built for Commit 5: the comparison's operands read a row's
+     decay, and the read-through of a `ck_address` constant with a kept expression applies in both modes
+     and to a row as to an element address. Every form of the sweep is rejected at its line: by
+     `array_address_null_test`, or, where the front end folds the WHOLE test to an integer constant, by
+     the older `unsupported_expression` (and for C++'s `c || g[1]` by `constant_logical_operand`, an older
+     shape rule on the folded `|| 1`); a contract test of `&g[1][2]` draws two rows on its line. No
+     existing test's row moved. Pinned per form. **Not under the rule, accepted, as their one-dimensional
+     forms are on the base** (audit round E2a, note 9; sound: a false `check(m[0] == m[1])` fails): a row
+     under a cast or a `?:` compared with null (`(int *)m[1] != 0`, `(c ? m[1] : m[0]) != 0`) and two rows
+     compared with each other (`m[0] == m[1]`); listed for M8's warning sweep with this item's other
+     accepted shapes.
 6. **Local arrays of aggregates** (amends 0059 items 3 and 6, 0043 item 6, 0063 item 6).
    - **Allocation:** one trusted method per element type, `alloc_arr_<E>(n)`, in `alloc_arr_<t>`'s shape: the block's length and liveness facts, item 3's length facts, and
      per leaf path full permission to the value field and to the flag field (each its own quantifier) with every
@@ -616,6 +689,26 @@ doc example holds.
        `tests/memory/negative/struct_member_array_struct_wf_tie_false_alarm.c`; the ghosts themselves (one
        per leaf path and slot) by `struct_member_array_struct_wf.c` and its `_wf_division` twin, whose
        cross-state row waits for the tie.
+     - **An array member of a range's or a global array's element** (question 376, settled with the
+       advisor on 2026-11-27, before its code; Part E). The ties follow the root, as above: the two states
+       of `p[e].a[e2]` (a parameter's range over structures with an array member) and of `g[e].a[e2]` (a
+       global array of such structures) are tied as `p[e].x` and `g[e].x` are, on question 367's terms:
+       only under a `reads` site, the key holding the formal or the global, `e`, the member path and `e2`,
+       and with no assumed fact of a new shape (otherwise the tie is stopped and listed). `p->v[e].a[e2]`
+       and `t.v[e].a[e2]` through a pointer (a MEMBER array of such structures) have no tie: question 345's
+       listed false alarm, pinned by a case. A local `v[e].a[e2]` has no contract read.
+     - **`cerastes_old` of the element forms, as measured** (2026-11-27, on the base and on Part E's build,
+       each with a twin whose value is wrong): accepted, the value being the entry value: `old(g[e].x)` of
+       a global array of structures and `old(gs.a[e])` of a global structure's scalar array member (both
+       since the base), `old(gm[e][e2])` of a global matrix, `old(a[e][e2])` of a row parameter,
+       `old(p[e].a[e2])` of a parameter's range and `old(p->m[e][e2])` of a matrix member under the
+       structure's atom. **Rejected by the encoder at the `ensures`** (`unsupported_annotation`):
+       `old(gt.v[e].x)` (question 346, the base's rule), `old(gu.m[e][e2])` of a global structure's matrix
+       member (item 13: question 346's limit carried over) and **`old(g[e].a[e2])` of a global array of
+       structures with an array member** (question 381: the encoder's rule reaches it although the
+       lowering would take it and has cases for it; kept rejected and pinned, since no audit round has
+       read that form end to end; M4.5e2 with question 346's forms, or opened earlier if the owner says
+       so).
      - **Cost, listed** (audit round C1, finding 7; fail closed: a timeout is exit 3; M4.8's cost items): a
        function that holds two `reads_range` atoms over ONE structure type and has a loop is slow. Under a
        loaded box, a loop that only reads took 81 s, and its twin whose loop writes through one of the
@@ -655,6 +748,13 @@ doc example holds.
    rejected at the declaration by P38's limit, as designed). Three messages are not yet in source terms: a
    place in a global structure's member array prints as `(&gt.v[0])[1].x`; "passes `gt.v[0].y` and a range
    to `gq`"; a write under `reads` says "the object it points to may have ended".
+   **As built in Part E** (2026-11-27): a global or `static` local matrix states its rows as item 13 has
+   them; a global or `static` local array of structures whose element has an array member states, per
+   array leaf, the listed cells, a zero quantifier over the cells an element's list leaves out and a zero
+   quantifier over two bound variables for the elements the list does not reach; where the values are
+   unknown each leaf gets its type's range as one quantifier, and **a `bool` leaf gets none** (a `bool`
+   cell has no range fact, as for a scalar global: `internal/encoding.md`); only `main` holds a `static`
+   local's initial values (on entry to its own function they are unknown).
 10. **Loops** (amends 0059 item 8, 0060 item 11, 0063 item 10). An array of aggregates the function holds is,
     **per leaf path,** an array place (a local, a global in `main`) or a range place (a parameter's range, a
     held global elsewhere, a held structure place's member), with 0059 item 8's entry rows, conjuncts and
@@ -670,6 +770,25 @@ doc example holds.
     alike (the same listed false alarm). A loop invariant or measure may read `g[e].x`, `t.v[e].x` and
     `p->v[e].x`, framed only by places the loop holds: in a function that holds no atom on `g`, and after
     `p = q;`, the read is `permission`.
+    **An element's array member in an invariant** (question 377, 2026-11-27; Part E): a loop invariant or
+    measure may read `v[e].a[e2]` of a LOCAL array of structures with an array member (both index rows,
+    the member's own length). Under a parameter's range it may read `p[e].x` and **not `p[e].a[e2]`**: that
+    read is rejected by the encoder at the invariant's line (`unsupported_expression`, the older row for
+    an element of a pointer to a structure in a loop clause), with a pin row; M4.5e2, with the other
+    invariant forms over ranges. The plan's test list names no such read (a shape outside the list stays
+    refused with a pin: this session's method), so it is a listed rejection, not one of section 7's cuts;
+    it is among the questions for the owner's review.
+    A loop invariant may read `g[e].a[e2]` of a global array of such structures that the function holds,
+    and in `main` (found accepted and right by audit round E3a: note 9; a self-test case and a C-level
+    pair come with the commit).
+    Through a pointer to a structure whose member is such an array, an invariant may read
+    `p->v[e].a[e2]` with constant or symbolic indexes (audit round E3b, finding 3: an index in range
+    verifies, a body that writes the cell fails `invariant-preserved`, a wrong entry value
+    `invariant-entry`, a second index outside its member `out-of-bounds`). **A message to know:** a FIRST
+    index that may be outside `p->v` is reported as `permission` ("this loop invariant reads `a[b]`, which
+    this loop does not hold"), a true error under another category's words (listed with the messages; an
+    earlier version of this paragraph called it a false alarm, from a probe whose index did run past the
+    array).
 11. **Sequencing** (0039 item 3, 0059 item 9, 0063 item 11). Object keys gain the index steps: `v[0].x` and
     `v[1].x`, and `v[i].x` and `v[i].y`, are different objects; two unsequenced accesses to the same leaf path
     of one array, one a write, with indexes that are not all constants, get the path-precise `unsequenced` row;
@@ -682,6 +801,11 @@ doc example holds.
     takes the path-precise row); and a structure store's leaves (`struct_store_leaves`) carry the index steps
     of an array member of aggregates, so a write to `t.v[0].x` inside a value stored to `t` is the static
     conflict it is for a scalar member.
+    **A cell of an array member of an element** (question 378, 2026-11-27; Part E; fail closed either
+    way): by the rule above `v[0].a[1] = v[0].a[1]++` on a named array is `unsequenced_modification`, as
+    `a[1] = a[1]++`, `v[0].x = v[0].x++` and `s.a[1] = s.a[1]++` are (measured on the base). The
+    Sequencer's key (`check.cpp`) must therefore carry the element's index, the member path and the
+    member's index. **Not built at this snapshot: the lowering's sub-step for it is pending**, and the form is reported as `unsequenced` until it lands.
     **A call that holds a range over structures** (Part C1) is a memory call on every leaf path of the
     range: the path-precise `unsequenced` rows against another access or another call in the same full
     expression are written per leaf with item 7's membership tests (a cell against a leaf's slots; two
@@ -754,15 +878,76 @@ doc example holds.
     cell is read into a temporary before the first store (so a self-copy needs no guard), no `ArrayCopy` of
     a nested leaf is written, and **the limit of 7 counts cells** of such members (`struct T { struct W
     v[2]; }` with `W { int a[4]; int n; }` is 10 cells and rejected as a whole copy; M4.5f3), pinned at 7
-    and 8 for the copy, the parameter, the result and the literal; whether a scalar array member beside
-    the matrix counts is stated by the session that builds it, from the code. The element copy `v[i] =
+    and 8 for the copy, the parameter, the result and the literal. **What the limit counts** (decided on
+    2026-11-26 at the start of the continuation's third session, before Part E's code; it replaces "stated
+    by the session that builds it, from the code"; it is the count Part C2 built, extended to Part E's
+    cells). *For a structure VALUE* (a by-value parameter, a result, a compound literal, a value read
+    from a place): every cell of the structure that is reached through at least one index step, at any
+    depth — each element of an array member of scalars (0063 item 13), each leaf of each element of a
+    member array of structures (Part C2), each cell of a matrix member and each cell of an element
+    structure's array leaf (Part E) — so **a scalar array member beside a matrix member counts**, and a
+    member outside every array does not; more than 7 is rejected (M4.5f3). *For a whole-structure copy
+    between two objects:* only the cells that the copy writes one by one, which are the cells of the
+    members that are arrays of aggregates (a member array of structures, a matrix member, at any depth
+    below them); an array member of scalars that stands directly in the structure, or in a by-value
+    structure member, is copied by `copy_arr_<t>` as 0063 item 13 has it and does not count; more than 7
+    counted cells is rejected (M4.5f3). Both counts are over the one enumeration below. The element copy `v[i] =
     v[j]` of an element with a scalar array leaf keeps this item's guarded `ArrayCopy`. **The encoder's
     order of cells and the lowering's value view must be ONE enumeration** (depth first, members in
     declaration order, every array's elements in index order, a matrix row major): at the base
     `vir.cpp`'s value view leaves a matrix member unexpanded and gives an element structure's array leaf
     two cells with one (path, element) key, and the draft's encoder walks its own list; until there is one
-    definition, `check.cpp` refuses a structure value of depth 2 or more. Tested by a structure passed by
-    value with a distinct value per cell, each read back, and a swapped twin.
+    definition, `check.cpp` refuses a structure value of depth 2 or more. **A contract cannot read a cell
+    of a matrix member of a structure VALUE** (question 364, settled with the advisor on 2026-11-26 before
+    the code of structure values; fail closed): `v.m[i][j]` of a by-value parameter and `r.m[i][j]` of a
+    result in a `requires` or an `ensures` are rejected (`unsupported_annotation`, with a text of their
+    own; M4.5f3, with array values), as this item rejects `t.v[1].y`, and so is `g().m[1][2]` in code and
+    in a `check` (`unsupported_expression`), where 0063 item 13 accepts `g().a[1]` for an array member of
+    scalars (listed; a pin row each). `v.a[i]` of an array member of scalars that stands beside a matrix
+    member stays 0063 item 13's read, over the one enumeration. **Tested so** (it replaces "a distinct
+    value per cell, each read back"): a permutation of cells INSIDE the matrix cannot be observed from C
+    once those reads are rejected, so the self-test pins the enumeration's order cell for cell
+    (`check_value_cells`) and a text check pins the order of a by-value call's arguments; a misalignment
+    of the matrix's cells against the members BESIDE it can be observed and is the unsound direction (a
+    `requires(v.n == 7)` met by a matrix cell), so the test passes `struct U { int a; int m[2][2]; int
+    b[2]; int c; }` by value with a distinct value in every cell and a `requires` on `v.a`, `v.b[0]`,
+    `v.b[1]` and `v.c`, its twin shifts the caller's values by one cell and fails `precondition`, and the
+    same pair stands for a result through `ensures(r, …)`; a whole-structure copy `w = u;` with a
+    distinct value per cell, each read back by a `check` in code, pins the copy's order.
+    **The element copy as built in Part E** (2026-11-27): the copy of an element with an array member of
+    scalars classes its two places as the same place (equal chains of members and constant indexes from
+    one named object: no copy is emitted, the source's rows are), as distinct (two named objects, or
+    chains from one named object that differ at a member step or at two different constant indexes: the
+    copy is not guarded) or as possibly one object (a place through a pointer; two elements of one named
+    array at indexes not both constants: the array leaf's copy is guarded by `d != s`). A direct array
+    member of scalars goes by `copy_arr_<t>` at any length; the limit of 7 counts by-value parameters and
+    results. **Cost, listed** (audit rounds E3a, finding 7, and E3b, finding 5; fail closed: no verdict
+    is exit 3; times on a loaded box, upper bounds): a copy between two elements of ONE array at symbolic
+    indexes stays guarded, and `v[i] = v[j]` over three initialized elements with a false `check` after
+    it fails as it must in 247 s in C++ and in 414 s in C, so under the default limit of 300 s the C
+    run has no verdict; the member form `t.v[i] = t.v[j]` 227 s and 525 s; `v[i].a[1] = v[j].a[1]++` over
+    three initialized 7-leaf elements 197 s and 310 s. No verdict in 300 s either for: two initialized
+    structure locals of 13 cells each in one function; a caller of a declared function whose contract
+    reads `p->v[i].a[j]` at symbolic indexes where the structure has two member arrays of one element
+    type with two array members each (with one member array the same callers verify and fail in
+    seconds). The lowering's own case of the three-element copy with a failing claim ends in 16 s. M4.8's
+    cost items. **In C++** `struct T t = (struct T){…};` is the initializer's braced list and is accepted
+    for a local of any structure type that a braced initializer is; C reads it as a structure value.
+    **Structure values of depth 2, costs and notes** (the short audit read of Commit 6's tree; each fail
+    closed): no verdict in 300 s in C for a whole copy of a 9-cell structure with a false claim after it
+    (C++ fails as it must in about 170 s), for `*p = *q` of the four-member structure under two `reads`
+    atoms (the smaller structure is `permission` in seconds), and for `*p = *q; *q = a;` under two `owns`
+    atoms, a true program; the failing twin of the two-pointer copy takes 380 s a mode on a quiet box
+    (`tests/long`). In C++ only, `struct U w = *p;` with a pointer to `const` is rejected (C accepts it).
+    The enumeration stops at 4,096 cells and says so through a flag, which the encoder checks. The
+    lowering does not see the flag; since Commit 7 it stops every structure value whose list has 4,096
+    cells or more with an internal error (exit 3, fail closed), which catches every cut list (a cut list
+    has exactly 4,096 entries). The stop is wider than its message: a value of 4,096 or more scalar cells
+    with no array in it is stopped too, although nothing was cut. Just under it, a by-value structure of
+    4,095 scalar cells ends the tool with a segmentation fault (exit 139; stack exhaustion by the
+    auditor's test with an unlimited stack; no diagnostic, nothing reported verified). That is older than
+    this session: on the build of its base both 4,095 and 4,096 cells end so (measured), so Commit 7's
+    stop turns the second into an internal error with a message and leaves the first (question 393).
 13. **Arrays of arrays** (amends 0060 item 15, 0063 item 14). A row is an array object in its own block; a
     matrix's leaf path has two index steps, and so has an array member of an element structure (`v[i].a[j]`).
     - **Array-of-rows parameters.** `T a[][M]`, `T a[N][M]` and `T (*a)[M]` declare a parameter of type pointer
@@ -792,6 +977,148 @@ doc example holds.
       array type with the row's bound and its `expr`; the written type is the parameter type's `declared_type`
       (so the spelling can be told), `[]` has no bound constant, and a call with a matrix of another inner bound
       is the front end's error in both modes (in C its #167, which the driver makes an error).
+    - **Written on 2026-11-26 at the start of the continuation's third session, before Part E's code**
+      (invariant 6; from the handoff's notes on the encoder draft and audit round R's note 8):
+      - **A declaration without a body** whose parameter is a pointer to a row is accepted and rejected by
+        the rules a definition's parameter has (the three spellings and the typedef'd ones; a `const` row,
+        a depth past 3 and a row of a rejected element type rejected), reported where the other
+        parameter-type rejections of a declaration without a body are reported today; its range atoms are
+        item 7's, trusted as every contract without a body is, and a call of it takes item 8's rows. A
+        declaration the unit never calls gives the Viper nothing, as before.
+      - **`restrict` and a row parameter.** `int (*restrict a)[3]` (and `int a[restrict][3]`) is a
+        `restrict` parameter and draws item 19's rejection (`unsupported_annotation`, at the function's
+        head); an array of `restrict` pointers as a parameter (`int *restrict a[restrict 2]`) has
+        `restrict` on its pointee and stays `unsupported_type` at the function's line (0032 item 2). A pin
+        row for each comes with Part E.
+      - **`Ptr(Array)` in the VIR** (item 4; corrected on 2026-11-26 after the first slice of Part E's
+        lowering and the encoder's re-read, before the code of row parameters) is the type of such a
+        PARAMETER, and with it of the parameter's own copy (the `Formal` and the `Local` that every
+        parameter has), and of nothing else: `check.cpp` refuses it as the type of any other local, of a
+        member, a result, a cell, a pointer's pointee, a cast or a temporary. A node of that type stands
+        in exactly three positions: **(i)** as the base of an `ElemAddr` (an `ElemAddr` over a row
+        parameter has the type of the ROW's address, `a[i]`; over the address of an array object it has
+        the element's pointer type, as before); **(ii)** as the row's decay, `ElemAddr(row, 0)`, a
+        pointer to the row's element 0; **(iii)** as the WHOLE argument of a call whose parameter is a
+        pointer to a row of the same row type — a matrix passed to a row parameter (`g(m)`, `g(u.m)`,
+        `g(gm)`, `g(c[i])` for a depth-3 array: the address of its row 0, `ElemAddr(&m, 0)`) and a row
+        parameter forwarded whole (`g(a)`, question 361, settled with the advisor: accepted, with a
+        self-test case through Silicon for the `owns` and the `reads` form and a test pair; if Silicon
+        does not take it the encoder refuses it with a pin). `check.cpp` checks the position and the
+        equality of the two row types.
+      - **A row parameter is read only so.** In code and in annotations `a` may be subscripted
+        (`a[i][j]`, `a[i]` as a row's decay), named as a range atom's base (`owns_range(a, n)`) and
+        passed whole (iii). Every other read or write of the parameter itself is rejected where it is
+        written (`unsupported_expression`): `a == b`, `a != NULL`, `if (a)`, `a = b`, `a++`, `(void)a`,
+        `*a` — so a null test of a row parameter cannot be written (listed, fail closed: a guard such as
+        `a == NULL || owns_range(a, n)` is rejected; the range atom on a row parameter is written
+        unguarded or under a guard that does not read `a`). Pinned.
+      - **The two states of a row parameter's element** (question 367, settled with the advisor on
+        2026-11-26 before its code): a range over rows is a parameter's range, so item 7's tie holds for
+        it: under a `reads` site (`reads_range(a, n)`) `f__wf` ties the exit ghost of `a[e][e2]` to its
+        entry ghost, the key holding the formal and both indexes, and never under `owns_range`. The
+        first lowering of row ranges left the tie out (a false `division-by-zero` in an `ensures` that
+        relied on the `requires`: fail closed), found by the registered positive at the second joined
+        proof; if the tie needs an assumed fact of a new shape it is not written, and the limit is
+        listed and pinned as question 345's is.
+      - **The address of a row** (`&m[i]`, `&g[i]`, `&u.m[i]`, `&a[i]` on a row parameter, `&c[i][j]` of
+        a depth-3 array) is a pointer to an array outside a parameter and is rejected
+        (`unsupported_type`, M8: the tag the base prints for `&a` of a one-dimensional array; question
+        366). The address of a whole member array (`&u.m`) keeps its older `unsupported_expression`.
+      - **Markers on a row parameter are not built:** `cerastes::owning(n)`, `ref_to_uninit` and
+        `must_init` on a pointer to a row, a marker over a range of rows, and `uninit` on a matrix are
+        rejected (`unsupported_annotation`, at the function's head or the declaration; M4.5e2 for
+        `owning(n)`, whose block is `malloc(n * sizeof(int[3]))`; M4.8 with item 2's markers on arrays
+        of aggregates for the others). Pinned.
+      - **`sizeof` of a row parameter** follows the compilers (P83 (h)): `sizeof(a)` is rejected
+        (`sizeof_array_argument`) for the array spellings (`int a[][3]`, `int a[2][3]`, `row a[]`, `row
+        a[2]`) and accepted, as the pointer's size, for `int (*a)[3]` and `row *a`; `sizeof(a[0])` is the
+        row's size in every spelling, IN CODE; in a contract or another annotation `sizeof(a[0])` is
+        rejected (`unsupported_type`, "an array type in sizeof …": the annotation path does not take a
+        row as `sizeof`'s operand; question 365; over-strict and listed, since the base accepts
+        `sizeof(g)`, `sizeof(g[0])`, `sizeof(p->a)` and `sizeof(s.a)` of arrays of scalars in a
+        contract (probed on the frozen build); fail closed, a pin row); `sizeof(*a)` stays rejected.
+      - **Contract reads of a matrix in static storage and of a matrix member** (question 362, settled
+        with the advisor; built with the third slice, as question 344's reads were in Part C2):
+        `g[e][e2]` of a global or `static` matrix, framed by `owns(g)` or `reads(g)` (the whole-array
+        range atom over rows), and `p->m[e][e2]`, `gt.m[e][e2]` and, in an `ensures`, `r->m[e][e2]`,
+        framed by the structure atom's array part or by `owns(p->m)`; `v[e].a[e2]` and `p[e].a[e2]` are
+        item 7's. Question 346's limit carries over (`cerastes_old(gt.m[e][e2])` of a global structure's
+        member is rejected, pinned) and so does question 345's listed false alarm (`f__wf` does not tie
+        the entry and exit ghosts of a matrix member's cell reached through a pointer).
+      - **Question 348 and a matrix member** (item 15's last clause; audit round E2a asked for the
+        reading). A structure with a matrix member is rejected at Part D's six positions, which name the
+        STRUCTURE (`owns_block`, the heap, an owner that points at it, markers on a pointer to it, a
+        place through a heap read, a partnerless `owns(*r)`, a written `owns(*p)`) or its MATRIX MEMBER
+        (`owns(r->m)`, a written `owns(p->m)`). An atom on a SCALAR cell of such a structure
+        (`owns(p->n)`: in a contract, partnerless on a result, written in a loop invariant) is an atom on
+        one cell, takes no array part, and stays accepted. Item 15 says so for the written atom; for the
+        contract atom and for the partnerless atom on a result it was MEASURED on the frozen base with a
+        member array of structures (`struct U { int n; struct P v[2]; }`: the auditor's four probes
+        m03b, q49, qq03, qq08 in that form verify in both modes on the build before Part E), so the
+        matrix member follows what the base does; pinned at C level by a pair of its own.
+      - **A matrix member reached through a chain of members** (`struct V { struct U u; int k; }` with `U`
+        holding the matrix: `p->u.m[i][j]`, `owns(*p)`, `owns(p->u)`, `reads(p->u.m)`) is this record's
+        leaf path with one more member step before the index steps (the terms; items 3 and 5: "a nested
+        structure's own facts", "a longer member chain for a nested structure"): accepted wherever the
+        member of the outer structure is, with the nested slot facts of 0043 item 4 stated at each step.
+        Question 348's six positions reject `struct V` as they reject `struct U` ("at any depth of its
+        by-value nest", item 15). Found accepted and verifying by audit round E2a's probes after the
+        member-under-an-atom sub-step landed; a self-test pair with a mutation, a C-level pair, a
+        sequencing pair and 348 pin rows for `struct V` come with Commit 5.
+      - **Two forms rejected on audit round E3a's findings** (2026-11-27; each verifies and is right in
+        the auditor's probes, and each emits a row that only a guard-shaped or kept-flag-shaped rule of
+        the Viper lint could admit, which this session does not write (question 357's boundary: that
+        boundary, and nothing more general, is the reason: other accepted shapes whose Viper the lint
+        refuses for want of an ordinary rule are listed in item 17): **a marker over a range
+        of structures whose element has an array member** (`ref_to_uninit` or `must_init` on `struct P
+        *p` with `owns_range(p, n)`: the plan's cut (1), taken for this element type only; markers over
+        a range of structures without an array member, and Part D's markers on a pointer to ONE
+        structure with an array member, stay accepted; question 383), and **an atom under a guard on
+        one of Part E's objects** (`c == 0 || owns(*p)`, `p == NULL || owns(*p)`, an arm of `?:`; question
+        384): an `owns` or `reads` atom, on the structure or on a member of it, whose structure has at
+        any depth of its by-value nest a matrix member or a member array of structures that have an
+        array member; and the whole-array atom `owns(g)` or `reads(g)` of a global or `static` local
+        matrix or array of structures whose element has an array member. As measured (36 guarded probes
+        per structure type and the global forms): for a structure with a matrix member, the nested
+        form and the global forms, each unguarded control lints clean and every guarded form is
+        refused at the guarded well-formedness row and at nothing else; for a structure with a member
+        array of structures that have an array member the same could be shown only for an atom on its
+        scalar member, because the lint had no rules yet for that structure's other atoms when it
+        was measured, and the rule takes the type on the shape it shares with the others. The unguarded atoms stay accepted, and so do guarded atoms on a structure whose array
+        members hold scalars (Part D), guarded ranges over rows and over structures, and guarded atoms
+        on a structure with a member array of structures of cells (Part C2: their Viper was refused by
+        the lint on the base too, a listed lint gap). Each is rejected by the encoder at the annotation,
+        `unsupported_annotation`, M4.5e2, with a pin row and a control that the neighbouring accepted
+        form still verifies. For the owner's review. **On a declaration without a body** whose atoms
+        are all on the RESULT (`struct U *mk(void)` with `ensures(r, r == NULL || owns(*r))`), 384's and
+        question 348's rejections are drawn at the declaration when a function CALLS it; while nothing
+        calls it the unit verifies (audit round E3b, note 8; fail closed: an uncalled declaration gives
+        nothing to anyone).
+      - **The address of a cell of a global structure's matrix member in C** (`int *q = &gu.m[1][0];`):
+        rejected in C (`unsupported_type`: the front end folds the address and the encoder reads the
+        row's type), accepted in C++ (audit round E3a, note 9). Listed and pinned; not opened before the
+        commit.
+      - **Not built: a matrix of structures** (`struct P m[2][2]` in any storage, a row parameter
+        `struct P a[][2]`; question 363). Item 2's wording admits the type, but no spike fixture, no
+        trusted method name and no planned test covers a row whose cells are structures, and the choice
+        to leave a shape the record admits unbuilt is the owner's: until the owner answers, the encoder
+        rejects it at its C line (`unsupported_type`, the message naming this item), `check.cpp` keeps
+        its refusal, and a pin holds a row per storage. An array of structures whose element has an
+        array member (`v[i].a[j]`), which S48 (g) verified, is built in every storage. **Cell types:** a
+        row's cell is any scalar of item 2 (`bool`, an integer type, an enumeration, a pointer to an
+        object type), each with a self-test case; a matrix of owning pointers is rejected (item 1).
+      - **A type with no object behind it** (a typedef declaration, the type operand of `sizeof` or
+        `_Alignof`, a static assertion's operand) that names an array of aggregates has no VIR object, so
+        `check.cpp` has nothing to refuse there: the encoder opens these positions only in the build in
+        which the lowering gives the objects of such types their rows (the same joined snapshot), and
+        until then they stay rejected with the earlier text.
+      - **Shapes the plan's test list did not name** (the encoder's re-read listed them): array
+        designators stay rejected everywhere (item 1: M8), a MEMBER designator for a matrix member is
+        0043's and accepted; matrices of `bool`, enumerations and pointers are built (a global matrix
+        with a pointer cell takes item 9's two escape directions per cell, with a test pair); `v[i].a[j]`
+        as a global, a `static` local and a member of a structure is built with a pair each; depth 3
+        through a member (`struct W { int m[2][2]; } v[2]`) and a depth-3 row parameter (`int
+        a[][2][3]`) are built with a pair each; a matrix of structures is not built (above).
     - **Computed types** (0063 item 14, extended): a typedef, `typeof`, `decltype`, and the type operand of
       `sizeof` and `_Alignof` may name an array of aggregates when every bound in it is read as written.
 14. **Quantifiers and applications** (amends 0061 items 1, 3 and 6, 0062 item 4).
@@ -960,7 +1287,11 @@ doc example holds.
       beside such a member; `ref_to_uninit` or `must_init` on a pointer to it, and `owning` on one; a place
       of it reached through a heap read, `p->q->v[e].x` included; an `ensures` atom on it with no `requires`
       partner; a written atom in a loop invariant on it or on any array member of it (a written atom on one
-      of its scalar cells is accepted, as before this record). The encoder rejects each at the C line with a
+      of its scalar cells is accepted, as before this record). **A seventh route, found by audit round
+      E3a (finding 4, 2026-11-27):** a place of such a structure rooted at a pointer MEMBER of a by-value
+      structure parameter (`struct H { struct U *q; int n; }`, `owns(*h.q)`, `owns(h.q->m)`) is rejected by
+      the encoder too, with this item's message (it stopped at `check.cpp`'s refusal before); the same
+      route for a structure whose array members hold scalars stays accepted, as Part D built it. The encoder rejects each at the C line with a
       message that names this item; `check.cpp` refuses each (the backstop); and **lowering stops with an
       internal error for an aggregate element at each of these sites that would otherwise take the general
       leaf path Part C2 built** (the array parts of `atom`, `call_atoms` and `atom_returns` under a marker,
@@ -1065,6 +1396,36 @@ doc example holds.
     - The rule is in `collect_init_elems`, which locals, globals and values share. A C positive in the tests
       avoids every row GCC flags (the `native-ok` policy).
 17. **The lint** (amends 0012 item 11, 0060 item 16, 0061 item 11, 0063 item 15).
+    - **Listed at Part E's first commit, for the lint step that opens the next session** (questions 369,
+      373, 379, 380 and 390; each is a gap of the lint, a tool that checks the Viper of the tests: the
+      verifier's verdicts do not pass through it). **The table collision:** the rules for an array member
+      of scalars in an element are tied by NUMBER (member index, count, field) to the unit's structure
+      allocations, and the encoder emits an allocation for every declared structure type; a unit that
+      declares two structure types stating one member key with two counts or fields (also the SAME
+      element type in member arrays of two lengths: `struct T { struct P v[3]; … }` beside `struct T9 {
+      struct P v[2]; … }`) has the Viper of every range, global or member form over either REFUSED (one
+      added declaration turns a clean file into 18 problems); a test unit therefore holds one such
+      structure type per member key until the table is keyed by type. **Accepted programs whose Viper
+      the lint refuses for want of a rule** (each verifies with its wrong twin failing; no test holds
+      one): an element copy whose SOURCE is an element of a global array (`g[0] = g[1]`, `g[i] = g[j]`,
+      `gt.v[2] = g[0]`); a ONE-cell array leaf in the element of a member array (`struct P1 { int n; int
+      a[1]; }`: the lowering writes two bound variables for an array leaf of any count, the lint reads a
+      count of 1 as a cell); an element whose only member is an array, in a global structure's member
+      array, copied in `main`; a global matrix of pointers to structures with an unknown value; a cell
+      atom beside a contract read on a structure with a member array of structures of cells; guarded
+      atoms on Part C2's structures (refused by the base's lint too). **Weaker than it could be:** the
+      well-formedness row of a pointer is tied leaf by leaf, by number, across the unit's allocations
+      (a row may state an element no structure of the unit has, where two allocations supply the two
+      counts); `leaf_value` (369); the older rules of 373, 379 and 380; no completeness rule for a
+      structure local's scope exit; an `ensures` amount is not tied to its `requires`'. **Rule A of
+      Commit 6** (question 391; the short audit read: "stands with a change", the change being the
+      table keyed by type): the guarded well-formedness row of a pointer to a structure that has a
+      matrix (or a member array of structures) AND a direct scalar array member may state that array's
+      length, tied by number to the unit's allocations; so a length that is not the type's own passes
+      where another DECLARED structure has a scalar array at that member index, an understated length
+      of 1 passes, and a second declared structure with another count at that index makes the right row
+      refused. Without the rule the previous commit's lint refuses the Viper of a plain `owns(*p)` on
+      such a structure (by the auditor's inference from that commit's lint on this commit's text).
     - **The receiver grammar** gains index steps: a quantified row's receiver is a chain of `loc(<block>, <bound
       variable or 0>)` and `member(<ref>, <literal>)` steps from `block_of(<bound local>)` in code and from a
       block term of 0063 item 15's grammar where a line has no local, with one bound variable per index step,

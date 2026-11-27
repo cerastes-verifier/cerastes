@@ -1,0 +1,117 @@
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+38	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+38	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+39	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+39	postcondition.violated	internal	t.c	6	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+40	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+40	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+41	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+41	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+42	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+42	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+43	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+43	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+48	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `zero`
+49	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `zero`
+50	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `zero`
+51	not.wellformed	internal	t.c	15	3	internal check: well-formedness of the contract of `zero`
+52	not.wellformed	internal	t.c	15	3	internal check: well-formedness of the contract of `zero`
+53	not.wellformed	internal	t.c	15	3	internal check: well-formedness of the contract of `zero`
+54	not.wellformed	internal	t.c	15	3	internal check: well-formedness of the contract of `zero`
+55	not.wellformed	internal	t.c	15	3	internal check: well-formedness of the contract of `zero`
+56	not.wellformed	internal	t.c	15	3	internal check: well-formedness of the contract of `zero`
+57	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the contract of `zero`
+57	postcondition.violated	internal	t.c	18	3	internal check: Silicon's own check of the postcondition of `zero`
+58	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the contract of `zero`
+58	postcondition.violated	internal	t.c	18	3	internal check: Silicon's own check of the postcondition of `zero`
+59	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the contract of `zero`
+59	postcondition.violated	internal	t.c	18	3	internal check: Silicon's own check of the postcondition of `zero`
+60	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the contract of `zero`
+60	postcondition.violated	internal	t.c	18	3	internal check: Silicon's own check of the postcondition of `zero`
+61	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the contract of `zero`
+61	postcondition.violated	internal	t.c	18	3	internal check: Silicon's own check of the postcondition of `zero`
+62	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the contract of `zero`
+62	postcondition.violated	internal	t.c	18	3	internal check: Silicon's own check of the postcondition of `zero`
+75	assert.failed[insufficient.permission]	permission	t.c	79	3	this loop begins without the permission to every cell of every row of `gm`
+76	assert.failed[insufficient.permission]	permission	t.c	79	3	this loop begins without the permission to every cell of every row of `gm`
+79	invariant.not.established	internal	t.c	79	3	internal check: automatic range invariant of `i`
+79	invariant.not.preserved	internal	t.c	79	3	internal check: automatic range invariant of `i`
+80	invariant.not.established	internal	t.c	79	3	internal check: automatic range invariant of `j`
+80	invariant.not.preserved	internal	t.c	79	3	internal check: automatic range invariant of `j`
+81	invariant.not.established	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+81	invariant.not.preserved	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+82	invariant.not.established	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+82	invariant.not.preserved	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+83	invariant.not.established	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+83	invariant.not.preserved	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+84	invariant.not.established	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+84	invariant.not.preserved	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+85	invariant.not.established	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+85	invariant.not.preserved	internal	t.c	79	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+86	invariant.not.established	invariant-entry	t.c	63	3	this loop invariant may not hold on entry
+86	invariant.not.preserved	invariant-preserved	t.c	63	3	this loop invariant may not be preserved by an iteration
+87	invariant.not.established	overflow	t.c	69	3	signed `int` subtraction may overflow
+87	invariant.not.preserved	overflow	t.c	69	3	signed `int` subtraction may overflow
+88	termination.failed	termination	t.c	70	3	the measure of this loop may not decrease, or may not be bounded below by zero
+92	assert.failed[insufficient.permission]	permission	t.c	55	3	this loop begins without the permission to every cell of every row of `gm`
+93	assert.failed[insufficient.permission]	permission	t.c	55	3	this loop begins without the permission to every cell of every row of `gm`
+96	invariant.not.established	internal	t.c	55	3	internal check: automatic range invariant of `j`
+96	invariant.not.preserved	internal	t.c	55	3	internal check: automatic range invariant of `j`
+97	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+97	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+98	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+98	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+99	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+99	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+100	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+100	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+101	invariant.not.established	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+101	invariant.not.preserved	internal	t.c	55	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+102	invariant.not.established	invariant-entry	t.c	37	3	this loop invariant may not hold on entry
+102	invariant.not.preserved	invariant-preserved	t.c	37	3	this loop invariant may not be preserved by an iteration
+103	invariant.not.established	overflow	t.c	40	3	signed `int` subtraction may overflow
+103	invariant.not.preserved	overflow	t.c	40	3	signed `int` subtraction may overflow
+104	termination.failed	termination	t.c	41	3	the measure of this loop may not decrease, or may not be bounded below by zero
+106	assert.failed	out-of-bounds	t.c	48	3	writes an element of the array, whose first index may be outside `gm`
+107	assert.failed	out-of-bounds	t.c	48	3	writes an element of the array, whose second index may be outside the row
+109	assert.failed	permission	t.c	48	3	writes an element of the array without owning it: a callee may have kept its object
+112	assert.failed	overflow	t.c	51	3	signed `int` addition may overflow
+114	assert.failed	permission	t.c	54	3	an iteration of this loop ends without the permission to `gm` that it began with
+115	assert.failed[insufficient.permission]	permission	t.c	54	3	an iteration of this loop ends without the permission to `gm` that it began with
+116	assert.failed[insufficient.permission]	permission	t.c	54	3	an iteration of this loop ends without the permission to `gm` that it began with
+118	assert.failed	overflow	t.c	75	3	signed `int` addition may overflow
+120	assert.failed	permission	t.c	78	3	an iteration of this loop ends without the permission to `gm` that it began with
+121	assert.failed[insufficient.permission]	permission	t.c	78	3	an iteration of this loop ends without the permission to `gm` that it began with
+122	assert.failed[insufficient.permission]	permission	t.c	78	3	an iteration of this loop ends without the permission to `gm` that it began with
+124	assert.failed[insufficient.permission]	permission	t.c	86	3	returns without owning `gm`, which its contract promises	t.c:18:this is the postcondition
+125	assert.failed[insufficient.permission]	permission	t.c	86	3	returns without owning `gm`, which its contract promises	t.c:18:this is the postcondition
+126	assert.failed	permission	t.c	86	3	returns without owning `gm`, which its contract promises	t.c:18:this is the postcondition
+127	assert.failed	permission	t.c	86	3	returns without owning `gm`, which its contract promises	t.c:18:this is the postcondition
+128	assert.failed	permission	t.c	86	3	returns without owning `gm`, which its contract promises	t.c:18:this is the postcondition
+129	assert.failed	permission	t.c	86	3	returns without owning `gm`, which its contract promises	t.c:18:this is the postcondition
+135	not.wellformed	internal	t.c	87	3	internal check: well-formedness of the contract of `main`
+135	postcondition.violated	internal	t.c	87	3	internal check: Silicon's own check of the postcondition of `main`
+141	call.precondition	internal	t.c	87	3	internal check: Silicon's own check of the call of program_start
+144	assert.failed	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it
+146	assert.failed	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it
+147	assert.failed	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it
+148	assert.failed	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it
+149	assert.failed[insufficient.permission]	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it (every cell of every row)
+150	assert.failed[insufficient.permission]	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it (every cell of every row)
+151	assert.failed	uninitialized	t.c	88	3	calls `zero`, which needs every element of `gm` to have a value; it may not have one here
+152	assert.failed	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it (every cell of every row)
+153	assert.failed	permission	t.c	88	3	calls `zero`, which needs to own `gm`, without owning it
+154	call.precondition	internal	t.c	88	3	internal check: Silicon's own check of the precondition of `zero`
+157	assert.failed	missing-return	t.c	93	3	control may reach the end of `main` without returning a value
+163	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `zero (well-formedness)`
+164	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `zero (well-formedness)`
+165	not.wellformed	internal	t.c	12	3	internal check: well-formedness of the contract of `zero (well-formedness)`

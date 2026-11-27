@@ -1,0 +1,108 @@
+32	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+33	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+33	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+34	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+34	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+35	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+35	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+36	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+36	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+37	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+37	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+38	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+38	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+43	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+44	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+45	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+46	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+46	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+47	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+47	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+48	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+48	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+49	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+49	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+54	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `f`
+54	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the postcondition of `f`
+62	call.precondition	internal	t.c	2	3	internal check: Silicon's own check of the allocation of `m`
+63	call.precondition	internal	t.c	82	3	internal check: Silicon's own check of the initialization of `m`
+66	assert.failed[insufficient.permission]	permission	t.c	72	3	this loop begins without the permission to every cell of every row of `m`
+67	assert.failed[insufficient.permission]	permission	t.c	72	3	this loop begins without the permission to every cell of every row of `m`
+71	invariant.not.established	internal	t.c	72	3	internal check: automatic range invariant of `i`
+71	invariant.not.preserved	internal	t.c	72	3	internal check: automatic range invariant of `i`
+72	invariant.not.established	internal	t.c	72	3	internal check: automatic range invariant of `j`
+72	invariant.not.preserved	internal	t.c	72	3	internal check: automatic range invariant of `j`
+73	invariant.not.established	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+73	invariant.not.preserved	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+74	invariant.not.established	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+74	invariant.not.preserved	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+75	invariant.not.established	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+75	invariant.not.preserved	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+76	invariant.not.established	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+76	invariant.not.preserved	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+77	invariant.not.established	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+77	invariant.not.preserved	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+78	invariant.not.established	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+78	invariant.not.preserved	internal	t.c	72	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+79	invariant.not.established	invariant-entry	t.c	59	3	this loop invariant may not hold on entry
+79	invariant.not.preserved	invariant-preserved	t.c	59	3	this loop invariant may not be preserved by an iteration
+80	invariant.not.established	overflow	t.c	62	3	signed `int` subtraction may overflow
+80	invariant.not.preserved	overflow	t.c	62	3	signed `int` subtraction may overflow
+81	termination.failed	termination	t.c	63	3	the measure of this loop may not decrease, or may not be bounded below by zero
+84	assert.failed[insufficient.permission]	permission	t.c	48	3	this loop begins without the permission to every cell of every row of `m`
+85	assert.failed[insufficient.permission]	permission	t.c	48	3	this loop begins without the permission to every cell of every row of `m`
+89	invariant.not.established	internal	t.c	48	3	internal check: automatic range invariant of `j`
+89	invariant.not.preserved	internal	t.c	48	3	internal check: automatic range invariant of `j`
+90	invariant.not.established	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+90	invariant.not.preserved	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+91	invariant.not.established	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+91	invariant.not.preserved	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+92	invariant.not.established	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+92	invariant.not.preserved	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+93	invariant.not.established	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+93	invariant.not.preserved	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+94	invariant.not.established	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+94	invariant.not.preserved	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+95	invariant.not.established	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+95	invariant.not.preserved	internal	t.c	48	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+96	invariant.not.established	invariant-entry	t.c	19	3	this loop invariant may not hold on entry
+96	invariant.not.preserved	invariant-preserved	t.c	19	3	this loop invariant may not be preserved by an iteration
+97	invariant.not.established	out-of-bounds	t.c	28	3	this loop invariant reads an element of the array, whose first index may be outside `m`
+97	invariant.not.preserved	out-of-bounds	t.c	28	3	this loop invariant reads an element of the array, whose first index may be outside `m`
+98	invariant.not.established	out-of-bounds	t.c	28	3	this loop invariant reads an element of the array, whose second index may be outside the row
+98	invariant.not.preserved	out-of-bounds	t.c	28	3	this loop invariant reads an element of the array, whose second index may be outside the row
+99	invariant.not.established	uninitialized	t.c	28	3	this loop invariant reads an element of the array before it is given a value
+99	invariant.not.preserved	uninitialized	t.c	28	3	this loop invariant reads an element of the array before it is given a value
+100	invariant.not.established	invariant-entry	t.c	32	3	this loop invariant may not hold on entry
+100	invariant.not.preserved	invariant-preserved	t.c	32	3	this loop invariant may not be preserved by an iteration
+101	invariant.not.established	out-of-bounds	t.c	38	3	this loop invariant reads `m[1][2]`, whose first index may be outside `m`
+101	invariant.not.preserved	out-of-bounds	t.c	38	3	this loop invariant reads `m[1][2]`, whose first index may be outside `m`
+102	invariant.not.established	out-of-bounds	t.c	38	3	this loop invariant reads `m[1][2]`, whose second index may be outside `m[1]`
+102	invariant.not.preserved	out-of-bounds	t.c	38	3	this loop invariant reads `m[1][2]`, whose second index may be outside `m[1]`
+103	invariant.not.established	uninitialized	t.c	38	3	this loop invariant reads `m[1][2]` before it is given a value
+103	invariant.not.preserved	uninitialized	t.c	38	3	this loop invariant reads `m[1][2]` before it is given a value
+104	invariant.not.established	invariant-entry	t.c	41	3	this loop invariant may not hold on entry
+104	invariant.not.preserved	invariant-preserved	t.c	41	3	this loop invariant may not be preserved by an iteration
+105	invariant.not.established	overflow	t.c	44	3	signed `int` subtraction may overflow
+105	invariant.not.preserved	overflow	t.c	44	3	signed `int` subtraction may overflow
+106	termination.failed	termination	t.c	45	3	the measure of this loop may not decrease, or may not be bounded below by zero
+108	assert.failed	overflow	t.c	7	3	signed `int` addition may overflow
+110	assert.failed[insufficient.permission]	permission	t.c	47	3	an iteration of this loop ends without the permission to every cell of every row of `m` that it began with
+111	assert.failed[insufficient.permission]	permission	t.c	47	3	an iteration of this loop ends without the permission to every cell of every row of `m` that it began with
+112	assert.failed	permission	t.c	47	3	an iteration of this loop ends without the permission to every cell of every row of `m` that it began with
+114	assert.failed	overflow	t.c	68	3	signed `int` addition may overflow
+116	assert.failed[insufficient.permission]	permission	t.c	71	3	an iteration of this loop ends without the permission to every cell of every row of `m` that it began with
+117	assert.failed[insufficient.permission]	permission	t.c	71	3	an iteration of this loop ends without the permission to every cell of every row of `m` that it began with
+118	assert.failed	permission	t.c	71	3	an iteration of this loop ends without the permission to every cell of every row of `m` that it began with
+120	assert.failed	out-of-bounds	t.c	78	3	reads `m[0][1]`, whose first index may be outside `m`
+121	assert.failed	out-of-bounds	t.c	78	3	reads `m[0][1]`, whose second index may be outside `m[0]`
+122	assert.failed	permission	t.c	78	3	reads `m[0][1]` without owning it: a callee may have kept its object
+123	assert.failed	uninitialized	t.c	78	3	`m[0][1]` may be read here before it is given a value
+124	assert.failed	check	t.c	81	3	this `check` may not hold
+126	assert.failed[insufficient.permission]	lifetime	t.c	88	3	the address of an element of `m` may still be in use when its lifetime ends
+127	assert.failed[insufficient.permission]	lifetime	t.c	88	3	the address of an element of `m` may still be in use when its lifetime ends
+128	assert.failed	lifetime	t.c	88	3	the address of `m` may still be in use when its lifetime ends
+133	assert.failed[insufficient.permission]	lifetime	t.c	90	3	the address of an element of `m` may still be in use when its lifetime ends
+134	assert.failed[insufficient.permission]	lifetime	t.c	90	3	the address of an element of `m` may still be in use when its lifetime ends
+135	assert.failed	lifetime	t.c	90	3	the address of `m` may still be in use when its lifetime ends
+139	assert.failed	missing-return	t.c	91	3	control may reach the end of `f` without returning a value

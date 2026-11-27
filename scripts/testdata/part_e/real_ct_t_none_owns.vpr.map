@@ -1,0 +1,131 @@
+30	not.wellformed	internal	src/t_none_owns.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+30	postcondition.violated	internal	src/t_none_owns.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+31	not.wellformed	internal	src/t_none_owns.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+31	postcondition.violated	internal	src/t_none_owns.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+32	not.wellformed	internal	src/t_none_owns.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+32	postcondition.violated	internal	src/t_none_owns.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+33	not.wellformed	internal	src/t_none_owns.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+33	postcondition.violated	internal	src/t_none_owns.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+34	not.wellformed	internal	src/t_none_owns.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+34	postcondition.violated	internal	src/t_none_owns.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+35	not.wellformed	internal	src/t_none_owns.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+35	postcondition.violated	internal	src/t_none_owns.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+36	not.wellformed	internal	src/t_none_owns.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct W`
+36	postcondition.violated	internal	src/t_none_owns.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct W`
+41	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+41	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+42	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+42	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+43	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+43	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+44	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+44	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+45	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+45	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+46	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+46	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+47	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+47	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+48	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+48	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+49	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+49	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+50	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+50	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+51	not.wellformed	internal	src/t_none_owns.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+51	postcondition.violated	internal	src/t_none_owns.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+56	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f`
+57	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f`
+58	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f`
+59	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+60	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+61	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+62	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+63	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+64	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+65	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+66	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+67	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+68	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+69	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+70	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+71	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+72	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+73	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+74	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+75	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+76	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+77	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+78	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+79	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+80	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+81	not.wellformed	internal	src/t_none_owns.c	6	5	internal check: well-formedness of the contract of `f`
+82	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f`
+82	postcondition.violated	internal	src/t_none_owns.c	5	5	internal check: Silicon's own check of the postcondition of `f`
+83	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+83	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+84	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+84	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+85	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+85	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+86	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+86	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+87	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+87	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+88	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+88	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+89	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+89	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+90	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+90	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+91	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+91	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+92	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+92	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+93	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+93	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+94	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+94	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+95	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+95	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+96	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+96	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+97	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+97	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+98	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+98	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+99	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+99	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+100	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+100	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+101	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+101	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+102	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+102	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+103	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+103	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+104	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+104	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+105	not.wellformed	internal	src/t_none_owns.c	7	5	internal check: well-formedness of the contract of `f`
+105	postcondition.violated	internal	src/t_none_owns.c	7	5	internal check: Silicon's own check of the postcondition of `f`
+114	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `*p`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+115	assert.failed	internal	src/t_none_owns.c	10	3	internal check: WF of a pointer parameter
+116	assert.failed	internal	src/t_none_owns.c	10	3	internal check: a pointer parameter points into its block
+117	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `*p`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+118	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `*p`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+119	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `*p`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+120	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `*p`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+121	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `*p`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+123	assert.failed[insufficient.permission]	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+124	assert.failed[insufficient.permission]	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+125	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+126	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+127	assert.failed[insufficient.permission]	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+128	assert.failed[insufficient.permission]	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+129	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+130	assert.failed	permission	src/t_none_owns.c	10	3	returns without owning `p->v`, which its contract promises	src/t_none_owns.c:7:this is the postcondition
+132	assert.failed	missing-return	src/t_none_owns.c	11	1	control may reach the end of `f` without returning a value
+138	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f (well-formedness)`
+139	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f (well-formedness)`
+140	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f (well-formedness)`
+141	not.wellformed	internal	src/t_none_owns.c	5	5	internal check: well-formedness of the contract of `f (well-formedness)`

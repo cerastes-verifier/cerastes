@@ -782,13 +782,16 @@ def parse_struct_member(text: str, root: str = "r") -> tuple[int, ...] | None:
     return None if inner is None else inner + (int(m.group("k")),)
 
 
-def struct_wf_lens_problem(parts: list[str], root: str, counts: dict[tuple[int, ...], int] | None = None) -> str | None:
+def struct_wf_lens_problem(parts: list[str], root: str, counts: dict[tuple[int, ...], int] | None = None,
+                           scalar_counts: dict[tuple[int, ...], int] | None = None) -> str | None:
     """The guarded conjunct of `WF_S(v)` in a `program_start` row (decision 0043 item 8): under `v != null && offset_of(v) < len(block_of(v))`
     only `len(member(<chain>, k)) == 1` with a literal k, each member block once, a member of a member only inside a nested struct member,
     and the slot facts `A != B` exactly for the pairs of the root or a nested slot A and a nested slot B below it, chains rooted at the value.
     An array member of the structure states its count instead (decision 0063 items 3 and 15): `len(member(<chain>, k)) == N` with the `N` of
     `counts` (the array members of the allocation `alloc_struct_<n>_<tag>` of that structure, by member key); a count other than 1 for a
-    member the allocation does not state as an array is refused.  Returns the reason, or None."""
+    member the allocation does not state as an array is refused.  `scalar_counts` (decision 0064 items 3 and 12, slice 4: the guarded facts of a pointer to a structure that has a matrix member or a member
+    array of structures AND a direct array member of scalars, `struct U { int a; int m[2][2]; int b[2]; int c; }`): for a member `counts` does not tie, the count the unit's own allocation states for that
+    member's array of scalars (`_SCALAR_ARRAY_COUNTS`) is admitted besides 1, never another count.  Returns the reason, or None."""
     members: list[tuple[int, ...]] = []
     facts: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
     for part in parts:
@@ -801,7 +804,8 @@ def struct_wf_lens_problem(parts: list[str], root: str, counts: dict[tuple[int, 
             continue
         m = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", part)
         key = parse_struct_member(m.group("m"), root) if m else None
-        if key is None or int(m.group("n")) != (counts or {}).get(key, 1):
+        if key is None or (int(m.group("n")) != (counts or {}).get(key, 1)
+                           and not (key not in (counts or {}) and (scalar_counts or {}).get(key) == int(m.group("n")))):
             if key is not None and key in (counts or {}):
                 return (f"`{part}`: the allocation of the structure states `{(counts or {})[key]}` elements for the array member {key} "
                         "(decision 0063 item 15: the count of the allocation)")
@@ -834,11 +838,41 @@ def aggregate_member_rows(middle: list[str], at: int, q1: dict[str, str], key: t
     if q1["lo"] != "0" or q1["hi"] != str(n):
         return f"the array member {key}: the length facts of its elements are not over `0 <= j && j < {n}`"
     slot = f"loc({q1['b']},{q1['k']})"
-    keys, why = range_lens_members(q1["cons"], slot)
+    arr: dict[tuple[int, ...], int] = {}
+    keys, why = range_lens_members(q1["cons"], slot, arrays_out=arr)
     if why is not None or keys is None:
         return f"the array member {key}: the length facts of its elements: {why}"
     out: list[tuple[tuple[int, ...], str]] = []
     for leaf in element_leaves(keys):
+        if leaf in arr:
+            # an ARRAY LEAF of scalars of the element (decision 0064 items 3, 6 and 17): its three rows have two bound variables, over the element's own count n and the leaf's own count M
+            # (the `len(...) == M` of the length facts above), in this order, over the cell `loc(member(<slot>, a), j)`
+            cols = arr[leaf]
+            cell = leaf_receiver(f"loc({q1['b']},#0)", leaf, "#1")
+            shown = leaf_receiver(f"loc({q1['b']},k)", leaf, "j")
+            suffix = ""
+            for off, (what, body) in enumerate((("the value permission", "acc({c}.v_{t})"), ("the flag permission", "acc({c}.d_{t})"), ("`!flag`", "(!{c}.d_{t})"))):
+                if at >= len(middle):
+                    return f"the array member {key}: the array leaf {leaf} of its elements is not followed by {what} of its cells"
+                raw = middle[at][len("ensures "):]
+                at += 1
+                why, renamed = canonical_binders(raw)
+                if why is not None:
+                    return f"the array member {key}: `{' '.join(raw.split())}`: {why}"
+                if off == 0:
+                    mv = re.fullmatch(rf"forall#0:Int,#1:Int::\{{{re.escape(norm_viper(cell))}\}}.*==>acc\({re.escape(norm_viper(cell))}\.v_(?P<t>[\w$']+)\)", norm_viper(renamed))
+                    if mv is None:
+                        return (f"the array member {key}: the first row of the array leaf {leaf} of its elements is not `acc(<cell>.v_t)` of the cell "
+                                f"`{shown}` with two bound variables")
+                    suffix = mv.group("t")
+                want = f"forall #0: Int, #1: Int :: {{ {cell} }} (((0 <= #0) && (#0 < {n})) && ((0 <= #1) && (#1 < {cols}))) ==> " + body.format(c=cell, t=suffix)
+                if norm_viper(renamed) != norm_viper(want):
+                    return (f"the array member {key}: {what} of the array leaf {leaf} of its elements is not `forall k, j :: {{ {shown} }} "
+                            f"0 <= k && k < {n} && 0 <= j && j < {cols} ==> {body.format(c='<that cell>', t='T')}` (the element's own count and the leaf's own count)")
+            if suffix not in declared["v"] or suffix not in declared["d"]:
+                return f"the field suffix `{suffix}` is not declared (`field v_{suffix}` and `field d_{suffix}`)"
+            out.append((leaf, suffix))
+            continue
         cell = leaf_receiver(slot, leaf)
         suffix = ""
         for off, (what, shape) in enumerate((("acc({c}.v_{t})", r"acc\({c}\.v_(?P<t>[\w$']+)\)"), ("acc({c}.d_{t})", r"acc\({c}\.d_(?P<t>[\w$']+)\)"),
@@ -857,17 +891,56 @@ def aggregate_member_rows(middle: list[str], at: int, q1: dict[str, str], key: t
         if suffix not in declared["v"] or suffix not in declared["d"]:
             return f"the field suffix `{suffix}` is not declared (`field v_{suffix}` and `field d_{suffix}`)"
         out.append((leaf, suffix))
-    return at, out
+    return at, out, arr
 
 
-def struct_allocation_problem(src: Source, d: Decl, suffix: str) -> str | None:
+def matrix_member_rows(middle: list[str], at: int, q1: dict[str, str], key: tuple[int, ...], n: int, declared: dict[str, set[str]]):
+    """The rows of a MATRIX member `T m[N][M]` in `alloc_struct_<n>_<tag>` (decision 0064 items 3, 9 and 17, Part E slice 3b), `q1` being the length-facts row already read (clause
+    `at - 1`): the member block `B = member(X, k)` has `len(B) == N` (the caller read it) and `forall k :: { loc(B, k) } 0 <= k && k < N ==> len(member(loc(B, k), 0)) == M` (`q1`, over the
+    member's OWN count and a literal M >= 1); then the three quantified rows over the cell `loc(member(loc(B, k), 0), j)` with TWO bound variables over `0 <= k < N` and `0 <= j < M` (the
+    member's own counts, not any others), in this order: `acc(C.v_t)`, `acc(C.d_t)`, `!C.d_t`, one declared field suffix t.  Returns (the next clause, the field suffix) or the reason."""
+    block = q1["b"]
+    if parse_struct_member(block) != key:
+        return f"the matrix member {key}: the length facts of its rows are over another block than the one `len(...) == {n}` states"
+    if q1["lo"] != "0" or q1["hi"] != str(n):
+        return f"the matrix member {key}: the length facts of its rows are not over `0 <= k && k < {n}`"
+    lm = re.fullmatch(rf"len\(member\(loc\({re.escape(block)},{re.escape(q1['k'])}\),0\)\)==(?P<m>[1-9][0-9]*)", q1["cons"])
+    if lm is None:
+        return f"the matrix member {key}: the length facts of its rows are not `len(member(loc(member(X, k), k), 0)) == M` with a literal M >= 1"
+    cols = int(lm.group("m"))
+    cell = f"loc(member(loc({block}, #0), 0), #1)"
+    suffix = ""
+    for off, (what, body) in enumerate((("the value permission", "acc({c}.v_{t})"), ("the flag permission", "acc({c}.d_{t})"), ("`!flag`", "(!{c}.d_{t})"))):
+        if at + off >= len(middle):
+            return f"the matrix member {key} is not followed by {what} of its cells"
+        raw = middle[at + off][len("ensures "):]
+        why, renamed = canonical_binders(raw)
+        if why is not None:
+            return f"the matrix member {key}: `{' '.join(raw.split())}`: {why}"
+        if off == 0:
+            mv = re.fullmatch(rf"forall#0:Int,#1:Int::\{{{re.escape(norm_viper(cell))}\}}.*==>acc\({re.escape(norm_viper(cell))}\.v_(?P<t>[\w$']+)\)", norm_viper(renamed))
+            if mv is None:
+                return f"the matrix member {key}: its first row is not `acc(<cell>.v_t)` of the cell `loc(member(loc({block}, k), 0), j)` with two bound variables"
+            suffix = mv.group("t")
+            if suffix not in declared["v"] or suffix not in declared["d"]:
+                return f"the field suffix `{suffix}` is not declared (`field v_{suffix}` and `field d_{suffix}`)"
+        want = f"forall #0: Int, #1: Int :: {{ {cell} }} (((0 <= #0) && (#0 < {n})) && ((0 <= #1) && (#1 < {cols}))) ==> " + body.format(c=cell, t=suffix)
+        if norm_viper(renamed) != norm_viper(want):
+            return (f"the matrix member {key}: {what} of its cells is not `forall k, j :: {{ loc(member(loc({block}, k), 0), j) }} 0 <= k && k < {n} && 0 <= j && j < {cols} ==> "
+                    f"{body.format(c='loc(member(loc(' + block + ', k), 0), j)', t='T')}` (the member's own counts)")
+    return at + 3, suffix
+
+
+def struct_allocation_problem(src: Source, d: Decl, suffix: str, shape_out: dict | None = None) -> str | None:
     """Decision 0043 items 4 and 13: the trusted allocation `alloc_struct_<n>_<tag>` is pinned by its shape: bodyless, the header
     and `decreases _`; first the root facts of `alloc_<t>`; then clauses in which each member block has `len(member(X, k)) == 1`,
     each leaf exactly `acc(L.v_t) && acc(L.d_t) && !L.d_t` with `L = loc(member(X, k), 0)` and one declared suffix `t`, a nested struct
     member nothing else (its slot is the X of the clauses that follow), and the slot facts `A != B` of item 4, exactly the pairs
     (A, B) with B a nested slot and A the root or a nested slot whose chain B's chain strictly extends; last the liveness clause
     with exactly one `lv` permission on the literal `lvloc(block_of(r))`; every chain in the canonical grammar rooted at `r`, every
-    member block and every (receiver, field) once; nothing else.  Returns the reason, or None."""
+    member block and every (receiver, field) once; nothing else.  `shape_out` (a dict the caller owns) receives, when the allocation is read to its end, `elem_arrays`: {(the key of an array member of
+    structures, the key of an ARRAY LEAF of its elements): (the member's count N, the leaf's count M, the leaf's field suffix)} and `elem_leaves`: {the key of such a member: (N, {leaf: (its cell count, 1 for a
+    cell leaf; its field suffix)} of EVERY leaf of the element)} (decision 0064 items 3, 6 and 17).  Returns the reason, or None."""
     if d.has_body:
         return "it has a body"
     lines = [" ".join(src.code[n - 1].split()) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
@@ -921,12 +994,28 @@ def struct_allocation_problem(src: Source, d: Decl, suffix: str) -> str | None:
                 # an array member whose elements are structures (decision 0064 items 3 and 17): the length facts of the slots, then per leaf of the
                 # element the three quantified rows over the leaf receiver, in this order, each leaf once
                 at += 1
+                mlm = re.fullmatch(rf"len\(member\(loc\({re.escape(q1['b'])},{re.escape(q1['k'])}\),0\)\)==(?P<m>[1-9][0-9]*)", q1["cons"])
+                if mlm is not None and (mlm.group("m") != "1" or (at < len(middle) and (bm := _BINDER_LIST_RE.match(middle[at][len("ensures "):])) is not None
+                                                               and bm.group("bs").count(",") == 1)):
+                    # a matrix member: the elements are rows (a length fact M other than 1, or two bound variables in the row after it)
+                    why = matrix_member_rows(middle, at, q1, key, n, declared)
+                    if isinstance(why, str):
+                        return why
+                    at, mt = why
+                    if (key + (-2,), mt) in leaves:
+                        return f"the leaf {key} twice"
+                    leaves.add((key + (-2,), mt))
+                    continue
                 why = aggregate_member_rows(middle, at, q1, key, n, declared)
                 if isinstance(why, str):
                     return why
-                at, agg_leaves = why
+                at, agg_leaves, agg_arr = why
                 for leaf, t in agg_leaves:
                     leaves.add((key + (-1,) + leaf, t))
+                    if shape_out is not None and leaf in agg_arr:
+                        shape_out.setdefault("elem_arrays", {})[(key, leaf)] = (n, agg_arr[leaf], t)
+                if shape_out is not None and agg_arr:
+                    shape_out.setdefault("elem_leaves", {})[key] = (n, {leaf: (agg_arr.get(leaf, 1), t) for leaf, t in agg_leaves})
                 continue
             suffix_seen: set[str] = set()
             for want in ("acc(loc(B,j).v_T)", "acc(loc(B,j).d_T)", "!loc(B,j).d_T"):
@@ -1315,6 +1404,32 @@ def struct_array_counts(src: Source, decls: list[Decl]) -> dict[str, dict[tuple[
     return out
 
 
+def scalar_array_members(src: Source, decls: list[Decl]) -> dict[tuple[int, ...], tuple[int, str]]:
+    """The array members OF SCALARS of the structure allocations `alloc_struct_<n>_<tag>` of the unit, as {member key: (N, the element's field suffix)} (decision 0063 item 15, decision 0064 items 3
+    and 17): a clause `len(member(<chain>, k)) == N` directly followed by the quantified permission row `forall j :: {...} 0 <= j && j < N ==> acc(loc(member(<chain>, k), j).v_t)` of its
+    elements (a matrix member's and an array-of-structures member's next clause is a length quantifier, not a permission).  A key that two allocations state with two (N, suffix) pairs is
+    ambiguous and left out (fail closed)."""
+    out: dict[tuple[int, ...], tuple[int, str]] = {}
+    seen: dict[tuple[int, ...], set[tuple[int, str]]] = {}
+    for d in decls:
+        if d.kind != "method" or not d.name.startswith(ALLOC_PREFIX) or not STRUCT_ALLOC_RE.match(d.name[len(ALLOC_PREFIX):]):
+            continue
+        clauses = [norm_viper(t) for k, _l, t in clause_texts(src, d) if k == "ensures"]
+        for i, c in enumerate(clauses[:-1]):
+            m = re.fullmatch(r"len\((?P<m>member\(.*\))\)==(?P<n>[0-9]+)", c)
+            key = parse_struct_member(m.group("m")) if m else None
+            if key is None or int(m.group("n")) == 1:
+                continue
+            nxt = re.fullmatch(r"forall(?P<j>[A-Za-z_$][\w$']*):Int::\{[^{}]*\}\(?0<=(?P=j)&&(?P=j)<(?P<hi>[0-9]+)\)?==>acc\(loc\((?P<b>member\(.*\)),(?P=j)\)\.v_(?P<t>[A-Za-z0-9_$']+)\)", clauses[i + 1])
+            if nxt is None or int(nxt.group("hi")) != int(m.group("n")) or nxt.group("b") != m.group("m"):
+                continue
+            seen.setdefault(key, set()).add((int(m.group("n")), nxt.group("t")))
+    for key, pairs in seen.items():
+        if len(pairs) == 1:
+            out[key] = next(iter(pairs))
+    return out
+
+
 ARRAY_GROUP_FIRST_RE = re.compile(r"^forall[A-Za-z_$][\w$']*:Int::\{loc\(GB_")
 
 
@@ -1349,6 +1464,13 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
         return min(j + 1, end), None, problems
 
     if q0 is not None and (m0 is not None or key is not None) and g in gbs and "len(member(" in q0["cons"]:
+        if key is not None and _member_sarr_lens(key, q0):
+            # an element with an array leaf of scalars in a structure global's array member of structures (slice 3c-4): the unit's own allocation states the count; a group of its own
+            return member_sarr_global_group(clauses, i if lens_q0 is not None else i + 1, end, fields, counts, q0, g, key, fail)
+        if key is None and range_lens_members(q0["cons"], f"loc({q0['b']},{q0['k']})")[1] is not None \
+                and range_lens_members(q0["cons"], f"loc({q0['b']},{q0['k']})", scalar_arrays=True)[1] is None:
+            # an element with an array member of scalars (slice 3c-3): the length facts state a count the unit's allocation states; a group of its own
+            return sarr_global_group(clauses, i if lens_q0 is not None else i + 1, end, fields, counts, q0, g, fail)
         return aggregate_global_group(clauses, i, end, fields, counts, q0, g, key, fail, lens_q0 is not None)
     if q0 is None or (m0 is None and key is None) or g not in gbs:
         return fail(first_line, "the first row is not the value permission `forall k: Int :: { loc(GB_g(), k) } 0 <= k && k < N ==> acc(loc(GB_g(), k).v_t)` "
@@ -1479,11 +1601,12 @@ def parse_block_leaf_row(text: str) -> dict[str, str] | None:
     return out
 
 
-def leaf_receiver(slot: str, leaf: tuple[int, ...]) -> str:
-    """The receiver of the leaf `leaf` (member steps) of the element at `slot`: `loc(member(<...>, j), 0)`."""
+def leaf_receiver(slot: str, leaf: tuple[int, ...], index: str = "0") -> str:
+    """The receiver of the leaf `leaf` (member steps) of the element at `slot`: `loc(member(<...>, j), 0)`; `index` replaces the 0 of the LAST step (the cell `index` of an array leaf of
+    scalars: `loc(member(<...>, j), index)`)."""
     r = slot
-    for j in leaf:
-        r = f"loc(member({r},{j}),0)"
+    for n, j in enumerate(leaf):
+        r = f"loc(member({r},{j}),{index if n == len(leaf) - 1 else 0})"
     return r
 
 
@@ -1603,6 +1726,405 @@ def aggregate_global_group(clauses: list[tuple[str, int, str]], i: int, end: int
     return (j if key is not None else j + 1), (g, n, ptr_suffix or suffixes[0], targets, key, frozenset(zip(leaves, suffixes))), []
 
 
+# Decision 0064 items 3, 9 and 17 (Part E, slice 3c-3): a GLOBAL or `static` local array of structures whose element has an ARRAY MEMBER OF SCALARS (`struct P g[2]` with `struct P { int n; int a[3]; }`).
+# The group is `aggregate_global_group`'s per LEAF path of the element, in declaration order, with the array leaf's rows over two bound variables: the three permission rows (the value, the flag, the
+# flags) of a cell leaf `forall k :: { loc(member(loc(GB_g(), k), l), 0) } 0 <= k && k < N ==> ...` and of an array leaf `forall k, j :: { loc(member(loc(GB_g(), k), a), j) } 0 <= k && k < N && 0 <= j && j < M ==> ...`;
+# then the values: known, element by element (the leaves in declaration order, once each), one conjunct per cell `loc(member(loc(GB_g(), e), l), c).v_t == v` (the array leaf's cells from 0 in order, once each) followed, when
+# the list leaves cells of the array out, by ONE one-binder quantifier `c <= j && j < M ==> ... == 0` for them; then, when the list does not reach every element, per leaf in declaration order the quantifier of the
+# rest (`m <= k && k < N ==> cell == 0`; the array leaf's with the second binder over `0 <= j < M`); unknown: per leaf the TYPE'S OWN range over `[0, N)` (and `[0, M)`) as one quantifier, alone; last `acc(lvloc(GB_g()).lv)`.
+# The array leaf's member, count M and field are those of an array member of scalars of a pinned `alloc_struct_...` of the unit (`_SCALAR_ARRAY_COUNTS`, `_SCALAR_ARRAY_FIELDS`).  The forms of the rest of the elements (the
+# quantifiers after the listed elements) have no emitted text yet: they are read as written here and anything else is refused.
+def _is_sarr_lens(pq: dict) -> bool:
+    """Whether the length facts clause `pq` (`parse_block_row`) of a global is the one of an element with an array member of scalars: refused by the older reading and accepted when the unit's own
+    allocation states the count (`range_lens_members(..., scalar_arrays=True)`)."""
+    slot = f"loc({pq['b']},{pq['k']})"
+    if re.fullmatch(r"len\(member\(" + re.escape(norm_viper(slot)) + r",0\)\)==[1-9][0-9]*", norm_viper(_strip_wrap(pq["cons"]))):
+        return False  # the single fact `len(member(slot, 0)) == M` is a global MATRIX's row length (`matrix_global_group`): its route, whatever the unit's table holds
+    return range_lens_members(pq["cons"], slot)[1] is not None and range_lens_members(pq["cons"], slot, scalar_arrays=True)[1] is None
+
+
+def parse_sarr_row(text: str, g: str, block: str | None = None) -> dict | None:
+    """A quantified row of a `program_start` group over an array leaf: `forall k: Int, j: Int :: { loc(member(loc(GB_g(), k), a), j) } lo <= k && k < N && 0 <= j && j < M ==> C` (two binders; `row` None) or
+    `forall j: Int :: { loc(member(loc(GB_g(), r), a), j) } lo <= j && j < M ==> C` with a literal element r (one binder; `row` = r); fields: `member` (a), `binders`, `row`, `lo`, `hi` (of k, two binders),
+    `jlo`, `jhi`, `cell` (the trigger, normalized) and `cons` (normalized); None for another shape.  `block` (the member form, `member_sarr_global_group`): the block term `B` of a structure global's array
+    member of structures replaces `GB_g()`: the trigger is `loc(member(loc(B, k), a), j)`."""
+    head = _INDEX_HEAD_RE.match(text.strip())
+    if head is None:
+        return None
+    binders = [x.split(":")[0].strip() for x in head.group("bs").split(",")]
+    if len(binders) not in (1, 2) or len(set(binders)) != len(binders):
+        return None
+    recv = norm_viper(head.group("trigger"))
+    base = re.escape(g) + r"\(\)" if block is None else re.escape(norm_viper(block))
+    m = re.fullmatch(rf"loc\(member\(loc\({base},(?P<x>{IDENT}|[0-9]+)\),(?P<a>[0-9]+)\),(?P<j>{IDENT})\)", recv)
+    if m is None or m.group("j") != binders[-1] or (len(binders) == 2 and m.group("x") != binders[0]) or (len(binders) == 1 and not re.fullmatch(r"[0-9]+", m.group("x"))):
+        return None
+    parts = _split_top(head.group("body"), "==>")
+    if len(parts) < 2:
+        return None
+    try:
+        ante = [norm_viper(c) for c in _flatten_and(parts[0])]
+    except ValueError:
+        return None
+    if len(ante) != 2 * len(binders):
+        return None
+    bounds: list[tuple[str, str]] = []
+    for i, b in enumerate(binders):
+        lo = re.fullmatch(r"(?P<lo>[0-9]+)<=" + re.escape(b), ante[2 * i])
+        hi = re.fullmatch(re.escape(b) + r"<(?P<hi>[1-9][0-9]*)", ante[2 * i + 1])
+        if lo is None or hi is None:
+            return None
+        bounds.append((lo.group("lo"), hi.group("hi")))
+    out: dict = {"member": int(m.group("a")), "binders": binders, "row": None if len(binders) == 2 else int(m.group("x")), "jlo": bounds[-1][0], "jhi": bounds[-1][1], "cell": recv,
+                 "cons": norm_viper(_strip_wrap("==>".join(parts[1:])))}
+    if len(binders) == 2:
+        out["lo"], out["hi"] = bounds[0]
+    return out
+
+
+def sarr_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fields: dict[str, str], counts, q0: dict[str, str], g: str, fail):
+    """The row group of a global (or `static` local) array of structures with an array member of scalars in `program_start` (see the comment above), starting at clause `i` (the first row of the first leaf); `q0` is
+    `parse_block_row` of the length facts clause that preceded it.  Returns what `aggregate_global_group` returns for a global: (the next clause index, (g, N, field suffix, [(line, target)], None, the element's
+    shape) or None, [(line, why)])."""
+    n, b, k = int(q0["hi"]), q0["b"], q0["k"]
+    first = clauses[i][1] if i < end else clauses[end - 1][1]
+    if q0["lo"] != "0" or n < 1:
+        return fail(first, f"the length facts of the elements are over `0 <= k && k < N` with a literal N >= 1, found `{q0['lo']} <= k && k < {q0['hi']}`", i)
+    slot = f"loc({b},{k})"
+    keys, why = range_lens_members(q0["cons"], slot, scalar_arrays=True)
+    if why is not None or keys is None:
+        return fail(first, f"the length facts of the elements of an array of structures: {why}", i)
+    leaves = element_leaves(keys)
+    arrays = {lf: _SCALAR_ARRAY_COUNTS[lf] for lf in leaves if lf in _SCALAR_ARRAY_COUNTS}
+    if not arrays or any(len(lf) != 1 for lf in arrays) or any(len(lf) != 1 for lf in leaves if lf not in arrays and len(lf) > 1 and lf[:-1] in arrays):
+        return fail(first, "an array leaf of scalars at the first level of the element is the only array leaf read here (a deeper one is Part E's later slice)", i)
+    suffixes: dict[tuple[int, ...], str] = {}
+    j = i
+    for leaf in leaves:
+        arr = leaf in arrays
+        for off, (what, shape) in enumerate((("the value permission", "acc({c}.v_{t})"), ("the flag permission", "acc({c}.d_{t})"), ("the flags (every one true)", "{c}.d_{t}"))):
+            if j >= end:
+                return fail(first, f"the group ends before {what} of the leaf {leaf}", j)
+            if arr:
+                q = parse_sarr_row(clauses[j][2], g)
+                ok = q is not None and q["row"] is None and q["member"] == leaf[0] and q["lo"] == "0" and q["hi"] == str(n) and q["jlo"] == "0" and q["jhi"] == str(arrays[leaf])
+                cell = q["cell"] if q is not None else ""
+            else:
+                q = parse_slot_row(clauses[j][2])
+                cell = leaf_receiver(slot, leaf)
+                ok = q is not None and q["trig"] == cell and q["lo"] == "0" and q["hi"] == str(n) and q["k"] == k
+            if not ok:
+                bound = f"`0 <= k && k < {n}`" + (f" and `0 <= j && j < {arrays[leaf]}`" if arr else "")
+                return fail(clauses[j][1], f"the row after the length facts is not {what} of the leaf {leaf} over {bound} with its cell as the trigger", j + 1)
+            if off == 0:
+                mv = re.fullmatch(rf"acc\({re.escape(cell)}\.v_(?P<t>[\w$']+)\)", q["cons"])
+                if mv is None or mv.group("t") not in fields:
+                    return fail(clauses[j][1], f"the first row of the leaf {leaf} is not `acc({cell}.v_t)` of a declared field", j + 1)
+                suffixes[leaf] = mv.group("t")
+                if arr and suffixes[leaf] != _SCALAR_ARRAY_FIELDS.get(leaf):
+                    return fail(clauses[j][1], f"the array leaf {leaf} is of the field `{suffixes[leaf]}`, not that of the allocation's own array member `{_SCALAR_ARRAY_FIELDS.get(leaf)}` (decision 0064 item 17)", j + 1)
+            elif q["cons"] != shape.format(c=cell, t=suffixes[leaf]):
+                return fail(clauses[j][1], f"the row after the value permission of the leaf {leaf} is not {what}", j + 1)
+            j += 1
+
+    def cell_of(leaf: tuple[int, ...], e: str | int, c: str | int | None = None) -> str:
+        if leaf in arrays:
+            return f"loc(member(loc({b},{e}),{leaf[0]}),{c})"
+        return leaf_receiver(f"loc({b},{e})", leaf)
+
+    targets: list[tuple[int, str | None]] = []
+    ptr_suffix: str | None = None
+    e = li = cj = 0  # the next listed item is leaf `li` of element `e` (its array cell `cj`)
+    rests: list[tuple[int, ...]] = []  # the leaves whose quantifier of the rest / of an unknown value has been read
+    unknown = False
+    zero_rest = False
+    while j < end:
+        ln, text = clauses[j][1], norm_viper(clauses[j][2])
+        if text == f"acc(lvloc({g}()).lv)":
+            break
+        q1 = parse_slot_row(clauses[j][2])
+        q2 = parse_sarr_row(clauses[j][2], g)
+        if not rests and not unknown and e < n:
+            leaf = leaves[li]
+            t = suffixes[leaf]
+            consumed = False
+            if leaf in arrays:
+                m_cells = arrays[leaf]
+                if cj < m_cells:
+                    cell = cell_of(leaf, e, cj)
+                    em = re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==(?P<v>.+)", text)
+                    if em is not None:
+                        good, target = leaf_value(fields, t, cell, text, counts)
+                        if not good or "||" in em.group("v") or "<=" in em.group("v"):
+                            return fail(ln, f"the listed value `{em.group('v')}` is not a literal of its type, `null` or `loc(GB_h(), 0)` of a declared global", j + 1)
+                        if target is not None:
+                            if ptr_suffix not in (None, t):
+                                return fail(ln, "addresses in pointer leaves of two types", j + 1)
+                            ptr_suffix = t
+                        targets.append((ln, target))
+                        cj += 1
+                        consumed = True
+                        done = cj == m_cells
+                    elif q2 is not None and q2["row"] == e and q2["member"] == leaf[0]:
+                        # the cells of this element's array the list leaves out: from the cell after the last listed to the end of the array, equal to the zero of the type
+                        zero = zero_literal(fields, t)
+                        qcell = q2["cell"]
+                        if int(q2["jlo"]) != cj or q2["jhi"] != str(m_cells) or zero is None or q2["cons"] != f"{qcell}.v_{t}=={zero}":
+                            return fail(ln, f"the quantifier of the cells of element {e}'s array that the list leaves out is over `{cj} <= j && j < {m_cells}` and states `{qcell}.v_{t} == {zero}`", j + 1)
+                        consumed = True
+                        done = True
+                if consumed:
+                    j += 1
+                    if done:
+                        cj = 0
+                        li += 1
+                        if li == len(leaves):
+                            e, li = e + 1, 0
+                    continue
+            else:
+                cell = cell_of(leaf, e)
+                em = re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==(?P<v>.+)", text)
+                if em is not None:
+                    good, target = leaf_value(fields, t, cell, text, counts)
+                    if not good or "||" in em.group("v") or "<=" in em.group("v"):
+                        return fail(ln, f"the listed value `{em.group('v')}` is not a literal of its type, `null` or `loc(GB_h(), 0)` of a declared global", j + 1)
+                    if target is not None:
+                        if ptr_suffix not in (None, t):
+                            return fail(ln, "addresses in pointer leaves of two types", j + 1)
+                        ptr_suffix = t
+                    targets.append((ln, target))
+                    li += 1
+                    if li == len(leaves):
+                        e, li = e + 1, 0
+                    j += 1
+                    continue
+            if li != 0 or cj != 0:
+                return fail(ln, f"`{text}` is not what element {e} has next: its leaf {leaf} listed (cell {cj}), the leaves in declaration order, each once", j + 1)
+        if q1 is None and q2 is None:
+            return fail(ln, f"`{text}` is not a listed value (the elements from 0, each leaf in declaration order, once), a quantifier of the rest or `acc(lvloc({g}()).lv)`", j + 1)
+        if rests and len(rests) == len(leaves):
+            return fail(ln, "a row after the quantifiers of the values (the group ends with `acc(lvloc(GB_g()).lv)`)", j + 1)
+        # the quantifier of the elements the list does not reach (a zero rest) or the type's own range of an unknown value, per leaf in declaration order
+        at = len(rests)
+        leaf = leaves[at]
+        t = suffixes[leaf]
+        zero = zero_literal(fields, t)
+        if leaf in arrays:
+            q = q2
+            ok = q is not None and q["row"] is None and q["member"] == leaf[0] and q["hi"] == str(n) and q["jlo"] == "0" and q["jhi"] == str(arrays[leaf])
+            cell = q["cell"] if q is not None else ""
+        else:
+            q = q1
+            cell = leaf_receiver(slot, leaf)
+            ok = q is not None and q["trig"] == cell and q["hi"] == str(n) and q["k"] == k
+        if not ok:
+            return fail(ln, f"the quantifier of the values of the leaf {leaf} is over its cell up to `k < {n}`" + (f" and `0 <= j < {arrays[leaf]}`" if leaf in arrays else "") + " (the leaves in declaration order, each once)", j + 1)
+        if zero is not None and q["cons"] == f"{cell}.v_{t}=={zero}":
+            if unknown or int(q["lo"]) != e:
+                return fail(ln, f"the zero rest of the leaf {leaf} starts at `{q['lo']}` but {e} elements are listed (it starts where the list ends, for every leaf)", j + 1)
+            if e >= n:
+                return fail(ln, "a zero rest although every element is listed", j + 1)
+            zero_rest = True
+        else:
+            # the range of an unknown value is the TYPE'S OWN (question 373's rule 4: `leaf_value` takes any literal range and is not reused alone)
+            if re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==[^|&<]+", q["cons"]) or not _block_type_range(q["cons"], cell, t) or q["lo"] != "0" or e != 0 or zero_rest:
+                return fail(ln, f"the quantifier of the values of the leaf {leaf} is neither the zero rest (`{cell}.v_{t} == {zero}`) nor the type's own range of an unknown value alone over `0 <= k && k < {n}`", j + 1)
+            unknown = True
+        rests.append(leaf)
+        j += 1
+    if j >= end:
+        return fail(first, f"the group has no final `acc(lvloc({g}()).lv)`", end)
+    if li != 0 or cj != 0:
+        return fail(clauses[j][1], f"the element {e} has only {li} of its {len(leaves)} leaves listed", j + 1)
+    # a `bool` leaf of an unknown value states no quantifier (decision 0063 item 9: the type's range of a `bool` is none; the exemption below is the same): the trailing `bool` leaves of an unknown group
+    trailing_bool = 0
+    while unknown and trailing_bool < len(leaves) and fields.get(suffixes[leaves[len(leaves) - 1 - trailing_bool]]) == "Bool":
+        trailing_bool += 1
+    if rests and len(rests) != len(leaves) - trailing_bool:
+        return fail(clauses[j][1], f"the quantifier of the values is given for {len(rests)} of the {len(leaves)} leaves (every leaf, in declaration order)", j + 1)
+    for leaf in leaves:
+        t = suffixes[leaf]
+        if e < n and not rests and zero_literal(fields, t) is not None and not (fields.get(t) == "Bool" and e == 0):
+            return fail(clauses[j][1], f"no zero rest and no range of an unknown value: the elements from {e} on have no value row for the leaf {leaf}", j + 1)
+    return j + 1, (g, n, ptr_suffix or suffixes[leaves[0]], targets, None, frozenset((lf, suffixes[lf]) for lf in leaves)), []
+
+
+# Decision 0064 items 3, 9 and 17 (Part E, slice 3c-4): the row group of a STRUCTURE GLOBAL's member array of structures whose element has an ARRAY LEAF of scalars (`static struct T gt` with `struct T { struct P v[2]; int k; }`,
+# `struct P { int n; int a[3]; }`).  It follows the structure's cell row, as `aggregate_global_group`'s member form does, and is `sarr_global_group`'s per LEAF path of the element, in declaration order: the three rows of a cell
+# leaf (`forall k :: { loc(member(loc(B, k), l), 0) } 0 <= k && k < N ==> ...`) and of the array leaf (two bound variables over `0 <= k < N` and `0 <= j < M`); then either the VALUES, element by element (the leaves in
+# declaration order, once each, the array leaf's cells from 0 in order, `loc(member(loc(B, e), a), c).v_t == v`; the cells the list leaves out by one one-binder quantifier `c <= j && j < M ==> ... == 0`), every element listed; or,
+# per leaf in declaration order, the quantifier of the type's OWN range over every element (`0 <= k < N`, and `0 <= j < M` for the array leaf), alone (question 373's rule 4: `leaf_value`'s any-literal range is not reused).
+# The array leaf's N, M and field are those of the unit's own allocation for the member `key` (`_ELEM_ARRAYS`).  A zero rest over unreached ELEMENTS has no emitted text for this form and is refused.
+def _member_sarr_lens(key: tuple[int, ...], q0: dict[str, str]) -> bool:
+    """Whether the length facts `q0` of the structure global's array member `key` hold an array leaf of scalars that the unit's allocation states (`_ELEM_ARRAYS`)."""
+    slot = f"loc({q0['b']},{q0['k']})"
+    keys, why = range_lens_members(q0["cons"], slot)
+    counts = range_lens_counts(q0["cons"], slot)
+    # (at least two member blocks: an element whose ONLY member is the array has the text of a matrix member's rows and keeps the matrix rules)
+    return why is None and keys is not None and len(keys) >= 2 and any(counts.get(lf, 1) != 1 and (key, lf) in _ELEM_ARRAYS for lf in element_leaves(keys))
+
+
+def member_sarr_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fields: dict[str, str], counts, q0: dict[str, str], g: str, key: tuple[int, ...], fail):
+    """The row group of a structure global's member array of structures with an array leaf of scalars in `program_start` (see the comment above), starting at clause `i` (the first row of the first leaf); `q0` is
+    `parse_block_row` of the length facts clause that preceded it.  Returns what `aggregate_global_group` returns for a member: (the next clause index, (g, N, field suffix, [(line, target)], key, the element's shape), [])
+    or `fail(...)`'s."""
+    n, b, k = int(q0["hi"]), q0["b"], q0["k"]
+    first = clauses[i][1] if i < end else clauses[end - 1][1]
+    if q0["lo"] != "0" or n < 1:
+        return fail(first, f"the length facts of the elements are over `0 <= k && k < N` with a literal N >= 1, found `{q0['lo']} <= k && k < {q0['hi']}`", i)
+    slot = f"loc({b},{k})"
+    keys, why = range_lens_members(q0["cons"], slot)
+    if why is not None or keys is None:
+        return fail(first, f"the length facts of the elements of an array of structures: {why}", i)
+    leaves = element_leaves(keys)
+    lens_counts = range_lens_counts(q0["cons"], slot)
+    arrays: dict[tuple[int, ...], tuple[int, str]] = {}
+    for lf in leaves:
+        if lens_counts.get(lf, 1) == 1:
+            continue
+        entry = _ELEM_ARRAYS.get((key, lf))
+        if len(lf) != 1 or entry is None or entry[0] != n or entry[1] != lens_counts[lf]:
+            return fail(first, f"the array leaf {lf} of the elements has {lens_counts[lf]} cells, not the {entry[1] if entry else '?'} of the unit's allocation for the member {key} over {entry[0] if entry else '?'} elements (decision 0064 items 3 and 17)", i)
+        arrays[lf] = (entry[1], entry[2])
+    if not arrays:
+        return fail(first, "no array leaf of scalars in the length facts of the elements", i)
+    suffixes: dict[tuple[int, ...], str] = {}
+    j = i
+    for leaf in leaves:
+        arr = leaf in arrays
+        for off, (what, shape) in enumerate((("the value permission", "acc({c}.v_{t})"), ("the flag permission", "acc({c}.d_{t})"), ("the flags (every one true)", "{c}.d_{t}"))):
+            if j >= end:
+                return fail(first, f"the group ends before {what} of the leaf {leaf}", j)
+            if arr:
+                q = parse_sarr_row(clauses[j][2], g, b)
+                ok = q is not None and q["row"] is None and q["member"] == leaf[0] and q["lo"] == "0" and q["hi"] == str(n) and q["jlo"] == "0" and q["jhi"] == str(arrays[leaf][0])
+                cell = q["cell"] if q is not None else ""
+            else:
+                q = parse_slot_row(clauses[j][2])
+                cell = leaf_receiver(slot, leaf)
+                ok = q is not None and q["trig"] == cell and q["lo"] == "0" and q["hi"] == str(n) and q["k"] == k
+            if not ok:
+                bound = f"`0 <= k && k < {n}`" + (f" and `0 <= j && j < {arrays[leaf][0]}`" if arr else "")
+                return fail(clauses[j][1], f"the row after the length facts is not {what} of the leaf {leaf} over {bound} with its cell as the trigger", j + 1)
+            if off == 0:
+                mv = re.fullmatch(rf"acc\({re.escape(cell)}\.v_(?P<t>[\w$']+)\)", q["cons"])
+                if mv is None or mv.group("t") not in fields:
+                    return fail(clauses[j][1], f"the first row of the leaf {leaf} is not `acc({cell}.v_t)` of a declared field", j + 1)
+                suffixes[leaf] = mv.group("t")
+                if arr and suffixes[leaf] != arrays[leaf][1]:
+                    return fail(clauses[j][1], f"the array leaf {leaf} is of the field `{suffixes[leaf]}`, not that of the unit's allocation `{arrays[leaf][1]}` (decision 0064 item 17)", j + 1)
+            elif q["cons"] != shape.format(c=cell, t=suffixes[leaf]):
+                return fail(clauses[j][1], f"the row after the value permission of the leaf {leaf} is not {what}", j + 1)
+            j += 1
+
+    def cell_of(leaf: tuple[int, ...], e: int, c: int | None = None) -> str:
+        return leaf_receiver(f"loc({b},{e})", leaf, "0" if c is None else str(c))
+
+    targets: list[tuple[int, str | None]] = []
+    ptr_suffix: str | None = None
+    e = li = cj = 0  # the next listed item is leaf `li` of element `e` (its array cell `cj`)
+    rests: list[tuple[int, ...]] = []  # the leaves whose quantifier of an unknown value has been read
+    mine = {leaf_receiver(slot, lf) for lf in leaves if lf not in arrays}
+    zero_seen = unknown_seen = False
+    while j < end:
+        ln, text = clauses[j][1], norm_viper(clauses[j][2])
+        q1 = parse_slot_row(clauses[j][2])
+        q2 = parse_sarr_row(clauses[j][2], g, b)
+        if not rests and e < n:
+            leaf = leaves[li]
+            t = suffixes[leaf]
+            consumed = False
+            done = False
+            if leaf in arrays:
+                m_cells = arrays[leaf][0]
+                if cj < m_cells:
+                    cell = cell_of(leaf, e, cj)
+                    em = re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==(?P<v>.+)", text)
+                    if em is not None:
+                        good, target = leaf_value(fields, t, cell, text, counts)
+                        if not good or "||" in em.group("v") or "<=" in em.group("v"):
+                            return fail(ln, f"the listed value `{em.group('v')}` is not a literal of its type, `null` or `loc(GB_h(), 0)` of a declared global", j + 1)
+                        if target is not None:
+                            if ptr_suffix not in (None, t):
+                                return fail(ln, "addresses in pointer leaves of two types", j + 1)
+                            ptr_suffix = t
+                        targets.append((ln, target))
+                        cj += 1
+                        consumed = True
+                        done = cj == m_cells
+                    elif q2 is not None and q2["row"] == e and q2["member"] == leaf[0]:
+                        # the cells of this element's array that the list leaves out: from the cell after the last listed to the end of the array, equal to the zero of the type
+                        zero = zero_literal(fields, t)
+                        qcell = q2["cell"]
+                        if cj == 0 or int(q2["jlo"]) != cj or q2["jhi"] != str(m_cells) or zero is None or q2["cons"] != f"{qcell}.v_{t}=={zero}":
+                            return fail(ln, f"the quantifier of the cells of element {e}'s array that the list leaves out is over `{cj} <= j && j < {m_cells}` after a listed cell and states `{qcell}.v_{t} == {zero}`", j + 1)
+                        consumed = True
+                        done = True
+                if consumed:
+                    j += 1
+                    if done:
+                        cj = 0
+                        li += 1
+                        if li == len(leaves):
+                            e, li = e + 1, 0
+                    continue
+            else:
+                cell = cell_of(leaf, e)
+                em = re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==(?P<v>.+)", text)
+                if em is not None:
+                    good, target = leaf_value(fields, t, cell, text, counts)
+                    if not good or "||" in em.group("v") or "<=" in em.group("v"):
+                        return fail(ln, f"the listed value `{em.group('v')}` is not a literal of its type, `null` or `loc(GB_h(), 0)` of a declared global", j + 1)
+                    if target is not None:
+                        if ptr_suffix not in (None, t):
+                            return fail(ln, "addresses in pointer leaves of two types", j + 1)
+                        ptr_suffix = t
+                    targets.append((ln, target))
+                    li += 1
+                    if li == len(leaves):
+                        e, li = e + 1, 0
+                    j += 1
+                    continue
+            if li != 0 or cj != 0:
+                return fail(ln, f"`{text}` is not what element {e} has next: its leaf {leaf} listed (cell {cj}), the leaves in declaration order, each once", j + 1)
+        # no listed value follows: this is the quantifier of an unknown value's range per leaf (nothing listed), or the next group of the structure global
+        at = len(rests)
+        if e != 0 or at >= len(leaves):
+            break
+        leaf = leaves[at]
+        t = suffixes[leaf]
+        if leaf in arrays:
+            q = q2
+            ok = q is not None and q["row"] is None and q["member"] == leaf[0] and q["hi"] == str(n) and q["jlo"] == "0" and q["jhi"] == str(arrays[leaf][0])
+            cell = q["cell"] if q is not None else ""
+        else:
+            q = q1
+            cell = leaf_receiver(slot, leaf)
+            ok = q is not None and q["trig"] == cell and q["hi"] == str(n) and q["k"] == k
+        if not ok:
+            if at == 0 and not (q1 is not None and q1["trig"] in mine) and q2 is None:
+                break  # not a row of this group: the next group of the structure global starts here
+            return fail(ln, f"the quantifier of the values of the leaf {leaf} is over its cell up to `k < {n}`" + (f" and `0 <= j < {arrays[leaf][0]}`" if leaf in arrays else "") + " (the leaves in declaration order, each once)", j + 1)
+        # an unknown value's range is the TYPE'S OWN (question 373's rule 4); a known zero (a `static` structure with no initializer, C level) is the zero rest from element 0 for every leaf, in declaration
+        # order, the array leaf's with two bound variables; the two are never mixed
+        zero = zero_literal(fields, t)
+        if zero is not None and q["cons"] == f"{cell}.v_{t}=={zero}" and q["lo"] == "0" and not unknown_seen:
+            zero_seen = True
+        elif not (re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==[^|&<]+", q["cons"]) or not _block_type_range(q["cons"], cell, t) or q["lo"] != "0" or zero_seen):
+            unknown_seen = True
+        else:
+            return fail(ln, f"the quantifier of the values of the leaf {leaf} is neither the zero rest from element 0 (`{cell}.v_{t} == {zero}`, every leaf) nor the type's own range of an unknown value over `0 <= k && k < {n}` (every leaf); listed values need every element listed", j + 1)
+        rests.append(leaf)
+        j += 1
+    if li != 0 or cj != 0:
+        return fail(clauses[min(j, end - 1)][1], f"the element {e} has only {li} of its {len(leaves)} leaves listed", j)
+    if rests and len(rests) != len(leaves):
+        return fail(clauses[min(j, end) - 1][1], f"the quantifier of the values is given for {len(rests)} of the {len(leaves)} leaves (every leaf, in declaration order)", j)
+    if not rests and e < n:
+        return fail(clauses[min(j, end - 1)][1], f"the elements from {e} on have no value row: every element is listed, or every leaf has the type's own range (a zero rest over unreached elements is not read for this form)", j)
+    return j, (g, n, ptr_suffix or suffixes[leaves[0]], targets, key, frozenset((lf, suffixes[lf]) for lf in leaves)), []
+
+
 def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> tuple[bool, list[str] | None]:
     ok_domains = [d for d in decls if d.kind == "domain" and lint_domain(src, d, lambda _l, _w: None)]
     in_domain: set[int] = set()
@@ -1675,9 +2197,45 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                         if mk is not None and mk not in pending_lens:
                             pending_lens[mk] = (ln, ql)
                             continue
+                    # a global matrix: the length facts of its rows, then a row over TWO bound variables (decision 0064 item 9, Part E slice 3a)
+                    mxk = next(((pk, pv) for pk, pv in pending_lens.items() if pk[1] and not _member_sarr_lens(pk[1], pv[1])
+                                and parse_gb_index_row(_pseudo_member_text(text, pk[0], pk[1])) is not None
+                                and parse_gb_index_row(_pseudo_member_text(text, pk[0], pk[1]))["g"] == _pseudo_name(pk[0], pk[1])), None)
+                    if mxk is not None:
+                        # a structure global's matrix member (decision 0064 items 3, 9 and 17, Part E slice 3b-3): its row group follows the structure's cell row
+                        pk, pv = mxk
+                        pending_lens.pop(pk)
+                        at, group, why = matrix_member_global_group(clauses, at - 1, stop, fields, gbs, counts, pv, pk[0], pk[1])
+                        row_problems.extend(why)
+                        if group is not None:
+                            ag, an, asuffix, atargets, akey, _ashape = group
+                            if ag not in srows:
+                                row_problems.append((ln, f"the matrix member {akey} of the structure global `{ag}` has its row group before the structure's cell row (decision 0063 item 9)"))
+                            elif akey in sarrs.get(ag, {}):
+                                row_problems.append((ln, f"a second row group for the matrix member {akey} of `{ag}` (two full permissions would make `main` vacuous)"))
+                            else:
+                                sarrs.setdefault(ag, {})[akey] = (ln, asuffix, an, atargets)
+                        continue
+                    sarr_lens = next((pk for pk, (_pl, pq) in pending_lens.items() if not pk[1] and _is_sarr_lens(pq)), None)
+                    mx = parse_gb_index_row(text) if pending_lens and sarr_lens is None else None
+                    if mx is not None and len(mx["binders"]) == 2 and (mx["g"], ()) in pending_lens:
+                        at, group, why = matrix_global_group(clauses, at - 1, stop, fields, gbs, counts, pending_lens.pop((mx["g"], ())))
+                        row_problems.extend(why)
+                        if group is not None:
+                            ag, an, asuffix, atargets, _akey, _ashape = group
+                            if ag in rows or ag in srows or ag in arows:
+                                row_problems.append((ln, f"a second `program_start` row for `{ag}` (two full permissions would make `main` vacuous)"))
+                            else:
+                                arows[ag] = (ln, asuffix, an, atargets)
+                        continue
                     sq = parse_slot_row(text) if pending_lens else None
                     lens_hit = None
-                    if sq is not None:
+                    if sarr_lens is not None and (sq is not None or parse_sarr_row(text, sarr_lens[0]) is not None):
+                        lens_hit = sarr_lens  # the first row of the first leaf of an element with an array member of scalars (slice 3c-3), a cell leaf's or an array leaf's
+                    elif any(pk[1] and _member_sarr_lens(pk[1], pq) and parse_sarr_row(text, pk[0], pq["b"]) is not None for pk, (_pl, pq) in pending_lens.items()):
+                        # the first row of an element whose ARRAY LEAF comes first (slice 3c-4, C level: `struct W { int a[4]; int n; }`): two bound variables
+                        lens_hit = next(pk for pk, (_pl, pq) in pending_lens.items() if pk[1] and _member_sarr_lens(pk[1], pq) and parse_sarr_row(text, pk[0], pq["b"]) is not None)
+                    elif sq is not None:
                         for pk, (_pl, pq) in pending_lens.items():
                             pkeys, pwhy = range_lens_members(pq["cons"], f"loc({pq['b']},{pq['k']})")
                             if pwhy is None and pkeys and sq["trig"] == leaf_receiver(f"loc({pq['b']},{pq['k']})", element_leaves(pkeys)[0]):
@@ -4315,6 +4873,10 @@ def _clause_split(code: str) -> tuple[str, str] | None:
 def array_allocation_problem(src: Source, d: Decl, field_types: dict[str, str]) -> str | None:
     alloc = d.name.startswith(ARR_ALLOC_PREFIX)
     copy = d.name.startswith(ARR_COPY_PREFIX)
+    if d.name.startswith((ROW_ALLOC_PREFIX, ROW_ZERO_PREFIX)):
+        # an array of rows (decision 0064 items 3 and 6, Part E): the clause set is generated from the name and compared; it never falls through to the other rules
+        why = row_array_problem(src, d, alloc, field_types)[0]
+        return None if why is None else f"(an array of rows, decision 0064 items 3 and 6) {why}"
     t = d.name[len(ARR_ALLOC_PREFIX if alloc else ARR_COPY_PREFIX if copy else ARR_ZERO_PREFIX):]
     if not ARR_SUFFIX_RE.match(t):
         return f"the element suffix `{t}` is not an identifier"
@@ -4367,6 +4929,9 @@ AGG_SLOT = "loc(block_of(r),k)"
 AGG_ROOT_FACTS = norm_viper("((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)")
 AGG_LIVE_FACTS = norm_viper("(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)")
 AGG_ZERO_ROOT_FACTS = norm_viper("((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)")
+# a leaf that is an ARRAY member of the element (decision 0064 items 3 and 6, Part E slice 3c: `struct W { int a[4]; int n; } v[2]`): its rows have a second bound variable `j` over
+# `0 <= j < M` (a literal), the trigger is `loc(member(<slot chain>, a), j)`, and the length facts state `len(member(slot, a)) == M` (`struct_wf_lens_problem` with the counts)
+AGG_QUANT2_RE = re.compile(r"^forallk:Int,j:Int::\{(?P<trigger>[^{}]*)\}0<=k&&k<n&&0<=j&&j<(?P<m>[0-9]+)==>(?P<cons>.+)$")
 _AGG_ACC_RE = re.compile(r"^acc\((?P<cell>.+)\.(?P<f>[vd])_(?P<t>[\w$']+)\)$")
 _AGG_NOT_FLAG_RE = re.compile(r"^!(?P<cell>.+)\.d_(?P<t>[\w$']+)$")
 _AGG_FLAG_RE = re.compile(r"^(?P<cell>.+)\.d_(?P<t>[\w$']+)$")
@@ -4416,22 +4981,33 @@ def aggregate_array_problem(src: Source, d: Decl, alloc: bool, field_types: dict
                 return why, none
             continue
         m = AGG_QUANT_RE.match(text)
+        arr_m: int | None = None
         if m is None:
-            return f"`{kw} {text}` is not one of the clauses of decision 0064 items 3 and 6", none
-        if m.group("k") != "k" or m.group("lo") != "0" or m.group("hi") != "n":
-            return f"`{kw} {text}`: a quantified clause is over `0 <= k && k < n` with the binder `k`", none
-        trigger, cons = m.group("trigger"), m.group("cons")
-        if trigger == AGG_SLOT:
-            if not (alloc and kw == "ensures"):
-                return "the length facts stand in the `ensures` of an allocation only", none
-            if (why := once("the length facts")) is not None:
-                return why, none
-            lens_parts = cons.split("&&")
-            continue
-        chain = parse_struct_chain(trigger, AGG_SLOT)
-        if not chain:
-            return (f"`{kw} {text}`: the trigger is not the slot `loc(block_of(r), k)` (the length facts) or a leaf receiver `loc(<chain>, 0)` "
-                    "of the canonical chain rooted at the slot (decision 0064 item 17)"), none
+            m2 = AGG_QUANT2_RE.match(text)
+            if m2 is None:
+                return f"`{kw} {text}` is not one of the clauses of decision 0064 items 3 and 6", none
+            trigger, cons = m2.group("trigger"), m2.group("cons")
+            tm = re.fullmatch(r"loc\((?P<blk>member\(.*\)),j\)", trigger)
+            chain = parse_struct_member(tm.group("blk"), AGG_SLOT) if tm is not None else None
+            arr_m = int(m2.group("m"))
+            if not chain or arr_m < 1:
+                return (f"`{kw} {text}`: the trigger of a two-binder row is not `loc(member(<chain>, a), j)` of the canonical chain rooted at the slot with `0 <= j < M`, M a "
+                        "literal (decision 0064 items 3 and 17)"), none
+        else:
+            if m.group("k") != "k" or m.group("lo") != "0" or m.group("hi") != "n":
+                return f"`{kw} {text}`: a quantified clause is over `0 <= k && k < n` with the binder `k`", none
+            trigger, cons = m.group("trigger"), m.group("cons")
+            if trigger == AGG_SLOT:
+                if not (alloc and kw == "ensures"):
+                    return "the length facts stand in the `ensures` of an allocation only", none
+                if (why := once("the length facts")) is not None:
+                    return why, none
+                lens_parts = cons.split("&&")
+                continue
+            chain = parse_struct_chain(trigger, AGG_SLOT)
+            if not chain:
+                return (f"`{kw} {text}`: the trigger is not the slot `loc(block_of(r), k)` (the length facts) or a leaf receiver `loc(<chain>, 0)` "
+                        "of the canonical chain rooted at the slot (decision 0064 item 17)"), none
         role = None
         cm = _AGG_ACC_RE.match(cons)
         if cm is not None and cm.group("cell") == trigger:
@@ -4450,12 +5026,13 @@ def aggregate_array_problem(src: Source, d: Decl, alloc: bool, field_types: dict
         key = (chain, f"{kw} {role[0]}")
         if key in roles:
             return f"the leaf {chain}: `{kw} {role[0]}` twice (each (receiver, field) is given once)", none
-        roles[key] = {"t": role[1]}
+        roles[key] = {"t": role[1], "m": arr_m}
     if alloc:
         if not {"`requires 1 <= n`", "the root facts", "the liveness token", "the length facts"} <= set(seen):
             return "a clause is missing (`requires 1 <= n`, the root facts, the length facts or the liveness token)", none
         assert lens_parts is not None
-        if (why := struct_wf_lens_problem(lens_parts, AGG_SLOT)) is not None:
+        counts = {chain: row["m"] for (chain, _role), row in roles.items() if row["m"] is not None}
+        if (why := struct_wf_lens_problem(lens_parts, AGG_SLOT, counts or None)) is not None:
             return f"the length facts: {why}", none
         members = {parse_struct_member(m.group("m"), AGG_SLOT) for p in lens_parts if (m := re.fullmatch(r"len\((?P<m>.*)\)==[0-9]+", p))}
         members.discard(None)
@@ -4485,7 +5062,15 @@ def aggregate_array_problem(src: Source, d: Decl, alloc: bool, field_types: dict
         (t,) = suffixes
         if f"v_{t}" not in field_types or f"d_{t}" not in field_types:
             return f"the field suffix `{t}` is not declared (`field v_{t}` and `field d_{t}`)", none
-        leaves[chain] = t
+        counts_of = {roles[(chain, role)]["m"] for role in need}
+        if len(counts_of) != 1:
+            return f"the leaf {chain}: its rows do not all have the same bound variables and the same count M", none
+        (arr_count,) = counts_of
+        if arr_count is None:
+            leaves[chain] = t
+        else:
+            # an array leaf: the key of the leaf path as `index_leaf_key` reads a row's steps: (member, 0) for a structure step, (member, M) for the array's index step
+            leaves[tuple((c, 0) for c in chain[:-1]) + ((chain[-1], arr_count),)] = t
     return None, leaves
 
 
@@ -4547,6 +5132,13 @@ def _aggregate_leaf_rows(src: Source, d: Decl) -> list[tuple[int, str, str, tupl
         if m is None or m.group("kw") not in ("assert", "exhale"):
             continue
         guard, body = split_guard(m.group("rest"))
+        ir = parse_index_row(body) if body is not None and guard is None else None
+        if ir is not None and len(ir.binders) >= 2:
+            # a row with a bound variable per index step (an array of rows, decision 0064 item 17): the leaf key is its steps with their counts
+            acc_i = index_acc(ir)
+            if acc_i is not None and acc_i[1] is None and not ir.extras:
+                rows.append((n, m.group("kw"), ir.x, index_leaf_key(ir), acc_i[0], ir.ranges[0][0], ir.ranges[0][1]))
+            continue
         q = parse_leaf_row(body) if body is not None and guard is None else None
         if q is None or q[2]:
             continue
@@ -4572,7 +5164,10 @@ def lint_scope_exits(src: Source, decls: list[Decl], add: Callable[[int, str], N
             ad = by_name.get(m.group("alloc")) if m else None
             if m is None or ad is None or not any("member(" in src.code[k - 1] for k in range(ad.line, ad.end_line + 1)):
                 continue
-            why, leaves = aggregate_array_problem(src, ad, True, field_types)
+            if ad.name.startswith(ROW_ALLOC_PREFIX):
+                why, leaves = row_array_problem(src, ad, True, field_types)  # an array of rows: the leaf key is its bounds (decision 0064 item 6, Part E)
+            else:
+                why, leaves = aggregate_array_problem(src, ad, True, field_types)
             if why is not None:
                 continue  # `lint_array_allocations` reports it
             want = {(chain, f"{kind}_{t}") for chain, t in leaves.items() for kind in "vd"}
@@ -4615,8 +5210,8 @@ def lint_scope_exits(src: Source, decls: list[Decl], add: Callable[[int, str], N
             if len(set(got)) != len(got):
                 add(run[0][0], f"{what} over `{x}` give a (receiver, field) row twice (decision 0064 item 6)")
             elif set(got) != want:
-                missing = sorted(want - set(got))
-                extra = sorted(set(got) - want)
+                missing = sorted(want - set(got), key=str)
+                extra = sorted(set(got) - want, key=str)
                 add(run[0][0], f"{what} over `{x}` are not the rows of its allocation (line {at}): "
                     + (f"missing {missing[0]}" if missing else f"unexpected {extra[0]}") + " (decision 0064 item 6: every way out exhales exactly what the allocation gave)")
             bad = [r for r in run if r[5] != "0" or (count is not None and r[6] != str(count))]
@@ -4715,7 +5310,7 @@ def lint_range_length_facts(src: Source, decls: list[Decl], add: Callable[[int, 
             if q is not None:
                 cs = _squash(q[3])
                 if not q[2] and "len(member(" in cs:
-                    keys, why = range_lens_members(cs, f"loc({_squash(q[1])},{q[0]})")
+                    keys, why = range_lens_members(cs, f"loc({_squash(q[1])},{q[0]})", scalar_arrays=True)
                     if why is None and keys is not None:
                         xm = BLOCK_BASE_RE.match(_squash(q[1]))
                         lens[(m.group("kw"), xm.group(1) if xm else "", q[4], q[5])] = (n, set(keys))
@@ -4799,6 +5394,1361 @@ def lint_array_copy_calls(src: Source, decls: list[Decl], add: Callable[[int, st
             why = array_copy_call_problem(src, d, n, m.group("name")[len(ARR_COPY_PREFIX):], args)
             if why is not None:
                 add(n, f"`{m.group('name')}` is called without its rows (decision 0063 item 13): {why}")
+
+
+# ---------------------------------------------------------------------------
+# Part E (decision 0064 items 3, 6, 13 and 17): arrays of arrays
+# ---------------------------------------------------------------------------
+# A matrix `T m[N][M]` is an array of N rows, a row an array object in its own block: element `i` is the slot `loc(B, i)`, its row the block `member(loc(B, i), 0)`, and the
+# row's cell `j` is `loc(member(loc(B, i), 0), j)` (decision 0028 item 16).  A LEAF PATH runs through INDEX STEPS, and a quantifier over one has ONE BOUND VARIABLE per index step,
+# in order of the steps, each over `0 <= b && b < <literal>` (the first over the range of the array's own slots); the receiver of a row is a chain of `loc(member(<ref>, <literal>), <bound
+# variable or 0>)` steps from `loc(block_of(X), <the first bound variable>)` and is the row's trigger.  Two parts stand here: (1) the trusted allocation of an array of rows and its zero
+# fill, pinned by their NAME, which spells the cell type and every bound (`alloc_arr_row_int_3`: n rows of `int[3]`; `alloc_arr_row_int_3_4`: n elements `int[3][4]`), so that the clause
+# set is generated and compared, nothing in it is read from the clauses themselves; (2) the quantified rows over a leaf with two or three bound variables (`parse_index_row`), judged
+# where `lint_quantified_rows` meets them (`index_row_problem`), and tied to the length facts of the blocks their inner binders index (`lint_index_length_facts`) and, over a local matrix,
+# to its allocation (`lint_scope_exits`).  The lint admits nothing here that a one-binder rule refuses: a row with a second binder is a new shape, and every other shape of a row keeps its
+# old rule.  Depth 4 (four bound variables) is refused: the record rejects it (item 2, M8).
+ROW_ALLOC_PREFIX = "alloc_arr_row_"
+ROW_ZERO_PREFIX = "zero_arr_row_"
+MAX_INDEX_BINDERS = 3
+_BINDER_LIST_RE = re.compile(rf"^\s*forall\s+(?P<bs>{IDENT}\s*:\s*Int(?:\s*,\s*{IDENT}\s*:\s*Int)*)\s*::")
+_INDEX_STEP_RE = re.compile(rf"^loc\(member\((?P<inner>.*),(?P<lit>[0-9]+)\),(?P<idx>{IDENT}|0)\)$")
+_INDEX_ROOT_RE = re.compile(rf"^loc\(block_of\((?P<x>{IDENT})\),(?P<idx>{IDENT})\)$")
+_ROW_FORMALS = frozenset({"r", "n", "rd", "d", "s"})
+
+
+def row_array_spelling(name: str, field_types: dict[str, str]) -> tuple[str, list[int]] | str:
+    """(the cell suffix `t`, the bounds [b1, ...]) of `alloc_arr_row_<t>_<b1>[_<b2>]` or `zero_arr_row_...`, or why the name spells none.  The split of the trailing numbers into
+    the cell suffix and the bounds is resolved against the declared fields (`v_<t>` and `d_<t>`); a name with no split, or more than one, is refused (never guessed)."""
+    tail = name[len(ROW_ALLOC_PREFIX if name.startswith(ROW_ALLOC_PREFIX) else ROW_ZERO_PREFIX):]
+    tokens = tail.split("_")
+    numeric = 0
+    while numeric < len(tokens) - 1 and re.fullmatch(r"[1-9][0-9]*", tokens[len(tokens) - 1 - numeric]):
+        numeric += 1
+    if numeric == 0:
+        return f"the name `{name}` spells no bound (`<prefix><cell suffix>_<bound>[_<bound>]`)"
+    found: list[tuple[str, list[int]]] = []
+    for k in range(1, numeric + 1):
+        suffix = "_".join(tokens[:len(tokens) - k])
+        if suffix and f"v_{suffix}" in field_types and f"d_{suffix}" in field_types:
+            found.append((suffix, [int(x) for x in tokens[len(tokens) - k:]]))
+    if not found:
+        return f"the name `{name}` spells no declared cell suffix (`field v_<t>` and `field d_<t>`) before its bounds"
+    if len(found) > 1:
+        return f"the name `{name}` is ambiguous: it splits into a cell suffix and bounds in {len(found)} ways ({', '.join(f'`{s}`' for s, _b in found)})"
+    suffix, bounds = found[0]
+    if len(bounds) + 1 > MAX_INDEX_BINDERS:
+        return f"`{name}` has {len(bounds) + 1} index steps: a leaf path of depth 4 or more is rejected (decision 0064 item 2, M8)"
+    return suffix, bounds
+
+
+def _row_places(bounds: list[int], b: list[str]) -> list[str]:
+    places = [f"loc(block_of(r), {b[0]})"]
+    for k in range(len(bounds)):
+        places.append(f"loc(member({places[-1]}, 0), {b[k + 1]})")
+    return places
+
+
+def _row_quantifier(b: list[str], bounds: list[int], level: int, trigger: str, body: str) -> str:
+    ranges = [f"((0 <= {b[0]}) && ({b[0]} < n))"] + [f"((0 <= {b[k]}) && ({b[k]} < {bounds[k - 1]}))" for k in range(1, level + 1)]
+    return f"forall {', '.join(f'{x}: Int' for x in b[:level + 1])} :: {{ {trigger} }} ({' && '.join(ranges)}) ==> {body}"
+
+
+def row_array_clauses(alloc: bool, t: str, bounds: list[int], zero: str) -> list[tuple[str, str]]:
+    """The (keyword, text) clauses of `alloc_arr_row_<t>_<bounds>` and of its zero fill (decision 0064 items 3 and 6, S48 (g), (m) and the `zero_arr` fixtures), over the canonical
+    binders `#0`, `#1`, `#2`: the length fact of each row level over the binders above it, then per leaf of the element the value permission, the flag permission and `!flag` (the
+    zero fill: its `requires` are the two permissions and its `ensures` the same two, the zero value and the flag set), each (receiver, field) once."""
+    b = ["#0", "#1", "#2"]
+    places = _row_places(bounds, b)
+    leaf = places[-1]
+    depth = len(bounds)
+    out: list[tuple[str, str]] = []
+    if alloc:
+        out.append(("requires", "1 <= n"))
+        out.append(("ensures", "((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"))
+        for lvl in range(depth):
+            out.append(("ensures", _row_quantifier(b, bounds, lvl, places[lvl], f"len(member({places[lvl]}, 0)) == {bounds[lvl]}")))
+        out.append(("ensures", "(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"))
+        for body in (f"acc({leaf}.v_{t})", f"acc({leaf}.d_{t})", f"(!{leaf}.d_{t})"):
+            out.append(("ensures", _row_quantifier(b, bounds, depth, leaf, body)))
+    else:
+        out.append(("requires", "((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)"))
+        for body in (f"acc({leaf}.v_{t})", f"acc({leaf}.d_{t})"):
+            out.append(("requires", _row_quantifier(b, bounds, depth, leaf, body)))
+        for body in (f"acc({leaf}.v_{t})", f"acc({leaf}.d_{t})", f"({leaf}.v_{t} == {zero})", f"{leaf}.d_{t}"):
+            out.append(("ensures", _row_quantifier(b, bounds, depth, leaf, body)))
+    return out
+
+
+def canonical_binders(text: str) -> tuple[str | None, str]:
+    """(why not, the text with its quantifier's bound variables renamed `#0`, `#1`, ... by position): the binders are distinct and no formal of a trusted method; the rename is by
+    whole token (`i` and `l` also occur inside `loc`, `lvloc` and `v_int`).  A text with no quantifier is returned as it is."""
+    m = _BINDER_LIST_RE.match(text)
+    if m is None:
+        return None, text
+    names = [x.split(":")[0].strip() for x in m.group("bs").split(",")]
+    if len(set(names)) != len(names):
+        return f"the bound variables {names} are not distinct", text
+    if set(names) & _ROW_FORMALS:
+        return f"a bound variable is named like a formal (`{sorted(set(names) & _ROW_FORMALS)[0]}`): the range would not be the one written", text
+    place = {name: f"#{i}" for i, name in enumerate(names)}
+    renamed = re.sub(IDENT, lambda mm: place.get(mm.group(0), mm.group(0)), text)
+    return None, renamed
+
+
+def row_array_problem(src: Source, d: Decl, alloc: bool, field_types: dict[str, str]) -> tuple[str | None, dict[tuple[tuple[int, int], ...], str]]:
+    """(why the trusted method `d` (an `alloc_arr_row_...` when `alloc`, else its `zero_arr_row_...`) is not the allocation or zero fill its name spells, or None; the leaf it
+    states: the key `((0, b1), (0, b2), ...)` of its index steps -> the cell suffix)."""
+    none: dict[tuple[tuple[int, int], ...], str] = {}
+    if d.has_body:
+        return "it has a body (a trusted method is bodyless)", none
+    spelling = row_array_spelling(d.name, field_types)
+    if isinstance(spelling, str):
+        return spelling, none
+    t, bounds = spelling
+    lines = [(n, src.code[n - 1]) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
+    header = " ".join(lines[0][1].split())
+    want_header = f"method {d.name}(n: Int) returns (r: Ref)" if alloc else f"method {d.name}(r: Ref, n: Int)"
+    if header != want_header:
+        return f"its header is not `{want_header}`", none
+    if " ".join(lines[-1][1].split()) != "decreases _":
+        return "it does not end with `decreases _`", none
+    want = [(kw, norm_viper(text)) for kw, text in row_array_clauses(alloc, t, bounds, ZERO_LITERAL.get(field_types[f"v_{t}"], "?"))]
+    got: list[tuple[str, str]] = []
+    for _n, code in lines[1:-1]:
+        c = _clause_split(code)
+        if c is None:
+            return f"a line that is not a `requires` or `ensures` clause: `{' '.join(code.split())}`", none
+        kw, _text = c
+        raw = re.match(r"^\s*(?:requires|ensures)\s+(.*)$", code).group(1)
+        why, renamed = canonical_binders(raw)
+        if why is not None:
+            return f"`{kw} {' '.join(raw.split())}`: {why}", none
+        text = norm_viper(renamed)
+        got.append((kw, "1<=n" if text == "n>=1" else text))
+    seen: set[tuple[str, str]] = set()
+    for c in got:
+        if c in seen:
+            return f"`{c[0]} {c[1]}` twice (each (receiver, field) is given once, decision 0064 item 6)", none
+        seen.add(c)
+    extra = [c for c in got if c not in want]
+    missing = [c for c in want if c not in got]
+    if extra or missing:
+        return (f"its clauses are not the ones its name spells (a cell `{t}`, bounds {bounds}, over {len(bounds) + 1} bound variables, decision 0064 items 3 and 6)"
+                + (f"; unexpected `{extra[0][0]} {extra[0][1]}`" if extra else "") + (f"; missing `{missing[0][0]} {missing[0][1]}`" if missing else "")), none
+    return None, {tuple((0, b) for b in bounds): t}
+
+
+
+_INDEX_HEAD_RE = re.compile(rf"^forall\s+(?P<bs>{IDENT}\s*:\s*Int(?:\s*,\s*{IDENT}\s*:\s*Int)*)\s*::\s*\{{\s*(?P<trigger>[^{{}}]*?)\s*\}}\s*(?P<body>.*)$", re.S)
+
+
+@dataclasses.dataclass
+class IndexRow:
+    """A quantified row over a leaf with one bound variable per index step (decision 0064 item 17): `binders` in order, `ranges` (lo, hi) normalized, one per binder; `x` the variable
+    of `loc(block_of(X), <first binder>)`; `steps` the (member literal, index: a binder name or `0`) of every step after the root slot; `recv` the trigger, which is the row's cell (or
+    the place a length fact is about); `extras` the antecedent conjuncts after the ranges, those of a consequent implication included (`R ==> (A ==> B)` is `R && A ==> B`)."""
+    binders: list[str]
+    ranges: list[tuple[str, str]]
+    x: str
+    steps: list[tuple[int, str]]
+    recv: str
+    extras: list[str]
+    cons: str
+
+
+def parse_index_receiver(text: str) -> tuple[str, str, list[tuple[int, str]]] | None:
+    """(X, the first binder, the steps) of `loc(member(... loc(block_of(X), b0) ...), idx)`, `text` normalized; None if it is not that chain."""
+    steps: list[tuple[int, str]] = []
+    cur = text
+    while (m := _INDEX_STEP_RE.match(cur)) is not None:
+        steps.append((int(m.group("lit")), m.group("idx")))
+        cur = m.group("inner")
+    root = _INDEX_ROOT_RE.match(cur)
+    if root is None or root.group("idx") == "0":
+        return None
+    steps.reverse()
+    return root.group("x"), root.group("idx"), steps
+
+
+def parse_index_row(text: str) -> IndexRow | None:
+    """What follows the keyword of a clause or statement, WITHOUT its guard (`split_guard`): `forall b0: Int, b1: Int ... :: { R } ranges ==> CONSEQUENT` with R the receiver of
+    `parse_index_receiver` whose index steps are exactly the bound variables in order, the antecedent `lo <= b0 && b0 < hi` and for each other binder `0 <= b && b < <literal>`, the ranges
+    of the first binder reading no heap.  Four or more binders parse too (the verdict refuses them).  None if it is not that shape."""
+    head = _INDEX_HEAD_RE.match(text.strip())
+    if head is None:
+        return None
+    binders = [x.split(":")[0].strip() for x in head.group("bs").split(",")]
+    recv = norm_viper(head.group("trigger"))
+    parsed = parse_index_receiver(recv)
+    if parsed is None:
+        return None
+    x, first, steps = parsed
+    index_names = [idx for _lit, idx in steps if idx != "0"]
+    if len(set(binders)) != len(binders) or [first] + index_names != binders:
+        return None
+    parts = _split_top(head.group("body"), "==>")
+    if len(parts) < 2:
+        return None
+    try:
+        ante = [norm_viper(c) for c in _flatten_and(parts[0])]
+    except ValueError:
+        return None
+    if len(ante) < 2 * len(binders):
+        return None
+    ranges: list[tuple[str, str]] = []
+    for i, b in enumerate(binders):
+        lo = re.fullmatch(r"(?P<lo>.+)<=" + re.escape(b), ante[2 * i])
+        hi = re.fullmatch(re.escape(b) + r"<(?P<hi>.+)", ante[2 * i + 1])
+        if lo is None or hi is None:
+            return None
+        ranges.append((lo.group("lo"), hi.group("hi")))
+    if not (_heap_free(ranges[0][0]) and _heap_free(ranges[0][1])):
+        return None
+    extras = ante[2 * len(binders):]
+    cons = _strip_wrap("==>".join(parts[1:]))
+    while True:
+        sides = _split_top(cons, "==>")
+        if len(sides) < 2:
+            break
+        try:
+            extras += [norm_viper(c) for c in _flatten_and(sides[0])]
+        except ValueError:
+            return None
+        cons = _strip_wrap("==>".join(sides[1:]))
+    return IndexRow(binders, ranges, x, steps, recv, extras, cons)
+
+
+def index_leaf_key(ir: IndexRow) -> tuple[tuple[int, int], ...]:
+    """The key of a row's leaf path as an allocation states it: per step (member literal, the count of its index step's range, 0 for a cell step)."""
+    pos = {b: i for i, b in enumerate(ir.binders)}
+    key = []
+    for lit, idx in ir.steps:
+        count = 0
+        if idx != "0":
+            hi = ir.ranges[pos[idx]][1]
+            count = int(hi) if re.fullmatch(r"[0-9]+", hi) else -1
+        key.append((lit, count))
+    return tuple(key)
+
+
+def index_acc(ir: IndexRow) -> tuple[str, str | None] | None:
+    """(field, amount) of `acc(R.f[, amount])` with R the row's receiver, or None."""
+    m = re.fullmatch(rf"acc\({re.escape(ir.recv)}\.(?P<f>[vd]_[\w$']+)(?:,(?P<amt>.*))?\)", norm_viper(ir.cons))
+    return None if m is None else (m.group("f"), m.group("amt"))
+
+
+def index_row_shape(ir: IndexRow) -> tuple[str, str, str] | None:
+    """(shape, field suffix or detail, old label) of a row's consequent: `acc` (suffix = the field, `v_t` or `d_t`), `flag` (`R.d_t`), `range` (`R.d_t ==> lo <= R.v_t <= hi`), `range_bare` (`lo <= R.v_t <= hi` alone: a `requires`, `ensures` or `assert` row only, as emitted for a range over rows; a loop invariant's form of it is not admitted until a lowering emits one),
+    `kept_flag` (`old(R.d_t) ==> R.d_t`, labelled or not), `kept_value` (`R.v_t == old[L](R.v_t)`) and `lens` (`len(member(R, j)) == M`: detail `j:M`); None for anything else."""
+    cell, cons = ir.recv, norm_viper(ir.cons)
+    if (acc := index_acc(ir)) is not None:
+        return ("acc", acc[0], "") if not ir.extras else None
+    if not ir.extras and (m := re.fullmatch(re.escape(cell) + r"\.d_(?P<t>[\w$']+)", cons)) is not None:
+        return "flag", m.group("t"), ""
+    if len(ir.extras) == 1 and (m := re.fullmatch(re.escape(cell) + r"\.d_(?P<t>[\w$']+)", ir.extras[0])) is not None \
+            and _std_type_range(ir.cons, cell, m.group("t")):
+        return "range", m.group("t"), ""
+    # the type's range ALONE (decision 0064 item 7: per leaf path the permissions, the flags and the type range, each a quantifier of its own; the one-binder rows of 0060 item 16 state it
+    # alone as well): the same standard range of the cell's own field, no antecedent beyond the ranges
+    if not ir.extras and (m := re.search(re.escape(cell) + r"\.v_(?P<t>[\w$']+)", cons)) is not None and _std_type_range(ir.cons, cell, m.group("t")):
+        return "range_bare", m.group("t"), ""
+    if len(ir.extras) == 1 and (m := re.fullmatch(r"old(?:\[(?P<l>[\w$']+)\]\(?|\()" + re.escape(cell) + r"\.d_(?P<t>[\w$']+)\)?", ir.extras[0])) is not None \
+            and cons == f"{cell}.d_{m.group('t')}":
+        return "kept_flag", m.group("t"), m.group("l") or ""
+    if not ir.extras and (m := re.fullmatch(re.escape(cell) + r"\.v_(?P<t>[\w$']+)==old\[(?P<l>[\w$']+)\]\(?" + re.escape(cell) + r"\.v_(?P=t)\)?", cons)) is not None:
+        return "kept_value", m.group("t"), m.group("l")
+    if not ir.extras and (m := re.fullmatch(r"len\(member\(" + re.escape(cell) + r",(?P<j>[0-9]+)\)\)==(?P<m>[1-9][0-9]*)", cons)) is not None:
+        return "lens", f"{m.group('j')}:{m.group('m')}", ""
+    return None
+
+
+ROW_KINDS = {
+    "assert": {"acc", "flag", "range", "range_bare", "lens"},
+    "exhale": {"acc"},
+    "invariant": {"acc", "kept_flag", "range", "kept_value"},
+    "requires": {"acc", "flag", "range", "range_bare", "lens"},
+    "ensures": {"acc", "flag", "range", "range_bare", "lens", "kept_flag"},
+}
+
+
+def row_allocs(src: Source, d: Decl, decls: list[Decl]) -> dict[str, tuple[int, str, list[int], str]]:
+    """The local matrices of method `d`: X -> (the line of `X := alloc_arr_row_...(N)`, N as written, the bounds, the cell suffix), of the allocations whose method is pinned
+    (`row_array_problem`); a variable assigned twice is no entry."""
+    by_name = {e.name: e for e in decls if e.kind == "method"}
+    field_types = array_field_types(src)
+    out: dict[str, tuple[int, str, list[int], str]] = {}
+    seen: dict[str, int] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        m = ALLOC_ARR_CALL_RE.match(src.code[n - 1])
+        if m is None:
+            continue
+        seen[m.group("v")] = seen.get(m.group("v"), 0) + 1
+        ad = by_name.get(m.group("alloc"))
+        if ad is None or not m.group("alloc").startswith(ROW_ALLOC_PREFIX) or row_array_problem(src, ad, True, field_types)[0] is not None:
+            continue
+        spelling = row_array_spelling(m.group("alloc"), field_types)
+        if not isinstance(spelling, str):
+            out[m.group("v")] = (n, norm_viper(m.group("n")), spelling[1], spelling[0])
+    return {x: v for x, v in out.items() if seen[x] == 1}
+
+
+def agg_row_allocs(src: Source, d: Decl, decls: list[Decl]) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+    """The local arrays of structures with an ARRAY LEAF in method `d` (decision 0064 items 3, 6 and 17, Part E slice 3c): X -> (the line of `X := alloc_arr_<E>(N)`, N as written, {leaf key: the
+    leaf's field suffix}) of the allocations whose method is pinned (`aggregate_array_problem`) and states at least one array leaf; a leaf key is `index_leaf_key`'s: per step (member, 0) for a
+    structure or cell step, (member, M) for the array member's index step; a variable assigned twice is no entry."""
+    by_name = {e.name: e for e in decls if e.kind == "method"}
+    field_types = array_field_types(src)
+    out: dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]] = {}
+    seen: dict[str, int] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        m = ALLOC_ARR_CALL_RE.match(src.code[n - 1])
+        if m is None:
+            continue
+        seen[m.group("v")] = seen.get(m.group("v"), 0) + 1
+        ad = by_name.get(m.group("alloc"))
+        if ad is None or m.group("alloc").startswith(ROW_ALLOC_PREFIX) or not any("member(" in src.code[k - 1] for k in range(ad.line, ad.end_line + 1)):
+            continue
+        why, leaves = aggregate_array_problem(src, ad, True, field_types)
+        if why is not None:
+            continue
+        table: dict[tuple[tuple[int, int], ...], str] = {}
+        for key, t in leaves.items():
+            table[tuple((c, 0) for c in key) if all(isinstance(c, int) for c in key) else key] = t
+        if any(len(k) > 0 and k[-1][1] > 0 for k in table):
+            out[m.group("v")] = (n, norm_viper(m.group("n")), table)
+    return {x: v for x, v in out.items() if seen[x] == 1}
+
+
+def agg_place_problem(ir: IndexRow, agg: tuple[int, str, dict[tuple[tuple[int, int], ...], str]]) -> tuple[str | None, IndexRow, tuple[int, str, list[int], str] | None]:
+    """The tie of a row over the block of a local array of structures with an array leaf to its pinned allocation (decision 0064 items 3, 6 and 17): the row's leaf key (its members and the
+    count of every index step) must be a leaf the allocation states, in the allocation's own N.  Returns (why not, or None; the row with its member literals zeroed and the `alloc` tuple
+    `index_row_problem` takes for a local matrix: the first range, the counts and the field of the leaf are then judged by its unedited rules)."""
+    at, count, leaves = agg
+    key = index_leaf_key(ir)
+    suffix = leaves.get(key)
+    if suffix is None:
+        return (f"the receiver of a row over the array of structures `{ir.x}` is not a leaf of its allocation (line {at}) with these members and counts: {key} "
+                f"(its leaves: {sorted(leaves)}; decision 0064 items 3 and 6)"), ir, None
+    plain = dataclasses.replace(ir, steps=[(0, idx) for _lit, idx in ir.steps])
+    return None, plain, (at, count, [c for _lit, c in key], suffix)
+
+
+def global_matrix_places(src: Source, d: Decl, shapes: dict[str, tuple[int, int, str]],
+                         mshapes: dict[tuple[str, int], tuple[int, int, str]] | None = None) -> dict[str, tuple[int, str, list[int], str]]:
+    """The array places of global matrices in method `d` (decision 0064 item 9, slice 3a): X -> (the line, N, [M], the cell suffix) of the locals that the body assigns exactly
+    once, `X := loc(GB_g(), 0)` of a global matrix `g` of `shapes` (`matrix_global_shapes`).  The rows over `block_of(X)` run over the group's own rows and columns."""
+    assigned: dict[str, list[tuple[int, str]]] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        code = src.code[n - 1]
+        am = LOCAL_ASSIGN_RE.match(code)
+        if am is not None:
+            targets = [t.strip() for t in am.group("lhs").split(",")]
+            for t in targets:
+                assigned.setdefault(t, []).append((n, norm_viper(am.group("rhs")) if len(targets) == 1 else "<multi>"))
+            continue
+        vm = LOCAL_VAR_INIT_RE.match(code)
+        if vm is not None:
+            assigned.setdefault(vm.group("x"), []).append((n, norm_viper(vm.group("rhs"))))
+    out: dict[str, tuple[int, str, list[int], str]] = {}
+    for x, rs in assigned.items():
+        gm = re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", rs[0][1]) if len(rs) == 1 else None
+        if gm is not None and gm.group(1) in shapes:
+            n_rows, cols, t = shapes[gm.group(1)]
+            out[x] = (rs[0][0], str(n_rows), [cols], t)
+        mg = re.fullmatch(r"loc\(member\(loc\((GB_[\w$']+)\(\),0\),([0-9]+)\),0\)", rs[0][1]) if len(rs) == 1 else None
+        if mg is not None and mshapes and (mg.group(1), int(mg.group(2))) in mshapes:
+            # a structure global's matrix member (decision 0064 items 9 and 17, slice 3b-3): the same place as a global matrix's, over the member's own counts
+            n_rows, cols, t = mshapes[(mg.group(1), int(mg.group(2)))]
+            out[x] = (rs[0][0], str(n_rows), [cols], t)
+    return out
+
+
+def matrix_member_shapes(src: Source, decls: list[Decl]) -> dict[str, dict[tuple[int, ...], tuple[int, int, str]]]:
+    """The matrix members of the pinned structure allocations of the unit (decision 0064 items 3, 5 and 17, Part E slice 3b): `alloc_struct_<n>_<tag>` -> {member chain (k1, ..., k): (N rows, M
+    columns, the cell's field suffix)}, read from the clauses `len(member(<chain>, k)) == N`, the row-length facts with a literal M, and the first of the three two-binder rows
+    (`matrix_member_rows` judges them; a structure whose allocation has a problem has no entry).  A chain of one step is a member of the root structure; a longer one runs through by-value
+    structure members, whose own slots the pinned allocation states (`struct_allocation_problem`: a nested struct member's block has `len == 1` and nothing else is allowed in its place)."""
+    out: dict[str, dict[tuple[int, ...], tuple[int, int, str]]] = {}
+    for d in decls:
+        if d.kind != "method" or not d.name.startswith(ALLOC_PREFIX) or not STRUCT_ALLOC_RE.match(d.name[len(ALLOC_PREFIX):]):
+            continue
+        if struct_allocation_problem(src, d, d.name[len(ALLOC_PREFIX):]) is not None:
+            continue
+        clauses = [t for kw, _l, t in clause_texts(src, d) if kw == "ensures"]
+        for i, c in enumerate(clauses[:-2]):
+            m = re.fullmatch(r"len\((?P<m>member\(.*\))\)==(?P<n>[0-9]+)", norm_viper(c))
+            key = parse_struct_member(m.group("m")) if m else None
+            q1 = parse_block_row(clauses[i + 1]) if key is not None else None
+            if q1 is None:
+                continue
+            lm = re.fullmatch(rf"len\(member\(loc\({re.escape(q1['b'])},{re.escape(q1['k'])}\),0\)\)==(?P<m>[1-9][0-9]*)", q1["cons"])
+            if lm is None or i + 2 >= len(clauses):
+                continue
+            why, renamed = canonical_binders(clauses[i + 2])
+            mv = re.fullmatch(r"forall#0:Int,#1:Int::.*==>acc\(loc\(member\(loc\(.*,#0\),0\),#1\)\.v_(?P<t>[\w$']+)\)", norm_viper(renamed)) if why is None else None
+            if mv is not None and matrix_member_rows([f"ensures {x}" for x in clauses], i + 2, q1, key, int(m.group("n")), {"v": {mv.group("t")}, "d": {mv.group("t")}}) == (i + 5, mv.group("t")):
+                out.setdefault(d.name[len(ALLOC_PREFIX):], {})[key] = (int(m.group("n")), int(lm.group("m")), mv.group("t"))
+    return out
+
+
+def member_matrix_places(src: Source, d: Decl, shapes: dict[str, dict[tuple[int, ...], tuple[int, int, str]]]) -> dict[str, tuple[int, str, list[int], str]]:
+    """The array places of matrix MEMBERS of local structures in method `d` (decision 0064 items 5, 6 and 17, Part E slice 3b): X -> (the line, N, [M], the cell suffix) of the locals that the
+    body assigns exactly once, `X := loc(<member chain>, 0)` (`member(V, k)`, or `member(loc(member(V, k1), 0), k2)` ... through by-value structure members) with V a local that the body assigns
+    exactly once, `V := alloc_struct_<n>_<tag>()` of a pinned allocation whose member chain is a matrix of `shapes`.  The rows over `block_of(X)` run over the member's own rows and columns, as a
+    local matrix's over its allocation's."""
+    assigned: dict[str, list[tuple[int, str]]] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        code = src.code[n - 1]
+        am = LOCAL_ASSIGN_RE.match(code)
+        if am is not None:
+            targets = [t.strip() for t in am.group("lhs").split(",")]
+            for t in targets:
+                assigned.setdefault(t, []).append((n, norm_viper(am.group("rhs")) if len(targets) == 1 else "<multi>"))
+            continue
+        vm = LOCAL_VAR_INIT_RE.match(code)
+        if vm is not None:
+            assigned.setdefault(vm.group("x"), []).append((n, norm_viper(vm.group("rhs"))))
+    structs: dict[str, str] = {}
+    for v, rs in assigned.items():
+        am = ALLOC_CALL_RE.match(rs[0][1]) if len(rs) == 1 else None
+        if am is not None and am.group("name")[len(ALLOC_PREFIX):] in shapes:
+            structs[v] = am.group("name")[len(ALLOC_PREFIX):]
+    out: dict[str, tuple[int, str, list[int], str]] = {}
+    for x, rs in assigned.items():
+        mm = re.fullmatch(r"loc\((?P<b>member\(.*\)),0\)", rs[0][1]) if len(rs) == 1 else None
+        ch = member_chain(mm.group("b")) if mm is not None else None
+        if ch is not None and ch[0] in structs and tuple(ch[1]) in shapes[structs[ch[0]]]:
+            n_rows, cols, t = shapes[structs[ch[0]]][tuple(ch[1])]
+            out[x] = (rs[0][0], str(n_rows), [cols], t)
+    return out
+
+
+def member_sarr_places(src: Source, d: Decl, decls: list[Decl]) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+    """The array places of the member arrays of structures with an ARRAY LEAF of the structure locals of method `d` (decision 0064 items 3, 6 and 17, Part E slice 3c-4): X -> (the line, N as a literal,
+    {leaf key: the leaf's field suffix}) of the locals that the body assigns exactly once, `X := loc(<member chain K>, 0)` (`member(V, k)`, or through by-value structure members) with V a local that the body
+    assigns exactly once, `V := alloc_struct_<n>_<tag>()` of a pinned allocation whose member K is an array of structures with an array leaf (`_ELEM_LEAVES`: ITS OWN N, counts and fields).  The leaf keys are
+    `agg_row_allocs`' (per step (member, 0) for a cell step, (member, M) for the array leaf's index step), so that `agg_place_problem` judges the rows over `block_of(X)` and `index_row_problem` gets the
+    allocation tuple of a local array of structures, unedited."""
+    assigned: dict[str, list[tuple[int, str]]] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        code = src.code[n - 1]
+        am = LOCAL_ASSIGN_RE.match(code)
+        if am is not None:
+            targets = [t.strip() for t in am.group("lhs").split(",")]
+            for t in targets:
+                assigned.setdefault(t, []).append((n, norm_viper(am.group("rhs")) if len(targets) == 1 else "<multi>"))
+            continue
+        vm = LOCAL_VAR_INIT_RE.match(code)
+        if vm is not None:
+            assigned.setdefault(vm.group("x"), []).append((n, norm_viper(vm.group("rhs"))))
+    structs: dict[str, str] = {}
+    for v, rs in assigned.items():
+        am = ALLOC_CALL_RE.match(rs[0][1]) if len(rs) == 1 else None
+        if am is not None and am.group("name")[len(ALLOC_PREFIX):] in _ELEM_LEAVES:
+            structs[v] = am.group("name")[len(ALLOC_PREFIX):]
+    out: dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]] = {}
+    for x, rs in assigned.items():
+        mm = re.fullmatch(r"loc\((?P<b>member\(.*\)),0\)", rs[0][1]) if len(rs) == 1 else None
+        ch = member_chain(mm.group("b")) if mm is not None else None
+        if ch is None or ch[0] not in structs:
+            continue
+        entry = _ELEM_LEAVES[structs[ch[0]]].get(tuple(ch[1]))
+        if entry is None:
+            continue
+        n_el, leaves = entry
+        out[x] = (rs[0][0], str(n_el), {((leaf[0], c if c != 1 else 0),): t for leaf, (c, t) in leaves.items() if len(leaf) == 1})
+    return out
+
+
+def member_sarr_global_leaves(src: Source, decls: list[Decl]) -> dict[tuple[str, tuple[int, ...]], tuple[int, dict[tuple[tuple[int, int], ...], str]]]:
+    """The member arrays of structures with an array leaf of the STRUCTURE GLOBALS of the unit as `program_start`'s groups claim them (Part E slice 3c-4, `member_sarr_global_group`): (`GB_g`, the member's
+    key K) -> (N, {leaf key (`agg_row_allocs`': (member, 0) for a cell leaf, (member, M) for the array leaf): the leaf's field suffix}), read from the length facts clause over `member(loc(GB_g(), 0), K...)`; the
+    array leaf's counts and field are the unit's own allocation's (`_ELEM_ARRAYS`), a cell leaf's field is that of its value-permission row of the group.  A member with a leaf the table cannot place
+    (a nested one, a leaf with no row) is left out."""
+    out: dict[tuple[str, tuple[int, ...]], tuple[int, dict[tuple[tuple[int, int], ...], str]]] = {}
+    for d in decls:
+        if d.kind != "method" or d.name != PROGRAM_START:
+            continue
+        cl = [(kw, ln, t) for kw, ln, t in clause_texts(src, d) if kw == "ensures"]
+        for _kw, _ln, text in cl:
+            q = parse_block_row(text) if norm_viper(text).startswith("forall") else None
+            if q is None or q["lo"] != "0" or "len(member(" not in q["cons"]:
+                continue
+            gm = next(((cand, parse_struct_member(q["b"], f"loc({cand}(),0)")) for cand in set(re.findall(r"GB_[\w$']+", q["b"])) if parse_struct_member(q["b"], f"loc({cand}(),0)") is not None), None)
+            if gm is None or not _member_sarr_lens(gm[1], q):
+                continue
+            g, key = gm
+            slot = f"loc({q['b']},{q['k']})"
+            keys, _why = range_lens_members(q["cons"], slot)
+            counts = range_lens_counts(q["cons"], slot)
+            table: dict[tuple[tuple[int, int], ...], str] = {}
+            for leaf in element_leaves(keys or []):
+                if len(leaf) != 1:
+                    table = {}
+                    break
+                if counts.get(leaf, 1) != 1:
+                    entry = _ELEM_ARRAYS.get((key, leaf))
+                    if entry is None or entry[0] != int(q["hi"]) or entry[1] != counts[leaf]:
+                        table = {}
+                        break
+                    table[((leaf[0], counts[leaf]),)] = entry[2]
+                    continue
+                cell = leaf_receiver(slot, leaf)
+                for _k2, _l2, t2 in cl:
+                    q2 = parse_slot_row(t2)
+                    mv = re.fullmatch(rf"acc\({re.escape(cell)}\.v_(?P<t>[\w$']+)\)", q2["cons"]) if q2 is not None and q2["trig"] == cell else None
+                    if mv is not None:
+                        table[((leaf[0], 0),)] = mv.group("t")
+                        break
+            if table and len(table) == len(element_leaves(keys or [])):
+                out[(g, key)] = (int(q["hi"]), table)
+    return out
+
+
+def member_sarr_global_places(src: Source, d: Decl, leaves: dict[tuple[str, tuple[int, ...]], tuple[int, dict[tuple[tuple[int, int], ...], str]]]) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+    """The array places of the member arrays of structures with an array leaf of structure globals in method `d` (slice 3c-4): X -> (the line, N, {leaf key: field}) of the locals the body assigns exactly once,
+    `X := loc(member(loc(GB_g(), 0), K...), 0)` with (g, K) a member of `leaves` (`member_sarr_global_leaves`).  A global is never exited."""
+    assigned: dict[str, list[tuple[int, str]]] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        code = src.code[n - 1]
+        am = LOCAL_ASSIGN_RE.match(code)
+        if am is not None:
+            targets = [t.strip() for t in am.group("lhs").split(",")]
+            for t in targets:
+                assigned.setdefault(t, []).append((n, norm_viper(am.group("rhs")) if len(targets) == 1 else "<multi>"))
+            continue
+        vm = LOCAL_VAR_INIT_RE.match(code)
+        if vm is not None:
+            assigned.setdefault(vm.group("x"), []).append((n, norm_viper(vm.group("rhs"))))
+    out: dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]] = {}
+    for x, rs in assigned.items():
+        mm = re.fullmatch(r"loc\((?P<b>member\(.*\)),0\)", rs[0][1]) if len(rs) == 1 else None
+        ch = member_chain(mm.group("b")) if mm is not None else None
+        gm = re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", ch[0]) if ch is not None else None
+        if gm is not None and (gm.group(1), tuple(ch[1])) in leaves:
+            n_el, table = leaves[(gm.group(1), tuple(ch[1]))]
+            out[x] = (rs[0][0], str(n_el), table)
+    return out
+
+
+def index_row_problem(kind: str, guard: str | None, plain: bool, ir: IndexRow, perm_formals: frozenset[str],
+                      alloc: tuple[int, str, list[int], str] | None, gplace: tuple[int, str, list[int], str] | None = None,
+                      mplace: tuple[int, str, list[int], str] | None = None) -> tuple[str | None, str]:
+    """(why the quantified row `ir` of a `kind` clause or statement is not one of the rows over a leaf with a bound variable per index step, or None; the label its `old[...]` reads).
+    The shapes (`index_row_shape`) are those of the one-binder rules per kind (`ROW_KINDS`); an `acc` of an `exhale` and a marked `assert` is unguarded with no wrapping and no amount
+    (a heap-free one for the `assert`), a loop's or a clause's has no amount or the method's own `Perm` formal; the first range runs `0 <= b0 < N` or over a pointer
+    `offset_of(X) <= b0 < offset_of(X) + <count>`, every other `0 <= b < <literal>`; over a local matrix the receiver is its leaf, every count its bounds, every field its cell."""
+    if len(ir.binders) > MAX_INDEX_BINDERS:
+        return f"{len(ir.binders)} bound variables: a leaf path of depth 4 or more is rejected (decision 0064 item 2, M8)", ""
+    if ir.x in ir.binders:
+        return f"a bound variable is named like the array `{ir.x}`", ""
+    shape = index_row_shape(ir)
+    if shape is None:
+        return ("the consequent is not `acc(R.f)`, the flag, the type's range, a flag kept, the values kept or a length fact `len(member(R, j)) == M` of the receiver R "
+                "(decision 0064 item 17)"), ""
+    what, detail, label = shape
+    if what not in ROW_KINDS.get(kind, set()):
+        return f"a `{what}` row stands in no `{kind}` (decision 0064 item 17)", ""
+    lo0, hi0 = ir.ranges[0]
+    for b, (lo, hi) in zip(ir.binders[1:], ir.ranges[1:]):
+        if lo != "0" or not re.fullmatch(r"[1-9][0-9]*", hi):
+            return f"the range of `{b}` is not `0 <= {b} && {b} < <literal>`", ""
+    if lo0 == "0":
+        if not re.fullmatch(r"[1-9][0-9]*", hi0):
+            return f"the first range `0 <= {ir.binders[0]} && {ir.binders[0]} < {hi0}` is not over a literal count", ""
+    elif lo0 != f"offset_of({ir.x})" or not hi0.startswith(f"offset_of({ir.x})+") \
+            or any(re.search(rf"(?<![\w$']){re.escape(b)}(?![\w$'])", hi0) for b in ir.binders):
+        return f"the first range is neither `0 <= {ir.binders[0]} < N` nor `offset_of({ir.x}) <= {ir.binders[0]} < offset_of({ir.x}) + <a count that names no bound variable>`", ""
+    if guard is not None:
+        if GUARD_BAD_RE.search(guard) or not guard.strip():
+            return "the guard holds a permission, a quantifier or a labelled `old`", ""
+        if kind == "assert" and not _heap_free(guard) and not _guard_has_only_null_tests(guard):
+            return "the guard of an `assert` row reads the heap", ""
+    if what == "acc":
+        amount = index_acc(ir)[1]
+        if kind in ("exhale", "assert") and (guard is not None or not plain):
+            return f"a permission row of an `{kind}` is unguarded with no wrapping (a marked row, decision 0059 item 7)", ""
+        if kind == "exhale" and amount is not None:
+            return "the `exhale` of a row carries no amount", ""
+        if kind == "assert" and amount is not None and not _heap_free(amount):
+            return "the amount of a marked row reads no heap", ""
+        if kind in ("invariant", "requires", "ensures") and amount is not None and not (re.fullmatch(IDENT, amount) and amount in perm_formals):
+            return "the amount of an `acc` is a `Perm` formal of the method", ""
+    if what in ("kept_flag", "kept_value") and kind == "invariant" and not label:
+        return "a loop's kept row reads a labelled `old[L]`", ""
+    if what == "kept_flag" and kind == "ensures" and label:
+        return "a labelled `old[L]` stands in a loop invariant only", ""
+    if gplace is not None and alloc is None and what != "lens":
+        # the array place of a global matrix (`X := loc(GB_g(), 0)`): its rows run over the group's own count (a literal first range) or over `offset_of(X) ...` (the pointer form),
+        # and every row is over the leaf with the group's column count and its cell (decision 0064 item 9)
+        at, count, bounds, suffix = gplace
+        if lo0 == "0" and hi0 != count:
+            return f"the rows over the global matrix place `{ir.x}` run over `0 <= {ir.binders[0]} && {ir.binders[0]} < {count}`, the group's (line {at})", ""
+        if index_leaf_key(ir) != tuple((0, b) for b in bounds):
+            return f"the receiver of a row over the global matrix place `{ir.x}` is not its leaf with the counts {bounds} (line {at}, decision 0064 item 9)", ""
+        if (detail[2:] if what == "acc" else detail) != suffix:
+            return f"the field of a row over the global matrix place `{ir.x}` is not of its cell `{suffix}` (line {at})", ""
+        alloc = gplace if lo0 == "0" and kind != "exhale" else None  # a global is never exited: no `exhale` row over its place
+    if mplace is not None and alloc is None and gplace is None and what != "lens":
+        # the array place of a local structure's matrix member (`X := loc(member(V, k), 0)`, V a local from `alloc_struct_...`): a row over it runs over the member's own count (a literal
+        # first range) and is over the leaf with the member's column count and its cell, as a local matrix's over its allocation (decision 0064 items 6 and 17); it is exited like one
+        at, count, bounds, suffix = mplace
+        if lo0 == "0" and hi0 != count:
+            return f"the rows over the matrix member place `{ir.x}` run over `0 <= {ir.binders[0]} && {ir.binders[0]} < {count}`, the member's (line {at})", ""
+        if index_leaf_key(ir) != tuple((0, b) for b in bounds):
+            return f"the receiver of a row over the matrix member place `{ir.x}` is not its leaf with the counts {bounds} (line {at}, decision 0064 item 17)", ""
+        if (detail[2:] if what == "acc" else detail) != suffix:
+            return f"the field of a row over the matrix member place `{ir.x}` is not of its cell `{suffix}` (line {at})", ""
+        alloc = mplace if lo0 == "0" else None
+    if lo0 == "0" and alloc is None and not (kind == "assert" and what == "acc"):
+        # a literal first range is a local matrix's (its allocation's count) or a marked `assert` permission row's; the one-binder range rows over any other variable run over
+        # `offset_of(X) ...` (`range_atom_row_problem` refuses `0 <= k < N` there unless X is a bound local with the count its block's facts state)
+        return (f"a `{what}` row of a `{kind}` over `0 <= {ir.binders[0]} && {ir.binders[0]} < {hi0}` of `{ir.x}`, which is no local matrix of this method: a literal first range is "
+                "the allocation's, or a marked `assert` permission row's (decision 0064 item 17)"), ""
+    if what == "lens":
+        if len(ir.binders) > 2 or any(lit != 0 for lit, _i in ir.steps):
+            return "a length fact is over the member 0 block of a place with at most two bound variables", ""
+        return None, label
+    if alloc is not None:
+        at, count, bounds, suffix = alloc
+        key = index_leaf_key(ir)
+        if lo0 != "0" or hi0 != count:
+            return f"the rows over the local matrix `{ir.x}` run over `0 <= {ir.binders[0]} && {ir.binders[0]} < {count}`, the allocation's (line {at})", ""
+        if key != tuple((0, b) for b in bounds):
+            return f"the receiver of a row over the local matrix `{ir.x}` is not its leaf with the counts {bounds} (the allocation at line {at}, decision 0064 item 6)", ""
+        if (detail[2:] if what == "acc" else detail) != suffix:
+            return f"the field of a row over the local matrix `{ir.x}` is not of its cell `{suffix}` (the allocation at line {at})", ""
+    elif kind == "exhale":
+        return f"an `exhale` row over `{ir.x}`, which is no local matrix of this method (no `alloc_arr_row_...` call assigns it once)", ""
+    return None, label
+
+
+def index_groups(src: Source, d: Decl) -> set[tuple[str, str, str, str]]:
+    """(keyword, X, first lo, first hi) of every row of method `d` with two or more bound variables: the groups in which a one-binder length fact with a count other than 1 is
+    one of the rows (a row of a structure element counts 1, decision 0043 item 8)."""
+    out: set[tuple[str, str, str, str]] = set()
+    for n in range(d.line, d.end_line + 1):
+        m = QUANT_STMT_RE.match(src.code[n - 1])
+        if m is None:
+            continue
+        _g, body = split_guard(m.group("rest"))
+        ir = parse_index_row(body) if body is not None else None
+        if ir is not None and len(ir.binders) >= 2:
+            out.add((m.group("kw"), ir.x, ir.ranges[0][0], ir.ranges[0][1]))
+    return out
+
+
+def _block_key(ir: IndexRow, upto: int, lit: int) -> tuple:
+    """The block `member(<receiver of steps[:upto]>, lit)` the index step `upto` goes through, binders by position."""
+    pos = {b: i for i, b in enumerate(ir.binders)}
+    return (tuple((l, pos.get(i, -1) if i != "0" else 0) for l, i in ir.steps[:upto]), lit)
+
+
+def lint_index_length_facts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0064 items 3, 7 and 17 (Part E): in a method's `requires` or `ensures`, the rows over the leaves of the elements of one range of one pointer (the same clause kind, base
+    and first range) with a bound variable per index step are tied to the length facts the clause states: each inner bound variable ranges over exactly the count of the block it indexes
+    (`len(member(<place>, j)) == M` over the place's own bound variables, a row of the same group), so that no permission is stated for a cell of a block the facts do not give."""
+    for d in decls:
+        if d.kind != "method" or d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX, ARR_COPY_PREFIX, ALLOC_PREFIX)) or d.name == PROGRAM_START:
+            continue
+        lens: dict[tuple[str, str, str, str], dict[tuple, set[int]]] = {}
+        tied: dict[tuple[str, str, str, str], set[tuple]] = {}
+        rows: dict[tuple[str, str, str, str], list[tuple[int, IndexRow]]] = {}
+        for n in range(d.line, (d.body_line or d.end_line + 1)):
+            m = QUANT_STMT_RE.match(src.code[n - 1])
+            if m is None or m.group("kw") not in ("requires", "ensures"):
+                continue
+            _g, body = split_guard(m.group("rest"))
+            ir = parse_index_row(body) if body is not None else None
+            if ir is None:
+                continue
+            key = (m.group("kw"), ir.x, ir.ranges[0][0], ir.ranges[0][1])
+            shape = index_row_shape(ir)
+            if shape is not None and shape[0] == "lens" and (len(ir.binders) >= 2 or int(shape[1].split(":")[1]) != 1):
+                j, count = (int(v) for v in shape[1].split(":"))
+                lens.setdefault(key, {}).setdefault(_block_key(ir, len(ir.steps), j), set()).add(count)
+            if shape is None and len(ir.binders) == 1 and not ir.steps and not ir.extras:
+                # the length facts of the elements of one range as ONE conjunction (decision 0064 items 3 and 7; slice 3c-2): `len(member(<slot>, j)) == N` for each member block of the element,
+                # accepted by `range_lens_members` (an array member of scalars states the N of the unit's own allocation); a block other than a one-step member of the slot is not read here
+                for lkey, lcount in range_lens_counts(ir.cons, f"loc(block_of({ir.x}),{ir.binders[0]})").items():
+                    if len(lkey) == 1 and lcount != 1:
+                        lens.setdefault(key, {}).setdefault(_block_key(ir, 0, lkey[0]), set()).add(lcount)
+                        tied.setdefault(key, set()).add(_block_key(ir, 0, lkey[0]))
+            if len(ir.binders) >= 2 or (shape is not None and shape[0] == "lens"):
+                rows.setdefault(key, []).append((n, ir))
+        for key, group in rows.items():
+            have = lens.get(key, {})
+            for n, ir in group:
+                pos = {b: i for i, b in enumerate(ir.binders)}
+                for p, (lit, idx) in enumerate(ir.steps):
+                    if idx == "0":
+                        continue
+                    want = int(ir.ranges[pos[idx]][1]) if re.fullmatch(r"[0-9]+", ir.ranges[pos[idx]][1]) else -1
+                    if want not in have.get(_block_key(ir, p, lit), set()):
+                        add(n, f"the row ranges `{idx}` over `0 <= {idx} && {idx} < {ir.ranges[pos[idx]][1]}`, which no length fact of this `{key[0]}` states for the block `member(<place>, {lit})` it indexes "
+                               "(decision 0064 item 17: each inner bound variable ranges over exactly the count its block's length fact states)")
+                        break
+                    if _block_key(ir, p, lit) in tied.get(key, set()) and p == len(ir.steps) - 1:
+                        # the block's count came from a range of structures with an array member of scalars (`range_lens_counts`): the row's cell is of the field of that array member in the allocation
+                        shape = index_row_shape(ir)
+                        want_field = _SCALAR_ARRAY_FIELDS.get((lit,))
+                        got_field = re.sub(r"^[vd]_", "", shape[1]) if shape is not None else None
+                        if shape is not None and shape[0] != "lens" and got_field != want_field:
+                            add(n, f"the row over the array member {lit} of the elements of `{ir.x}` is of the field `{shape[1]}`, not that of the allocation's own array member `{want_field}` "
+                                   "(decision 0064 item 17: a row is tied to its allocation's counts, receiver and field)")
+                            break
+
+
+# Part E, slice 3a (decision 0064 items 9 and 17): the rows of a GLOBAL or `static` local MATRIX in `program_start`.  The block is `GB_g()` and a cell is
+# `loc(member(loc(GB_g(), k), 0), j)`: a quantifier over it has two bound variables (k over the rows, j over the columns) and the cell as its trigger, as the rows over a local
+# matrix (`parse_index_row`) but with a block term at the root.  The group is, in this order, each row its own `ensures`: the length facts of the rows as a clause of their own
+# right after the global facts' (`forall k :: { loc(GB_g(), k) } 0 <= k && k < N ==> len(member(loc(GB_g(), k), 0)) == M`, read by `lint_globals` as the pending length facts of an
+# array of structures and told from it by the next row's two bound variables); the value permission, the flag permission and the flags over `0 <= k < N` and `0 <= j < M`; the
+# values, known: row by row, one conjunct `loc(member(loc(GB_g(), r), 0), c).v_t == v` per listed cell of row r (c from 0, once each), then, when the row's list leaves cells out
+# (or reaches the row with none), ONE one-binder quantifier `c <= j < M ==> loc(member(loc(GB_g(), r), 0), j).v_t == 0` for them (a row whose M cells are all listed has none), and last
+# ONE two-binder quantifier `r <= k < N && 0 <= j < M ==> ... == 0` for the rows no list reaches; unknown (linkage, escape): the cell type's range as one two-binder quantifier over
+# `[0, N) x [0, M)` alone; and last `acc(lvloc(GB_g()).lv)`.
+_GB_INDEX_TRIGGER_RE = re.compile(rf"^loc\(member\(loc\((?P<g>GB_[\w$']+)\(\),(?P<x>{IDENT}|[0-9]+)\),0\),(?P<j>{IDENT})\)$")
+
+
+def parse_gb_index_row(text: str) -> dict | None:
+    """What follows the keyword of a clause of `program_start`: `forall k: Int, j: Int :: { loc(member(loc(GB_g(), k), 0), j) } lo <= k && k < N && 0 <= j && j < M ==> CONSEQUENT` (two
+    binders; the fields `g`, `binders`, `row` None, `lo`, `hi` of k and `jlo`, `jhi` of j) or `forall j: Int :: { loc(member(loc(GB_g(), r), 0), j) } lo <= j && j < M ==> CONSEQUENT` with a
+    literal row r (one binder; `row` = r, `jlo`, `jhi`), plus `cell` (the trigger, normalized) and `cons` (normalized); None for anything else (an extra antecedent, a bound that is
+    not a literal, three binders, a trigger that is not the cell of a row of a global)."""
+    head = _INDEX_HEAD_RE.match(text.strip())
+    if head is None:
+        return None
+    binders = [x.split(":")[0].strip() for x in head.group("bs").split(",")]
+    if len(binders) not in (1, 2) or len(set(binders)) != len(binders):
+        return None
+    recv = norm_viper(head.group("trigger"))
+    m = _GB_INDEX_TRIGGER_RE.match(recv)
+    if m is None or m.group("j") != binders[-1] or m.group("j") in ("0",):
+        return None
+    if len(binders) == 2 and m.group("x") != binders[0]:
+        return None
+    if len(binders) == 1 and not re.fullmatch(r"[0-9]+", m.group("x")):
+        return None
+    parts = _split_top(head.group("body"), "==>")
+    if len(parts) < 2:
+        return None
+    try:
+        ante = [norm_viper(c) for c in _flatten_and(parts[0])]
+    except ValueError:
+        return None
+    if len(ante) != 2 * len(binders):
+        return None
+    bounds: list[tuple[str, str]] = []
+    for i, b in enumerate(binders):
+        lo = re.fullmatch(r"(?P<lo>[0-9]+)<=" + re.escape(b), ante[2 * i])
+        hi = re.fullmatch(re.escape(b) + r"<(?P<hi>[1-9][0-9]*)", ante[2 * i + 1])
+        if lo is None or hi is None:
+            return None
+        bounds.append((lo.group("lo"), hi.group("hi")))
+    cons = norm_viper(_strip_wrap("==>".join(parts[1:])))
+    out: dict = {"g": m.group("g"), "binders": binders, "row": None if len(binders) == 2 else int(m.group("x")), "jlo": bounds[-1][0], "jhi": bounds[-1][1],
+                 "cell": recv, "cons": cons}
+    if len(binders) == 2:
+        out["lo"], out["hi"] = bounds[0]
+    return out
+
+
+def matrix_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fields: dict[str, str], gbs: dict[str, int],
+                        counts: dict[str, dict[tuple[int, ...], int]], lens: tuple[int, dict[str, str]]):
+    """The row group of a global (or `static` local) matrix in `program_start` (see the comment above), starting at clause `i` (the value permission); `lens` is (line, `parse_block_row`)
+    of the length facts clause that preceded it.  Returns what `array_global_group` returns: (the next clause index, (g, N rows, field suffix, [(line, target)], None, None) or None,
+    [(line, why)]); after a problem the rest of the group is skipped (one report)."""
+    problems: list[tuple[int, str]] = []
+    lens_line, q0 = lens
+    m0 = GB_TERM_RE.match(q0["b"])
+    g = m0.group(1) if m0 else ""
+    first = clauses[i][1]
+
+    def fail(ln: int, why: str, at: int):
+        problems.append((ln, f"the row group of a matrix global in `program_start` (decision 0064 item 9): {why}"))
+        j = at
+        while j < end and norm_viper(clauses[j][2]) != f"acc(lvloc({g}()).lv)":
+            j += 1
+        return min(j + 1, end), None, problems
+
+    if m0 is None or g not in gbs:
+        return fail(lens_line, "the length facts are not over a declared `GB_g`", i)
+    n = int(q0["hi"])
+    k0 = q0["k"]
+    lm = re.fullmatch(rf"len\(member\(loc\({re.escape(q0['b'])},{re.escape(k0)}\),0\)\)==(?P<m>[1-9][0-9]*)", q0["cons"])
+    if q0["lo"] != "0" or n < 1 or lm is None:
+        return fail(lens_line, "the length facts are `forall k :: { loc(GB_g(), k) } 0 <= k && k < N ==> len(member(loc(GB_g(), k), 0)) == M` with literals N and M >= 1", i)
+    cols = int(lm.group("m"))
+    t = ""
+    for off, what in enumerate(("the value permission", "the flag permission", "the flags (every one true)")):
+        if i + off >= end:
+            return fail(first, f"the group ends before {what}", i + off)
+        q = parse_gb_index_row(clauses[i + off][2])
+        if q is None or q["row"] is not None or q["g"] != g or q["lo"] != "0" or q["hi"] != str(n) or q["jlo"] != "0" or q["jhi"] != str(cols):
+            return fail(clauses[i + off][1], f"the row after the length facts is not {what} over `0 <= k && k < {n}` and `0 <= j && j < {cols}` with the cell "
+                                             f"`loc(member(loc({g}(), k), 0), j)` as trigger", i + off + 1)
+        cell = q["cell"]
+        if off == 0:
+            mv = re.fullmatch(rf"acc\({re.escape(cell)}\.v_(?P<t>[\w$']+)\)", q["cons"])
+            if mv is None or mv.group("t") not in fields:
+                return fail(clauses[i + off][1], "the first row is not `acc(<cell>.v_t)` of a declared field", i + off + 1)
+            t = mv.group("t")
+        elif q["cons"] != (f"acc({cell}.d_{t})" if off == 1 else f"{cell}.d_{t}"):
+            return fail(clauses[i + off][1], f"the row after the value permission is not {what}", i + off + 1)
+    zero = zero_literal(fields, t)
+    r = c = 0  # the next listed conjunct is the cell c of row r
+    zero_rest = unknown = False
+    targets: list[tuple[int, str | None]] = []
+    j = i + 3
+    while j < end:
+        ln, text = clauses[j][1], norm_viper(clauses[j][2])
+        if text == f"acc(lvloc({g}()).lv)":
+            break
+        if zero_rest or unknown:
+            return fail(ln, "a row after the quantifier of the rows no list reaches or of the unknown value (the group ends with `acc(lvloc(GB_g()).lv)`)", j + 1)
+        q = parse_gb_index_row(clauses[j][2])
+        if q is not None:
+            if q["g"] != g or q["jhi"] != str(cols):
+                return fail(ln, f"a quantifier of the values over another global or past the {cols} columns", j + 1)
+            if q["row"] is not None:
+                # the cells row r's list leaves out: from the cell after the last listed, to the end of the row (the row has no such quantifier when it lists all of its cells)
+                if q["row"] != r or int(q["jlo"]) != c or c >= cols or r >= n:
+                    return fail(ln, f"the quantifier of the cells row {q['row']}'s list leaves out is over row {r}, from the cell {c} (where its listed cells end) to the end of the row", j + 1)
+                if zero is None or q["cons"] != f"{q['cell']}.v_{t}=={zero}":
+                    return fail(ln, f"the quantifier of the cells a row's list leaves out states `{q['cell']}.v_{t} == {zero}`", j + 1)
+                r, c = r + 1, 0
+                j += 1
+                continue
+            if c != 0:
+                return fail(ln, f"a two-binder quantifier of the values while row {r} has {c} of its {cols} cells listed and no quantifier for the rest", j + 1)
+            if q["hi"] != str(n) or q["jlo"] != "0":
+                return fail(ln, f"the quantifier of the values over the rows no list reaches runs up to `k < {n}` over `0 <= j < {cols}`", j + 1)
+            if zero is not None and q["cons"] == f"{q['cell']}.v_{t}=={zero}":
+                if int(q["lo"]) != r:
+                    return fail(ln, f"the zero rest starts at the row `{q['lo']}` but {r} rows are reached by the list (it starts where the list ends)", j + 1)
+                if r >= n:
+                    return fail(ln, "a zero rest although every row is reached", j + 1)
+                zero_rest = True
+            else:
+                good, target = leaf_value(fields, t, q["cell"], q["cons"], counts)
+                # the range of an unknown value is the type's own, not any `lo <= v <= hi` (`leaf_value` takes any literal range): the lowering states the type's range, and a narrower
+                # one in this trusted row would be an assumption about the cell that no caller or callee gave
+                if not good or target is not None or re.fullmatch(rf"{re.escape(q['cell'])}\.v_{re.escape(t)}==[^|&<]+", q["cons"]) \
+                        or not _block_type_range(q["cons"], q["cell"], t):
+                    return fail(ln, f"the quantifier of the values is neither the zero rest (`{q['cell']}.v_{t} == {zero}`) nor the type's range / `WF` of an unknown value", j + 1)
+                if r != 0 or q["lo"] != "0":
+                    return fail(ln, "an unknown value's range quantifier stands alone over `0 <= k && k < N` (no cell is listed)", j + 1)
+                unknown = True
+            j += 1
+            continue
+        cell = f"loc(member(loc({g}(),{r}),0),{c})"
+        em = re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==(?P<v>.+)", text)
+        if em is None:
+            return fail(ln, f"`{text}` is not the listed value `{cell}.v_{t} == c` (the rows are listed from 0 and the cells of a row from 0, once each), a quantifier of the rest or "
+                            f"`acc(lvloc({g}()).lv)`", j + 1)
+        if r >= n:
+            return fail(ln, f"a cell of a row at or past the count {n}", j + 1)
+        good, target = leaf_value(fields, t, cell, text, counts)
+        if not good or "||" in em.group("v") or "<=" in em.group("v"):
+            return fail(ln, f"the listed value `{em.group('v')}` is not a literal of its type, `null` or `loc(GB_h(), 0)` of a declared global", j + 1)
+        targets.append((ln, target))
+        c += 1
+        if c == cols:
+            r, c = r + 1, 0
+        j += 1
+    if j >= end:
+        return fail(clauses[min(i, end - 1)][1], f"the group has no final `acc(lvloc({g}()).lv)`", end)
+    if c != 0:
+        return fail(clauses[j][1], f"row {r} has {c} of its {cols} cells listed and no quantifier for the rest", j + 1)
+    if r < n and not zero_rest and not unknown and zero is not None and fields.get(t) != "Bool":
+        return fail(clauses[j][1], f"no zero rest and no range of an unknown value: the rows from {r} on have no value row", j + 1)
+    if r < n and not zero_rest and not unknown and fields.get(t) == "Bool" and r != 0:
+        return fail(clauses[j][1], f"no zero rest for the rows from {r} on", j + 1)
+    return j + 1, (g, n, t, targets, None, None), problems
+
+
+def _pseudo_name(g: str, key: int | tuple[int, ...]) -> str:
+    """The pseudo global of the matrix member `key` of the structure global `g`: `GB_g_m<k0>` for a member of the structure, `GB_g_m<k0>_<k1>` through a by-value structure member (decision 0064 item 13)."""
+    return f"{g}_m" + "_".join(str(k) for k in ((key,) if isinstance(key, int) else key))
+
+
+def _pseudo_member_text(text: str, g: str, key: int | tuple[int, ...]) -> str:
+    """`text` with the block term of a structure global's matrix member (`member(loc(GB_g(), 0), k0)`, or `member(loc(member(loc(GB_g(), 0), k0), 0), k1)` through a by-value structure member) written as the
+    pseudo global block `GB_g_m<k0>()` (`_pseudo_name`), so that the rows of that member read as the rows of a global matrix (`parse_gb_index_row`, `matrix_global_group`)."""
+    steps = (key,) if isinstance(key, int) else key
+    pattern = rf"loc\(\s*{re.escape(g)}\(\s*\)\s*,\s*0\s*\)"
+    for i, k in enumerate(steps):
+        pattern = rf"member\(\s*{pattern}\s*,\s*{k}\s*\)"
+        if i + 1 < len(steps):
+            pattern = rf"loc\(\s*{pattern}\s*,\s*0\s*\)"
+    return re.sub(pattern, f"{_pseudo_name(g, key)}()", text)
+
+
+def matrix_member_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fields: dict[str, str], gbs: dict[str, int],
+                               counts: dict[str, dict[tuple[int, ...], int]], lens: tuple[int, dict[str, str]], g: str, k0: int | tuple[int, ...]):
+    """Decision 0064 items 3, 9 and 17 (Part E slice 3b-3): the row group of the MATRIX MEMBER k0 of the structure global `g` in `program_start`, starting at clause `i` (the value permission; `lens`
+    is the line and `parse_block_row` of the member's length facts clause that preceded it).  The group is the one of a global matrix (`matrix_global_group`: the value and flag permissions and the
+    flags over `N x M`, the listed values, the rows' rests, the type's own range of an unknown value) with the block `member(loc(GB_g(), 0), k0)` for `GB_g()`: it is judged by the same function
+    on the clauses with that term written as a pseudo global; its liveness cell is the structure's (the cell row before it), so the group ends at the first clause that is no row of it.  N, M and
+    the cell's field must be those of a matrix member k0 of a pinned `alloc_struct_...` of the unit.  Returns what `matrix_global_group` returns, the group's own end in place of its liveness cell."""
+    pseudo = _pseudo_name(g, k0)
+    key = (k0,) if isinstance(k0, int) else tuple(k0)
+    lens_line, q0 = lens
+    lens_text = _pseudo_member_text(f"forall {q0['k']}: Int :: {{ loc({q0['b']}, {q0['k']}) }} (0 <= {q0['k']}) && ({q0['k']} < {q0['hi']}) ==> {q0['raw'] if 'raw' in q0 else q0['cons']}", g, k0)
+    q0p = parse_block_row(lens_text)
+    if q0p is None:
+        return i, None, [(lens_line, "the length facts of a structure global's matrix member are not a row `forall k :: { loc(member(...), k) } 0 <= k && k < N ==> len(member(loc(..., k), 0)) == M`")]
+    extent: list[tuple[str, int, str]] = []
+    j = i
+    while j < end:
+        kw, ln, text = clauses[j]
+        t = _pseudo_member_text(text, g, k0)
+        x = parse_gb_index_row(t)
+        if (x is not None and x["g"] == pseudo) or re.match(rf"loc\(member\(loc\({re.escape(pseudo)}\(\),", norm_viper(t)):
+            extent.append((kw, ln, t))
+            j += 1
+            continue
+        break
+    if not extent:
+        return i, None, [(lens_line, "the length facts of a structure global's matrix member are not followed by its row group (decision 0064 item 9)")]
+    last_ln = extent[-1][1]
+    synthetic = [*extent, ("ensures", last_ln, f"acc(lvloc({pseudo}()).lv)")]
+    gbs2 = dict(gbs)
+    gbs2[pseudo] = 0
+    _next, group, problems = matrix_global_group(synthetic, 0, len(synthetic), fields, gbs2, counts, (lens_line, q0p))
+    if group is None:
+        return i + len(extent), None, problems
+    _g, n, t, targets, _a, _b = group
+    cols = int(re.search(r"==([1-9][0-9]*)$", q0p["cons"]).group(1)) if re.search(r"==([1-9][0-9]*)$", q0p["cons"]) else 0
+    if not (_matrix_pair_ok(key[0], n, cols, t) if len(key) == 1 else (key, n, cols, t) in _MATRIX_CHAIN_PAIRS):
+        return i + len(extent), None, [(lens_line, f"the matrix member {key} of `{g}` has {n} rows, {cols} columns and the cell field `{t}`: no matrix member of a pinned `alloc_struct_...` of this unit "
+                                                    "has these counts, this index and this cell (decision 0064 items 3 and 17)")]
+    return i + len(extent), (g, n, t, targets, key, None), problems
+
+
+def matrix_global_shapes(src: Source, decls: list[Decl]) -> dict[str, tuple[int, int, str]]:
+    """The global matrices of the unit as `program_start`'s groups claim them: `GB_g` -> (N rows, M columns, the cell's field suffix), read from the length facts clause
+    `forall k :: { loc(GB_g(), k) } 0 <= k && k < N ==> len(member(loc(GB_g(), k), 0)) == M` followed, in the same method, by the two-binder value permission over `N x M`
+    (`matrix_global_group` judges the group; a contract's rows are tied to these counts, so a wrong group is reported there and the shape here is the claimed one)."""
+    out: dict[str, tuple[int, int, str]] = {}
+    for d in decls:
+        if d.kind != "method" or d.name != PROGRAM_START:
+            continue
+        pending: dict[str, tuple[int, int]] = {}
+        for kw, _ln, text in clause_texts(src, d):
+            if kw != "ensures":
+                continue
+            q = parse_block_row(text)
+            m0 = GB_TERM_RE.match(q["b"]) if q else None
+            if q is not None and m0 is not None and q["lo"] == "0":
+                lm = re.fullmatch(rf"len\(member\(loc\({re.escape(q['b'])},{re.escape(q['k'])}\),0\)\)==(?P<m>[1-9][0-9]*)", q["cons"])
+                if lm is not None:
+                    pending[m0.group(1)] = (int(q["hi"]), int(lm.group("m")))
+                continue
+            x = parse_gb_index_row(text)
+            if x is not None and len(x["binders"]) == 2 and x["g"] in pending and x["lo"] == "0" and (int(x["hi"]), int(x["jhi"])) == pending[x["g"]]:
+                mv = re.fullmatch(rf"acc\({re.escape(x['cell'])}\.v_(?P<t>[\w$']+)\)", x["cons"])
+                if mv is not None:
+                    out.setdefault(x["g"], (int(x["hi"]), int(x["jhi"]), mv.group("t")))
+    return out
+
+
+def matrix_block_named(text: str, shapes: dict[str, tuple[int, int, str]]) -> str | None:
+    """The global matrix of `shapes` (`GB_g`) whose block term `GB_g()` stands in `text`, or None."""
+    for g in shapes:
+        if re.search(rf"(?<![\w$']){re.escape(g)}\s*\(\s*\)", text):
+            return g
+    return None
+
+
+def matrix_place_names(src: Source, d: Decl, decls: list[Decl], shapes: dict[str, tuple[int, int, str]],
+                       member_shapes: dict[str, dict[tuple[int, ...], tuple[int, int, str]]], mshapes: dict[tuple[str, int], tuple[int, int, str]] | None = None) -> dict[str, str]:
+    """Audit finding 5 (round E2a): every variable of method `d` that the body assigns (any number of times) the place of a MATRIX, as a name -> what it is: `X := alloc_arr_row_...(N)`
+    (a local matrix), `X := loc(GB_g(), 0)` of a global matrix of `shapes`, `X := loc(member(V, k), 0)` with V a local that the body assigns an `alloc_struct_<n>_<tag>()` whose member k is a
+    matrix of `member_shapes`.  A row with ONE bound variable over such a place reads the matrix flat; the places that `row_allocs`, `global_matrix_places` and `member_matrix_places` keep
+    are those assigned once, this keeps every assignment (a place bound twice is no place for a two-binder row, and no place for a flat one either)."""
+    rhs_of: dict[str, list[str]] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        code = src.code[n - 1]
+        am = LOCAL_ASSIGN_RE.match(code)
+        if am is not None:
+            targets = [t.strip() for t in am.group("lhs").split(",")]
+            for t in targets:
+                rhs_of.setdefault(t, []).append(norm_viper(am.group("rhs")) if len(targets) == 1 else "<multi>")
+            continue
+        vm = LOCAL_VAR_INIT_RE.match(code)
+        if vm is not None:
+            rhs_of.setdefault(vm.group("x"), []).append(norm_viper(vm.group("rhs")))
+    structs: dict[str, str] = {}
+    for v, rs in rhs_of.items():
+        for r in rs:
+            cm = ALLOC_CALL_RE.match(r)
+            if cm is not None and cm.group("name")[len(ALLOC_PREFIX):] in member_shapes:
+                structs[v] = cm.group("name")[len(ALLOC_PREFIX):]
+    out: dict[str, str] = {}
+    for x, rs in rhs_of.items():
+        for r in rs:
+            if (cm := re.fullmatch(r"(?P<name>alloc_arr_row_[A-Za-z0-9_$']+)\(.*\)", r)) is not None:
+                out[x] = f"a local matrix (`{cm.group('name')}`)"
+            elif (gm := re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", r)) is not None and gm.group(1) in shapes:
+                out[x] = f"the place of the global matrix `{gm.group(1)}`"
+            elif (mg := re.fullmatch(r"loc\(member\(loc\((GB_[\w$']+)\(\),0\),([0-9]+)\),0\)", r)) is not None and mshapes and (mg.group(1), int(mg.group(2))) in mshapes:
+                out[x] = f"the place of the matrix member {mg.group(2)} of the structure global `{mg.group(1)}`"
+            elif (mm := re.fullmatch(r"loc\((?P<b>member\(.*\)),0\)", r)) is not None and (ch := member_chain(mm.group("b"))) is not None and ch[0] in structs \
+                    and tuple(ch[1]) in member_shapes[structs[ch[0]]]:
+                out[x] = f"the place of the matrix member {'.'.join(str(k) for k in ch[1])} of `{ch[0]}`"
+    return out
+
+
+def matrix_member_global_shapes(src: Source, decls: list[Decl]) -> dict[tuple[str, int], tuple[int, int, str]]:
+    """The matrix members of the structure globals of the unit as `program_start`'s groups claim them: (`GB_g`, member index k0) -> (N rows, M columns, the cell's field suffix), read from the length
+    facts clause over `member(loc(GB_g(), 0), k0)` and the first two-binder permission after it (`matrix_member_global_group` judges the group); only one an allocation's matrix member of the unit
+    confirms (`_MATRIX_PAIRS`) is an entry."""
+    out: dict[tuple[str, int], tuple[int, int, str]] = {}
+    for d in decls:
+        if d.kind != "method" or d.name != PROGRAM_START:
+            continue
+        cl = [(kw, ln, t) for kw, ln, t in clause_texts(src, d) if kw == "ensures"]
+        for idx, (_kw, _ln, text) in enumerate(cl):
+            q = parse_block_row(text)
+            bm = re.fullmatch(r"member\(loc\((GB_[\w$']+)\(\),0\),([0-9]+)\)", q["b"]) if q is not None else None
+            lm = re.fullmatch(rf"len\(member\(loc\({re.escape(q['b'])},{re.escape(q['k'])}\),0\)\)==(?P<m>[1-9][0-9]*)", q["cons"]) if bm is not None else None
+            if q is None or bm is None or lm is None or q["lo"] != "0" or idx + 1 >= len(cl):
+                continue
+            g, k0 = bm.group(1), int(bm.group(2))
+            x = next((xx for _k2, _l2, t2 in cl[idx + 1:] if (xx := parse_gb_index_row(_pseudo_member_text(t2, g, k0))) is not None), None)  # the structure's cell row may stand between
+            if x is None or len(x["binders"]) != 2 or x["g"] != f"{g}_m{k0}" or x["lo"] != "0" or x["hi"] != q["hi"] or x["jlo"] != "0" or x["jhi"] != lm.group("m"):
+                continue
+            mv = re.fullmatch(rf"acc\({re.escape(x['cell'])}\.v_(?P<t>[\w$']+)\)", x["cons"])
+            if mv is not None and _matrix_pair_ok(k0, int(q["hi"]), int(lm.group("m")), mv.group("t")):
+                out.setdefault((g, k0), (int(q["hi"]), int(lm.group("m")), mv.group("t")))
+    return out
+
+
+def gb_matrix_row_problem(kind: str, guard: str | None, body: str, shapes: dict[str, tuple[int, int, str]], perm_formals: frozenset[str]) -> str | None:
+    """Decision 0064 items 9 and 17 (Part E slice 3a): a quantified row of a method's `requires` or `ensures` over a GLOBAL matrix's block term.  None when `body` is no such
+    row (another rule looks at it), "" when it is one, else the reason.  The rows (g a global matrix of `program_start`, N rows, M columns, cell field suffix t, F the cell
+    `loc(member(loc(GB_g(), k), 0), j)` as the trigger): the length facts of the rows, `forall k :: { loc(GB_g(), k) } 0 <= k && k < N ==> len(member(loc(GB_g(), k), 0)) == M`
+    (the M `program_start` states); over `0 <= k < N` and `0 <= j < M` the permission `acc(F.v_t[, a])` or `acc(F.d_t[, a])` (a a `Perm` formal of the method), the flag `F.d_t`, the
+    type's range of `F.v_t` alone or under the flag, and (an `ensures`) `old(F.d_t) ==> F.d_t`.  No count other than the group's, no other field, no part of the matrix."""
+    bq = parse_block_row(body)
+    if bq is not None and GB_TERM_RE.match(bq["b"]) and "len(member(" in bq["cons"]:
+        g = bq["b"][:-2]
+        lm = re.fullmatch(rf"len\(member\(loc\({re.escape(bq['b'])},{re.escape(bq['k'])}\),0\)\)==(?P<m>[1-9][0-9]*)", bq["cons"])
+        if lm is None:
+            return None  # the length facts of an array of structures: the older rule
+        if g not in shapes:
+            return None if lm.group("m") == "1" else f"`{g}` is no global matrix of `program_start`, and a length fact with {lm.group('m')} columns is a matrix's"
+        if guard is not None:
+            return "a guard on the length facts of a global matrix"
+        if bq["lo"] != "0" or int(bq["hi"]) != shapes[g][0] or int(lm.group("m")) != shapes[g][1]:
+            return f"the length facts of `{g}` run over `0 <= k < {shapes[g][0]}` and state {shapes[g][1]} columns, found `{bq['lo']} <= k < {bq['hi']}` and {lm.group('m')}"
+        return ""
+    x = parse_gb_index_row(body)
+    if x is None or len(x["binders"]) != 2:
+        flat = matrix_block_named(body, shapes)
+        if flat is not None:
+            # audit finding 5 (round E2a): a row with one bound variable (or three) over the slots of a matrix's block reads the matrix flat, a row's slot as a cell
+            return (f"a quantified row with {len(x['binders']) if x is not None else 'one or three'} bound variables over the block of the global matrix `{flat}` reads the matrix flat, "
+                    "a row's slot as a cell: over a matrix's block the only one-binder row is the row-length fact, every other row has a bound variable per index step (decision 0064 items 9 and 17)")
+        return None
+    g = x["g"]
+    if g not in shapes:
+        return f"`{g}` is no global matrix of `program_start`"
+    n, cols, t = shapes[g]
+    if guard is not None and (GUARD_BAD_RE.search(guard) or not guard.strip()):
+        return "the guard holds a permission, a quantifier or a labelled `old`"
+    if x["lo"] != "0" or int(x["hi"]) != n or x["jlo"] != "0" or int(x["jhi"]) != cols:
+        return f"the rows over the global matrix `{g}` run over `0 <= k < {n}` and `0 <= j < {cols}`, the group's (decision 0064 item 9)"
+    return _matrix_cons_problem(kind, x["cell"], x["cons"], t, f"`{g}`", perm_formals)
+
+
+def sarr_global_shapes(src: Source, decls: list[Decl]) -> dict[str, tuple[int, dict[int, tuple[int, str]]]]:
+    """The global (or `static` local) arrays of structures with an array member of scalars, as `program_start` states them (Part E slice 3c-3): `GB_g` -> (N elements, {array member a: (M, the element's field suffix)}),
+    read from the length-facts clause `forall k :: { loc(GB_g(), k) } 0 <= k && k < N ==> len(member(loc(GB_g(), k), l)) == 1 && ... && len(member(loc(GB_g(), k), a)) == M` that `_is_sarr_lens` accepts: M and the field are
+    those of the unit's own allocation (`_SCALAR_ARRAY_COUNTS`, `_SCALAR_ARRAY_FIELDS`).  The group's own rows are judged by `sarr_global_group`."""
+    out: dict[str, tuple[int, dict[int, tuple[int, str]]]] = {}
+    for d in decls:
+        if d.kind != "method" or d.name != PROGRAM_START:
+            continue
+        for kw, _l, text in clause_texts(src, d):
+            q = parse_block_row(text) if kw == "ensures" and norm_viper(text).startswith("forall") else None
+            gm = GB_TERM_RE.match(q["b"]) if q is not None else None
+            if q is None or gm is None or q["lo"] != "0" or "len(member(" not in q["cons"] or not _is_sarr_lens(q):
+                continue
+            keys, _why = range_lens_members(q["cons"], f"loc({q['b']},{q['k']})", scalar_arrays=True)
+            arrays = {key[0]: (_SCALAR_ARRAY_COUNTS[key], _SCALAR_ARRAY_FIELDS[key]) for key in (keys or []) if len(key) == 1 and key in _SCALAR_ARRAY_COUNTS and key in _SCALAR_ARRAY_FIELDS}
+            if arrays:
+                out[gm.group(1)] = (int(q["hi"]), arrays)
+    return out
+
+
+def sarr_global_leaves(src: Source, decls: list[Decl]) -> dict[str, tuple[int, dict[tuple[tuple[int, int], ...], str]]]:
+    """The leaves of the elements of the global arrays of structures with an array member of scalars (`sarr_global_shapes`), as `agg_place_problem` takes a table: `GB_g` -> (N, {leaf key (`index_leaf_key`'s:
+    per step (member, 0) for a cell leaf, (member, M) for an array leaf): the field suffix}).  A cell leaf's field is read from the value permission row of its group in `program_start`; a global whose
+    cell leaf has no such row is left out (the group's own rule reports it)."""
+    shapes = sarr_global_shapes(src, decls)
+    out: dict[str, tuple[int, dict[tuple[tuple[int, int], ...], str]]] = {}
+    for d in decls:
+        if d.kind != "method" or d.name != PROGRAM_START:
+            continue
+        clauses = clause_texts(src, d)
+        for g, (n, arrays) in shapes.items():
+            lens = next((parse_block_row(t) for kw, _l, t in clauses if kw == "ensures" and norm_viper(t).startswith("forall") and parse_block_row(t) is not None
+                         and GB_TERM_RE.match(parse_block_row(t)["b"]) and GB_TERM_RE.match(parse_block_row(t)["b"]).group(1) == g and "len(member(" in parse_block_row(t)["cons"]), None)
+            if lens is None:
+                continue
+            slot = f"loc({lens['b']},{lens['k']})"
+            keys, _why = range_lens_members(lens["cons"], slot, scalar_arrays=True)
+            table: dict[tuple[tuple[int, int], ...], str] = {}
+            for leaf in element_leaves(keys or []):
+                if len(leaf) == 1 and leaf[0] in arrays:
+                    table[((leaf[0], arrays[leaf[0]][0]),)] = arrays[leaf[0]][1]
+                    continue
+                cell = leaf_receiver(slot, leaf)
+                for kw, _l, t in clauses:
+                    q = parse_slot_row(t) if kw == "ensures" else None
+                    mv = re.fullmatch(rf"acc\({re.escape(cell)}\.v_(?P<t>[\w$']+)\)", q["cons"]) if q is not None and q["trig"] == cell else None
+                    if mv is not None:
+                        table[tuple((m, 0) for m in leaf)] = mv.group("t")
+                        break
+            if len(table) == len(element_leaves(keys or [])):
+                out[g] = (n, table)
+    return out
+
+
+def sarr_global_places(src: Source, d: Decl, leaves: dict[str, tuple[int, dict[tuple[tuple[int, int], ...], str]]]) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+    """The array places of global arrays of structures with an array member of scalars in method `d` (Part E slice 3c-3): X -> (the line, N, {leaf key: field}) of the locals the body assigns exactly once,
+    `X := loc(GB_g(), 0)` of a `g` of `leaves`.  The rows over `block_of(X)` run over the group's own N and are over its leaves, counts and fields (`agg_place_problem`)."""
+    assigned: dict[str, list[tuple[int, str]]] = {}
+    for n in range(d.body_line or d.line, d.end_line + 1):
+        code = src.code[n - 1]
+        am = LOCAL_ASSIGN_RE.match(code)
+        if am is not None:
+            targets = [t.strip() for t in am.group("lhs").split(",")]
+            for t in targets:
+                assigned.setdefault(t, []).append((n, norm_viper(am.group("rhs")) if len(targets) == 1 else "<multi>"))
+            continue
+        vm = LOCAL_VAR_INIT_RE.match(code)
+        if vm is not None:
+            assigned.setdefault(vm.group("x"), []).append((n, norm_viper(vm.group("rhs"))))
+    out: dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]] = {}
+    for x, rs in assigned.items():
+        gm = re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", rs[0][1]) if len(rs) == 1 else None
+        if gm is not None and gm.group(1) in leaves:
+            n_el, table = leaves[gm.group(1)]
+            out[x] = (rs[0][0], str(n_el), table)
+    return out
+
+
+def _sarr_lens_matches(bq: dict, shape: tuple[int, dict[int, tuple[int, str]]]) -> bool:
+    """Whether the length-facts row `bq` (`parse_block_row` over a global's block `GB_g()`) states exactly the group's own facts: the group's N elements from 0, and every array member of scalars of the
+    shape (`sarr_global_shapes`) with its M, no other count other than 1 (question 375: a count is tied to the group of THIS global, not to any number the unit's table holds)."""
+    n, arrays = shape
+    if bq["lo"] != "0" or int(bq["hi"]) != n:
+        return False
+    counts = range_lens_counts(bq["cons"], f"loc({bq['b']},{bq['k']})")
+    return {key: c for key, c in counts.items() if c != 1} == {(a,): m for a, (m, _t) in arrays.items()}
+
+
+def gb_sarr_row_problem(kind: str, guard: str | None, body: str, shapes: dict[str, tuple[int, dict[int, tuple[int, str]]]], perm_formals: frozenset[str]) -> str | None:
+    """Decision 0064 items 9 and 17 (Part E slice 3c-3): a quantified row of a method's `requires` or `ensures` over an ARRAY LEAF of the elements of a global array of structures
+    (`forall k, j :: { loc(member(loc(GB_g(), k), a), j) } 0 <= k && k < N && 0 <= j && j < M ==> C`).  None when `body` is no such row (another rule looks at it), "" when it is one, else the
+    reason.  N is the `program_start` group's, a the array member and M its count and field the unit's own allocation states (`sarr_global_shapes`); the consequent is `_matrix_cons_problem`'s
+    (the permission with a `Perm` formal amount, the flag, the type's range alone or under the flag, `old(flag) ==> flag` in an `ensures`)."""
+    bq = parse_block_row(body)
+    gm = GB_TERM_RE.match(bq["b"]) if bq is not None else None
+    if bq is not None and gm is not None and gm.group(1) in shapes and "len(member(" in bq["cons"]:
+        # the length facts of the elements of a sarr global: the group's own N and counts (a global that is no sarr global keeps the older reading, which refuses a count other than 1)
+        if guard is not None:
+            return "a guard on the length facts of a global array of structures"
+        return "" if _sarr_lens_matches(bq, shapes[gm.group(1)]) else f"the length facts of `{gm.group(1)}` are not the group's own N and counts (decision 0064 items 3, 9 and 17)"
+    for g, (n, arrays) in shapes.items():
+        x = parse_sarr_row(body, g)
+        if x is None:
+            continue
+        if x["row"] is not None:
+            return f"a one-binder row over the cells of element {x['row']}'s array member of `{g}` is no row of a contract (the rows of an array leaf have a bound variable per index step)"
+        if x["member"] not in arrays:
+            return f"the member {x['member']} of the elements of `{g}` is no array member of scalars of the unit's allocation (decision 0064 item 17)"
+        m, t = arrays[x["member"]]
+        if guard is not None and (GUARD_BAD_RE.search(guard) or not guard.strip()):
+            return "the guard holds a permission, a quantifier or a labelled `old`"
+        if x["lo"] != "0" or int(x["hi"]) != n or x["jlo"] != "0" or int(x["jhi"]) != m:
+            return f"the rows over the array member {x['member']} of `{g}` run over `0 <= k < {n}` and `0 <= j < {m}`, the group's and the allocation's (decision 0064 items 9 and 17)"
+        return _matrix_cons_problem(kind, x["cell"], x["cons"], t, f"`{g}`", perm_formals)
+    return None
+
+
+def _matrix_cons_problem(kind: str, cell: str, cons: str, t: str, what: str, perm_formals: frozenset[str]) -> str:
+    """The consequent of a contract row over the cell `cell` of a matrix whose cells have the field suffix `t` (`what` names the matrix in a message): `acc(F.v_t[, a])` or `acc(F.d_t[, a])` with `a` a
+    `Perm` formal of the method, the flag, the type's range of `F.v_t` alone or under the flag, and (an `ensures`) `old(F.d_t) ==> F.d_t`.  "" when it is one of them, else the reason."""
+    am = re.fullmatch(rf"acc\({re.escape(cell)}\.(?P<f>[vd]_[\w$']+)(?:,(?P<amt>[^()&|=]+))?\)", cons)
+    if am is not None:
+        if am.group("f") not in (f"v_{t}", f"d_{t}"):
+            return f"the field `{am.group('f')}` is not of the cell `{t}` of {what}"
+        if am.group("amt") is not None and not (re.fullmatch(IDENT, am.group("amt")) and am.group("amt") in perm_formals):
+            return "the amount of an `acc` is a `Perm` formal of the method"
+        return ""
+    if cons == f"{cell}.d_{t}":
+        return ""
+    sides = _split_top(cons, "==>")
+    if len(sides) == 1 and re.search(rf"{re.escape(cell)}\.v_{re.escape(t)}(?![\w$'])", cons) and _block_type_range(cons, cell, t):
+        return ""
+    if len(sides) == 2:
+        if sides[0] == f"old({cell}.d_{t})" and sides[1] == f"{cell}.d_{t}":
+            return "" if kind == "ensures" else "`old` in a `requires`"
+        if sides[0] == f"{cell}.d_{t}" and _block_type_range(sides[1], cell, t):
+            return ""
+    return f"the consequent is not `acc(F.f)`, the flag, the type's range or a flag implication of the cell `F` of {what}"
+
+
+_MEMBER_INDEX_TRIGGER_RE = re.compile(rf"^loc\(member\(loc\((?P<blk>member\(.*\)),(?P<x>{IDENT})\),0\),(?P<j>{IDENT})\)$")
+
+
+def matrix_member_block_flat_problem(body: str, clause_texts_norm: list[str], pairs_ok: Callable[[int, int, int], bool]) -> str | None:
+    """Audit round E2a (the measurement of the member's block term): a quantified row with ONE bound variable over the slots of the block `B = member(<chain>, k)` that the clause set states the
+    rows of a matrix for (`len(member(loc(B, b), 0)) == M` and a pair (k, N, M) of an allocation) reads the matrix flat, a row's slot as a cell.  None when `body` is no such row."""
+    q = parse_block_row(body)
+    if q is None or q["lo"] != "0" or "len(member(" in q["cons"]:
+        return None
+    ch = member_chain(q["b"])
+    if ch is None:
+        return None
+    k, n = ch[1][-1], int(q["hi"])
+    for c in clause_texts_norm:
+        for mm in re.finditer(rf"len\(member\(loc\({re.escape(norm_viper(q['b']))},{IDENT}\),0\)\)==([0-9]+)(?![0-9])", c):
+            if pairs_ok(k, n, int(mm.group(1))):
+                return (f"a quantified row with one bound variable over the block `{q['b']}` of a matrix member (the clause set states its row-length fact {mm.group(1)}) reads the matrix flat, "
+                        "a row's slot as a cell: its rows have a bound variable per index step (decision 0064 items 3, 9 and 17)")
+    return None
+
+
+def member_matrix_row_problem(kind: str, guard: str | None, body: str, roots: set[str], gbs: set[str], clause_texts_norm: list[str], perm_formals: frozenset[str]) -> str | None:
+    """Audit round E2a / decision 0064 items 3, 9 and 17 (Part E, slice 3b-2 and 3b-3): a contract row over the MATRIX MEMBER k0 of the structure a formal or a result `F` points to, or of a
+    structure global `loc(GB_g(), 0)`: `forall k, j :: { loc(member(loc(member(ROOT, k0), k), 0), j) } 0 <= k < N && 0 <= j < M ==> CONSEQUENT`.  None when `body` is no such row (another rule
+    looks at it), "" when it is one, else the reason.  The tie: N, M and the cell's field suffix are those of a matrix member k0 of a pinned allocation of the unit (`_MATRIX_PAIRS`), the root is
+    a formal, a result or a declared global's `loc(GB_g(), 0)`, and the clause set of the method states the lengths the row relies on (`len(member(ROOT, k0)) == N` and the row-length fact
+    `len(member(loc(member(ROOT, k0), k), 0)) == M`); the consequent is `_matrix_cons_problem`'s (the amount is the method's own `Perm` formal, unedited)."""
+    head = _INDEX_HEAD_RE.match(body.strip())
+    if head is None:
+        return None
+    binders = [x.split(":")[0].strip() for x in head.group("bs").split(",")]
+    m = _MEMBER_INDEX_TRIGGER_RE.match(norm_viper(head.group("trigger")))
+    if len(binders) != 2 or m is None or m.group("x") != binders[0] or m.group("j") != binders[1] or len(set(binders)) != 2:
+        return None
+    parts = _split_top(head.group("body"), "==>")
+    if len(parts) < 2:
+        return None
+    try:
+        ante = [norm_viper(c) for c in _flatten_and(parts[0])]
+    except ValueError:
+        return None
+    if len(ante) != 4:
+        return None
+    bounds: list[tuple[str, str]] = []
+    for i, b in enumerate(binders):
+        lo = re.fullmatch(r"(?P<lo>[0-9]+)<=" + re.escape(b), ante[2 * i])
+        hi = re.fullmatch(re.escape(b) + r"<(?P<hi>[1-9][0-9]*)", ante[2 * i + 1])
+        if lo is None or hi is None:
+            return None
+        bounds.append((lo.group("lo"), hi.group("hi")))
+    ch = member_chain(m.group("blk"))
+    if ch is None:
+        return None
+    root, steps = ch
+    k0 = steps[-1]
+    cell = norm_viper(head.group("trigger"))
+    cons = norm_viper(_strip_wrap("==>".join(parts[1:])))
+    gm = re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", root)
+    if (gm is None and root not in roots) or (gm is not None and gm.group(1) not in gbs):
+        return f"the root `{root}` of the matrix member is no formal, no result and no declared global's `loc(GB_g(), 0)`"
+    if bounds[0][0] != "0" or bounds[1][0] != "0":
+        return "the rows over a matrix member start at row 0 and column 0"
+    n, mm = int(bounds[0][1]), int(bounds[1][1])
+    tm = re.search(rf"{re.escape(cell)}\.[vd]_([\w$']+)", cons)
+    t = tm.group(1) if tm else ""
+    if not _matrix_pair_ok(k0, n, mm, t):
+        return (f"the rows over the member chain {steps} of `{root}` run over {n} rows and {mm} columns with the cell field `{t}`: no matrix member of a pinned `alloc_struct_...` of this unit "
+                "has these counts, this index and this cell (decision 0064 items 3 and 17)")
+    prefix = chain_prefix_blocks(root, steps)
+    blk = prefix[-1]
+    for pb in prefix[:-1]:
+        if not any(re.search(rf"len\({re.escape(pb)}\)==1(?![0-9])", c) for c in clause_texts_norm):
+            return f"the method states no `len({pb}) == 1`: an earlier step of the chain is a by-value structure member whose own length fact the clause set must state (decision 0043 item 4)"
+    if not any(re.search(rf"len\({re.escape(blk)}\)=={n}(?![0-9])", c) for c in clause_texts_norm):
+        return f"the method states no `len({blk}) == {n}`: the count of a member's rows is the one its facts state"
+    if not any(re.search(rf"len\(member\(loc\({re.escape(blk)},{IDENT}\),0\)\)=={mm}(?![0-9])", c) for c in clause_texts_norm):
+        return f"the method states no row-length fact `forall k :: ... len(member(loc({blk}, k), 0)) == {mm}`"
+    if guard is not None and (GUARD_BAD_RE.search(guard) or not guard.strip()):
+        return "the guard holds a permission, a quantifier or a labelled `old`"
+    return _matrix_cons_problem(kind, cell, cons, t, f"the matrix member {steps} of `{root}`", perm_formals)
+
+
+_MEMBER_SARR_TRIGGER_RE = re.compile(rf"^loc\(member\(loc\((?P<blk>member\(.*\)),(?P<x>{IDENT})\),(?P<a>[0-9]+)\),(?P<j>{IDENT})\)$")
+
+
+def member_sarr_row_problem(kind: str, guard: str | None, body: str, roots: set[str], gbs: set[str], clause_texts_norm: list[str], perm_formals: frozenset[str]) -> str | None:
+    """Decision 0064 items 3, 9 and 17 (Part E slice 3c-4): a contract row over an ARRAY LEAF of scalars of the ELEMENTS of the array member K of structures of the structure a formal or a result `F`
+    points to, or of a structure global `loc(GB_g(), 0)`: `forall k, j :: { loc(member(loc(member(ROOT, K), k), a), j) } 0 <= k < N && 0 <= j < M ==> CONSEQUENT`.  None when `body` is no such row
+    (another rule looks at it, in particular a row whose (K, a) the unit's allocation does not state as an array leaf), "" when it is one, else the reason.  The tie is to the unit's own pinned
+    allocation (`_ELEM_ARRAYS`): N, M and the leaf's field suffix are the ones it states for (K, a); the root is a formal, a result or a declared global's `loc(GB_g(), 0)`; the clause set of the method
+    states the lengths the row relies on (`len(member(ROOT, K)) == N`, an earlier step's `len(P) == 1` and the length fact `len(member(loc(member(ROOT, K), k), a)) == M`); the consequent, the guard and
+    the amount are `member_matrix_row_problem`'s own (`_matrix_cons_problem`: the amount is the method's own `Perm` formal, unedited)."""
+    head = _INDEX_HEAD_RE.match(body.strip())
+    if head is None:
+        return None
+    binders = [x.split(":")[0].strip() for x in head.group("bs").split(",")]
+    m = _MEMBER_SARR_TRIGGER_RE.match(norm_viper(head.group("trigger")))
+    if len(binders) != 2 or m is None or m.group("x") != binders[0] or m.group("j") != binders[1] or len(set(binders)) != 2:
+        return None
+    ch = member_chain(m.group("blk"))
+    if ch is None:
+        return None
+    root, steps = ch
+    leaf = (int(m.group("a")),)
+    entry = _ELEM_ARRAYS.get((tuple(steps), leaf))
+    if entry is None:
+        return None
+    parts = _split_top(head.group("body"), "==>")
+    if len(parts) < 2:
+        return None
+    try:
+        ante = [norm_viper(c) for c in _flatten_and(parts[0])]
+    except ValueError:
+        return None
+    if len(ante) != 4:
+        return None
+    bounds: list[tuple[str, str]] = []
+    for i, b in enumerate(binders):
+        lo = re.fullmatch(r"(?P<lo>[0-9]+)<=" + re.escape(b), ante[2 * i])
+        hi = re.fullmatch(re.escape(b) + r"<(?P<hi>[1-9][0-9]*)", ante[2 * i + 1])
+        if lo is None or hi is None:
+            return None
+        bounds.append((lo.group("lo"), hi.group("hi")))
+    n_el, cols, t = entry
+    cell = norm_viper(head.group("trigger"))
+    cons = norm_viper(_strip_wrap("==>".join(parts[1:])))
+    gm = re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", root)
+    if (gm is None and root not in roots) or (gm is not None and gm.group(1) not in gbs):
+        return f"the root `{root}` of the member is no formal, no result and no declared global's `loc(GB_g(), 0)`"
+    if bounds[0][0] != "0" or bounds[1][0] != "0" or int(bounds[0][1]) != n_el or int(bounds[1][1]) != cols:
+        return (f"the rows over the array leaf {leaf} of the elements of the member {steps} of `{root}` run over `0 <= k < {bounds[0][1]}` and `0 <= j < {bounds[1][1]}`: the pinned allocation states "
+                f"{n_el} elements of {cols} cells, from 0 (decision 0064 items 3 and 17)")
+    prefix = chain_prefix_blocks(root, steps)
+    blk = prefix[-1]
+    for pb in prefix[:-1]:
+        if not any(re.search(rf"len\({re.escape(pb)}\)==1(?![0-9])", c) for c in clause_texts_norm):
+            return f"the method states no `len({pb}) == 1`: an earlier step of the chain is a by-value structure member whose own length fact the clause set must state (decision 0043 item 4)"
+    if not any(re.search(rf"len\({re.escape(blk)}\)=={n_el}(?![0-9])", c) for c in clause_texts_norm):
+        return f"the method states no `len({blk}) == {n_el}`: the count of a member's elements is the allocation's"
+    if not any(re.search(rf"len\(member\(loc\({re.escape(blk)},{IDENT}\),{leaf[0]}\)\)=={cols}(?![0-9])", c) for c in clause_texts_norm):
+        return f"the method states no length fact `forall k :: ... len(member(loc({blk}, k), {leaf[0]})) == {cols}`"
+    if guard is not None and (GUARD_BAD_RE.search(guard) or not guard.strip()):
+        return "the guard holds a permission, a quantifier or a labelled `old`"
+    return _matrix_cons_problem(kind, cell, cons, t, f"the array leaf {leaf} of the elements of the member {steps} of `{root}`", perm_formals)
 
 
 # The quantified rows (decision 0059 items 7 and 8).  Viper refuses `perm` under a quantifier, so a permission check over a
@@ -4969,6 +6919,7 @@ def _std_type_range(cons: str, cell: str, t: str) -> bool:
 # ties a range over a pointer: a row over a leaf receiver needs the length-facts row of the same range and clause kind to state the member block of the
 # leaf and of every nested structure above it, and a leaf with no length-facts row at all is refused.
 def lint_block_length_facts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    sarr_shapes_here = sarr_global_shapes(src, decls)
     for d in decls:
         if d.kind != "method" or d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX, ARR_COPY_PREFIX, ALLOC_PREFIX)) or d.name == PROGRAM_START:
             continue
@@ -4988,7 +6939,10 @@ def lint_block_length_facts(src: Source, decls: list[Decl], add: Callable[[int, 
                 continue
             qb = parse_block_row(body)
             if qb is not None and "len(member(" in qb["cons"]:
-                keys, why = range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})")
+                bk = block_member_index(qb["b"])
+                gbm = GB_TERM_RE.match(qb["b"])
+                sarr_ok = gbm is not None and gbm.group(1) in sarr_shapes_here and _sarr_lens_matches(qb, sarr_shapes_here[gbm.group(1)])
+                keys, why = range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})", (bk, int(qb["hi"])) if bk is not None else None, sarr_ok)
                 if why is None and keys is not None:
                     lens[(kw, qb["b"], qb["lo"], qb["hi"])] = (n, set(keys))
         for key, rows in leaves.items():
@@ -5005,11 +6959,72 @@ def lint_block_length_facts(src: Source, decls: list[Decl], add: Callable[[int, 
                     break
 
 
-def range_lens_members(cons: str, slot: str) -> tuple[list[tuple[int, ...]] | None, str | None]:
+# Decision 0064 items 3, 9 and 17 (Part E, slice 3b): the matrix members of the unit's pinned `alloc_struct_<n>_<tag>` allocations, as (member index, N rows, M columns, cell field suffix).  Set by
+# `lint_vpr` for the unit it judges, and RESET at the start of every unit (a unit with no such structure is judged with an empty set); consulted ONLY to accept an element length fact with
+# M other than 1 and the rows over `member(F, k)` when N, M, the leaf and the cell suffix equal an allocation's own.
+_MATRIX_PAIRS: frozenset[tuple[int, int, int, str]] = frozenset()
+# The matrix members of the allocations reached THROUGH by-value structure members (a chain of two or more steps, decision 0064 item 13): (the chain, N rows, M columns, the cell's field suffix); reset per unit.
+_MATRIX_CHAIN_PAIRS: frozenset[tuple[tuple[int, ...], int, int, str]] = frozenset()
+
+# Decision 0064 items 3 and 17 (Part E, slice 3c-2): the array members of scalars of the unit's pinned `alloc_struct_<n>_<tag>` allocations, {member key: N} (`_SCALAR_ARRAY_FIELDS`: {member key: the element's field suffix}).  Set by `lint_vpr` for the unit it
+# judges and RESET at the start of every unit; consulted ONLY to accept an element length fact `len(member(<chain>, k)) == N` with N other than 1 when the allocation's own array member k of
+# scalars states the same N (the tie is by number, as the matrix pairs': the lint cannot know a pointer's type).
+_SCALAR_ARRAY_COUNTS: dict[tuple[int, ...], int] = {}
+_SCALAR_ARRAY_FIELDS: dict[tuple[int, ...], str] = {}
+
+# Decision 0064 items 3, 6 and 17 (Part E, slice 3c-4): the ARRAY LEAVES OF SCALARS of the elements of an array member of structures of the unit's pinned `alloc_struct_<n>_<tag>` allocations
+# (`struct T { struct P v[2]; int k; }` with `struct P { int n; int a[3]; }`), as {(the member's key K, the leaf's key L relative to the element): (N elements, M cells, the leaf's field suffix)}.
+# The allocation ITSELF is the source (`struct_allocation_problem`'s `shape_out`), never another allocation's count by number; a (K, L) that two allocations state with two triples is left out
+# (fail closed).  RESET at the start of every unit by `lint_vpr`; consulted by `range_lens_members` (the count `len(member(slot, L)) == M` of the element at a slot of the member K) and by
+# `member_sarr_row_problem` (the rows over such a leaf in a contract).
+_ELEM_ARRAYS: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[int, int, str]] = {}
+# The same allocations' element leaves per ALLOCATION (a place knows the allocation its structure local came from): {`struct_<n>_<tag>`: {the member's key: (N, {leaf: (cells, field suffix)})}}; reset per unit.
+_ELEM_LEAVES: dict[str, dict[tuple[int, ...], tuple[int, dict[tuple[int, ...], tuple[int, str]]]]] = {}
+
+
+def element_array_members(src: Source, decls: list[Decl]) -> tuple[dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[int, int, str]],
+                                                                    dict[str, dict[tuple[int, ...], tuple[int, dict[tuple[int, ...], tuple[int, str]]]]]]:
+    """(`_ELEM_ARRAYS`, `_ELEM_LEAVES`) of the unit: read from every `alloc_struct_<n>_<tag>` that `struct_allocation_problem` accepts; a key of the first stated with two triples is left out."""
+    seen: dict[tuple[tuple[int, ...], tuple[int, ...]], set[tuple[int, int, str]]] = {}
+    leaves: dict[str, dict[tuple[int, ...], tuple[int, dict[tuple[int, ...], tuple[int, str]]]]] = {}
+    for d in decls:
+        if d.kind != "method" or not d.name.startswith(ALLOC_PREFIX) or not STRUCT_ALLOC_RE.match(d.name[len(ALLOC_PREFIX):]):
+            continue
+        shape: dict = {}
+        if struct_allocation_problem(src, d, d.name[len(ALLOC_PREFIX):], shape) is not None:
+            continue
+        for kl, triple in shape.get("elem_arrays", {}).items():
+            seen.setdefault(kl, set()).add(triple)
+        if shape.get("elem_leaves"):
+            leaves[d.name[len(ALLOC_PREFIX):]] = shape["elem_leaves"]
+    return {kl: next(iter(v)) for kl, v in seen.items() if len(v) == 1}, leaves
+
+
+def _slot_member_key(slot: str) -> tuple[int, ...] | None:
+    """The member key K of the array member whose element is at `slot` = `loc(member(<chain>, ...), idx)` (`member_chain`: the member steps from a Viper variable or `loc(GB_g(), 0)`), else None."""
+    m = re.fullmatch(r"loc\((member\(.*\)),(?:[A-Za-z_$][\w$']*|[0-9]+)\)", norm_viper(slot))
+    ch = member_chain(m.group(1)) if m else None
+    return tuple(ch[1]) if ch else None
+
+
+def _elem_array_count_ok(slot: str, leaf: tuple[int, ...], count: int) -> bool:
+    """Whether the unit's own allocation states, for the elements of the array member at `slot`, an array leaf `leaf` of `count` cells (`_ELEM_ARRAYS`)."""
+    key = _slot_member_key(slot)
+    return key is not None and (key, leaf) in _ELEM_ARRAYS and _ELEM_ARRAYS[(key, leaf)][1] == count
+
+
+def _matrix_pair_ok(k: int, n: int, m: int, suffix: str | None = None) -> bool:
+    return any(p[0] == k and p[1] == n and p[2] == m and (suffix is None or p[3] == suffix) for p in _MATRIX_PAIRS)
+
+
+def range_lens_members(cons: str, slot: str, matrix: tuple[int, int] | None = None, scalar_arrays: bool = False,
+                       arrays_out: dict[tuple[int, ...], int] | None = None) -> tuple[list[tuple[int, ...]] | None, str | None]:
     """(the member blocks, why not) of the length-facts consequent `cons` (squashed) of a range atom over structures: `len(member(<chain>, j)) == 1`
     for each member block of the element at `slot` (a chain of decision 0043 item 13 rooted at the slot, a literal j each), a member of a member only
     inside a nested structure member, no block twice, and the slot facts `A != B` (decision 0043 item 4) either exactly the pairs of the root or a
-    nested slot and a nested slot below it, or none (the range atom's rows state the lengths only: S48 (c2))."""
+    nested slot and a nested slot below it, or none (the range atom's rows state the lengths only: S48 (c2)).  `arrays_out` (a dict the caller owns,
+    used only by the allocation `alloc_struct_<n>_<tag>`'s own rule, decision 0064 items 3, 6 and 17): a count N >= 2 is taken at a member block that
+    no other member block extends (an ARRAY LEAF of scalars of the element) and recorded in it; the caller ties each such leaf to its own rows."""
     try:
         parts = [_squash(x) for x in _flatten_and(cons)]
     except ValueError:
@@ -5020,27 +7035,94 @@ def range_lens_members(cons: str, slot: str) -> tuple[list[tuple[int, ...]] | No
     for part in members:
         m = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", part)
         key = parse_struct_member(m.group("m"), slot) if m else None
-        if key is None or int(m.group("n")) != 1:
+        count_ok = m is not None and (int(m.group("n")) == 1 or (matrix is not None and key == (0,) and _matrix_pair_ok(matrix[0], matrix[1], int(m.group("n"))))
+                                      or (scalar_arrays and key is not None and _SCALAR_ARRAY_COUNTS.get(key) == int(m.group("n")))
+                                      or (arrays_out is not None and key is not None and int(m.group("n")) >= 2)
+                                      or (key is not None and int(m.group("n")) >= 2 and _elem_array_count_ok(slot, key, int(m.group("n")))))
+        if key is None or not count_ok:
             return None, f"`{part}` is not `len(member(<chain>, <literal>)) == 1` with a chain rooted at the slot `{slot}`"
         if key in keys:
             return None, f"the member block {key} twice"
         keys.append(key)
+        if arrays_out is not None and int(m.group("n")) != 1:
+            arrays_out[key] = int(m.group("n"))
     if not keys:
         return None, "no member block"
     kset = set(keys)
     for key in kset:
         if key[:-1] and key[:-1] not in kset:
             return None, f"the member block {key} is not inside a nested struct member"
+    for key in (arrays_out or {}):
+        if any(o != key and o[:len(key)] == key for o in kset):
+            return None, f"the array leaf {key} has a member block inside it: a count other than 1 is admitted only at a member block that no other extends"
     if facts:
-        why = struct_wf_lens_problem(parts, slot)
+        why = struct_wf_lens_problem(parts, slot, dict(_SCALAR_ARRAY_COUNTS) if scalar_arrays else (dict(arrays_out) if arrays_out else None))
         if why is not None:
             return None, why
     return keys, None
 
 
-def range_lens_problem(cons: str, cell: str) -> str | None:
+def range_lens_counts(cons: str, slot: str) -> dict[tuple[int, ...], int]:
+    """{member key: N} of the length facts `cons` of a range atom over structures when `range_lens_members` accepts them (else empty): the N of each `len(member(<chain>, j)) == N`."""
+    keys, why = range_lens_members(cons, slot, scalar_arrays=True)
+    if why is not None or keys is None:
+        return {}
+    out: dict[tuple[int, ...], int] = {}
+    for part in _flatten_and(cons):
+        m = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", _squash(part))
+        key = parse_struct_member(m.group("m"), slot) if m else None
+        if key is not None:
+            out[key] = int(m.group("n"))
+    return out
+
+
+def member_chain(b: str) -> tuple[str, list[int]] | None:
+    """The block term `b` of a matrix member's rows as (root, member steps): `member(R, k)` or, through by-value structure members, `member(loc(member(R, k1), 0), k2)` ... with R a variable
+    or `loc(GB_g(), 0)`; None for anything else."""
+    cur = norm_viper(b)
+    steps: list[int] = []
+    while True:
+        m = re.fullmatch(r"member\((.*),([0-9]+)\)", cur)
+        if m is None or len(steps) > 4:
+            return None
+        steps.append(int(m.group(2)))
+        inner = m.group(1)
+        r = re.fullmatch(r"loc\((member\(.*\)),0\)", inner)
+        if r is not None:
+            cur = r.group(1)
+            continue
+        if re.fullmatch(IDENT, inner) or re.fullmatch(r"loc\(GB_[\w$']+\(\),0\)", inner):
+            return inner, steps[::-1]
+        return None
+
+
+def chain_prefix_blocks(root: str, steps: list[int]) -> list[str]:
+    """The block terms of the chain `steps` from `root`, the last the matrix member's: P1 = `member(root, k1)`, P2 = `member(loc(P1, 0), k2)` ..."""
+    out: list[str] = []
+    for i, k in enumerate(steps):
+        out.append(f"member({root},{k})" if i == 0 else f"member(loc({out[-1]},0),{k})")
+    return out
+
+
+def chain_facts_ok(b: str, has_one: Callable[[str], bool]) -> bool:
+    """Whether every EARLIER step of the chain `b` is a by-value structure member whose own length fact `len(P) == 1` the clause set states (`has_one(P)`, the nested slot facts of decision 0043
+    item 4 as record 0064 items 3 and 5 extend them); a chain of one step has no earlier step."""
+    ch = member_chain(b)
+    if ch is None:
+        return False
+    blocks = chain_prefix_blocks(*ch)
+    return all(has_one(p) for p in blocks[:-1])
+
+
+def block_member_index(b: str) -> int | None:
+    """The LAST member step k of the block term `b` when it is a member chain (`member_chain`), else None."""
+    ch = member_chain(b)
+    return ch[1][-1] if ch else None
+
+
+def range_lens_problem(cons: str, cell: str, matrix: tuple[int, int] | None = None, scalar_arrays: bool = False) -> str | None:
     """Why `cons` is not the length facts of a range atom over structures (`range_lens_members`), or None."""
-    return range_lens_members(cons, cell)[1]
+    return range_lens_members(cons, cell, matrix, scalar_arrays)[1]
 
 
 def _mentions_name(text: str, name: str) -> bool:
@@ -5069,13 +7151,19 @@ def struct_lens_conjuncts_problem(lens: list[str], v: str) -> str | None:
         if _mentions_name(qb["b"], qb["k"]):
             return (f"the binder `{qb['k']}` of the quantifier over the member {key} occurs in its slot expression `{qb['b']}`: an inner quantifier "
                     "that reuses a name its slot mentions captures it (decision 0064 item 3, a length quantifier under another quantifier)")
-        keys, why = range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})")
+        # a matrix member: the last step is a matrix member of an allocation, every earlier step a by-value structure member whose own `len(...) == 1` the facts state
+        ones = {parse_struct_member(mm.group(1), v) for x in others if (mm := re.fullmatch(r"len\((.*)\)==1", x))}
+        chain_ok = all(key[:i] in ones for i in range(1, len(key)))
+        keys, why = range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})", (key[-1], int(qb["hi"])) if chain_ok else None)
         if why is not None:
             return f"the length facts of the elements of the member {key}: {why}"
         if key in counts:
             return f"the quantifier of the member {key} twice"
         counts[key] = int(qb["hi"])
-    why = struct_wf_lens_problem(others, v, counts)
+    # slice 4 (decision 0064 items 3 and 12): the unit's table of arrays of scalars is read here ONLY by a structure that also has a quantified member (a matrix member or a member array of structures: `counts`
+    # is not empty), the shape of `struct U { int a; int m[2][2]; int b[2]; int c; }`; a structure with no quantifier stays closed for a count other than 1 (question 374's site, pinned by
+    # `test_only_the_range_atoms_sites_read_the_unit_table`)
+    why = struct_wf_lens_problem(others, v, counts, dict(_SCALAR_ARRAY_COUNTS) if counts else None)
     if why is not None:
         return why
     stated = {parse_struct_member(m.group(1), v) for x in others if (m := re.fullmatch(r"len\((.*)\)==[0-9]+", x))}
@@ -5085,8 +7173,39 @@ def struct_lens_conjuncts_problem(lens: list[str], v: str) -> str | None:
     return None
 
 
+def _is_struct_wf_guarded_lens(text: str, p: str) -> bool:
+    """`p != null && offset_of(p) < len(block_of(p)) ==> <the structure's own length facts and the quantifiers of its array members' elements>`: the guarded conjunct of `WF_S(p)`, as a conjunct
+    of a cell atom's clause whose own pointer is `p` (`struct_lens_conjuncts_problem` judges the facts; the matrix pairs tie a column count other than 1).  **The guard's root must be the clause's own
+    pointer `p`** (question 374, condition 2): a guard and facts about another root would assume the length facts of a pointer the clause does not own (the lint cannot know a pointer's type)."""
+    sides = _split_top(_strip_wrap(text), "==>")
+    if len(sides) != 2:
+        return False
+    guard, body = sides
+    g = re.fullmatch(r"([A-Za-z_$][\w$']*|loc\(GB_[\w$']+\(\),0\))!=null&&offset_of\(\1\)<len\(block_of\(\1\)\)", norm_viper(guard))
+    if g is None or g.group(1) != p:
+        return False
+    try:
+        lens = _flatten_and(body)
+    except ValueError:
+        return False
+    return struct_lens_conjuncts_problem(lens, p) is None
+
+
+def wf_guarded_rows(src: Source, d: Decl) -> dict[tuple[str, str], set[str]]:
+    """{(clause kind, root): {the guarded conjunct, normalized}} of the standalone well-formedness rows `WF(v) && (v != null && offset_of(v) < len(block_of(v)) ==> <lens>)` of the method `d`'s
+    `requires` and `ensures` (`struct_wf_member_array_row` says "" for exactly that row): what a cell atom's clause of the same method may repeat (`block_clause_problem`; question 374)."""
+    out: dict[tuple[str, str], set[str]] = {}
+    for kw, _ln, text in clause_texts(src, d):
+        if kw not in ("requires", "ensures") or struct_wf_member_array_row(text) != "":
+            continue
+        parts = _flatten_and(text)
+        head = re.match(r"\(*([A-Za-z_$][\w$']*|loc\(GB_[\w$']+\(\),0\))==null", _squash(parts[0]))
+        out.setdefault((kw, head.group(1)), set()).add(norm_viper(_strip_wrap(parts[1])))
+    return out
+
+
 def block_clause_problem(kw: str, rest: str, gbs: set[str], arrays: dict[str, int], roots: set[str], lens: dict[str, set[int]],
-                         perm_formals: frozenset[str]) -> str | None:
+                         perm_formals: frozenset[str], wf_rows: dict[tuple[str, str], set[str]] | None = None) -> str | None:
     """Decision 0064 item 15 (heap storage, owners, markers): the `requires` or `ensures` of a method that is one `owns_block` or `owns` site's whole
     part written as a conjunction (not as the rows of one array atom): `P != null && <WF> && offset_of(P) == 0 && acc(loc(block_of(P), -1).tok) && ...`
     under `!(P == null) ==>` (or `!(((P == null) ? 1 : 0) != 0) ==>`, as a parameter's site writes it); `P` a formal, a result, or (a global's cell
@@ -5128,6 +7247,11 @@ def block_clause_problem(kw: str, rest: str, gbs: set[str], arrays: dict[str, in
     has_nested = any(FORALL_RE.search(c) is not None and len(_split_top(_strip_wrap(c.strip()), "==>")) == 2 for c in conj)
     if not (has_tok or has_cell or has_nested):
         return None
+    # question 374 (audit round E3a, finding 6): a clause that is applicable ONLY because it holds the structure's well-formedness conjunct (a guarded quantifier, `has_nested` by it alone) must
+    # hold a cell atom of the pointer, a permission to a cell of one of `p`'s own members: `p != null && <the conjunct>` is no site
+    only_wf = not (has_tok or has_cell) and all(not (FORALL_RE.search(c) is not None and len(_split_top(_strip_wrap(c.strip()), "==>")) == 2) or _is_struct_wf_guarded_lens(_strip_wrap(c).strip(), p) for c in conj)
+    if only_wf and not any(re.match(rf"acc\(loc\(member\({re.escape(norm_viper(p))},[0-9]+\),[0-9]+\)\.[vd]_[\w$']+", norm_viper(_strip_wrap(c).strip())) for c in conj):
+        return None
     if guard_p is not None and guard_p != p:
         return "the guard of an `owns_block` clause names another pointer than its block part"
     for c in conj:
@@ -5143,8 +7267,20 @@ def block_clause_problem(kw: str, rest: str, gbs: set[str], arrays: dict[str, in
             why = block_row_problem(kw, None, bq, gbs, arrays, roots, lens, perm_formals)
             if why:
                 return why
+        elif FORALL_RE.search(t) and _is_struct_wf_guarded_lens(t, p) and re.search(r"len\(member\(loc\(.*\),[0-9]+\)\)==(?!1(?![0-9]))[0-9]+", norm_viper(t)):
+            # decision 0064 items 3 and 17 (Part E slice 3b-4; question 374, tightened by audit round E3a, finding 6, question 385): the structure's own well-formedness conjunct inside a cell
+            # atom's clause, whose row-length fact has the matrix's column count (slice 3c-4: or the count of an array leaf of the elements, `len(member(loc(...), a)) == M`, any member index a); a count of 1 stays with the older rules.  It is accepted only (1) when it is TEXTUALLY the guarded conjunct
+            # of the SAME method's well-formedness row for the same root `p` (`wf_guarded_rows`: a clause that is that row alone), in the same clause kind (an `ensures` of a FORMAL
+            # parameter also by the `requires` row: the pointer is unchanged, its well-formedness the same fact), so that it states nothing the method does not state already and a second
+            # allocation's other counts cannot enter by number; and (2) in a clause that holds a cell atom of `p` (a permission to a cell of `p`'s own members), not in `p != null && <it>` alone
+            known = (wf_rows or {}).get((kw, p), set()) | ((wf_rows or {}).get(("requires", p), set()) if kw == "ensures" and p in roots else set())
+            if norm_viper(_strip_wrap(t)) not in known:
+                return "the structure's well-formedness conjunct of a cell atom's clause is not textually the guarded conjunct of this method's own well-formedness row for the pointer (decision 0064 items 3 and 17, question 374)"
+            if not any(re.match(rf"acc\(loc\(member\({re.escape(norm_viper(p))},[0-9]+\),[0-9]+\)\.[vd]_[\w$']+", norm_viper(_strip_wrap(c).strip())) for c in conj):
+                return "the structure's well-formedness conjunct stands in a clause that holds no cell atom of the pointer (decision 0064 items 3 and 17, question 374)"
+            continue
         elif FORALL_RE.search(t):
-            nested = block_clause_problem(kw, t, gbs, arrays, roots, lens, perm_formals)
+            nested = block_clause_problem(kw, t, gbs, arrays, roots, lens, perm_formals, wf_rows)
             if nested is None:
                 return "a conjunct of an `owns_block` clause holds a quantifier that is neither a row nor the block clause of a pointer its closure reaches"
             if nested:
@@ -5220,7 +7356,9 @@ def _is_struct_lens_quantifier(text: str) -> bool:
     qb = parse_block_row(body)
     if g is None or qb is None or qb["lo"] != "0" or parse_struct_member(qb["b"], g.group(1)) is None:
         return False
-    return range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})")[1] is None
+    key = parse_struct_member(qb["b"], g.group(1))
+    # the prior restates the facts a clause set's other conjuncts judge (a nested chain's own `len(...) == 1` is one of them): only the pair is tied here
+    return range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})", (key[-1], int(qb["hi"]))) [1] is None
 
 
 def _is_struct_wf_member_array_row(text: str) -> bool:
@@ -5358,7 +7496,7 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
         return None  # the well-formedness of a pointer element, with its pointee's length facts when it points to a structure (audit round C1, finding 4)
     if recv is None and len(sides) == 1 and "len(member(" in cs:
         # decision 0064 item 7: the length facts of the elements of a range of structures, one quantifier over the slots with the slot as its trigger
-        return range_lens_problem(cs, cell)
+        return range_lens_problem(cs, cell, scalar_arrays=True)
     if len(sides) == 1:
         if re.fullmatch(cells + r"\.d_" + IDENT, cs):
             return None
@@ -5413,6 +7551,7 @@ LOCAL_ASSIGN_RE = re.compile(rf"^\s*(?P<lhs>{IDENT}(?:\s*,\s*{IDENT})*)\s*:=\s*(
 LOCAL_VAR_INIT_RE = re.compile(rf"^\s*var\s+(?P<x>{IDENT})\s*:\s*[A-Za-z]+\s*:=\s*(?P<rhs>.+?)\s*$")
 BOUND_RHS_RE = re.compile(r"^loc\((?P<b>.+),(?P<j>-?[0-9]+)\)$")
 ALLOC_CALL_RE = re.compile(r"^(?P<name>alloc_struct_[0-9]+_[\w$']+)\(\)$")
+ELEMENT_SLOT_RHS_RE = re.compile(rf"^loc\(block_of\((?P<y>{IDENT})\),offset_of\((?P<o>{IDENT})\)\+(?P<e>[0-9]+|{IDENT})\)$")
 
 
 def member_array_counts(counts: dict[str, dict[tuple[int, ...], int]]) -> dict[tuple[int, ...], set[int]]:
@@ -5426,8 +7565,40 @@ def member_array_counts(counts: dict[str, dict[tuple[int, ...], int]]) -> dict[t
     return out
 
 
+ELEM_LEAF_INLINE_RE = re.compile(rf"^loc\(member\(loc\((?P<b>member\(.*\)),(?P<e>[0-9]+|{IDENT})\),(?P<a>[0-9]+)\),0\)$")
+ELEM_LEAF_SLOT_RE = re.compile(rf"^loc\(member\((?P<s>{IDENT}),(?P<a>[0-9]+)\),0\)$")
+ELEM_SLOT_OF_MEMBER_RE = re.compile(rf"^loc\((?P<b>member\(.*\)),(?P<e>[0-9]+|{IDENT})\)$")
+
+
+def _elem_leaf_block_counts(rhs: str, single: dict[str, str], roots: set[str], gbs: set[str]) -> set[int] | None:
+    """`{M}` when `rhs` (the single assignment of a bound local, normalized) is the first cell of the ARRAY LEAF `a` of an element `e` of the member array K of structures of a structure `R` (a root:
+    a formal, a result, a structure local from an allocation, a temporary assigned once, or `loc(GB_g(), 0)` of a declared global) and the unit's own allocation states that leaf with M cells
+    (`_ELEM_ARRAYS`): `loc(member(loc(member(R, K), e), a), 0)` with the element index a literal or a Viper variable (the element 0 of a literal chain reads like a nested structure's slot), or
+    `loc(member(S, a), 0)` with `S := loc(member(R, K), e)` assigned once.  None for any other text (the older rules judge it)."""
+    m = ELEM_LEAF_INLINE_RE.match(rhs)
+    if m is not None:
+        blk, leaf = m.group("b"), int(m.group("a"))
+    else:
+        sm = ELEM_LEAF_SLOT_RE.match(rhs)
+        if sm is None or sm.group("s") not in single:
+            return None
+        em = ELEM_SLOT_OF_MEMBER_RE.match(single[sm.group("s")])
+        if em is None:
+            return None
+        blk, leaf = em.group("b"), int(sm.group("a"))
+    ch = member_chain(blk)
+    if ch is None:
+        return None
+    root, steps = ch
+    gm = re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", root)
+    if not ((gm is not None and gm.group(1) in gbs) or (gm is None and root in roots)):
+        return None
+    entry = _ELEM_ARRAYS.get((tuple(steps), (leaf,)))
+    return None if entry is None else {entry[1]}
+
+
 def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays: dict[str, int],
-                 counts: dict[str, dict[tuple[int, ...], int]] | None = None) -> dict[str, tuple[set[int], str]]:
+                 counts: dict[str, dict[tuple[int, ...], int]] | None = None, flags_only: set[str] | None = None) -> dict[str, tuple[set[int], str]]:
     """Decision 0063 item 15's bound local: the `Ref` locals of method `d` that some statement of its body assigns `loc(B, j)` with B a block term
     (`GB_<g>()` or `member(<chain>, k)`), as {local: (the counts the block's length fact states, why it is no bound local of the grammar or "")}.  A
     bound local is e1a's array local whose rows are `block_of(t)` over `0 <= k < N`: it is assigned exactly `loc(B, 0)` (every assignment the same text)
@@ -5435,7 +7606,8 @@ def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays:
     count of the member at that path and index in an `alloc_struct_*` of the unit (`member_array_counts`).  The chain is rooted at a Viper VARIABLE only
     (never an expression): a formal, a result, a local assigned an `alloc_struct_*` call, or any other local that the body assigns exactly once (a
     call-row temporary bound from the argument first, a pointer a call returned, a load for 0045's places), and `loc(GB_<g>(), 0)` of a declared
-    global."""
+    global.  `flags_only` (a set the caller owns, `lint_copy_source_rows`): receives the locals that are bound by an ELEMENT COPY's roots only (an element slot's member block, or the array leaf of an element of a
+    member array, decision 0064 item 12): the only row over such a block is the source's flags row."""
     assigns: dict[str, list[str]] = {}
     for n in range(d.line + 1, d.end_line + 1):
         line = src.code[n - 1]
@@ -5457,6 +7629,15 @@ def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays:
         am = ALLOC_CALL_RE.match(rhs)
         if (am and am.group("name") in by_name) or not rhs.startswith("loc("):
             roots.add(x)  # a structure local from an allocation; a temporary bound from the argument, a call's result, a load
+    # decision 0064 items 3, 12 and 17 (Part E, the element copy `v[i] = v[j]` of an element with an array member): an ELEMENT SLOT local, `t := loc(block_of(Y), offset_of(Y) + <a
+    # literal or a Viper variable>)`, assigned once, with Y a root (a formal, a result, a structure local from an allocation or a temporary assigned once), is a root for chains
+    # (`t_k := loc(member(t, k), 0)`, the copied leaf's block): the copy's source-flags row is judged over that member, whose count is the allocation's own (`member_counts`)
+    slot_roots: set[str] = set()
+    for x, rhs in list(single.items()):
+        sm = ELEMENT_SLOT_RHS_RE.match(rhs)
+        if x not in roots and sm is not None and sm.group("y") == sm.group("o") and sm.group("y") in roots:
+            roots.add(x)
+            slot_roots.add(x)
     pending = {x: BOUND_RHS_RE.match(rhs) for x, rhs in single.items() if x not in roots and rhs.startswith("loc(")}
     changed = True
     while changed:
@@ -5480,7 +7661,17 @@ def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays:
         m = ms[0]
         b = m.group("b")
         bt = block_term(b, gbs, roots - {x})
-        if m.group("j") != "0":
+        # decision 0064 items 3, 12 and 17 (Part E slice 3c-4, the element copy `t.v[i] = t.v[j]` of an element with an array leaf): the block of the array leaf of an element of a member array of
+        # structures, whose count is the unit's own allocation's for that member and leaf (`_ELEM_ARRAYS`).  It is read ONLY where the older reading has no answer (a block that is no canonical chain, or a
+        # chain whose member no allocation states as an array): `loc(member(loc(member(R, 0), 0), 1), 0)` is also a nested by-value array member's block, which keeps its `member_counts`
+        leaf_counts = None
+        if len(rhss) == 1 and m.group("j") == "0" and (bt is None or (bt[0] == "member" and not member_counts.get(bt[2]))):
+            leaf_counts = _elem_leaf_block_counts(rhss[0], single, roots - {x}, gbs)
+        if leaf_counts is not None:
+            out[x] = (leaf_counts, "")
+            if flags_only is not None:
+                flags_only.add(x)
+        elif m.group("j") != "0":
             out[x] = (set(), f"the local `{x}` is bound to slot {m.group('j')} of `{b}`, not the first slot of an array")
         elif bt is None:
             out[x] = (set(), f"the local `{x}` is bound to `loc({b}, 0)`, whose block is neither `GB_g()` of a declared array global nor `member(<chain>, k)` over "
@@ -5493,10 +7684,44 @@ def bound_locals(src: Source, d: Decl, decls: list[Decl], gbs: set[str], arrays:
                 out[x] = (set(), f"`{bt[1]}` is not an array global (no row group of it in `program_start`)")
         elif member_counts.get(bt[2]):
             out[x] = (member_counts[bt[2]], "")
+            if flags_only is not None and len(rhss) == 1 and (cm := re.fullmatch(rf"loc\(member\((?P<s>{IDENT}),[0-9]+\),0\)", rhss[0])) is not None and cm.group("s") in slot_roots:
+                flags_only.add(x)
         else:
             out[x] = (set(), f"no `alloc_struct_*` of the unit has an array member at {bt[2]} (`len({b}) == N`): the count of a member's rows is the literal "
                              "the allocation of its structure states (decision 0063 item 15)")
     return out
+
+
+def lint_copy_source_rows(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Audit round E3a (the ruling on instance 8's element-slot root): a local bound by an ELEMENT COPY's roots only (`bound_locals`' `flags_only`: the member block of an element slot, `t := loc(member(s, k), 0)`
+    with `s := loc(block_of(Y), offset_of(Y) + e)`, and the array leaf of an element of a member array, `t := loc(member(loc(member(R, K), e), a), 0)`) has ONE row over its block in real text, the source's flags
+    row `assert forall k :: { loc(block_of(t), k) } 0 <= k && k < M ==> loc(block_of(t), k).d_<t>` among the rows that start at 0 (the copy's amount rows are `array_copy_call_problem`'s and are `acc` rows; the
+    pointer-form rows `offset_of(t) <= k < offset_of(t) + n` that a call hands over do not depend on the bound count and keep the older rules; real text has both over such a local).  Any other row from 0 that is no
+    `acc` (the type's range, `old(F.d) ==> F.d`, a flag under a guard or an amount) is refused: the root makes a place known for that row form only."""
+    gbs = {m.group("name") for l in src.code if (m := GB_DECL_RE.match(l))}
+    array_counts = array_global_counts(src, decls)
+    struct_counts = struct_array_counts(src, decls)
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        flags: set[str] = set()
+        bound_locals(src, d, decls, gbs, array_counts, struct_counts, flags)
+        if not flags:
+            continue
+        for n in range(d.body_line or d.line, d.end_line + 1):
+            m = QUANT_STMT_RE.match(src.code[n - 1])
+            if m is None:
+                continue
+            guard, body = split_guard(m.group("rest"))
+            q = parse_range_quantifier_full(body) if body is not None else None
+            xm = BLOCK_BASE_RE.match(_squash(q[1])) if q is not None else None
+            if xm is None or xm.group(1) not in flags or q[3].startswith("acc(") or _row_acc(q) is not None or q[4] != "0":
+                continue  # (a pointer-form row, `offset_of(t) <= k < offset_of(t) + n`, a call's rows over the same pointer, does not depend on the bound count and is the older rules')
+            x = xm.group(1)
+            flag = re.fullmatch(rf"loc\({re.escape(_squash(q[1]))},{re.escape(q[0])}\)\.d_[\w$']+", _squash(q[3]))
+            if m.group("kw") != "assert" or guard is not None or q[2] or flag is None:
+                add(n, f"a row over the block of `{x}`, which an element copy's roots bind (the array leaf of an element, decision 0064 items 3, 12 and 17), is not the source's flags row "
+                       "`assert forall k :: { loc(block_of(t), k) } 0 <= k && k < M ==> loc(block_of(t), k).d_<t>`: the root makes a place known for that row form only")
 
 
 def _block_type_range(cons: str, cell: str, t: str) -> bool:
@@ -5546,7 +7771,8 @@ def block_row_problem(kw: str, guard: str | None, q: dict[str, str], gbs: set[st
         return None  # the leaf of a pointer to a structure: WF and the guarded length facts, possibly with a quantifier (finding 1)
     if "recv" not in q and "len(member(" in cons:
         # the length facts of the elements of an array of structures, one quantifier over the slots (decision 0064 item 3)
-        return range_lens_problem(cons, cell)
+        bk = block_member_index(q["b"]) if chain_facts_ok(q["b"], lambda p: 1 in lens.get(p, set())) else None
+        return range_lens_problem(cons, cell, (bk, n) if bk is not None else None)
     m = re.fullmatch(rf"acc\({re.escape(cell)}\.(?P<f>[vd]_[\w$']+)(?:,(?P<amt>[^()&|=]+))?\)", cons)
     if m:
         if m.group("amt") is not None and not (re.fullmatch(IDENT, m.group("amt")) and m.group("amt") in perm_formals):
@@ -5588,6 +7814,10 @@ def marked_row_shape(code: str) -> bool:
     if m is None or m.group("kw") != "assert":
         return False
     q = parse_range_quantifier_full(m.group("rest")) or parse_leaf_row(m.group("rest"))
+    if q is None and (ir := parse_index_row(m.group("rest"))) is not None and len(ir.binders) >= 2:
+        # a row over a leaf with a bound variable per index step (decision 0064 item 17)
+        acc_i = index_acc(ir)
+        return acc_i is not None and not ir.extras and (acc_i[1] is None or _heap_free(acc_i[1]))
     if q is None:
         # decision 0064 item 15, step B: a row of a written part over `member(X, j)`, the `acc` of one field with no amount (`lint_quantified_rows` ties it)
         wq = parse_block_row(m.group("rest"))
@@ -7127,6 +9357,17 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
             skip.update(range(d.line, d.end_line + 1))  # trusted rows with their own rules (`array_global_group`, `struct_allocation_problem`)
     gb_names = {m.group("name") for l in src.code if (m := GB_DECL_RE.match(l))}
     array_counts = array_global_counts(src, decls)
+    matrix_shapes = matrix_global_shapes(src, decls)
+    sarr_shapes = sarr_global_shapes(src, decls)
+    sarr_leaves = sarr_global_leaves(src, decls)
+    sgplace_cache: dict[int, dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]] = {}
+
+    def sgplaces_of(md: Decl) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+        if md.line not in sgplace_cache:
+            sgplace_cache[md.line] = sarr_global_places(src, md, sarr_leaves)
+        return sgplace_cache[md.line]
+
+    mg_shapes = matrix_member_global_shapes(src, decls)
     struct_counts = struct_array_counts(src, decls)
     block_ctx: dict[int, tuple[set[str], dict[str, set[int]]]] = {}
 
@@ -7134,6 +9375,13 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
         if md.line not in block_ctx:
             block_ctx[md.line] = ({*_formal_names(src, md), *(n for n, _t in method_results(src, md))}, method_len_facts(src, md))
         return block_ctx[md.line]
+
+    wf_ctx: dict[int, dict[tuple[str, str], set[str]]] = {}
+
+    def wf_rows_of(md: Decl) -> dict[tuple[str, str], set[str]]:
+        if md.line not in wf_ctx:
+            wf_ctx[md.line] = wf_guarded_rows(src, md)
+        return wf_ctx[md.line]
 
     bound_ctx: dict[int, dict[str, tuple[set[int], str]]] = {}
     labels_before: dict[int, set[str]] = {}
@@ -7181,6 +9429,69 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
         if d.line not in wea_of_method:
             wea_of_method[d.line] = wea_snapshots(src, d)
         return wea_of_method[d.line]
+
+    row_alloc_cache: dict[int, dict[str, tuple[int, str, list[int], str]]] = {}
+    index_group_cache: dict[int, set[tuple[str, str, str, str]]] = {}
+
+    agg_alloc_cache: dict[int, dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]] = {}
+
+    def agg_allocs_of(md: Decl) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+        if md.line not in agg_alloc_cache:
+            agg_alloc_cache[md.line] = agg_row_allocs(src, md, decls)
+        return agg_alloc_cache[md.line]
+
+    msplace_cache: dict[int, dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]] = {}
+    mgplace_cache: dict[int, dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]] = {}
+    mg_leaves = member_sarr_global_leaves(src, decls)
+
+    def mgplaces_of(md: Decl) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+        if md.line not in mgplace_cache:
+            mgplace_cache[md.line] = member_sarr_global_places(src, md, mg_leaves)
+        return mgplace_cache[md.line]
+
+    def msplaces_of(md: Decl) -> dict[str, tuple[int, str, dict[tuple[tuple[int, int], ...], str]]]:
+        if md.line not in msplace_cache:
+            msplace_cache[md.line] = member_sarr_places(src, md, decls)
+        return msplace_cache[md.line]
+
+    def row_allocs_of(md: Decl) -> dict[str, tuple[int, str, list[int], str]]:
+        if md.line not in row_alloc_cache:
+            row_alloc_cache[md.line] = row_allocs(src, md, decls)
+        return row_alloc_cache[md.line]
+
+    gplace_cache: dict[int, dict[str, tuple[int, str, list[int], str]]] = {}
+
+    def gplaces_of(md: Decl) -> dict[str, tuple[int, str, list[int], str]]:
+        if md.line not in gplace_cache:
+            gplace_cache[md.line] = global_matrix_places(src, md, matrix_shapes, mg_shapes)
+        return gplace_cache[md.line]
+
+    mm_shapes = matrix_member_shapes(src, decls)
+    mplace_cache: dict[int, dict[str, tuple[int, str, list[int], str]]] = {}
+
+    def mplaces_of(md: Decl) -> dict[str, tuple[int, str, list[int], str]]:
+        if md.line not in mplace_cache:
+            mplace_cache[md.line] = member_matrix_places(src, md, mm_shapes)
+        return mplace_cache[md.line]
+
+    cn_cache: dict[int, list[str]] = {}
+
+    def clause_norms_of(md: Decl) -> list[str]:
+        if md.line not in cn_cache:
+            cn_cache[md.line] = [norm_viper(t) for kw, _l, t in clause_texts(src, md) if kw in ("requires", "ensures")]
+        return cn_cache[md.line]
+
+    mpn_cache: dict[int, dict[str, str]] = {}
+
+    def mplace_names_of(md: Decl) -> dict[str, str]:
+        if md.line not in mpn_cache:
+            mpn_cache[md.line] = matrix_place_names(src, md, decls, matrix_shapes, mm_shapes, mg_shapes)
+        return mpn_cache[md.line]
+
+    def index_groups_of(md: Decl) -> set[tuple[str, str, str, str]]:
+        if md.line not in index_group_cache:
+            index_group_cache[md.line] = index_groups(src, md)
+        return index_group_cache[md.line]
 
     carrier_ctx: dict[int, tuple[set[str], dict[str, set[int]]]] = {}
     wp_ctx: dict[int, tuple[set[str], dict[str, set[int]], dict[str, tuple[str, int]], set]] = {}
@@ -7238,6 +9549,14 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
         kept_row = False
         ok = False
         why = ""
+        ir = parse_index_row(body) if (starts_q and m is not None and lineno in method_of) else None
+        if ir is not None and len(ir.binders) < 2:
+            # a one-binder row is the older rules', except a length fact with a count other than 1 in a group that has rows with a second bound variable (an array of rows):
+            # the structure rows' count of 1 and their refusals stay as they were (decision 0064 item 17)
+            ish = index_row_shape(ir)
+            lens_count = int(ish[1].split(":")[1]) if ish is not None and ish[0] == "lens" else 1
+            if lens_count == 1 or (kind, ir.x, ir.ranges[0][0], ir.ranges[0][1]) not in index_groups_of(method_of[lineno]):
+                ir = None
         wp_row = parse_block_row(body) if (starts_q and q is None and kind == "assert" and m is not None and lineno in method_of) else None
         if wp_row is not None and wp_row["b"].startswith("member("):
             wmd = method_of[lineno]
@@ -7247,7 +9566,62 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                                     written_part_partners(src, wmd, gb_names, array_counts, wroots, wlens, wea_info_at(lineno)[0]))
             if not wp_ctx[wmd.line][3]:
                 wp_row = None  # a method with no loop over a written part: the older rule's refusal stands
-        if wp_row is not None and wp_row["b"].startswith("member("):
+        flat_place: str | None = None
+        if q is not None and lineno in method_of and re.fullmatch(r"len\(member\(.*\)\)==[0-9]+", _squash(q[3])) is None and (fb := BLOCK_BASE_RE.match(_squash(q[1]))) is not None:
+            # audit finding 5 (round E2a): a row with ONE bound variable over the place of a matrix (a local matrix, a global's place, a matrix member's place) reads it flat
+            flat_place = mplace_names_of(method_of[lineno]).get(fb.group(1))
+        if flat_place is None and starts_q and kind in ("invariant", "assert", "exhale") and lineno in method_of and (gbm := matrix_block_named(body, matrix_shapes)) is not None:
+            # audit round E2a (finding 5, the measurement of the block term itself): the rows of a loop, an `assert` and an `exhale` run over a PLACE of a matrix, never over its `GB_g()` term
+            why = (f"a `{kind}` row over the block term of the global matrix `{gbm}` itself: over a matrix the rows of a loop or a marked row run over its place with a bound variable per "
+                   "index step (decision 0064 items 9 and 17)")
+            ok = False
+        elif flat_place is not None:
+            why = (f"a `{kind}` row with one bound variable over `{_squash(q[1])}`, {flat_place}, reads the matrix flat, a row's slot as a cell: over a matrix's place the only one-binder "
+                   "row is the row-length fact, every other row has a bound variable per index step (decision 0064 items 6, 9 and 17)")
+            ok = False
+        elif ir is not None:
+            # decision 0064 item 17 (Part E): a row over a leaf with a bound variable per index step
+            imd = method_of[lineno]
+            ir_in, ralloc = ir, row_allocs_of(imd).get(ir.x)
+            agg = agg_allocs_of(imd).get(ir.x) if ralloc is None else None
+            agg_why = None
+            if agg is None and ralloc is None and ir.x in sgplaces_of(imd):
+                # the place of a global array of structures with an array leaf (slice 3c-3): tied to the `program_start` group's own leaves, counts and fields; a global is never exited
+                if kind == "exhale":
+                    agg_why = f"an `exhale` row over `{ir.x}`, the place of a global: a global is never exited (decision 0064 item 9)"
+                else:
+                    agg_why, ir_in, ralloc = agg_place_problem(ir, sgplaces_of(imd)[ir.x])
+                    if ir.ranges[0][0] != "0":
+                        ralloc = None  # the pointer form (`offset_of(X) <= k < offset_of(X) + <count>`, a call's rows): the leaf is tied above, the first range is the pointer rules' (as a global matrix's place)
+            elif agg is None and ralloc is None and ir.x in mgplaces_of(imd):
+                # the place of a STRUCTURE GLOBAL's member array of structures with an array leaf (slice 3c-4: `X := loc(member(loc(GB_g(), 0), k), 0)`): tied to the `program_start` group's own leaves, counts and
+                # fields (`member_sarr_global_leaves`, `agg_place_problem`); a global is never exited, the pointer form keeps the pointer rules'
+                if kind == "exhale":
+                    agg_why = f"an `exhale` row over `{ir.x}`, the place of a global: a global is never exited (decision 0064 item 9)"
+                else:
+                    agg_why, ir_in, ralloc = agg_place_problem(ir, mgplaces_of(imd)[ir.x])
+                    if ir.ranges[0][0] != "0":
+                        ralloc = None
+            elif agg is None and ralloc is None and ir.x in msplaces_of(imd):
+                # the place of a structure local's member array of structures with an array leaf (slice 3c-4: `X := loc(member(V, k), 0)`, V from `alloc_struct_...`): tied to the pinned allocation's own
+                # leaves, counts and fields (`member_sarr_places`, `agg_place_problem`); the scope exit's `exhale` rows run over its N, the pointer form (`offset_of(X) <= k < ...`, a call's rows) keeps the pointer rules'
+                agg_why, ir_in, ralloc = agg_place_problem(ir, msplaces_of(imd)[ir.x])
+                if ir.ranges[0][0] != "0":
+                    ralloc = None
+            elif agg is not None:
+                # a local array of structures with an array leaf: the row is tied to its pinned allocation's own leaves (`agg_place_problem`), the rest is the matrix rules'
+                agg_why, ir_in, ralloc = agg_place_problem(ir, agg)
+            why, ilabel = ((agg_why, "") if agg_why is not None else
+                           index_row_problem(kind, guard, plain, ir_in, perm_formals(lineno), ralloc, gplaces_of(imd).get(ir.x), mplaces_of(imd).get(ir.x)))
+            ok = not why
+            if ok and kind == "assert" and (ish := index_row_shape(ir)) is not None and ish[0] == "acc":
+                marked_lines.add(lineno)
+                if (gw := bound_row_guard_problem(src, imd, ir.x, lineno)) is not None:
+                    add(lineno, gw)
+            if ok and ilabel:
+                old_labels = [ilabel]
+                kept_row = True
+        elif wp_row is not None and wp_row["b"].startswith("member("):
             # decision 0064 item 15, step B: an entry or back-edge row of a written part (a quantified `assert` over `member(X, j)`)
             wroots, wlens, winfo, wpartners = wp_ctx[wmd.line]
             why = written_part_row_problem(src, wmd, lineno, ending_row, guard, wp_row, gb_names, array_counts, wroots, wlens, winfo, wpartners) or ""
@@ -7321,10 +9695,15 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
             why = swp
             ok = not why
         elif q is None and not starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
-                and (bcl := block_clause_problem(kind, m.group("rest"), gb_names, array_counts, *block_ctx_of(method_of[lineno]), perm_formals(lineno))) is not None:
+                and (bcl := block_clause_problem(kind, m.group("rest"), gb_names, array_counts, *block_ctx_of(method_of[lineno]), perm_formals(lineno), wf_rows_of(method_of[lineno]))) is not None:
             # decision 0064 item 15: an `owns_block` site's whole block part as one conjunction, its array leaves' quantified conjuncts rows over a member block
             why = bcl
             ok = not why
+        elif q is None and starts_q and kind == "invariant" and m is not None and lineno in method_of \
+                and (mfi := matrix_member_block_flat_problem(body, clause_norms_of(method_of[lineno]), _matrix_pair_ok)) is not None:
+            # audit round E2a (advisor): a loop's one-binder row over a matrix member's block term of a pointer, the clause set stating the matrix's row-length fact
+            why = mfi
+            ok = False
         elif q is None and starts_q and kind == "invariant" and m is not None and lineno in method_of \
                 and (cq := parse_block_row(body)) is not None:
             # decision 0064 item 15 (Part D): a carrier's rows over `member(X, j)` in a loop's invariants (`carrier_row_problem`)
@@ -7342,6 +9721,30 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                 if not why:
                     old_labels = [kept_w[1]]
                     kept_row = True
+            ok = not why
+        elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
+                and (mfl := matrix_member_block_flat_problem(body, clause_norms_of(method_of[lineno]), _matrix_pair_ok)) is not None:
+            why = mfl
+            ok = False
+        elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
+                and (msr := member_sarr_row_problem(kind, guard, body, block_ctx_of(method_of[lineno])[0], gb_names, clause_norms_of(method_of[lineno]), perm_formals(lineno))) is not None:
+            # (BEFORE the matrix member's rule: an array leaf at member 0 of the element, `struct W { int a[4]; int n; }`, has the text of a matrix member's rows; the table decides, a row whose (K, a) the allocation does not state falls through) decision 0064 items 3, 9 and 17 (Part E slice 3c-4): a row over an ARRAY LEAF of scalars of the elements of a member array of structures of a pointed-to or global structure
+            why = msr
+            ok = not why
+        elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
+                and (mmr := member_matrix_row_problem(kind, guard, body, block_ctx_of(method_of[lineno])[0], gb_names, clause_norms_of(method_of[lineno]), perm_formals(lineno))) is not None:
+            # decision 0064 items 3, 9 and 17 (Part E slice 3b-2, 3b-3): a row over a matrix MEMBER of a pointed-to or global structure (`member_matrix_row_problem`)
+            why = mmr
+            ok = not why
+        elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
+                and (gsr := gb_sarr_row_problem(kind, guard, body, sarr_shapes, perm_formals(lineno))) is not None:
+            # decision 0064 items 9 and 17 (Part E slice 3c-3): a row over an ARRAY LEAF of the elements of a global array of structures, two bound variables (`gb_sarr_row_problem`)
+            why = gsr
+            ok = not why
+        elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
+                and (gmr := gb_matrix_row_problem(kind, guard, body, matrix_shapes, perm_formals(lineno))) is not None:
+            # decision 0064 items 9 and 17 (Part E slice 3a): a row over a GLOBAL matrix's block term, the cell with two bound variables (or the length facts of its rows)
+            why = gmr
             ok = not why
         elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
                 and (bq := parse_block_row(body) or parse_block_leaf_row(body)) is not None:
@@ -8158,6 +10561,19 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     src = split_source(text)
     problems: list[str] = []
     decls = declarations(src)
+    global _MATRIX_PAIRS
+    _MATRIX_PAIRS = frozenset()  # the empty set first: the unit's own pairs are computed without the previous unit's
+    _MATRIX_PAIRS = frozenset((k[0], n, m, t) for per in matrix_member_shapes(src, decls).values() for k, (n, m, t) in per.items() if len(k) == 1)  # reset for every unit
+    global _MATRIX_CHAIN_PAIRS
+    _MATRIX_CHAIN_PAIRS = frozenset((k, n, m, t) for per in matrix_member_shapes(src, decls).values() for k, (n, m, t) in per.items() if len(k) > 1)  # reset for every unit
+    global _SCALAR_ARRAY_COUNTS, _SCALAR_ARRAY_FIELDS
+    _SCALAR_ARRAY_COUNTS, _SCALAR_ARRAY_FIELDS = {}, {}
+    _scalar_members = scalar_array_members(src, decls)  # reset for every unit
+    _SCALAR_ARRAY_COUNTS = {k: v[0] for k, v in _scalar_members.items()}
+    _SCALAR_ARRAY_FIELDS = {k: v[1] for k, v in _scalar_members.items()}
+    global _ELEM_ARRAYS, _ELEM_LEAVES
+    _ELEM_ARRAYS, _ELEM_LEAVES = {}, {}
+    _ELEM_ARRAYS, _ELEM_LEAVES = element_array_members(src, decls)  # reset for every unit
 
     def add(lineno: int, why: str) -> None:
         problems.append(f"{name}:{lineno}: {why}")
@@ -8250,8 +10666,10 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_array_allocations(src, decls, add)
     lint_array_copy_calls(src, decls, add)
     lint_scope_exits(src, decls, add)
+    lint_copy_source_rows(src, decls, add)
     lint_range_length_facts(src, decls, add)
     lint_block_length_facts(src, decls, add)
+    lint_index_length_facts(src, decls, add)
     has_globals, global_facts = lint_globals(src, decls, add)
     quantified = classify_quantified_lines(src, decls)
     lint_ghost_amounts(src, decls, add, quantified.wildcard_rows | frozenset(n for n, (why, wild) in pf_requires.items() if wild and why is None))

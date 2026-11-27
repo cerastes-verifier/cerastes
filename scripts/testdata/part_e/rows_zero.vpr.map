@@ -1,0 +1,58 @@
+30	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+31	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+31	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+32	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+32	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+33	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+33	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+34	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+34	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+35	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+35	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+36	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+36	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+41	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+42	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+43	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+44	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+44	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+45	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+45	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+46	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+46	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+47	not.wellformed	internal	rows_zero_src.c	6	7	internal check: well-formedness of the trusted contract of the initialization of an array of `int[3]`
+47	postcondition.violated	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the trusted contract of the initialization of an array of `int[3]`
+52	not.wellformed	internal	rows_zero_src.c	3	6	internal check: well-formedness of the contract of `f_mat`
+53	not.wellformed	internal	rows_zero_src.c	3	6	internal check: well-formedness of the contract of `f_mat`
+54	not.wellformed	internal	rows_zero_src.c	4	5	internal check: well-formedness of the contract of `f_mat`
+64	call.precondition	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the allocation of `m`
+65	call.precondition	internal	rows_zero_src.c	6	7	internal check: Silicon's own check of the initialization of `m`
+66	assert.failed	out-of-bounds	rows_zero_src.c	6	19	writes `m[0][0]`, whose first index may be outside `m`
+67	assert.failed	out-of-bounds	rows_zero_src.c	6	19	writes `m[0][0]`, whose second index may be outside `m[0]`
+69	assert.failed	permission	rows_zero_src.c	6	19	writes `m[0][0]` without owning it: a callee may have kept its object
+72	assert.failed	out-of-bounds	rows_zero_src.c	6	24	writes `m[1][0]`, whose first index may be outside `m`
+73	assert.failed	out-of-bounds	rows_zero_src.c	6	24	writes `m[1][0]`, whose second index may be outside `m[1]`
+75	assert.failed	permission	rows_zero_src.c	6	24	writes `m[1][0]` without owning it: a callee may have kept its object
+78	assert.failed	out-of-bounds	rows_zero_src.c	7	22	reads `m[1][2]`, whose first index may be outside `m`
+79	assert.failed	out-of-bounds	rows_zero_src.c	7	22	reads `m[1][2]`, whose second index may be outside `m[1]`
+80	assert.failed	permission	rows_zero_src.c	7	22	reads `m[1][2]` without owning it: a callee may have kept its object
+81	assert.failed	uninitialized	rows_zero_src.c	7	22	`m[1][2]` may be read here before it is given a value
+82	assert.failed	check	rows_zero_src.c	7	31	this `check` may not hold
+83	assert.failed	out-of-bounds	rows_zero_src.c	8	23	reads `m[ci][cj]`, whose first index may be outside `m`
+84	assert.failed	out-of-bounds	rows_zero_src.c	8	23	reads `m[ci][cj]`, whose second index may be outside `m[ci]`
+85	assert.failed	permission	rows_zero_src.c	8	23	reads `m[ci][cj]` without owning it: a callee may have kept its object
+86	assert.failed	uninitialized	rows_zero_src.c	8	23	`m[ci][cj]` may be read here before it is given a value
+87	assert.failed	out-of-bounds	rows_zero_src.c	8	41	reads `m[ci][cj]`, whose first index may be outside `m`
+88	assert.failed	out-of-bounds	rows_zero_src.c	8	41	reads `m[ci][cj]`, whose second index may be outside `m[ci]`
+89	assert.failed	permission	rows_zero_src.c	8	41	reads `m[ci][cj]` without owning it: a callee may have kept its object
+90	assert.failed	uninitialized	rows_zero_src.c	8	41	`m[ci][cj]` may be read here before it is given a value
+91	assert.failed	out-of-bounds	rows_zero_src.c	8	59	reads `m[ci][cj]`, whose first index may be outside `m`
+92	assert.failed	out-of-bounds	rows_zero_src.c	8	59	reads `m[ci][cj]`, whose second index may be outside `m[ci]`
+93	assert.failed	permission	rows_zero_src.c	8	59	reads `m[ci][cj]` without owning it: a callee may have kept its object
+94	assert.failed	uninitialized	rows_zero_src.c	8	59	`m[ci][cj]` may be read here before it is given a value
+95	assert.failed	check	rows_zero_src.c	8	69	this `check` may not hold
+96	assert.failed[insufficient.permission]	lifetime	rows_zero_src.c	9	1	the address of an element of `m` may still be in use when its lifetime ends
+97	assert.failed[insufficient.permission]	lifetime	rows_zero_src.c	9	1	the address of an element of `m` may still be in use when its lifetime ends
+98	assert.failed	lifetime	rows_zero_src.c	9	1	the address of `m` may still be in use when its lifetime ends
+107	not.wellformed	internal	rows_zero_src.c	3	6	internal check: well-formedness of the contract of `f_mat (well-formedness)`
+108	not.wellformed	internal	rows_zero_src.c	3	6	internal check: well-formedness of the contract of `f_mat (well-formedness)`

@@ -1,0 +1,121 @@
+33	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+34	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+35	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+36	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+37	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+38	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+39	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+40	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+41	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+41	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+42	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+42	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+43	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+43	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+44	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+44	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+45	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+45	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+46	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+46	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+47	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+47	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+48	not.wellformed	internal	t.c	46	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+48	postcondition.violated	internal	t.c	46	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+53	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+53	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+54	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+54	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+55	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+55	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+56	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+56	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+57	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+57	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+58	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+58	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+59	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+59	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+64	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+64	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+65	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+65	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+66	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+66	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+67	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+67	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+68	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+68	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+69	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+69	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+70	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+70	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+71	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+71	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+72	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+72	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+73	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+73	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+74	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+74	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+79	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+79	postcondition.violated	internal	t.c	7	3	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+80	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+80	postcondition.violated	internal	t.c	7	3	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+81	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the trusted contract of program_start for `gt`
+81	postcondition.violated	internal	t.c	7	3	internal check: Silicon's own check of the trusted contract of program_start for `gt`
+82	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+82	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+83	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+83	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+84	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+84	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+85	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+85	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+86	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+86	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+87	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+87	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+88	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+88	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+89	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+89	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+90	not.wellformed	internal	t.c	16	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+90	postcondition.violated	internal	t.c	16	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+91	not.wellformed	internal	t.c	18	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+91	postcondition.violated	internal	t.c	18	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+92	not.wellformed	internal	t.c	21	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+92	postcondition.violated	internal	t.c	21	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+93	not.wellformed	internal	t.c	24	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+93	postcondition.violated	internal	t.c	24	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+94	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the trusted contract of program_start for `gt.v`
+94	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the trusted contract of program_start for `gt.v`
+99	not.wellformed	internal	t.c	27	3	internal check: well-formedness of the contract of `main`
+99	postcondition.violated	internal	t.c	27	3	internal check: Silicon's own check of the postcondition of `main`
+107	call.precondition	internal	t.c	27	3	internal check: Silicon's own check of the call of program_start
+108	assert.failed	out-of-bounds	t.c	39	3	writes `gt.v[1]`, whose index may be outside `gt.v`
+109	assert.failed	out-of-bounds	t.c	38	3	reads `gt.v[0]`, whose index may be outside `gt.v`
+110	assert.failed	permission	t.c	38	3	reads `gt.v[0].n` without owning it: the object it points to may have ended
+111	assert.failed	uninitialized	t.c	38	3	`gt.v[0].n` may be read here before it is given a value
+113	assert.failed	permission	t.c	39	3	writes `gt.v[1].n` without owning it: the object it points to may have ended
+116	assert.failed	out-of-bounds	t.c	46	3	reads `gt.v[1]`, whose index may be outside `gt.v`
+117	assert.failed	out-of-bounds	t.c	46	3	reads `gt.v[0]`, whose index may be outside `gt.v`
+122	assert.failed	permission	t.c	46	3	copies `gt.v[0].a`, whose elements the function may not hold (a callee may have kept them)
+123	assert.failed[insufficient.permission]	permission	t.c	46	3	copies `gt.v[0].a`, whose elements the function may not hold (a callee may have kept them)
+124	assert.failed[insufficient.permission]	permission	t.c	46	3	copies `gt.v[0].a`, whose elements the function may not hold (a callee may have kept them)
+125	assert.failed	uninitialized	t.c	46	3	copies `gt.v[0]`, whose member `gt.v[0].a` may hold an element without a value
+126	assert.failed[insufficient.permission]	permission	t.c	46	3	writes `gt.v[1].a` without owning every element of it: the object it belongs to may have ended
+127	assert.failed[insufficient.permission]	permission	t.c	46	3	writes `gt.v[1].a` without owning every element of it: the object it belongs to may have ended
+128	assert.failed	internal	t.c	46	3	internal check: the two arrays of a copy are distinct blocks
+129	call.precondition	internal	t.c	46	3	internal check: Silicon's own check of the copy of an array member
+130	assert.failed	out-of-bounds	t.c	52	3	reads `gt.v[1]`, whose index may be outside `gt.v`
+131	assert.failed	permission	t.c	52	3	reads `gt.v[1].n` without owning it: the object it points to may have ended
+132	assert.failed	uninitialized	t.c	52	3	`gt.v[1].n` may be read here before it is given a value
+133	assert.failed	out-of-bounds	t.c	62	3	reads `gt.v[1]`, whose index may be outside `gt.v`
+134	assert.failed	out-of-bounds	t.c	62	3	reads `gt.v[1].a[2]`, whose index may be outside `gt.v[1].a`
+135	assert.failed	permission	t.c	62	3	reads `gt.v[1].a[2]` without owning it: the object it points to may have ended
+136	assert.failed	uninitialized	t.c	62	3	`gt.v[1].a[2]` may be read here before it is given a value
+137	assert.failed	permission	t.c	68	3	reads `gt.k` without owning it: `main` needs `reads(gt.k)` or `owns(gt.k)` in its contract
+138	assert.failed	uninitialized	t.c	68	3	`gt.k` may be read here before it is given a value
+139	assert.failed	check	t.c	72	3	this `check` may not hold
+142	assert.failed	missing-return	t.c	77	3	control may reach the end of `main` without returning a value

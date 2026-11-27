@@ -227,12 +227,34 @@ xref:memory.adoc#ranges-of-structures[Ranges of structures] has the rules, and
 xref:memory.adoc#arrays-of-structures[Arrays of structures] what a local array of
 structures can do.
 
+An array may also hold arrays. A matrix is indexed twice, and each index is checked
+against its own bound, the second against the row it reaches into:
+
+[source,c]
+----
+include::example$tutorial/aggregates_matrix.c[tag=source]
+----
+
+[source,console]
+----
+aggregates_matrix.c: verified (1 function; one translation unit: assumes that functions defined elsewhere satisfy the contracts declared here)
+----
+
+The outer invariant bounds the sum of the rows done so far, the inner one adds the
+cells of the current row, and each loop has its own measure. Neither loop writes to
+`m`, so nothing need be said about the matrix itself: its cells keep their values and
+the bounds `i < 2` and `j < 3` make both index checks hold. With `+j <= 3+` as the inner
+loop's condition the read is reported (`out-of-bounds`: the message reads `m[i][j]`,
+whose second index may be outside `m[i]`), although `m[0][3]` would land on `m[1][0]` in memory:
+a row ends where its type says it does. xref:memory.adoc#arrays-of-arrays[Arrays of
+arrays] has the rules, and how a function takes a matrix as a parameter.
+
 == What is next
 
 A loop that changes an array in place, such as adding one to every element, needs to speak
 of each element's value on entry to the function inside its invariant (`cerastes_old` in a
 loop invariant). That, pointer arithmetic (`p + i`), and a quantifier inside another are not
-supported yet; nor are arrays of arrays, or a quantifier over a member of a structure. An
+supported yet; nor is a quantifier over a member of a structure or over the cells of a matrix. An
 array of structures may also be a global or a member of a structure
 (xref:memory.adoc#global-arrays[Global arrays], xref:memory.adoc#array-members[Array
 members]). Arrays of scalars in

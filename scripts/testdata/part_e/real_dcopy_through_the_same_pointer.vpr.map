@@ -1,0 +1,241 @@
+32	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+33	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+34	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+35	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+36	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+37	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+38	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+39	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+40	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+40	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+41	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+41	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+42	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+42	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+43	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+43	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+44	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+44	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+45	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+45	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+46	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+46	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+47	not.wellformed	internal	t.c	203	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+47	postcondition.violated	internal	t.c	203	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+52	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+52	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+53	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+53	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+54	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+54	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+55	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+55	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+56	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+56	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+57	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+57	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+58	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+58	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+59	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+59	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+60	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+60	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+61	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+61	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+62	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+62	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+63	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+63	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+64	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+64	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+69	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g`
+70	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g`
+71	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+72	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+73	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+74	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+75	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+76	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+77	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+78	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+79	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+80	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+81	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+82	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+83	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+84	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+85	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+86	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+87	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+88	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+89	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+90	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+91	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+92	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+93	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+94	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+95	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+96	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+97	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+98	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+99	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+100	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+101	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+102	not.wellformed	internal	t.c	10	3	internal check: well-formedness of the contract of `g`
+103	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+103	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+104	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+104	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+105	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+105	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+106	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+106	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+107	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+107	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+108	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+108	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+109	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+109	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+110	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+110	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+111	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+111	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+112	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+112	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+113	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+113	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+114	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+114	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+115	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+115	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+116	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+116	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+117	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+117	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+118	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+118	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+119	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+119	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+120	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+120	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+121	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+121	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+122	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+122	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+123	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+123	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+124	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+124	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+125	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+125	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+126	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+126	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+127	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+127	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+128	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+128	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+129	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+129	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+130	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+130	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+131	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+131	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+132	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+132	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+133	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+133	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+134	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+134	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+135	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+135	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+136	not.wellformed	internal	t.c	110	3	internal check: well-formedness of the contract of `g`
+136	postcondition.violated	internal	t.c	110	3	internal check: Silicon's own check of the postcondition of `g`
+158	assert.failed	null-dereference	t.c	142	3	dereferences the pointer, which may be null
+159	assert.failed	permission	t.c	142	3	reads the object the pointer points to without owning it: the object it points to may have ended
+160	assert.failed	uninitialized	t.c	142	3	the object the pointer points to may be read here before it is given a value
+162	assert.failed	null-dereference	t.c	143	3	dereferences the pointer, which may be null
+163	assert.failed	permission	t.c	143	3	reads the object the pointer points to without owning it: the object it points to may have ended
+164	assert.failed	uninitialized	t.c	143	3	the object the pointer points to may be read here before it is given a value
+166	assert.failed	null-dereference	t.c	147	3	dereferences the pointer, which may be null
+167	assert.failed	out-of-bounds	t.c	147	3	reads an element of the array, whose first index may be outside ``
+168	assert.failed	out-of-bounds	t.c	147	3	reads an element of the array, whose second index may be outside the row
+169	assert.failed	permission	t.c	147	3	reads an element of the array without owning it: a callee may have kept its object
+170	assert.failed	uninitialized	t.c	147	3	the object the pointer points to may be read here before it is given a value
+172	assert.failed	null-dereference	t.c	150	3	dereferences the pointer, which may be null
+173	assert.failed	out-of-bounds	t.c	150	3	reads an element of the array, whose first index may be outside ``
+174	assert.failed	out-of-bounds	t.c	150	3	reads an element of the array, whose second index may be outside the row
+175	assert.failed	permission	t.c	150	3	reads an element of the array without owning it: a callee may have kept its object
+176	assert.failed	uninitialized	t.c	150	3	the object the pointer points to may be read here before it is given a value
+178	assert.failed	null-dereference	t.c	153	3	dereferences the pointer, which may be null
+179	assert.failed	out-of-bounds	t.c	153	3	reads an element of the array, whose first index may be outside ``
+180	assert.failed	out-of-bounds	t.c	153	3	reads an element of the array, whose second index may be outside the row
+181	assert.failed	permission	t.c	153	3	reads an element of the array without owning it: a callee may have kept its object
+182	assert.failed	uninitialized	t.c	153	3	the object the pointer points to may be read here before it is given a value
+184	assert.failed	null-dereference	t.c	156	3	dereferences the pointer, which may be null
+185	assert.failed	out-of-bounds	t.c	156	3	reads an element of the array, whose first index may be outside ``
+186	assert.failed	out-of-bounds	t.c	156	3	reads an element of the array, whose second index may be outside the row
+187	assert.failed	permission	t.c	156	3	reads an element of the array without owning it: a callee may have kept its object
+188	assert.failed	uninitialized	t.c	156	3	the object the pointer points to may be read here before it is given a value
+190	assert.failed	null-dereference	t.c	188	3	dereferences the pointer, which may be null
+192	assert.failed	permission	t.c	188	3	writes the object the pointer points to without owning it: the object it points to may have ended
+195	assert.failed	null-dereference	t.c	190	3	dereferences the pointer, which may be null
+197	assert.failed	permission	t.c	190	3	writes the object the pointer points to without owning it: the object it points to may have ended
+200	assert.failed	null-dereference	t.c	192	3	dereferences the pointer, which may be null
+201	assert.failed	out-of-bounds	t.c	192	3	writes an element of the array, whose first index may be outside ``
+202	assert.failed	out-of-bounds	t.c	192	3	writes an element of the array, whose second index may be outside the row
+204	assert.failed	permission	t.c	192	3	writes an element of the array without owning it: a callee may have kept its object
+207	assert.failed	null-dereference	t.c	194	3	dereferences the pointer, which may be null
+208	assert.failed	out-of-bounds	t.c	194	3	writes an element of the array, whose first index may be outside ``
+209	assert.failed	out-of-bounds	t.c	194	3	writes an element of the array, whose second index may be outside the row
+211	assert.failed	permission	t.c	194	3	writes an element of the array without owning it: a callee may have kept its object
+214	assert.failed	null-dereference	t.c	196	3	dereferences the pointer, which may be null
+215	assert.failed	out-of-bounds	t.c	196	3	writes an element of the array, whose first index may be outside ``
+216	assert.failed	out-of-bounds	t.c	196	3	writes an element of the array, whose second index may be outside the row
+218	assert.failed	permission	t.c	196	3	writes an element of the array without owning it: a callee may have kept its object
+221	assert.failed	null-dereference	t.c	198	3	dereferences the pointer, which may be null
+222	assert.failed	out-of-bounds	t.c	198	3	writes an element of the array, whose first index may be outside ``
+223	assert.failed	out-of-bounds	t.c	198	3	writes an element of the array, whose second index may be outside the row
+225	assert.failed	permission	t.c	198	3	writes an element of the array without owning it: a callee may have kept its object
+228	assert.failed	null-dereference	t.c	203	3	dereferences the pointer, which may be null
+229	assert.failed	null-dereference	t.c	203	3	dereferences the pointer, which may be null
+233	assert.failed	permission	t.c	203	3	copies an array member, whose elements the function may not hold (a callee may have kept them)
+234	assert.failed[insufficient.permission]	permission	t.c	203	3	copies an array member, whose elements the function may not hold (a callee may have kept them)
+235	assert.failed[insufficient.permission]	permission	t.c	203	3	copies an array member, whose elements the function may not hold (a callee may have kept them)
+236	assert.failed	uninitialized	t.c	203	3	copies the structure, whose member the array may hold an element without a value
+237	assert.failed[insufficient.permission]	permission	t.c	203	3	writes an array member without owning every element of it: the object it belongs to may have ended
+238	assert.failed[insufficient.permission]	permission	t.c	203	3	writes an array member without owning every element of it: the object it belongs to may have ended
+240	assert.failed	internal	t.c	203	3	internal check: the two arrays of a copy are distinct blocks
+241	call.precondition	internal	t.c	203	3	internal check: Silicon's own check of the copy of an array member
+243	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+244	assert.failed	internal	t.c	205	3	internal check: WF of a pointer parameter
+245	assert.failed	internal	t.c	205	3	internal check: a pointer parameter points into its block
+246	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+247	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+248	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+249	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+250	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+251	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+252	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+253	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+254	assert.failed	permission	t.c	205	3	returns without owning `*p`, which its contract promises	t.c:110:this is the postcondition
+256	assert.failed[insufficient.permission]	permission	t.c	205	3	returns without owning `p->m`, which its contract promises	t.c:110:this is the postcondition
+257	assert.failed[insufficient.permission]	permission	t.c	205	3	returns without owning `p->m`, which its contract promises	t.c:110:this is the postcondition
+258	assert.failed	permission	t.c	205	3	returns without owning `p->m`, which its contract promises	t.c:110:this is the postcondition
+259	assert.failed	permission	t.c	205	3	returns without owning `p->m`, which its contract promises	t.c:110:this is the postcondition
+261	assert.failed[insufficient.permission]	permission	t.c	205	3	returns without owning `p->b`, which its contract promises	t.c:110:this is the postcondition
+262	assert.failed[insufficient.permission]	permission	t.c	205	3	returns without owning `p->b`, which its contract promises	t.c:110:this is the postcondition
+263	assert.failed	permission	t.c	205	3	returns without owning `p->b`, which its contract promises	t.c:110:this is the postcondition
+264	assert.failed	permission	t.c	205	3	returns without owning `p->b`, which its contract promises	t.c:110:this is the postcondition
+265	assert.failed	postcondition	t.c	205	3	the postcondition of `g` may not hold	t.c:110:this is the postcondition
+271	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+272	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+273	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+274	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+275	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+276	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+277	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+278	not.wellformed	internal	t.c	6	3	internal check: well-formedness of the contract of `g (well-formedness)`
+281	assert.failed	permission	t.c	40	3	the contract of `g` reads an element of a pointer without owning it
+282	assert.failed	permission	t.c	73	3	the contract of `g` reads an element of a pointer without owning it
+283	assert.failed	permission	t.c	41	3	the contract of `g` reads an element of a pointer without owning it
+284	assert.failed	permission	t.c	105	3	the contract of `g` reads an element of a pointer without owning it

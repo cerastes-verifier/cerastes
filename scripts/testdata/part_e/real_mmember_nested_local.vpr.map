@@ -1,0 +1,442 @@
+30	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+30	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+31	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+31	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+32	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+32	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+33	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+33	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+34	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+34	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+35	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+35	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+36	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+36	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+37	not.wellformed	internal	matrix_member_nested.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+37	postcondition.violated	internal	matrix_member_nested.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+42	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+42	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+43	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+43	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+44	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+44	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+45	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+45	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+46	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+46	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+47	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+47	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+48	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+48	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+49	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+49	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+50	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+50	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+51	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+51	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+52	not.wellformed	internal	matrix_member_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+52	postcondition.violated	internal	matrix_member_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+57	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all`
+58	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all`
+59	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+60	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+61	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+62	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+63	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+64	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+65	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+66	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+67	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+68	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+69	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+70	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+71	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+72	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+73	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+74	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+75	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+76	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+77	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+78	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+79	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+80	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+81	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+82	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+83	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+84	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+85	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+86	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+87	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+88	not.wellformed	internal	matrix_member_nested.c	12	5	internal check: well-formedness of the contract of `write_all`
+89	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all`
+89	postcondition.violated	internal	matrix_member_nested.c	11	5	internal check: Silicon's own check of the postcondition of `write_all`
+90	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+90	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+91	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+91	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+92	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+92	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+93	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+93	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+94	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+94	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+95	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+95	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+96	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+96	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+97	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+97	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+98	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+98	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+99	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+99	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+100	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+100	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+101	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+101	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+102	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+102	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+103	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+103	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+104	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+104	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+105	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+105	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+106	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+106	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+107	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+107	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+108	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+108	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+109	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+109	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+110	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+110	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+111	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+111	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+112	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+112	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+113	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+113	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+114	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+114	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+115	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+115	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+116	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+116	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+117	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+117	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+118	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+118	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+119	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+119	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+120	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+120	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+121	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+121	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+122	not.wellformed	internal	matrix_member_nested.c	13	5	internal check: well-formedness of the contract of `write_all`
+122	postcondition.violated	internal	matrix_member_nested.c	13	5	internal check: Silicon's own check of the postcondition of `write_all`
+130	assert.failed	null-dereference	matrix_member_nested.c	15	16	dereferences `p`, which may be null
+131	assert.failed	out-of-bounds	matrix_member_nested.c	15	16	writes `p->u.m[1][2]`, whose first index may be outside `p->u.m`
+132	assert.failed	out-of-bounds	matrix_member_nested.c	15	16	writes `p->u.m[1][2]`, whose second index may be outside `p->u.m[1]`
+134	assert.failed	permission	matrix_member_nested.c	15	16	writes `p->u.m[1][2]` without owning it: a callee may have kept its object
+137	assert.failed	null-dereference	matrix_member_nested.c	16	8	dereferences `p`, which may be null
+139	assert.failed	permission	matrix_member_nested.c	16	8	writes `p->k` without owning it: the object it points to may have ended
+142	assert.failed	null-dereference	matrix_member_nested.c	17	11	dereferences `p`, which may be null
+143	assert.failed	permission	matrix_member_nested.c	17	11	reads `p->k` without owning it: the object it points to may have ended
+144	assert.failed	uninitialized	matrix_member_nested.c	17	11	`p->k` may be read here before it is given a value
+146	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+147	assert.failed	internal	matrix_member_nested.c	17	3	internal check: WF of a pointer parameter
+148	assert.failed	internal	matrix_member_nested.c	17	3	internal check: a pointer parameter points into its block
+149	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+150	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+151	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+152	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+153	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+154	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+155	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+156	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+157	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `*p`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+159	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	17	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+160	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	17	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+161	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+162	assert.failed	permission	matrix_member_nested.c	17	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:13:this is the postcondition
+163	assert.failed	postcondition	matrix_member_nested.c	17	3	the postcondition of `write_all` may not hold	matrix_member_nested.c:13:this is the postcondition
+165	assert.failed	missing-return	matrix_member_nested.c	18	1	control may reach the end of `write_all` without returning a value
+171	not.wellformed	internal	matrix_member_nested.c	20	5	internal check: well-formedness of the contract of `write_u`
+172	not.wellformed	internal	matrix_member_nested.c	20	5	internal check: well-formedness of the contract of `write_u`
+173	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+174	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+175	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+176	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+177	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+178	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+179	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+180	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+181	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+182	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+183	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+184	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+185	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+186	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+187	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+188	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+189	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+190	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+191	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+192	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+193	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+194	not.wellformed	internal	matrix_member_nested.c	21	5	internal check: well-formedness of the contract of `write_u`
+195	not.wellformed	internal	matrix_member_nested.c	20	5	internal check: well-formedness of the contract of `write_u`
+195	postcondition.violated	internal	matrix_member_nested.c	20	5	internal check: Silicon's own check of the postcondition of `write_u`
+196	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+196	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+197	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+197	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+198	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+198	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+199	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+199	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+200	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+200	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+201	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+201	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+202	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+202	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+203	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+203	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+204	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+204	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+205	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+205	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+206	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+206	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+207	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+207	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+208	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+208	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+209	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+209	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+210	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+210	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+211	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+211	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+212	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+212	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+213	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+213	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+214	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+214	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+215	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+215	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+216	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+216	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+217	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+217	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+218	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+218	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+219	not.wellformed	internal	matrix_member_nested.c	22	5	internal check: well-formedness of the contract of `write_u`
+219	postcondition.violated	internal	matrix_member_nested.c	22	5	internal check: Silicon's own check of the postcondition of `write_u`
+226	assert.failed	null-dereference	matrix_member_nested.c	24	16	dereferences `p`, which may be null
+227	assert.failed	out-of-bounds	matrix_member_nested.c	24	16	writes `p->u.m[1][2]`, whose first index may be outside `p->u.m`
+228	assert.failed	out-of-bounds	matrix_member_nested.c	24	16	writes `p->u.m[1][2]`, whose second index may be outside `p->u.m[1]`
+230	assert.failed	permission	matrix_member_nested.c	24	16	writes `p->u.m[1][2]` without owning it: a callee may have kept its object
+233	assert.failed	null-dereference	matrix_member_nested.c	25	19	dereferences `p`, which may be null
+234	assert.failed	out-of-bounds	matrix_member_nested.c	25	19	reads `p->u.m[1][2]`, whose first index may be outside `p->u.m`
+235	assert.failed	out-of-bounds	matrix_member_nested.c	25	19	reads `p->u.m[1][2]`, whose second index may be outside `p->u.m[1]`
+236	assert.failed	permission	matrix_member_nested.c	25	19	reads `p->u.m[1][2]` without owning it: a callee may have kept its object
+237	assert.failed	uninitialized	matrix_member_nested.c	25	19	`p->u.m[1][2]` may be read here before it is given a value
+239	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+240	assert.failed	internal	matrix_member_nested.c	25	3	internal check: WF of a pointer parameter
+241	assert.failed	internal	matrix_member_nested.c	25	3	internal check: a pointer parameter points into its block
+242	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+243	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+244	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+245	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+246	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+248	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	25	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+249	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	25	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+250	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+251	assert.failed	permission	matrix_member_nested.c	25	3	returns without owning `p->u.m`, which its contract promises	matrix_member_nested.c:22:this is the postcondition
+252	assert.failed	postcondition	matrix_member_nested.c	25	3	the postcondition of `write_u` may not hold	matrix_member_nested.c:22:this is the postcondition
+254	assert.failed	missing-return	matrix_member_nested.c	26	1	control may reach the end of `write_u` without returning a value
+260	not.wellformed	internal	matrix_member_nested.c	28	5	internal check: well-formedness of the contract of `read_matrix`
+261	not.wellformed	internal	matrix_member_nested.c	28	5	internal check: well-formedness of the contract of `read_matrix`
+262	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+263	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+264	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+265	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+266	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+267	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+268	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+269	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+270	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+271	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+272	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+273	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+274	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+275	not.wellformed	internal	matrix_member_nested.c	29	5	internal check: well-formedness of the contract of `read_matrix`
+276	not.wellformed	internal	matrix_member_nested.c	28	5	internal check: well-formedness of the contract of `read_matrix`
+276	postcondition.violated	internal	matrix_member_nested.c	28	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+277	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+277	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+278	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+278	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+279	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+279	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+280	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+280	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+281	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+281	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+282	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+282	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+283	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+283	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+284	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+284	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+285	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+285	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+286	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+286	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+287	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+287	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+288	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+288	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+289	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+289	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+290	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+290	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+291	not.wellformed	internal	matrix_member_nested.c	30	5	internal check: well-formedness of the contract of `read_matrix`
+291	postcondition.violated	internal	matrix_member_nested.c	30	5	internal check: Silicon's own check of the postcondition of `read_matrix`
+297	assert.failed	null-dereference	matrix_member_nested.c	32	19	dereferences `p`, which may be null
+298	assert.failed	out-of-bounds	matrix_member_nested.c	32	19	reads `p->u.m[0][0]`, whose first index may be outside `p->u.m`
+299	assert.failed	out-of-bounds	matrix_member_nested.c	32	19	reads `p->u.m[0][0]`, whose second index may be outside `p->u.m[0]`
+300	assert.failed	permission	matrix_member_nested.c	32	19	reads `p->u.m[0][0]` without owning it: a callee may have kept its object
+301	assert.failed	uninitialized	matrix_member_nested.c	32	19	`p->u.m[0][0]` may be read here before it is given a value
+303	assert.failed	permission	matrix_member_nested.c	32	3	returns without the permission to read `p->u.m`, which it borrowed	matrix_member_nested.c:30:this is the postcondition
+304	assert.failed	internal	matrix_member_nested.c	32	3	internal check: WF of a pointer parameter
+305	assert.failed	internal	matrix_member_nested.c	32	3	internal check: a pointer parameter points into its block
+306	assert.failed	permission	matrix_member_nested.c	32	3	returns without the permission to read `p->u.m`, which it borrowed	matrix_member_nested.c:30:this is the postcondition
+308	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	32	3	returns without the permission to read `p->u.m` it borrowed	matrix_member_nested.c:30:this is the postcondition
+309	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	32	3	returns without the permission to read `p->u.m` it borrowed	matrix_member_nested.c:30:this is the postcondition
+310	assert.failed	permission	matrix_member_nested.c	32	3	returns without the permission to read `p->u.m` it borrowed	matrix_member_nested.c:30:this is the postcondition
+311	assert.failed	permission	matrix_member_nested.c	32	3	returns without the permission to read `p->u.m` it borrowed	matrix_member_nested.c:30:this is the postcondition
+312	assert.failed	postcondition	matrix_member_nested.c	32	3	the postcondition of `read_matrix` may not hold	matrix_member_nested.c:30:this is the postcondition
+314	assert.failed	missing-return	matrix_member_nested.c	33	1	control may reach the end of `read_matrix` without returning a value
+320	not.wellformed	internal	matrix_member_nested.c	35	5	internal check: well-formedness of the contract of `caller`
+320	postcondition.violated	internal	matrix_member_nested.c	35	5	internal check: Silicon's own check of the postcondition of `caller`
+321	not.wellformed	internal	matrix_member_nested.c	36	5	internal check: well-formedness of the contract of `caller`
+321	postcondition.violated	internal	matrix_member_nested.c	36	5	internal check: Silicon's own check of the postcondition of `caller`
+347	call.precondition	internal	matrix_member_nested.c	38	12	internal check: Silicon's own check of the allocation of `v`
+349	assert.failed	permission	matrix_member_nested.c	38	18	writes `v.u.n` without owning it: the object it points to may have ended
+352	assert.failed	out-of-bounds	matrix_member_nested.c	38	23	writes `v.u.m[0][0]`, whose first index may be outside `v.u.m`
+353	assert.failed	out-of-bounds	matrix_member_nested.c	38	23	writes `v.u.m[0][0]`, whose second index may be outside `v.u.m[0]`
+355	assert.failed	permission	matrix_member_nested.c	38	23	writes `v.u.m[0][0]` without owning it: a callee may have kept its object
+358	assert.failed	out-of-bounds	matrix_member_nested.c	38	26	writes `v.u.m[0][1]`, whose first index may be outside `v.u.m`
+359	assert.failed	out-of-bounds	matrix_member_nested.c	38	26	writes `v.u.m[0][1]`, whose second index may be outside `v.u.m[0]`
+361	assert.failed	permission	matrix_member_nested.c	38	26	writes `v.u.m[0][1]` without owning it: a callee may have kept its object
+364	assert.failed	out-of-bounds	matrix_member_nested.c	38	29	writes `v.u.m[0][2]`, whose first index may be outside `v.u.m`
+365	assert.failed	out-of-bounds	matrix_member_nested.c	38	29	writes `v.u.m[0][2]`, whose second index may be outside `v.u.m[0]`
+367	assert.failed	permission	matrix_member_nested.c	38	29	writes `v.u.m[0][2]` without owning it: a callee may have kept its object
+370	assert.failed	out-of-bounds	matrix_member_nested.c	38	34	writes `v.u.m[1][0]`, whose first index may be outside `v.u.m`
+371	assert.failed	out-of-bounds	matrix_member_nested.c	38	34	writes `v.u.m[1][0]`, whose second index may be outside `v.u.m[1]`
+373	assert.failed	permission	matrix_member_nested.c	38	34	writes `v.u.m[1][0]` without owning it: a callee may have kept its object
+376	assert.failed	out-of-bounds	matrix_member_nested.c	38	37	writes `v.u.m[1][1]`, whose first index may be outside `v.u.m`
+377	assert.failed	out-of-bounds	matrix_member_nested.c	38	37	writes `v.u.m[1][1]`, whose second index may be outside `v.u.m[1]`
+379	assert.failed	permission	matrix_member_nested.c	38	37	writes `v.u.m[1][1]` without owning it: a callee may have kept its object
+382	assert.failed	out-of-bounds	matrix_member_nested.c	38	40	writes `v.u.m[1][2]`, whose first index may be outside `v.u.m`
+383	assert.failed	out-of-bounds	matrix_member_nested.c	38	40	writes `v.u.m[1][2]`, whose second index may be outside `v.u.m[1]`
+385	assert.failed	permission	matrix_member_nested.c	38	40	writes `v.u.m[1][2]` without owning it: a callee may have kept its object
+389	assert.failed	permission	matrix_member_nested.c	38	46	writes `v.k` without owning it: the object it points to may have ended
+393	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+394	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+395	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+396	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+397	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+399	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+400	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+401	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+402	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it (every cell of every row)
+403	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it (every cell of every row)
+404	assert.failed	uninitialized	matrix_member_nested.c	39	22	calls `read_matrix`, which needs every element of `v.u.m` to have a value; it may not have one here
+405	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it (every cell of every row)
+406	assert.failed	permission	matrix_member_nested.c	39	22	calls `read_matrix`, which needs to read `v.u.m`, without the permission to read it
+407	call.precondition	internal	matrix_member_nested.c	39	22	internal check: Silicon's own check of the precondition of `read_matrix`
+410	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+411	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+412	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+413	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+414	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+415	assert.failed	uninitialized	matrix_member_nested.c	40	20	passes `&v` to `write_all`, whose parameter `p` needs `v.u.n` to have a value; it may not have one here
+416	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+417	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+418	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+419	assert.failed	uninitialized	matrix_member_nested.c	40	20	passes `&v` to `write_all`, whose parameter `p` needs `v.k` to have a value; it may not have one here
+420	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+421	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+423	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+424	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+425	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v.u.m`, without owning it
+426	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v.u.m`, without owning it (every cell of every row)
+427	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v.u.m`, without owning it (every cell of every row)
+428	assert.failed	uninitialized	matrix_member_nested.c	40	20	calls `write_all`, which needs every element of `v.u.m` to have a value; it may not have one here
+429	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v.u.m`, without owning it (every cell of every row)
+430	assert.failed	permission	matrix_member_nested.c	40	20	calls `write_all`, which needs to own `v`, without owning it
+431	call.precondition	internal	matrix_member_nested.c	40	20	internal check: Silicon's own check of the precondition of `write_all`
+434	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+435	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+436	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+437	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+438	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+439	assert.failed	uninitialized	matrix_member_nested.c	41	18	passes `&v` to `write_u`, whose parameter `p` needs `v.u.n` to have a value; it may not have one here
+440	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+441	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+443	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+444	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+445	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u.m`, without owning it
+446	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u.m`, without owning it (every cell of every row)
+447	assert.failed[insufficient.permission]	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u.m`, without owning it (every cell of every row)
+448	assert.failed	uninitialized	matrix_member_nested.c	41	18	calls `write_u`, which needs every element of `v.u.m` to have a value; it may not have one here
+449	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u.m`, without owning it (every cell of every row)
+450	assert.failed	permission	matrix_member_nested.c	41	18	calls `write_u`, which needs to own `v.u`, without owning it
+451	call.precondition	internal	matrix_member_nested.c	41	18	internal check: Silicon's own check of the precondition of `write_u`
+453	assert.failed	out-of-bounds	matrix_member_nested.c	42	18	reads `v.u.m[1][2]`, whose first index may be outside `v.u.m`
+454	assert.failed	out-of-bounds	matrix_member_nested.c	42	18	reads `v.u.m[1][2]`, whose second index may be outside `v.u.m[1]`
+455	assert.failed	permission	matrix_member_nested.c	42	18	reads `v.u.m[1][2]` without owning it: a callee may have kept its object
+456	assert.failed	uninitialized	matrix_member_nested.c	42	18	`v.u.m[1][2]` may be read here before it is given a value
+457	assert.failed	overflow	matrix_member_nested.c	42	22	signed `int` addition may overflow
+458	assert.failed	overflow	matrix_member_nested.c	42	26	signed `int` addition may overflow
+459	assert.failed	overflow	matrix_member_nested.c	42	30	signed `int` addition may overflow
+461	assert.failed	lifetime	matrix_member_nested.c	42	3	the address of `v.u.n` may still be in use when its lifetime ends
+462	assert.failed	lifetime	matrix_member_nested.c	42	3	the address of `v.k` may still be in use when its lifetime ends
+464	assert.failed[insufficient.permission]	lifetime	matrix_member_nested.c	42	3	the address of an element of `v.u.m` may still be in use when its lifetime ends
+465	assert.failed[insufficient.permission]	lifetime	matrix_member_nested.c	42	3	the address of an element of `v.u.m` may still be in use when its lifetime ends
+466	assert.failed	lifetime	matrix_member_nested.c	42	3	the address of `v` may still be in use when its lifetime ends
+471	assert.failed	postcondition	matrix_member_nested.c	42	3	the postcondition of `caller` may not hold	matrix_member_nested.c:36:this is the postcondition
+473	assert.failed	lifetime	matrix_member_nested.c	43	1	the address of `v.u.n` may still be in use when its lifetime ends
+474	assert.failed	lifetime	matrix_member_nested.c	43	1	the address of `v.k` may still be in use when its lifetime ends
+476	assert.failed[insufficient.permission]	lifetime	matrix_member_nested.c	43	1	the address of an element of `v.u.m` may still be in use when its lifetime ends
+477	assert.failed[insufficient.permission]	lifetime	matrix_member_nested.c	43	1	the address of an element of `v.u.m` may still be in use when its lifetime ends
+478	assert.failed	lifetime	matrix_member_nested.c	43	1	the address of `v` may still be in use when its lifetime ends
+483	assert.failed	missing-return	matrix_member_nested.c	43	1	control may reach the end of `caller` without returning a value
+489	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all (well-formedness)`
+490	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all (well-formedness)`
+491	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all (well-formedness)`
+492	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all (well-formedness)`
+493	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all (well-formedness)`
+494	not.wellformed	internal	matrix_member_nested.c	11	5	internal check: well-formedness of the contract of `write_all (well-formedness)`
+497	assert.failed	permission	matrix_member_nested.c	13	55	the contract of `write_all` reads `p->u.m[1][2]` without owning it
+502	not.wellformed	internal	matrix_member_nested.c	20	5	internal check: well-formedness of the contract of `write_u (well-formedness)`
+503	not.wellformed	internal	matrix_member_nested.c	20	5	internal check: well-formedness of the contract of `write_u (well-formedness)`
+504	not.wellformed	internal	matrix_member_nested.c	20	5	internal check: well-formedness of the contract of `write_u (well-formedness)`
+505	not.wellformed	internal	matrix_member_nested.c	20	5	internal check: well-formedness of the contract of `write_u (well-formedness)`
+508	assert.failed	permission	matrix_member_nested.c	22	57	the contract of `write_u` reads `p->u.m[1][2]` without owning it
+513	not.wellformed	internal	matrix_member_nested.c	28	5	internal check: well-formedness of the contract of `read_matrix (well-formedness)`
+514	not.wellformed	internal	matrix_member_nested.c	28	5	internal check: well-formedness of the contract of `read_matrix (well-formedness)`
+515	not.wellformed	internal	matrix_member_nested.c	28	5	internal check: well-formedness of the contract of `read_matrix (well-formedness)`
+516	not.wellformed	internal	matrix_member_nested.c	28	5	internal check: well-formedness of the contract of `read_matrix (well-formedness)`
+519	assert.failed	permission	matrix_member_nested.c	30	65	the contract of `read_matrix` reads `p->u.m[0][0]` without owning it
+524	not.wellformed	internal	matrix_member_nested.c	35	5	internal check: well-formedness of the contract of `caller (well-formedness)`
+527	assert.failed	overflow	matrix_member_nested.c	36	32	signed `int` addition may overflow
+528	assert.failed	overflow	matrix_member_nested.c	36	36	signed `int` addition may overflow
+529	assert.failed	overflow	matrix_member_nested.c	36	40	signed `int` addition may overflow

@@ -1,0 +1,31 @@
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+38	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+38	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+39	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of program_start for `gm`
+39	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of program_start for `gm`
+44	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the contract of `main`
+44	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the postcondition of `main`
+49	call.precondition	internal	t.c	2	3	internal check: Silicon's own check of the call of program_start
+51	assert.failed	out-of-bounds	t.c	9	3	writes `gm[0][0]`, whose first index may be outside `gm`
+52	assert.failed	out-of-bounds	t.c	9	3	writes `gm[0][0]`, whose second index may be outside `gm[0]`
+54	assert.failed	permission	t.c	9	3	writes `gm[0][0]` without owning it: a callee may have kept its object
+57	assert.failed	out-of-bounds	t.c	15	3	reads `gm[0][0]`, whose first index may be outside `gm`
+58	assert.failed	out-of-bounds	t.c	15	3	reads `gm[0][0]`, whose second index may be outside `gm[0]`
+59	assert.failed	permission	t.c	15	3	reads `gm[0][0]` without owning it: a callee may have kept its object
+60	assert.failed	uninitialized	t.c	15	3	`gm[0][0]` may be read here before it is given a value
+61	assert.failed	check	t.c	18	3	this `check` may not hold
+62	assert.failed	out-of-bounds	t.c	24	3	reads `gm[1][2]`, whose first index may be outside `gm`
+63	assert.failed	out-of-bounds	t.c	24	3	reads `gm[1][2]`, whose second index may be outside `gm[1]`
+64	assert.failed	permission	t.c	24	3	reads `gm[1][2]` without owning it: a callee may have kept its object
+65	assert.failed	uninitialized	t.c	24	3	`gm[1][2]` may be read here before it is given a value
+66	assert.failed	check	t.c	27	3	this `check` may not hold
+69	assert.failed	missing-return	t.c	31	3	control may reach the end of `main` without returning a value

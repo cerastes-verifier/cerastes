@@ -1,0 +1,75 @@
+30	not.wellformed	internal	tests/memory/struct_array_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+30	postcondition.violated	internal	tests/memory/struct_array_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+31	not.wellformed	internal	tests/memory/struct_array_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+31	postcondition.violated	internal	tests/memory/struct_array_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+32	not.wellformed	internal	tests/memory/struct_array_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+32	postcondition.violated	internal	tests/memory/struct_array_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+33	not.wellformed	internal	tests/memory/struct_array_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+33	postcondition.violated	internal	tests/memory/struct_array_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+34	not.wellformed	internal	tests/memory/struct_array_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+34	postcondition.violated	internal	tests/memory/struct_array_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+35	not.wellformed	internal	tests/memory/struct_array_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+35	postcondition.violated	internal	tests/memory/struct_array_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+36	not.wellformed	internal	tests/memory/struct_array_nested.c	9	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+36	postcondition.violated	internal	tests/memory/struct_array_nested.c	9	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+41	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+41	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+42	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+42	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+43	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+43	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+44	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+44	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+45	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+45	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+46	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+46	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+47	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+47	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+48	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+48	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+49	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+49	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+50	not.wellformed	internal	tests/memory/struct_array_nested.c	14	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+50	postcondition.violated	internal	tests/memory/struct_array_nested.c	14	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+55	not.wellformed	internal	tests/memory/struct_array_nested.c	19	5	internal check: well-formedness of the contract of `use`
+56	not.wellformed	internal	tests/memory/struct_array_nested.c	20	5	internal check: well-formedness of the contract of `use`
+57	not.wellformed	internal	tests/memory/struct_array_nested.c	19	5	internal check: well-formedness of the contract of `use`
+57	postcondition.violated	internal	tests/memory/struct_array_nested.c	19	5	internal check: Silicon's own check of the postcondition of `use`
+58	not.wellformed	internal	tests/memory/struct_array_nested.c	21	5	internal check: well-formedness of the contract of `use`
+58	postcondition.violated	internal	tests/memory/struct_array_nested.c	21	5	internal check: Silicon's own check of the postcondition of `use`
+73	call.precondition	internal	tests/memory/struct_array_nested.c	23	12	internal check: Silicon's own check of the allocation of `t`
+74	assert.failed	out-of-bounds	tests/memory/struct_array_nested.c	23	19	writes `t.s.a[0]`, whose index may be outside `t.s.a`
+76	assert.failed	permission	tests/memory/struct_array_nested.c	23	19	writes `t.s.a[0]` without owning it: a callee may have kept its object
+79	assert.failed	out-of-bounds	tests/memory/struct_array_nested.c	23	22	writes `t.s.a[1]`, whose index may be outside `t.s.a`
+81	assert.failed	permission	tests/memory/struct_array_nested.c	23	22	writes `t.s.a[1]` without owning it: a callee may have kept its object
+84	assert.failed	out-of-bounds	tests/memory/struct_array_nested.c	23	25	writes `t.s.a[2]`, whose index may be outside `t.s.a`
+86	assert.failed	permission	tests/memory/struct_array_nested.c	23	25	writes `t.s.a[2]` without owning it: a callee may have kept its object
+89	assert.failed	out-of-bounds	tests/memory/struct_array_nested.c	23	28	writes `t.s.a[3]`, whose index may be outside `t.s.a`
+91	assert.failed	permission	tests/memory/struct_array_nested.c	23	28	writes `t.s.a[3]` without owning it: a callee may have kept its object
+95	assert.failed	permission	tests/memory/struct_array_nested.c	23	32	writes `t.s.n` without owning it: the object it points to may have ended
+99	assert.failed	permission	tests/memory/struct_array_nested.c	23	36	writes `t.z` without owning it: the object it points to may have ended
+102	assert.failed	out-of-bounds	tests/memory/struct_array_nested.c	24	12	writes `t.s.a[i]`, whose index may be outside `t.s.a`
+104	assert.failed	permission	tests/memory/struct_array_nested.c	24	12	writes `t.s.a[i]` without owning it: a callee may have kept its object
+107	assert.failed	permission	tests/memory/struct_array_nested.c	25	19	reads `t.z` without owning it: the object it points to may have ended
+108	assert.failed	uninitialized	tests/memory/struct_array_nested.c	25	19	`t.z` may be read here before it is given a value
+109	assert.failed	permission	tests/memory/struct_array_nested.c	25	33	reads `t.s.n` without owning it: the object it points to may have ended
+110	assert.failed	uninitialized	tests/memory/struct_array_nested.c	25	33	`t.s.n` may be read here before it is given a value
+111	assert.failed	check	tests/memory/struct_array_nested.c	25	41	this `check` may not hold
+112	assert.failed	out-of-bounds	tests/memory/struct_array_nested.c	26	15	reads `t.s.a[i]`, whose index may be outside `t.s.a`
+113	assert.failed	permission	tests/memory/struct_array_nested.c	26	15	reads `t.s.a[i]` without owning it: a callee may have kept its object
+114	assert.failed	uninitialized	tests/memory/struct_array_nested.c	26	15	`t.s.a[i]` may be read here before it is given a value
+116	assert.failed	lifetime	tests/memory/struct_array_nested.c	26	3	the address of `t.s.n` may still be in use when its lifetime ends
+117	assert.failed	lifetime	tests/memory/struct_array_nested.c	26	3	the address of `t.z` may still be in use when its lifetime ends
+119	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_nested.c	26	3	the address of an element of `t.s.a` may still be in use when its lifetime ends
+120	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_nested.c	26	3	the address of an element of `t.s.a` may still be in use when its lifetime ends
+121	assert.failed	lifetime	tests/memory/struct_array_nested.c	26	3	the address of `t` may still be in use when its lifetime ends
+126	assert.failed	postcondition	tests/memory/struct_array_nested.c	26	3	the postcondition of `use` may not hold	tests/memory/struct_array_nested.c:21:this is the postcondition
+128	assert.failed	lifetime	tests/memory/struct_array_nested.c	27	1	the address of `t.s.n` may still be in use when its lifetime ends
+129	assert.failed	lifetime	tests/memory/struct_array_nested.c	27	1	the address of `t.z` may still be in use when its lifetime ends
+131	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_nested.c	27	1	the address of an element of `t.s.a` may still be in use when its lifetime ends
+132	assert.failed[insufficient.permission]	lifetime	tests/memory/struct_array_nested.c	27	1	the address of an element of `t.s.a` may still be in use when its lifetime ends
+133	assert.failed	lifetime	tests/memory/struct_array_nested.c	27	1	the address of `t` may still be in use when its lifetime ends
+138	assert.failed	missing-return	tests/memory/struct_array_nested.c	27	1	control may reach the end of `use` without returning a value
+144	not.wellformed	internal	tests/memory/struct_array_nested.c	19	5	internal check: well-formedness of the contract of `use (well-formedness)`
+145	not.wellformed	internal	tests/memory/struct_array_nested.c	19	5	internal check: well-formedness of the contract of `use (well-formedness)`

@@ -1,0 +1,77 @@
+32	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+32	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+38	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+38	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+39	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+39	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+44	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f`
+45	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f`
+46	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+47	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+48	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+49	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+50	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+51	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+52	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+53	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+54	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+55	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+56	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+57	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+58	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+59	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+60	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+61	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+62	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+63	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+64	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+90	assert.failed[insufficient.permission]	permission	t.c	39	3	this loop begins without the permission to every cell of every row of `p->m`
+91	assert.failed[insufficient.permission]	permission	t.c	39	3	this loop begins without the permission to every cell of every row of `p->m`
+94	invariant.not.established	internal	t.c	39	3	internal check: automatic range invariant of `i`
+94	invariant.not.preserved	internal	t.c	39	3	internal check: automatic range invariant of `i`
+95	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+95	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+96	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+96	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+97	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+97	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+98	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+98	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+99	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+99	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+100	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+100	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+101	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+101	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+102	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+102	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+103	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+103	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+104	invariant.not.established	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+104	invariant.not.preserved	internal	t.c	39	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+105	invariant.not.established	invariant-entry	t.c	17	3	this loop invariant may not hold on entry
+105	invariant.not.preserved	invariant-preserved	t.c	17	3	this loop invariant may not be preserved by an iteration
+106	invariant.not.established	overflow	t.c	31	3	signed `int` subtraction may overflow
+106	invariant.not.preserved	overflow	t.c	31	3	signed `int` subtraction may overflow
+107	termination.failed	termination	t.c	32	3	the measure of this loop may not decrease, or may not be bounded below by zero
+109	assert.failed	null-dereference	t.c	25	3	dereferences the pointer, which may be null
+110	assert.failed	out-of-bounds	t.c	25	3	writes an element of the array, whose first index may be outside ``
+111	assert.failed	out-of-bounds	t.c	25	3	writes an element of the array, whose second index may be outside the row
+113	assert.failed	permission	t.c	25	3	writes an element of the array without owning it: a callee may have kept its object
+116	assert.failed	overflow	t.c	35	3	signed `int` addition may overflow
+118	assert.failed	permission	t.c	38	3	an iteration of this loop ends without the permission to `p->n` that it began with
+119	assert.failed	permission	t.c	38	3	an iteration of this loop ends without the permission to `p->n` that it began with
+120	assert.failed[insufficient.permission]	permission	t.c	38	3	an iteration of this loop ends without the permission to `p->m` that it began with
+121	assert.failed[insufficient.permission]	permission	t.c	38	3	an iteration of this loop ends without the permission to `p->m` that it began with
+128	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f (well-formedness)`
+129	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `f (well-formedness)`

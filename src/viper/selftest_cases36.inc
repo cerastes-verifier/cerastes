@@ -867,7 +867,8 @@ void define_struct_range_cases()
     rc("e1e2c1_rej_range_over_a_struct_with_an_array_member", "whose element holds an array member",
        [=](Kit& k)
        {
-           StructType* S {k.strukt("S", {{"x", k.i32}, {"a", k.prog.array_of(k.i32, 2U)}})};
+           // (slice 3c-2 lifts the range over a structure with an array member of scalars; an element with a MATRIX member, depth 3, stays refused)
+           StructType* S {k.strukt("S", {{"x", k.i32}, {"a", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)}})};
            Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(S))}, {"n", k.i32}})};
            k.req(f, RO(k, f, 0));
            f->body = k.blk({});
@@ -2656,8 +2657,8 @@ void define_member_struct_array_cases()
     rc("e1e2c2_rej_member_element_with_an_array_member", "whose elements hold an array member",
        [=](Kit& k)
        {
-           // struct U { int a[2]; }; struct T { struct U v[2]; };  (a depth-2 leaf path: Part E)
-           StructType* U {k.strukt("U", {{"a", k.prog.array_of(k.i32, 2U)}})};
+           // struct U { int a[2][2]; }; struct T { struct U v[2]; };  (a depth-3 leaf path: Part E's slice 4; slice 3c-4 lifts the element with an array member of scalars)
+           StructType* U {k.strukt("U", {{"a", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)}})};
            k.strukt("T", {{"v", k.prog.array_of(k.st(U), 2U)}});
        });
     // int hm(struct T *p) requires(owns(*p) && p->v[1].x == 3) ensures(owns(*p) && r == p->v[1].x) { return p->v[1].x; }   (fill: t.v[1].x == 3)

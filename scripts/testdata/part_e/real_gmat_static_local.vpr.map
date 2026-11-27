@@ -1,0 +1,66 @@
+33	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+33	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+34	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+34	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+35	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of program_start for `sm`
+35	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of program_start for `sm`
+36	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of program_start for `sm`
+36	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of program_start for `sm`
+37	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of program_start for `sm`
+37	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of program_start for `sm`
+38	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of program_start for `sm`
+38	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of program_start for `sm`
+39	not.wellformed	internal	t.c	2	3	internal check: well-formedness of the trusted contract of program_start for `sm`
+39	postcondition.violated	internal	t.c	2	3	internal check: Silicon's own check of the trusted contract of program_start for `sm`
+44	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `f`
+45	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `f`
+46	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `f`
+47	not.wellformed	internal	t.c	5	3	internal check: well-formedness of the contract of `f`
+48	not.wellformed	internal	t.c	5	3	internal check: well-formedness of the contract of `f`
+49	not.wellformed	internal	t.c	5	3	internal check: well-formedness of the contract of `f`
+50	not.wellformed	internal	t.c	5	3	internal check: well-formedness of the contract of `f`
+51	not.wellformed	internal	t.c	5	3	internal check: well-formedness of the contract of `f`
+52	not.wellformed	internal	t.c	5	3	internal check: well-formedness of the contract of `f`
+53	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+53	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the postcondition of `f`
+54	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+54	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the postcondition of `f`
+55	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+55	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the postcondition of `f`
+56	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+56	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the postcondition of `f`
+57	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+57	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the postcondition of `f`
+58	not.wellformed	internal	t.c	8	3	internal check: well-formedness of the contract of `f`
+58	postcondition.violated	internal	t.c	8	3	internal check: Silicon's own check of the postcondition of `f`
+64	assert.failed	out-of-bounds	t.c	15	3	writes `sm[1][1]`, whose first index may be outside `sm`
+65	assert.failed	out-of-bounds	t.c	15	3	writes `sm[1][1]`, whose second index may be outside `sm[1]`
+67	assert.failed	permission	t.c	15	3	writes `sm[1][1]` without owning it: a callee may have kept its object
+70	assert.failed	out-of-bounds	t.c	21	3	reads `sm[1][1]`, whose first index may be outside `sm`
+71	assert.failed	out-of-bounds	t.c	21	3	reads `sm[1][1]`, whose second index may be outside `sm[1]`
+72	assert.failed	permission	t.c	21	3	reads `sm[1][1]` without owning it: a callee may have kept its object
+73	assert.failed	uninitialized	t.c	21	3	`sm[1][1]` may be read here before it is given a value
+74	assert.failed	check	t.c	24	3	this `check` may not hold
+75	assert.failed[insufficient.permission]	permission	t.c	26	3	returns without owning `sm`, which its contract promises	t.c:8:this is the postcondition
+76	assert.failed[insufficient.permission]	permission	t.c	26	3	returns without owning `sm`, which its contract promises	t.c:8:this is the postcondition
+77	assert.failed	permission	t.c	26	3	returns without owning `sm`, which its contract promises	t.c:8:this is the postcondition
+78	assert.failed	permission	t.c	26	3	returns without owning `sm`, which its contract promises	t.c:8:this is the postcondition
+79	assert.failed	permission	t.c	26	3	returns without owning `sm`, which its contract promises	t.c:8:this is the postcondition
+80	assert.failed	permission	t.c	26	3	returns without owning `sm`, which its contract promises	t.c:8:this is the postcondition
+86	not.wellformed	internal	t.c	27	3	internal check: well-formedness of the contract of `main`
+86	postcondition.violated	internal	t.c	27	3	internal check: Silicon's own check of the postcondition of `main`
+92	call.precondition	internal	t.c	27	3	internal check: Silicon's own check of the call of program_start
+95	assert.failed	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it
+97	assert.failed	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it
+98	assert.failed	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it
+99	assert.failed	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it
+100	assert.failed[insufficient.permission]	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it (every cell of every row)
+101	assert.failed[insufficient.permission]	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it (every cell of every row)
+102	assert.failed	uninitialized	t.c	28	3	calls `f`, which needs the `static` local `sm` of `f` to have a value; it may not have one here
+103	assert.failed	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it (every cell of every row)
+104	assert.failed	permission	t.c	28	3	calls `f`, which needs to own the `static` local `sm` of `f`, without owning it
+105	call.precondition	internal	t.c	28	3	internal check: Silicon's own check of the precondition of `f`
+108	assert.failed	missing-return	t.c	33	3	control may reach the end of `main` without returning a value
+114	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `f (well-formedness)`
+115	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `f (well-formedness)`
+116	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `f (well-formedness)`

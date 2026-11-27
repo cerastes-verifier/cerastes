@@ -1,0 +1,135 @@
+32	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+33	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+34	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+35	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+36	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+37	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+38	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+39	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+40	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+40	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+41	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+41	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+42	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+42	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+43	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+43	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+44	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+44	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+45	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+45	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+46	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+46	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+47	not.wellformed	internal	t.c	56	3	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+47	postcondition.violated	internal	t.c	56	3	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+52	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+52	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+53	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+53	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+54	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+54	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+55	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+55	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+56	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+56	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+57	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+57	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+58	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+58	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+63	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp`
+64	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp`
+65	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp`
+66	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+67	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+68	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+69	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+70	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+71	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+72	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+73	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+74	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+75	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+76	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+77	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+78	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+79	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+80	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+81	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+82	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the contract of `cp`
+83	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+83	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+84	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+84	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+85	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+85	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+86	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+86	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+87	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+87	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+88	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+88	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+89	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+89	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+90	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+90	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+91	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+91	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+92	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+92	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+93	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+93	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+94	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+94	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+95	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+95	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+96	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+96	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+97	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+97	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+98	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+98	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+99	not.wellformed	internal	t.c	41	3	internal check: well-formedness of the contract of `cp`
+99	postcondition.violated	internal	t.c	41	3	internal check: Silicon's own check of the postcondition of `cp`
+112	assert.failed	null-dereference	t.c	51	3	dereferences the pointer, which may be null
+113	assert.failed	lifetime	t.c	51	3	uses the pointer after the object it points to may have ended
+114	assert.failed	out-of-bounds	t.c	51	3	writes an element outside the object the pointer points into
+115	assert.failed	null-dereference	t.c	50	3	dereferences the pointer, which may be null
+116	assert.failed	lifetime	t.c	50	3	uses the pointer after the object it points to may have ended
+117	assert.failed	out-of-bounds	t.c	50	3	reads an element outside the object the pointer points into
+118	assert.failed	permission	t.c	50	3	reads the object the pointer points to without owning it: the object it points to may have ended
+119	assert.failed	uninitialized	t.c	50	3	the object the pointer points to may be read here before it is given a value
+121	assert.failed	permission	t.c	51	3	writes the object the pointer points to without owning it: the object it points to may have ended
+124	assert.failed	null-dereference	t.c	56	3	dereferences the pointer, which may be null
+125	assert.failed	lifetime	t.c	56	3	uses the pointer after the object it points to may have ended
+126	assert.failed	out-of-bounds	t.c	56	3	reads an element outside the object the pointer points into
+127	assert.failed	null-dereference	t.c	56	3	dereferences the pointer, which may be null
+128	assert.failed	lifetime	t.c	56	3	uses the pointer after the object it points to may have ended
+129	assert.failed	out-of-bounds	t.c	56	3	reads an element outside the object the pointer points into
+135	assert.failed	permission	t.c	56	3	copies an array member, whose elements the function may not hold (a callee may have kept them)
+136	assert.failed[insufficient.permission]	permission	t.c	56	3	copies an array member, whose elements the function may not hold (a callee may have kept them)
+137	assert.failed[insufficient.permission]	permission	t.c	56	3	copies an array member, whose elements the function may not hold (a callee may have kept them)
+138	assert.failed	uninitialized	t.c	56	3	copies the structure, whose member the array may hold an element without a value
+139	assert.failed[insufficient.permission]	permission	t.c	56	3	writes an array member without owning every element of it: the object it belongs to may have ended
+140	assert.failed[insufficient.permission]	permission	t.c	56	3	writes an array member without owning every element of it: the object it belongs to may have ended
+142	assert.failed	internal	t.c	56	3	internal check: the two arrays of a copy are distinct blocks
+143	call.precondition	internal	t.c	56	3	internal check: Silicon's own check of the copy of an array member
+145	assert.failed[insufficient.permission]	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+146	assert.failed[insufficient.permission]	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+147	assert.failed[insufficient.permission]	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+148	assert.failed[insufficient.permission]	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+149	assert.failed	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+150	assert.failed	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+151	assert.failed	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+152	assert.failed	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+153	assert.failed	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+154	assert.failed	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+155	assert.failed	permission	t.c	59	3	returns without owning `p[0..n)`, which its contract promises	t.c:41:this is the postcondition
+156	assert.failed	postcondition	t.c	59	3	the postcondition of `cp` may not hold	t.c:41:this is the postcondition
+162	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp (well-formedness)`
+163	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp (well-formedness)`
+164	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp (well-formedness)`
+165	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp (well-formedness)`
+166	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp (well-formedness)`
+167	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `cp (well-formedness)`
+170	assert.failed	permission	t.c	21	3	the contract of `cp` reads an element of a pointer without owning it
+171	assert.failed	permission	t.c	28	3	the contract of `cp` reads an element of a pointer without owning it
