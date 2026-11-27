@@ -6,7 +6,7 @@
   matrices, matrix members of structures in every storage with their contract reads, computed types of
   arrays of arrays and of structures; an element structure with an array member of scalars (`v[i].a[j]`) as
   a local, under a parameter's range, as a global and a `static` local and as a member; the element copy;
-  with items 2, 5, 6, 7, 9, 10, 11 and 12 as amended for them (questions 358 to 389, `internal/handoff.md`
+  with items 2, 5, 6, 7, 9, 10, 11 and 12 as amended for them (questions 358 to 394, `internal/handoff.md`
   §8); **and item 12's structure values of depth 2 by its Commit 6: a structure with a matrix member, or
   with a member array of structures that have an array member, passed, returned and copied as a whole
   value cell by cell under the limit of 7, the cells enumerated once (`vir::value_cells`) for the encoder
@@ -39,7 +39,7 @@
   any round; none asked a change of the lowering or the encoder after the last join (E3b: findings in tests, the record and the pages only). A short read S4 took Commit 6's tree in full (no wrong program verified; it found the
   third defect), and a shorter one S5 took Commit 7's fix (no wrong program verified; no verdict rests on
   the split; its should-fix items, none taken into this commit, are in handoff §8, questions 393 and 394
-  and the list after them).** item 15 (Part D) by the continuation's second session
+  and the list after them). The full check is green at its Commit 7 `0a4eb26` (18,190 tests).** item 15 (Part D) by the continuation's second session
   (2026-11-26: the leftovers of a structure with an array member, for array members of scalars; two audit
   rounds and a short read, below; the full check green at its Commit 4 `86442ce`);** those of the continuation's first session (2026-11-26:
   Parts R, C1 and C2, named below: items 5, 16 and 19 as amended, items 7 to 9, and the range, global and

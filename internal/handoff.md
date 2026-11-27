@@ -1,103 +1,200 @@
-# Handoff after the second session of M4.5e1e2's continuation (2026-11-26) — Parts E and F run next, from the same plan
+# Handoff after the third session of M4.5e1e2's continuation (2026-11-26/27) — a lint step, three dimensions, then Part F, run next, from the same plan
 
 The next session reads this file after `CLAUDE.md` and its plan. `status.md` has the formal entry of the last finished
-session (the continuation's second: Part D of the continuation plan's six) and what happened in it. This
-file adds what a cold start would otherwise have to rediscover, and holds only what is live (owner, 2026-10-26).
+session (the continuation's third: Part E of the continuation plan, through two dimensions) and what happened
+in it. This file adds what a cold start would otherwise have to rediscover, and holds only what is live (owner,
+2026-10-26).
 
-**What the next session needs here:** §1, §2, the rules of §4 and §6, and §8 (**three things are for the owner:
-question 354, the limit this session put on `calloc`; question 357, a lint edit that the permission system
-denied; question 348, a rejection it kept; none blocks the next session**; the advisor's rulings 348–357 are
-for the owner's review). What the next session needs from §3 is under "From the second session of M4.5e1e2's
-continuation" and, below it, "From the first session of M4.5e1e2's continuation".
+**What the next session needs here:** §1, §2, the rules of §4 and §6, and §8 (**for the owner, none blocking
+the next session:** question 363, a matrix of structures; the lint branch of question 374 with 385, 386,
+389 and 391; the three rejections of 382, 383 and 384; the listed rejections 377 and 381; the three internal
+errors of question 392; two older defects the last audit read met, 393 and 394; the questions that stood
+before: 354, 357, 348; the advisor's rulings 358–394 are for the owner's review). What the next session needs
+from §3 is under "From the third session of M4.5e1e2's continuation": **its first step is a lint step, its
+second is three dimensions, and only then Part F.**
 
 It was consolidated at M4.5d2b2b's planning (2026-11-09), at M4.5d2b2c's (2026-11-10), at M4.5e1's and at
 M4.5e1b's (both 2026-11-11), at M4.5e1c's (2026-11-23), at M4.5e1d's (2026-11-24), at M4.5e1e's and at M4.5e1e2's
 (both 2026-11-25), and at the planning of M4.5e1e2's continuation (2026-11-25), each at the owner's request; §1,
-§2 and the end of §8 were rewritten at the close of the continuation's first session and again at the close of
-its second (both 2026-11-26). **The text before that planning is `git show f313023:internal/handoff.md`, the
-text the continuation's first session started from is `git show ae622e5:internal/handoff.md`, and the text
-this session started from, with the owner's inline answers, is `git show 493a923:internal/handoff.md`**; the
-ones before are named there. Each note below keeps its origin in brackets. Session plans approved from
-M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its plan's "Inputs".
+§2 and the end of §8 were rewritten at the close of the continuation's first and second sessions (both
+2026-11-26) and of its third (2026-11-27). **The text before that planning is `git show
+f313023:internal/handoff.md`, the text the continuation's first session started from is `git show
+ae622e5:internal/handoff.md`, the text its second session started from is `git show
+493a923:internal/handoff.md`, and the text this session started from is `git show
+42880a1:internal/handoff.md`**; the ones before are named there. Each note below keeps its origin in brackets.
+Session plans approved from M4.5b1a on are in `.claude/plans/`; the notes a session consumes move into its
+plan's "Inputs".
 
 ## 1. State
 
-- **`main` is merged locally and not pushed.** The owner merged the continuation's first session into local
-  `main` (`e82f894`); this session committed the owner's own inline handoff answers there (`493a923`) and
-  branched from it. **`origin/main` is still `f07d80a`**, which accepts every unsound `restrict` form (found
-  by the audits of M4.5e1e2's first session; local `main` rejects every `restrict` parameter since the
-  continuation's Part R). Pushing is the owner's (§2, step 1).
-- **The second session of M4.5e1e2's continuation** (2026-11-26; plan
-  `.claude/plans/m4-5e1e2b-arrays-of-structures.md`; record 0064, accepted for the items built) is on the
-  branch `m4.5e1e2c-arrays-of-structures` (worktree `.claude/worktrees/m4.5e1e2c`), which started at
-  `493a923`. It landed **Part D in one commit, Commit 4 `86442ce`**: a structure with an array member of scalars
-  on the heap (`malloc`, `calloc` up to 24 values, `free`, `cerastes_owns_block`), with an `owning` or marked
-  member beside the array, under `owning`, `ref_to_uninit` and `must_init` pointers, reached through a
-  pointer read from memory in a contract, given by an `ensures` atom with no `requires` partner, carried by
-  loops and named by `owns` atoms written in loop invariants (record 0064 item 15). The closing commits
-  after it change only `internal/` and `plan.md`. Two audit rounds and a short read of the fixes (a fresh
-  Fable auditor each) found no wrong program that verifies; what they did not read is in the status entry,
-  "Audits". **The full check (`CERASTES_LONG=1`, on the box, run once): green at Commit 4 `86442ce`** (17,488 tests passed, 0 failed, 10 skipped; the VIR self-test 2,814 cases; 58 minutes on a loaded box), the last commit that touches anything but `internal/` and `plan.md`.
-- **What is left of M4.5e1e2: Parts E and F,** from the same plan, without a new planning (question 310's
-  12-hour rule; the session closed at the plan's split point after Commit 4 because Part E, with its audit
-  and the close-out, would have ended past fourteen hours). **Part E:** arrays of arrays, array-of-rows
-  parameters (the three spellings and, by P84 (b), the typedef'd ones), `v[i].a[j]`, depth 3, the tutorial's
-  matrix example. **Part F:** `forall` and `pure` applications over structure members, member arrays and
-  contract-position global arrays. Each is rejected today with a diagnostic and a pin that names its part.
-  **An encoder draft of Part E exists on the branch `m4.5e1e2c-part-e-encoder-draft`, unproved end to end
-  and unaudited** (§3).
-- **Listed limits this session added** (record 0064 item 15; each fail closed): `calloc` of a structure with
-  an array member is rejected above 24 values (question 354); a structure whose array member holds
-  structures is rejected at Part D's six positions (question 348); a read of an element that only a loop
-  wrote, in a `malloc`ed structure, is `uninitialized` until Part F; the false alarms and the shapes with no
-  verdict in the time limit that the audits measured; two tests set aside under
-  `internal/pending/m4.5e1e2c/` (question 357). Question 343's exit 3 stays listed until M4.5e2 (the owner).
+- **Nothing of this session is pushed or merged.** It is on the branch `m4.5e1e2d-arrays-of-structures`
+  (worktree `.claude/worktrees/m4.5e1e2d`), which started at `42880a1` (local `main` then, and the tip of
+  `origin/m4.5e1e2c-arrays-of-structures`). **`origin/main` was still `f07d80a` when the session started**,
+  which accepts every unsound `restrict` form; local `main` rejects them. Pushing and merging are the
+  owner's (§2, step 1).
+- **The third session of M4.5e1e2's continuation** (2026-11-26 20:17 UTC to 2026-11-27 17:20 UTC; plan
+  `.claude/plans/m4-5e1e2b-arrays-of-structures.md`; record 0064, accepted for the items built) landed
+  **Part E through two dimensions** in three commits: **Commit 5 `670ae10`** (matrices as locals, row
+  parameters, globals, `static` locals and members; ranges over rows; contract reads; loops; an element
+  structure with an array member of scalars, `v[i].a[j]`, in every storage; the whole-element copy;
+  computed types of arrays of arrays and of structures), **Commit 6 `68146c6`** (structure values
+  of depth 2: a structure with a matrix member, or with a member array of structures that have an array
+  member, passed, returned and copied as a whole under the limit of 7; and the fix of two internal errors
+  that Commit 5's tree has: below) and **Commit 7 `0a4eb26`** (the fix of a third internal error of the same family, with its tests). The closing commit after them changes only `internal/` and `plan.md`.
+  Six audit readings (a fresh Fable auditor each: E1, E2a, E3a, E3b, a short read of slice 4, and a shorter one of Commit 7's fix) found no
+  wrong program that verifies; what they did not read is in the status entry, "Audits". **The full check
+  (`CERASTES_LONG=1`, on the box, run once, after the last code change): green at Commit 7 `0a4eb26`: 18,190
+  tests passed, 0 failed, 10 skipped as before (log `build/m4.5e1e2d/check-c7-0a4eb26.log`).**
+- **Three internal errors of one family were found after Commit 5** (question 392; each fail closed: exit
+  3, "the program was not checked", never a wrong proof; each asks a row of a matrix for what only a
+  structure element or a cell has): (1) a structure whose FIRST member is a matrix under `owns(*p)` beside
+  `reads(*q)` or `owns(*q)` of two pointers; (2) a CALL of a function whose contract has two `reads` atoms
+  of a structure with a matrix member; (3) a structure with a matrix member in a function that needs a
+  pointer split, for example beside an `int *q` parameter that no atom covers. **Commit 5 `670ae10` has all
+  three (measured on its build); Commit 6 `68146c6` fixes (1) and (2) and has (3); Commit 7 `0a4eb26` fixes (3).** So only the branch's tip is
+  free of them: never build or bisect on `670ae10` or `68146c6` alone and read an exit 3 there as new.
+- **What is left of M4.5e1e2, in this order:** (1) **the lint step** the owner agreed to (question 369; §2,
+  step 4, and §3); (2) **three dimensions** (`int c[2][3][4]`: record 0064 item
+  2 admits depth 3; nothing of its lowering is built; rejected by the encoder behind the constant
+  `kOpenDepth3` with staging rows; the plan's Part E row and spike S48 (m) describe it; §3 has the first
+  step); (3) **Part F**: `forall` and `pure` applications over structure members, member arrays and
+  contract-position global arrays. All from the same plan, without a new planning. A matrix of structures
+  is not planned anywhere (question 363).
+- **Listed limits this session added** (record 0064 items 7, 10, 12, 13 and 17; each fail closed): the
+  rejections of questions 363, 377 and 381 to 384; no tie of a member matrix's cell or of `p->v[e].a[e2]`
+  across a call (question 345's false alarm); the costs (several loops over global matrices in one
+  function; a copy between two elements at symbolic indexes with a failing claim; the two-pointer copy's
+  failing twin); `sizeof(a[0])` of a row parameter in a contract; a pointer initialized with `&g.m[1][0]` in
+  C; the message texts. **The Viper lint has known gaps** (record item 17), which is why the next session
+  opens with a lint step (§2, step 4).
 - **The box:** the lanes `~/cerastes-e1e2/{base,il,edg,work,audit}` (containers `cerastes-e1e2-<lane>`, image
-  `cerastes-e1d:26.04`) are reused by the next session; `base` holds the baseline at `493a923` (the next
-  session's Step 0 takes a new one at its own base), `edg` and `audit` the final build of Part D, `il` the
-  Part E draft's build. The check lane `~/cerastes-s8/p-ubuntu-26.04` sits detached at `86442ce`, with this session's
-  `check-e1e2c-c4.log`, `.exit` and `.start` beside the earlier sessions' logs. The box was under other
-  users' load (40 to 75) for part of the session; times measured there are upper bounds.
-- **CI:** unchanged (question 176 the owner's; the last scheduled run on `main`, 2026-11-25, failed after
-  6 h 02, recorded only). **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website and **the EDG pin**
-  `f0ed5525af` are unchanged. The Mac's disk had 24 GiB free (98% used) during the session.
+  `cerastes-e1d:26.04`) are reused by the next session; `base` holds the baseline at `42880a1` (the next
+  session's Step 0 takes a new one at its own base); the others hold this session's last builds and the
+  auditors' probe directories (`build/audit-E1`, `-E2a`, `-E3a`, `-E3b`, `-S4`, `-S5` in lane `audit`). The check
+  lane `~/cerastes-s8/p-ubuntu-26.04` sits detached at `0a4eb26`, with this session's log beside the
+  earlier ones. **The box's local time is UTC+1** (`uptime`, `ls`; its `date -u` agrees with the Mac's). Its load was 16 to 100 for most of the
+  session, from this session's own lanes: times measured there are upper bounds.
+- **The Mac:** every rebuilt `cerastes` or `cerastes-vir-selftest` is a new application to macOS's consent
+  system (ad hoc linker signature), and while its prompt waits every open of `~/Documents` blocks; this
+  session lost 45 minutes to it and then ran binaries only in the lanes (§6). Its disk had 27 GiB free.
+- **CI:** unchanged (question 176 the owner's). **vlibc** `6e41fbe`, **vlibm** `1e6982e`, the website and
+  **the EDG pin** `f0ed5525af` are unchanged.
 
 ## 2. Owner steps
 
-1. **Push `main`, then merge and push this session's branch; recommended now.** `origin/main` (`f07d80a`)
-   still accepts the unsound `restrict` forms; local `main` (`493a923`) does not. The branch
-   `m4.5e1e2c-arrays-of-structures` is a fast-forward of local `main`: `git merge --ff-only
-   m4.5e1e2c-arrays-of-structures` on `main`, then push (never reset or rebase). The full check is green at Commit 4 `86442ce`; the commit after it
-   changes no code.
-2. **Answer, when convenient (none blocks the next session; §8, "Questions for the owner"):** 354 (the
-   `calloc` limit), 357 (the denied lint edit and the two tests set aside), 348 (where the rejection for
-   structures whose array member holds structures is lifted).
-3. **Review, when convenient:** the advisor's rulings of this session, 348–357 (§8), and the deviations in
-   `internal/status.md`; the earlier ones were let stand by the owner on 2026-11-26.
+1. **Push `main`, then merge and push this session's branch; recommended now.** The branch
+   `m4.5e1e2d-arrays-of-structures` is a fast-forward of local `main` (`42880a1`): `git merge --ff-only
+   m4.5e1e2d-arrays-of-structures` on `main`, then push (never reset or rebase). **The main checkout
+   (`/Users/mattborland/Documents/cerastes/cerastes`) had an uncommitted change of the owner's to `plan.md`
+   during this session** (M4's "Acceptance": sentences on security evaluations by a Claude Mythos 5.2 agent
+   before the work is accepted). This session did not touch it. Its close-out commit also edits `plan.md`
+   (other paragraphs), so git refuses the fast-forward while that change is uncommitted: commit it on `main`
+   first (the merge is then a real merge of two edits to different parts of the file, not a fast-forward)
+   or stash it, merge, and apply the stash. The full check is green at the branch's last code commit (`0a4eb26`); the commit after it changes only
+   `internal/` and `plan.md`.
+2. **Answer, when convenient (none blocks the next session; §8, "Questions for the owner"):** 392 (the three internal errors: nothing to decide, the handling to review); 363 (a matrix
+   of structures); 374 with 391 (the lint's guard-shaped branch and its second site: let them stand as
+   built, or have them reverted); 382, 383, 384 (three shapes rejected that verified in the auditors'
+   probes); 377 and 381 (two listed rejections); 354, 357 and 348 as they stood; 393 and 394 (two older
+   defects the last audit read met: where each is fixed); the depth-3 default (it was left for the next
+   session; the push of 10:19 UTC had no answer by the close).
+3. **Review, when convenient:** the advisor's rulings of this session, 358–394 (§8), and the deviations in
+   `internal/status.md`.
 4. **Start the next session:** `claude --agent orchestrator --effort high`, first message `M4.5e1e2
-   continuation, from Part E (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`. It runs from the same plan,
-   without a planning: a new branch `m4.5e1e2d-arrays-of-structures` from the tip of
-   `m4.5e1e2c-arrays-of-structures` (or from `main` once that is merged), the worktree
-   `.claude/worktrees/m4.5e1e2d`, the session directory `build/m4.5e1e2d/`, the same lanes. It runs the
-   plan's Step 0 again on the new base (the worktree with submodules and build, the lanes, the baseline, R1
-   and R3; no P84), copies this session's reports from `.claude/worktrees/m4.5e1e2c/build/m4.5e1e2c/` to its
-   `prev/`, and goes on from Part E's line in the plan's section 7, "Order of work". Its questions start at
-   358. Record 0064's items 13 and 14 are "decided, built by the next session". §3, "From the second session
-   of M4.5e1e2's continuation", holds what it must know about Part E's encoder draft before it briefs
-   anyone.
-5. **Remove, when convenient:** the earlier sessions' worktrees and merged branches (as before:
-   `.claude/worktrees/m4.5e1e2`, `m4.5e1e2-audit`, `m4.5e1e2b`, the refs `refs/tmp/e1e2-*` and
-   `refs/tmp/e1e2b-*`); this session's `.claude/worktrees/m4.5e1e2c-audit` and `.claude/worktrees/m4.5e1e2c-e`
-   (the Part E draft's worktree: its content is on the draft branch) and the refs `refs/tmp/e1e2c-*`. **Keep
-   `.claude/worktrees/m4.5e1e2c/build/m4.5e1e2c/` until the next session's Step 0 has copied it** (every
-   agent report, the audit reports and the auditors' probes under `audit-{D1,D2,D2b}/`, the briefings as
-   sent, the orchestrator's state log). On the box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
-6. **CI** (question 176): unchanged.
+   continuation, from the lint step and three dimensions (.claude/plans/m4-5e1e2b-arrays-of-structures.md)`.
+   It runs from the same plan, without a planning: a new branch `m4.5e1e2e-arrays-of-structures` from the tip
+   of `m4.5e1e2d-arrays-of-structures` (or from `main` once that is merged), the worktree
+   `.claude/worktrees/m4.5e1e2e`, the session directory `build/m4.5e1e2e/`, the same lanes. It runs the plan's
+   Step 0 again on the new base (the worktree with submodules and build, the lanes, the baseline, R1 and R3;
+   no P84), copies this session's reports from `.claude/worktrees/m4.5e1e2d/build/m4.5e1e2d/` to its `prev/`,
+   and then, in this order: **(a) the lint step the owner agreed to** (questions 369, 373, 379, 380, 390, Rule
+   A's change of question 391 and the table collision: record 0064 item 17 has the list; the test-mutator tightens and extends
+   `scripts/lint_viper.py` against the WHOLE regeneration and the self-test output, with one audit read of
+   the lint diff); **(b) three dimensions** (the rest of Part E: §3 has the first step and what is
+   prepared); **(c) Part F** from its line in the plan's section 7. Its questions start at 395.
+5. **Remove, when convenient:** the earlier sessions' worktrees and merged branches (as before, and now also
+   `.claude/worktrees/m4.5e1e2c`, `m4.5e1e2c-audit`, `m4.5e1e2c-e`, the branch
+   `m4.5e1e2c-part-e-encoder-draft`, whose content this session re-read, proved and committed, and the refs
+   `refs/tmp/e1e2c-*`); this session's `.claude/worktrees/m4.5e1e2d-audit` and the refs `refs/tmp/e1e2d-*` and
+   `refs/tmp/il*`. **Keep `.claude/worktrees/m4.5e1e2d/build/m4.5e1e2d/` until the next session's Step 0 has
+   copied it** (every agent report, the audit reports and the auditors' probes under
+   `audit-<round>/`, the briefings as sent, the orchestrator's state log and status draft). **Four
+   deletions that agents were refused by the permission system and that nobody made in their place:**
+   `tm9/il-vir.tar` (a broken copy), files matched by a glob under `tm10/` (test-mutator-10's report 20 names
+   them), scratch files of auditor S4 in lane `audit` on the box (its report names the directory), and an
+   `rm -f` of a probe directory that did not exist yet (edg-backend's report 21; nothing to remove):
+   harmless, the owner's to remove. On the
+   box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
+6. **The macOS re-approval of rebuilt binaries** (three ways out, the owner's choice): move the repository
+   out of `~/Documents`; give the launching application Full Disk Access; or sign the binaries with a stable
+   identity in a post-link step. Until one is done, the rule of §6 stands: compile on the Mac, run in the
+   lanes.
+7. **CI** (question 176): unchanged.
 
 ## 3. Open notes, by the session that consumes them
 
 One line per note, its origin in brackets (session and audit item); the full wording is in the commit named above.
 Notes that a session consumes move into its plan's "Inputs".
+
+**From the third session of M4.5e1e2's continuation (2026-11-27; what the next session must know before it
+briefs anyone):**
+- **The order is: the lint step, three dimensions, Part F.** The owner agreed to the lint step (question
+  369); three dimensions was left by default when its lowering had not begun and the orchestrator's context
+  was the limit (the owner's condition of 03:38 UTC).
+- **The lint step** (the test-mutator's; one audit read of its diff). `scripts/lint_viper.py` is an
+  allow-list over the Viper of every test and self-test case; this session added about 2,570 lines to it.
+  Its known gaps are listed in record 0064 item 17. Rules for the step: every tightening is checked against
+  the whole regeneration and the self-test output (a rule that refuses an accepted program's Viper is not
+  taken); the table that ties an array member of scalars to the unit's structure allocations is keyed by
+  NUMBER and must be keyed by type, since **a test unit that declares two structure types with array members
+  at one member index and different counts (also one element type in member arrays of two lengths) has
+  every range, global or member form over either refused** (16 test units hold two such types today and
+  lint clean only because of how they are shaped); question 357's boundary stands (no amount, guard or
+  kept-flag rule is loosened without the owner's word: questions 374, 383 and 384 are the open cases).
+- **Three dimensions: what exists.** The encoder's half is written and gated (`kOpenDepth3` false; its staging
+  rows are the depth-3 rows of `tests/memory/negative/matrix_reject_slice4_staging.c` and the pins named in
+  the status entry). The lowering has NOTHING: its last agent's report
+  (`build/m4.5e1e2d/il-analyst-report-7.md`, "4c") gives the first step: a trusted allocation named
+  `alloc_arr_mat_<t>_<R>_<C>` with its `zero_arr_mat_…`, and every walker that reads one inner level
+  (`ElemLeaf::count`, `row_leaf`/`is_row`, the two index words of `elem_addr`, the row allocation's two bound
+  variables, `check.cpp`'s type rules) gaining a third. Test drafts exist, untracked in the worktree and in
+  no commit: `tests/memory/matrix_depth3*`, `array_rows_param_depth3*`, `matrix_depth3_member*` (six files, written before any lowering existed and never run; copies are in
+  `build/m4.5e1e2d/depth3-drafts/`, so they outlive the worktree's `tests/`).
+  Spike S48 (m) measured 10 s a program. The lint needs a third bound variable in its row grammar.
+  **Its first two items, from the last audit read (S5; handoff §8 after question 394):** the step reopens
+  `split_candidates`, whose candidate for a matrix member is guarded only by a text pin in the self-test
+  cases `e1e2e_split_*_local_pick_*` that cannot tell the matrix's first cell from the first row's slot:
+  make the pin name each form with its own member index, and add the C-level failing twin where the
+  unknown pointer is a matrix cell (the auditor's text: `build/m4.5e1e2d/auditor-report-S5.md`, finding 5).
+- **How Part E was built, for whoever builds the next part** (the method worked; the plan's one il-analyst
+  per part did not): the lowering in proved sub-steps of 15 to 45 minutes, each a snapshot ref with the
+  self-test at 0 problems, the part's cases through Silicon, every older output byte-identical and a
+  mutation check; an il-analyst replaced at about 550k tokens (eight instances); an interim joined proof
+  and an audit round per third of the part (one auditor reads about 500 lines of lowering diff with the
+  lint and the encoder in full); the lint's rules written from REAL emitted text, self-test and C-level
+  (the self-test's text did not predict the C-level text once); a test's `expect:` rows registered before
+  any run and every must-fail twin shown to verify with the right value (question 388).
+- **A family of internal errors to probe for in three dimensions** (question 392): a ROW of a matrix
+  reaching code that expects a structure element or a cell. The three found sat in `overlap_pairs`,
+  `call_atoms` and `split_candidates` of `src/vir/lower.cpp`, and no audit round before Commit 5 met them:
+  their probes had the matrix after a scalar member, one `reads` atom at a call, and no pointer to the
+  cell's type beside the structure. For every new array shape, probe: the array as the FIRST member; two
+  atoms of each kind over two pointers; a call with two `reads` atoms; an unatomed pointer to the cell's
+  type beside the structure; a pointer member in the structure. The lowering owner's table of every site that can raise either internal-error text, with why a row
+  cannot reach it, is `build/m4.5e1e2d/il-analyst-report-10.md`; it is a table by reading, and its group of
+  14 sites for atoms written in loops rests on the encoder's rejections of question 348: **when M4.5e2
+  lifts 348 for these types, those 14 sites are re-derived first.**
+- **Measured facts worth keeping:** a matrix or an array leaf under a guard, a marker or a second structure
+  type meets the lint first (questions 383, 384, the collision); Silicon stops a path at its first failing
+  row, so one function per expected error; several loops over global matrices in one function cost minutes
+  (one loop per function: seconds); the encoder's statements for a whole copy are in
+  `build/m4.5e1e2d/edg-backend-report-18.md` ("4b: THE ENCODER'S STATEMENTS"); the element copy's place
+  classes are in record 0064 item 12; `scripts/box_lane.sh run <lane> bash -c '<cmds>'` is the form that
+  works; a bundle ship to the box takes 20 s to 4 minutes; the box's local time is UTC+1.
+- **The sessions' tools** are in `build/m4.5e1e2d/` and uncommitted (probe and proof scripts of the agents:
+  `il2-proof.sh`, `s4-cycle.sh`, `s4-same.sh`, `e2e-probes/{prove.sh,provej.sh,compose.sh,backstop.py,expcheck.py}`,
+  the test-mutators' `tm*/` helpers): they are session scratch; the committed ones are `scripts/box_lane.sh`,
+  `regen_vpr.py`, `vprdiff.py`, `rejections.py`.
 
 **From the second session of M4.5e1e2's continuation** (2026-11-26; record 0064 item 15; the reports are in
 `.claude/worktrees/m4.5e1e2c/build/m4.5e1e2c/`: `auditor-report-{D1,D2}.md` with probes under
@@ -2189,3 +2286,66 @@ The next questions start at 395.
    a structure with an array member only the `owns` forms on a pointer variable were built; written `reads`
    forms and atoms through a pointer read from memory stay rejected (fail closed; M4.5e2), a cut the
    orchestrator took in a briefing and the advisor accepted only afterwards. 352 and 353 are rulings for Part E, taken from the encoder draft.
+
+### Questions for the owner (after the third session of M4.5e1e2's continuation, 2026-11-27)
+
+Each says first whether the matter is fail closed or unsound; none is unsound; none blocks the next session.
+The full text of each is above in this section under its number.
+
+1. **392, three internal errors found after the first commit** (fail closed: exit 3, "the program was not
+   checked"; never a wrong proof). All three are fixed at the branch's tip; the first commit alone has
+   three and the second alone has one (§1). The first two were fixed without asking (the plan's stop rule
+   settles an exit 3 within its part) and the third with the advisor, in a commit of its own with its own
+   audit read. *Nothing to decide;* the handling is for review. *What would have been the alternative:*
+   close on the second commit and list the third for the next session.
+2. **363, a matrix of structures** (`struct P m[2][2]`; fail closed: rejected). Record 0064 item 2 admits the
+   type, but no spike fixture, trusted method or planned test covers it. *Recommended:* leave it rejected
+   and place it in M4.5e2 with the other shapes of structures inside arrays inside structures; *alternative:*
+   build it in the next session after three dimensions.
+3. **374, with 385, 386, 389 and 391: the lint's guard-shaped branch and its second site** (nothing
+   unsound: the verifier's verdicts do not pass through the lint). A test-mutator lifted a guard-shaped
+   refusal against the stop rule of question 357; two audit rounds then tightened it to "the conjunct is
+   textually the same method's own well-formedness row", and round E3b judged it and its two later edits
+   "stand". In Commit 6 a second lift at the same site (391, "Rule A": a length fact for a scalar array
+   member beside a matrix, needed by the Viper of `*p = *q`) was judged "stands with a change" by the short
+   read: its table is keyed by the unit, not by the row's own structure type; the change is the next
+   session's lint step. *Recommended:* let both stand as built until that step; *alternative:* revert it, which makes an atom on a scalar member of a structure with
+   a matrix member an accepted program whose Viper the lint refuses.
+4. **382, 383, 384: three shapes rejected on audit findings** (fail closed). Each verified and was right in
+   the auditors' probes: an element structure that holds, by value, a structure with an array member; a
+   marker over a range of structures with an array member; an atom under a guard on a structure with a
+   matrix member (and on the other Part E objects). The first was in no record or test list; the other two
+   emit rows that only a kept-flag-shaped or guard-shaped lint rule could admit. *Recommended:* leave all
+   three rejected until M4.5e2; *alternative for 383 and 384:* give the word to write the two lint rules
+   (question 357's boundary) and accept them, in the lint step of the next session.
+5. **377 and 381: two listed rejections** (fail closed): a loop invariant that reads `p[e].a[e2]` under a
+   range, and `cerastes_old(g[e].a[e2])` of a global array (the lowering has both paths' cases for the
+   second). *Recommended:* M4.5e2 for both; *alternative:* open 381 in the next session with an audit read.
+6. **The next session's first step is the lint step** (already agreed: question 369; it now also covers
+   373, 379, 380, 390 and the table collision). Nothing to answer unless the order should change.
+7. **Three dimensions was left for the next session** (fail closed: rejected). The push asking for an
+   override had no answer by the close, so the default was taken. Nothing to answer unless Part F should come
+   first.
+8. **The macOS re-approval of rebuilt binaries** (§2, step 6): which of the three ways out, if any.
+9. **Four deletions agents were refused by the permission system** (§2, step 5): the owner's to make.
+   **And the uncommitted `plan.md` change in the main checkout** (§2, step 1) before the merge.
+10. **393, a segmentation fault** (fail closed, but with no diagnostic: the tool is killed, exit status
+   139, nothing is reported verified; older than this session, measured on its base's build). A structure
+   of about 4,095 scalar members passed by value crashes `cerastes verify` (stack exhaustion). Since this
+   session's third commit 4,096 cells or more end in an internal error with a message instead.
+   *Recommended:* in M4.8, the encoder rejects a by-value structure above a stated number of cells with a
+   diagnostic at its C line; *alternative:* the next session.
+11. **394, a false alarm at a call** (fail closed; the base's behaviour, on any structure): a function
+   that owns `*p` and `*y`, passes `y` to a declared function whose contract keeps `owns(*a)` and returns
+   `owns(*r)`, and returns under `ensures(owns(*p))` is told it "returns without owning `*p`". The cause
+   is the auditor's reading of the emitted Viper (the amount a call lends on a block's liveness cell), not
+   a trace. *Recommended:* M4.5e1f, which rewrites the amounts lent at a call; *alternative:* M4.8.
+12. **354, 357 and 348, as they stood** after the continuation's second session (the limit on `calloc`; the
+   denied lint edit and the two tests set aside under `internal/pending/m4.5e1e2c/`; the rejection for
+   structures whose array member holds structures or arrays, which this session extended to a matrix member
+   and found a seventh route for).
+13. **The advisor's rulings of this session, 358 to 394, for review**; those that are test mechanics only:
+    358, 360, 368, 370, 371, 387, 388. Under invariant 1, for the owner's eye: four `expect:` lines of the
+    staging pin `tests/memory/negative/matrix_reject_slice4_staging.c` were removed in Commit 6 when their
+    rejections were lifted (the plan's Flips for staging pins), and six staging pin files were deleted in
+    Commit 5 for positives (Flips A (E)).
