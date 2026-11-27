@@ -258,10 +258,15 @@ int check_leaf_paths()
             zv[3U].elem == 1 && zv[4U].path == std::vector<int> {1} && zv[4U].elem == -1 && zv[4U].index_after == -1 &&
             zv[3U].text == "v[1].y",
         "the value view of a member that is an array of structures: every leaf of every element, element by element");
-    // a matrix member is flagged too
+    // a matrix member (decision 0064 item 12, Part E slice 4a): the value view of a type of depth 2 is value_cells' list, cell for cell, never flagged: six leaves, each with its steps
     StructType* X {k.strukt("X", {{"m", k.prog.array_of(k.prog.array_of(k.i32, 3U), 2U)}})};
-    expect(struct_value_leaves(*X).size() == 1U && struct_value_leaves(*X)[0U].aggregate_element,
-           "a matrix member is one flagged leaf");
+    {
+        const std::vector<StructLeaf> xv {struct_value_leaves(*X)};
+        expect(xv.size() == 6U && !xv[0U].aggregate_element && xv[4U].text == "m[1][1]" &&
+                   xv[4U].steps == std::vector<ValueStep> {{false, 0U}, {true, 1U, true}, {true, 1U}} &&
+                   xv[4U].path == std::vector<int> {0} && xv[4U].elem == 1 && xv[4U].index_after == -1,
+               "a matrix member: six leaves, m[1][1] with the steps member 0, element 1 (of rows), element 1");
+    }
     // the structures 0063 accepted are not flagged
     bool none {true};
     for (const StructLeaf& l : struct_value_leaves(*S))

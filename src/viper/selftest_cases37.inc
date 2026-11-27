@@ -69,43 +69,68 @@ void define_part_e_pointer_to_array_rejections()
 
 void define_part_e_value_rejections()
 {
-    // record 0064 item 12 (question 353): a structure value whose type has a leaf path of two or more index steps is refused (slice 4 lifts it when the lowering's value view reads the one
-    // enumeration of cells).  The types: a matrix member, and a member array of structures whose element has an array member.
+    // record 0064 item 12 (Part E, slice 4a): a structure value of depth 2 or more is the tuple of vir::value_cells and is accepted up to 7 cells reached through an index step (struct U { int
+    // m[2][3]; int n; } is 6); what stays refused: a value past the limit (M4.5f3), a row of a matrix member of a value (question 364), an array member read as a value, and the positions
+    // 0044 item 2 never allowed.  The types: a matrix member (6 cells, and 8 past the limit), a member array of structures whose element has an array member (6, and 10 past it).
     auto matrix_struct = [](Kit& k)
     {
         return k.strukt("U", {{"m", e1e2e_matrix(k)}, {"n", k.i32}});
+    };
+    auto wide_struct = [](Kit& k)
+    {
+        return k.strukt("U8", {{"m", k.prog.array_of(k.prog.array_of(k.i32, 4U), 2U)}, {"n", k.i32}});
     };
     auto nested_struct = [](Kit& k)
     {
         StructType* W {k.strukt("W", {{"a", k.prog.array_of(k.i32, 2U)}, {"n", k.i32}})};
         return k.strukt("T", {{"v", k.prog.array_of(k.st(W), 2U)}});
     };
-    rc("e1e2e_rej_value_parameter_matrix_member", "parameter 1 of 'f' is struct U, decision 0064 item 12, question 353",
+    auto wide_nested_struct = [](Kit& k)
+    {
+        StructType* W {k.strukt("W", {{"a", k.prog.array_of(k.i32, 4U)}, {"n", k.i32}})};
+        return k.strukt("T", {{"v", k.prog.array_of(k.st(W), 2U)}});
+    };
+    rc("e1e2e_rej_value_parameter_matrix_member_beyond_the_limit", "array elements passed by value",
        [=](Kit& k)
        {
-           // void f(struct U u) {}
-           Function* f {k.fn("f", k.vd, {{"u", k.st(matrix_struct(k))}})};
+           // void f(struct U8 u) {}  with struct U8 { int m[2][4]; int n; }: 8 cells reached through an index step
+           Function* f {k.fn("f", k.vd, {{"u", k.st(wide_struct(k))}})};
            f->body = k.blk({});
            k.done(f);
        });
-    rc("e1e2e_rej_value_parameter_nested_array_member",
-       "parameter 1 of 'f' is struct T, decision 0064 item 12, question 353",
+    rc("e1e2e_rej_value_parameter_nested_array_member_beyond_the_limit", "array elements passed by value",
        [=](Kit& k)
        {
-           // void f(struct T t) {}  with struct T { struct W v[2]; } and struct W { int a[2]; int n; }
-           Function* f {k.fn("f", k.vd, {{"t", k.st(nested_struct(k))}})};
+           // void f(struct T t) {}  with struct T { struct W v[2]; } and struct W { int a[4]; int n; }: 10 cells (the record's own example)
+           Function* f {k.fn("f", k.vd, {{"t", k.st(wide_nested_struct(k))}})};
            f->body = k.blk({});
            k.done(f);
        });
-    rc("e1e2e_rej_value_result_matrix_member",
-       "the return type of 'f' is struct U, decision 0064 item 12, question 353",
+    rc("e1e2e_rej_value_result_matrix_member_beyond_the_limit", "array elements passed by value",
        [=](Kit& k)
        {
-           // struct U f(void);
-           Function* f {k.fn("f", k.st(matrix_struct(k)))};
+           // struct U8 f(void);
+           Function* f {k.fn("f", k.st(wide_struct(k)))};
            k.trusted(f);
        });
-    rc("e1e2e_rej_value_load_nested_array_member", "an expression of the struct type struct T, decision 0064 item 12",
+    rc("e1e2e_rej_value_result_nested_array_member_beyond_the_limit", "array elements passed by value",
+       [=](Kit& k)
+       {
+           Function* f {k.fn("f", k.st(wide_nested_struct(k)))};
+           k.trusted(f);
+       });
+    rc("e1e2e_rej_value_aggregate_matrix_member_beyond_the_limit", "holds more than 7",
+       [=](Kit& k)
+       {
+           // (struct U8){...} as a value: an Aggregate of 9 cells
+           StructType* U {wide_struct(k)};
+           Function* f {k.fn("f", k.vd)};
+           Var* u {k.scell(f, "u", U)};
+           const Expr* lit {k.b.aggregate(k.st(U), {k.num(k.i32, "0")}, k.at())};
+           f->body = k.blkc({k.decl(u, nullptr), k.store(k.addr(u), lit)});
+           k.done(f);
+       });
+    rc("e1e2e_rej_value_load_nested_array_member", "in a position decision 0044 item 2 does not allow",
        [=](Kit& k)
        {
            // struct T t; (void)t;  as a read of the whole object
@@ -115,10 +140,10 @@ void define_part_e_value_rejections()
            f->body = k.blkc({k.decl(t, nullptr), k.es(k.deref(k.addr(t)))});
            k.done(f);
        });
-    rc("e1e2e_rej_value_store_matrix_member", "an expression of the struct type struct U, decision 0064 item 12",
+    rc("e1e2e_rej_value_store_matrix_member", "in a position decision 0044 item 2 does not allow",
        [=](Kit& k)
        {
-           // struct U u, w; u = w;  as the store of a whole value
+           // struct U u, w; u = w;  as the store of a whole value (the encoder writes a copy cell by cell, never as a value)
            StructType* U {matrix_struct(k)};
            Function* f {k.fn("f", k.vd)};
            Var* u {k.scell(f, "u", U)};
@@ -126,15 +151,39 @@ void define_part_e_value_rejections()
            f->body = k.blkc({k.decl(u, nullptr), k.decl(w, nullptr), k.store(k.addr(u), k.deref(k.addr(w)))});
            k.done(f);
        });
-    rc("e1e2e_rej_value_aggregate_matrix_member", "an aggregate of struct U, decision 0064 item 12, question 353",
+    rc("e1e2e_rej_value_aggregate_matrix_member_leaf_count",
+       "an aggregate of struct U with 2 arguments, 7 leaves expected",
        [=](Kit& k)
        {
-           // (struct U){...} as a value: an Aggregate whose type has two index steps
+           // (struct U){...} with two arguments: the value has 7 cells
            StructType* U {matrix_struct(k)};
            Function* f {k.fn("f", k.vd)};
            Var* u {k.scell(f, "u", U)};
            const Expr* lit {k.b.aggregate(k.st(U), {k.num(k.i32, "0"), k.num(k.i32, "0")}, k.at())};
            f->body = k.blkc({k.decl(u, nullptr), k.store(k.addr(u), lit)});
+           k.done(f);
+       });
+    // question 364: a row of a matrix member of a structure value is not a value, so `v.m[i][j]` of a by-value parameter in a contract is refused
+    rc("e1e2e_rej_value_contract_reads_a_row_of_a_matrix_member", "is a row, and an array is never a value",
+       [=](Kit& k)
+       {
+           // void f(struct U u) requires(u.m[1] == ...) {}
+           StructType* U {matrix_struct(k)};
+           Function* f {k.fn("f", k.vd, {{"u", k.st(U)}})};
+           f->mark_address_taken(f->param_var(0));
+           k.req(f, k.eq(k.b.elem_value(k.F(f, 0), 0, k.num(k.i32, "1"), k.at()), k.num(k.i32, "0")));
+           f->body = k.blk({});
+           k.done(f);
+       });
+    rc("e1e2e_rej_value_member_array_read_as_a_value", "an array is never a value",
+       [=](Kit& k)
+       {
+           // void f(struct U u) requires(u.m == ...) {}: the whole matrix member of a value
+           StructType* U {matrix_struct(k)};
+           Function* f {k.fn("f", k.vd, {{"u", k.st(U)}})};
+           f->mark_address_taken(f->param_var(0));
+           k.req(f, k.eq(k.b.field(k.F(f, 0), 0, k.at()), k.num(k.i32, "0")));
+           f->body = k.blk({});
            k.done(f);
        });
 }
@@ -650,6 +699,34 @@ void define_part_e_local_matrix_rejections()
        {
            // struct U { int m[2][3][3]; }: depth 3 is slice 4's (a matrix member of depth 2 is slice 3b's)
            k.strukt("U", {{"m", k.prog.array_of(k.prog.array_of(e1e2e_row(k), 3U), 2U)}});
+       });
+    // slice 4c is not built (depth 3 in every storage: the lowering's walkers read one inner level, ElemLeaf::count, and the trusted allocation is per row type): every form of it keeps its refusal
+    rc("e1e2e_rej_depth4_local", "depth 4 or more is M8",
+       [=](Kit& k)
+       {
+           // int c[2][2][2][2]: depth 4 is M8's
+           Function* f {k.fn("f", k.vd)};
+           Var* c {k.cell(f, "c",
+                          k.prog.array_of(k.prog.array_of(k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U), 2U), 2U))};
+           f->body = k.blkc({k.decl(c, nullptr)});
+           k.done(f);
+       });
+    rc("e1e2e_rej_member_array_of_structures_with_a_matrix_member", "the member 'v' of the struct 'struct T'",
+       [=](Kit& k)
+       {
+           // struct W { int m[2][2]; }; struct T { struct W v[2]; }: v[i].m[j][k] is depth 3 (slice 4c), so the structure W is refused as an element
+           StructType* W {k.strukt("W", {{"m", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)}})};
+           k.strukt("T", {{"v", k.prog.array_of(k.st(W), 2U)}});
+       });
+    rc("e1e2e_rej_local_array_of_structures_with_a_matrix_member", "variable 'v' is an array of",
+       [=](Kit& k)
+       {
+           // struct W { int m[2][2]; } v[2]; as a local
+           StructType* W {k.strukt("W", {{"m", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)}})};
+           Function* f {k.fn("f", k.vd)};
+           Var* v {k.cell(f, "v", k.prog.array_of(k.st(W), 2U))};
+           f->body = k.blkc({k.decl(v, nullptr)});
+           k.done(f);
        });
     rc("e1e2e_rej_matrix_of_structures_local", "an array of struct P[3]",
        [=](Kit& k)
@@ -4256,16 +4333,30 @@ int check_value_cells()
             "M { int m[2][3]; int a[2]; int n; }: a scalar array beside the matrix counts by value (8) and not in a copy (6)");
         expect(value_index_cells(matrix) == 6U && copied_index_cells(matrix) == 6U && copied_index_cells(row) == 0U,
                "a matrix is 6 cells by value and in a copy, a row 3 and 0");
-        // the value view flags a type of depth 2 as one aggregate leaf, whatever the shape of the element (the hazard of two cells with one key)
-        const std::vector<StructLeaf> tv {struct_value_leaves(*T)};
-        expect(tv.size() == 1U && tv[0U].aggregate_element, "the value view of T is one flagged leaf, never expanded");
-        const std::vector<StructLeaf> mv {struct_value_leaves(*M)};
-        bool flagged {false};
-        for (const StructLeaf& l : mv)
+        // the value view of a type of depth 2 or more IS value_cells (slice 4a), cell for cell: the same text, type and steps, never flagged, and `elem` the first index step
+        for (const StructType* st : {T, M})
         {
-            flagged = flagged || l.aggregate_element;
+            const std::vector<StructLeaf> leaves {struct_value_leaves(*st, "s")};
+            const std::vector<ValueCell> cells {value_cells(k.st(st), "s")};
+            bool same {!leaves.empty() && leaves.size() == cells.size()};
+            for (size_t i {0U}; same && i < leaves.size(); ++i)
+            {
+                int first {-1};
+                for (const ValueStep& step : cells[i].steps)
+                {
+                    if (step.index && first < 0)
+                    {
+                        first = static_cast<int>(step.value);
+                    }
+                }
+                same = leaves[i].text == cells[i].text && leaves[i].type == cells[i].type &&
+                       leaves[i].steps == cells[i].steps && leaves[i].elem == first && !leaves[i].aggregate_element;
+            }
+            expect(same,
+                   "the value view of a type of depth 2 is value_cells' list: text, type and steps cell for cell");
         }
-        expect(flagged, "the value view of M flags the matrix member");
+        expect(struct_value_leaves(*T).size() == 10U && struct_value_leaves(*M).size() == 9U,
+               "T { W v[2]; } has 10 leaves in the value view, M { int m[2][3]; int a[2]; int n; } 9");
     }
     {
         // Builder::elem_addr (record 0064 items 4 and 13): the element of the address of an array object is the array's element; the element of a pointer VALUE of a pointer-to-row type is the
@@ -8798,5 +8889,1454 @@ void define_part_e_audit_e3a_cases()
        [=](Kit& k)
        {
            k.fail("invariant-preserved", loop_f(k, true).loc);
+       });
+}
+
+// ---- decision 0064 item 12 (Part E, slice 4a): structure VALUES of depth 2: the value view IS vir::value_cells ----
+// struct U { int a; int m[2][2]; int b[2]; int c; }: the cells of a value, in the one enumeration: a, m[0][0], m[0][1], m[1][0], m[1][1], b[0], b[1], c (8 cells; 6 reached through an index step)
+void define_part_e_deep_value_cases()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto mkU = [](Kit& k) -> StructType*
+    {
+        return k.strukt("U", {{"a", k.i32},
+                              {"m", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)},
+                              {"b", k.prog.array_of(k.i32, 2U)},
+                              {"c", k.i32}});
+    };
+    auto mplace = [](Kit& k, const Expr* base, const char* i, const char* j)
+    {
+        return k.b.elem_addr(k.b.elem_addr(k.mem(base, 1), k.num(k.i32, i), k.at()), k.num(k.i32, j), k.at());
+    };
+    auto bplace = [](Kit& k, const Expr* base, const char* i)
+    {
+        return k.b.elem_addr(k.mem(base, 2), k.num(k.i32, i), k.at());
+    };
+    // the places of the eight cells of the object at `base`, in the order of the one enumeration
+    auto places = [=](Kit& k, const Expr* base)
+    {
+        return std::vector<const Expr*> {k.mem(base, 0),
+                                         mplace(k, base, "0", "0"),
+                                         mplace(k, base, "0", "1"),
+                                         mplace(k, base, "1", "0"),
+                                         mplace(k, base, "1", "1"),
+                                         bplace(k, base, "0"),
+                                         bplace(k, base, "1"),
+                                         k.mem(base, 3)};
+    };
+    // the reads of the eight cells of the object `u`, in order
+    auto reads_of = [=](Kit& k, const Var* u)
+    {
+        std::vector<const Expr*> args;
+        for (const Expr* p : places(k, k.addr(u)))
+        {
+            args.push_back(k.deref(p));
+        }
+        return args;
+    };
+    // `u` declared, then its cells written with the values 1 to 8 (the cell `skip` left unwritten when it is >= 0)
+    auto fill = [=](Kit& k, const Var* u, int skip, std::vector<const Stmt*>& body)
+    {
+        body.push_back(k.decl(u, nullptr));
+        static const char* const vals[] {"1", "2", "3", "4", "5", "6", "7", "8"};
+        const std::vector<const Expr*> ps {places(k, k.addr(u))};
+        for (size_t i {0U}; i < ps.size(); ++i)
+        {
+            if (static_cast<int>(i) != skip)
+            {
+                body.push_back(k.store(ps[i], N(k, vals[i])));
+            }
+        }
+    };
+    auto tail = [](Kit& k, std::vector<const Stmt*>& body)
+    {
+        if (k.vac_tail)
+        {
+            const Stmt* v {k.chk(k.no())};
+            body.push_back(v);
+            k.vac_loc = v->loc;
+        }
+    };
+    auto lcv = [](const char* name, const char* doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(std::string(name) + "_vacuity",
+           "the same with check(false) after everything: it fails (the rows are consistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    // the contract of g and of mk about the cells BESIDE the matrix: v.a == 1, v.b[0] == 6, v.b[1] == 7, v.c == 8 (the matrix's cells are not readable: question 364)
+    auto beside = [=](Kit& k, const Expr* v)
+    {
+        return k.land(k.land(k.eq_c(k.b.field(v, 0, k.at()), k.i32, "1"),
+                             k.eq_c(k.b.elem_value(v, 2, N(k, "0"), k.at()), k.i32, "6")),
+                      k.land(k.eq_c(k.b.elem_value(v, 2, N(k, "1"), k.at()), k.i32, "7"),
+                             k.eq_c(k.b.field(v, 3, k.at()), k.i32, "8")));
+    };
+    // void g(struct U v) requires(beside(v)) trusted;   void f(void) { struct U u; <cells 1..8>; g(<the value of u, `shift` cells late>); }
+    auto call_g = [=](Kit& k, int shift, int skip) -> const Expr*
+    {
+        StructType* S {mkU(k)};
+        Function* g {k.fn("g", k.vd, {{"v", k.st(S)}})};
+        g->mark_address_taken(g->param_var(0));
+        k.req(g, beside(k, k.F(g, 0)));
+        k.trusted(g);
+        Function* f {k.fn("f", k.vd)};
+        Var* u {k.scell(f, "u", S)};
+        std::vector<const Stmt*> body;
+        fill(k, u, skip, body);
+        std::vector<const Expr*> args {reads_of(k, u)};
+        if (shift != 0)
+        {
+            // the cells one place late: what a value view that disagrees about the matrix's width would pass
+            args.erase(args.begin());
+            args.push_back(args.back());
+        }
+        const Expr* call {k.call(g, {k.b.aggregate(k.st(S), args, k.at())})};
+        body.push_back(k.es(call));
+        tail(k, body);
+        if (shift == 0 && skip < 0)
+        {
+            // the text pin of the order of the cells of a by-value call (record item 12, "Tested so"): the call's arguments are the object's eight cells in the one enumeration, and the callee's
+            // formals are named by the steps of the same cells, in the same order
+            k.text_checks.push_back(
+                [](const std::string& vpr) -> std::string
+                {
+                    static const std::regex first {R"(f_g__[0-9]+\(loc\(member\((v_u__[0-9]+), 0\), 0\)\.v_int)"};
+                    std::smatch m;
+                    if (!std::regex_search(vpr, m, first))
+                    {
+                        return "the call of g was not found";
+                    }
+                    const std::string u {m[1].str()};
+                    const std::string cell[] {"loc(member(" + u + ", 0), 0)",
+                                              "loc(member(loc(member(" + u + ", 1), 0), 0), 0)",
+                                              "loc(member(loc(member(" + u + ", 1), 0), 0), 1)",
+                                              "loc(member(loc(member(" + u + ", 1), 1), 0), 0)",
+                                              "loc(member(loc(member(" + u + ", 1), 1), 0), 1)",
+                                              "loc(member(" + u + ", 2), 0)",
+                                              "loc(member(" + u + ", 2), 1)",
+                                              "loc(member(" + u + ", 3), 0)"};
+                    const size_t at {static_cast<size_t>(m.position(0))};
+                    const size_t eol {vpr.find('\n', at)};
+                    const std::string line {vpr.substr(at, eol - at)};
+                    size_t pos {0U};
+                    for (const std::string& c : cell)
+                    {
+                        const size_t f {line.find(c + ".v_int", pos)};
+                        if (f == std::string::npos)
+                        {
+                            return "the call's arguments are not the cells of u in the order of value_cells: missing " +
+                                   c;
+                        }
+                        pos = f + c.size();
+                    }
+                    const size_t hdr {vpr.find("method f_g__")};
+                    const std::string head {vpr.substr(hdr, vpr.find('\n', hdr) - hdr)};
+                    size_t hp {0U};
+                    for (const char* n : {"p_v__0_m0:", "p_v__0_m1_e0_e0:", "p_v__0_m1_e0_e1:", "p_v__0_m1_e1_e0:",
+                                          "p_v__0_m1_e1_e1:", "p_v__0_m2_e0:", "p_v__0_m2_e1:", "p_v__0_m3:"})
+                    {
+                        const size_t f {head.find(n, hp)};
+                        if (f == std::string::npos)
+                        {
+                            return std::string("the formals of g are not in the order of value_cells: missing ") + n;
+                        }
+                        hp = f + 1U;
+                    }
+                    return "";
+                });
+        }
+        f->body = k.blkc(body);
+        k.done(f);
+        return skip >= 0 ? args[static_cast<size_t>(skip)] : call;
+    };
+    lcv("e1e2e_dvalue_call_by_value",
+        "g(u) of a structure with a matrix member beside two arrays and two cells: the value is the 8 cells in order, g requires v.a == 1, v.b[0] == 6, v.b[1] == 7, v.c == 8 and the caller's cells are right",
+        [=](Kit& k)
+        {
+            call_g(k, 0, -1);
+        });
+    lc("e1e2e_dvalue_call_shifted_fail",
+       "the same with the caller's cells one place late: the callee's v.a is the caller's m[0][0] and the precondition fails",
+       [=](Kit& k)
+       {
+           k.fail("precondition", call_g(k, 1, -1)->loc);
+       });
+    lc("e1e2e_dvalue_call_uninitialized_fail",
+       "the same with the matrix's cell m[1][0] never written: the read of it for the value is uninitialized",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", call_g(k, 0, 3)->loc);
+       });
+    lc("e1e2e_dvalue_call_uninitialized_beside_fail",
+       "the same with the cell b[1] beside the matrix never written: uninitialized at its read",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", call_g(k, 0, 6)->loc);
+       });
+    // struct U mk(void) ensures(beside(res)) { return (struct U){1, 2, 3, 4, 5, 6, 7, 8}; }   (`shift`: the cells one late)
+    auto result_mk = [=](Kit& k, int shift) -> const Stmt*
+    {
+        StructType* S {mkU(k)};
+        Function* mk {k.fn("mk", k.st(S))};
+        k.ens(mk, beside(k, k.R(mk)));
+        std::vector<const Expr*> args;
+        static const char* const vals[] {"1", "2", "3", "4", "5", "6", "7", "8"};
+        for (size_t i {0U}; i < 8U; ++i)
+        {
+            args.push_back(N(k, vals[std::min<size_t>(i + static_cast<size_t>(shift), 7U)]));
+        }
+        const Stmt* r {k.ret(k.b.aggregate(k.st(S), args, k.at()))};
+        mk->body = k.blk({r});
+        k.done(mk);
+        return r;
+    };
+    lc("e1e2e_dvalue_result",
+       "mk() returns (struct U){1, 2, ..., 8}: the result is the 8 cells in order, ensures res.a == 1, res.b[0] == 6, res.b[1] == 7, res.c == 8 holds",
+       [=](Kit& k)
+       {
+           result_mk(k, 0);
+       });
+    lc("e1e2e_dvalue_result_shifted_fail",
+       "the same returning the cells one place late: res.a is the matrix's first cell and the postcondition fails",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", result_mk(k, 1)->loc);
+       });
+    // int h(struct U v) ensures(res == v.<x>) { return <the cell of v's own copy>; }: the entry copy of the formals into the parameter's cells, by cell (a, b[0], b[1], c beside the matrix);
+    // `wrong` makes h return the cell one place before the one the contract names
+    auto param_cell = [=](Kit& k, int cell, int named, int wrong_cell) -> const Stmt*
+    {
+        StructType* S {mkU(k)};
+        Function* h {k.fn("h", k.i32, {{"v", k.st(S)}})};
+        h->mark_address_taken(h->param_var(0));
+        const Expr* v {k.F(h, 0)};
+        const Expr* want {
+            cell == 0 ? k.b.field(v, 0, k.at())
+                      : (cell == 1 ? k.b.elem_value(v, 2, N(k, "0"), k.at())
+                                   : (cell == 2 ? k.b.elem_value(v, 2, N(k, "1"), k.at()) : k.b.field(v, 3, k.at())))};
+        (void)named;
+        k.ens(h, k.eq(k.R(h), want));
+        const std::vector<const Expr*> reads {reads_of(k, h->param_var(0))};
+        // reads: a, m00, m01, m10, m11, b0, b1, c -> the cell indexes of the beside cells are 0, 5, 6, 7
+        static const size_t at_of[] {0U, 5U, 6U, 7U};
+        const Stmt* r {k.ret(reads[at_of[wrong_cell]])};
+        h->body = k.blk({r});
+        k.done(h);
+        return r;
+    };
+    for (int cell : {0, 1, 2, 3})
+    {
+        static const char* const names[] {"a", "b0", "b1", "c"};
+        lc(std::string("e1e2e_dvalue_param_cell_") + names[cell],
+           "a by-value parameter with a matrix member: the entry copy puts each formal in its own cell, so a read of the parameter's cell is the contract's v.<x> (a, b[0], b[1], c)",
+           [=](Kit& k)
+           {
+               param_cell(k, cell, cell, cell);
+           });
+        lc(std::string("e1e2e_dvalue_param_cell_") + names[cell] + "_wrong_fail",
+           "the same returning the next cell beside the matrix (cyclically) while the contract names v.<x>: the postcondition fails",
+           [=](Kit& k)
+           {
+               k.fail("postcondition", param_cell(k, cell, cell, (cell + 1) % 4)->loc);
+           });
+    }
+    // struct U id(struct U v) ensures(beside values of res and v agree) { return (struct U){the cells of v's own copy}; }   (`swap`: b[0] and b[1] exchanged)
+    auto id_fn = [=](Kit& k, bool swap) -> const Stmt*
+    {
+        StructType* S {mkU(k)};
+        Function* id {k.fn("id", k.st(S), {{"v", k.st(S)}})};
+        id->mark_address_taken(id->param_var(0));
+        const Expr* v {k.F(id, 0)};
+        const Expr* r {k.R(id)};
+        k.ens(id, k.land(k.land(k.eq(k.b.field(r, 0, k.at()), k.b.field(v, 0, k.at())),
+                                k.eq(k.b.elem_value(r, 2, N(k, "0"), k.at()), k.b.elem_value(v, 2, N(k, "0"), k.at()))),
+                         k.land(k.eq(k.b.elem_value(r, 2, N(k, "1"), k.at()), k.b.elem_value(v, 2, N(k, "1"), k.at())),
+                                k.eq(k.b.field(r, 3, k.at()), k.b.field(v, 3, k.at())))));
+        std::vector<const Expr*> args {reads_of(k, id->param_var(0))};
+        if (swap)
+        {
+            std::swap(args[5], args[6]);
+        }
+        const Stmt* ret {k.ret(k.b.aggregate(k.st(S), args, k.at()))};
+        id->body = k.blk({ret});
+        k.done(id);
+        return ret;
+    };
+    lc("e1e2e_dvalue_return_the_parameter",
+       "id(v) returns the value of its own copy: the result's a, b[0], b[1], c are the argument's",
+       [=](Kit& k)
+       {
+           id_fn(k, false);
+       });
+    lc("e1e2e_dvalue_return_the_parameter_swapped_fail",
+       "the same returning b[0] and b[1] exchanged: the postcondition fails",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", id_fn(k, true)->loc);
+       });
+    // struct U mk(void) ensures(beside(res)) trusted;  void f(void) { struct U u; u = mk(); check(u.a == 1 && u.b[0] == 6 && u.b[1] == 7 && u.c == 8 && u.m[1][0] == u.m[1][0]); }
+    // (the stored value is written cell by cell: the flags of the matrix's cells are set, their values unknown)
+    auto store_result = [=](Kit& k, const char* b0) -> const Stmt*
+    {
+        StructType* S {mkU(k)};
+        Function* mk {k.fn("mk", k.st(S))};
+        k.ens(mk, beside(k, k.R(mk)));
+        k.trusted(mk);
+        Function* f {k.fn("f", k.vd)};
+        Var* u {k.scell(f, "u", S)};
+        const std::vector<const Expr*> ps {places(k, k.addr(u))};
+        const Expr* m10 {k.deref(mplace(k, k.addr(u), "1", "0"))};
+        const Stmt* c {
+            k.chk(k.land(k.land(k.land(k.eq_c(k.deref(ps[0]), k.i32, "1"), k.eq_c(k.deref(ps[5]), k.i32, b0)),
+                                k.land(k.eq_c(k.deref(ps[6]), k.i32, "7"), k.eq_c(k.deref(ps[7]), k.i32, "8"))),
+                         k.eq(m10, m10)))};
+        f->body = k.blkc({k.decl(u, nullptr), k.store(k.addr(u), k.call(mk, {})), c});
+        k.done(f);
+        return c;
+    };
+    lc("e1e2e_dvalue_store_result",
+       "u = mk(): the value's eight cells are stored, one by leaf place: u.a == 1, u.b == {6, 7}, u.c == 8 and every matrix cell is initialized",
+       [=](Kit& k)
+       {
+           store_result(k, "6");
+       });
+    lc("e1e2e_dvalue_store_result_wrong_fail", "the same checking u.b[0] == 5: fails",
+       [=](Kit& k)
+       {
+           k.fail("check", store_result(k, "5")->loc);
+       });
+    // ---- the second type of the record: a member array of structures whose element has an array leaf.  struct W { int a[2]; int n; }; struct T { struct W v[2]; int k; }: the cells of a value are
+    // v[0].a[0], v[0].a[1], v[0].n, v[1].a[0], v[1].a[1], v[1].n, k (7 cells, 6 reached through an index step); a contract reads only k (t.v[i].n of a value is refused: record 0064 item 12) ----
+    auto mkT = [](Kit& k) -> StructType*
+    {
+        StructType* W {k.strukt("W", {{"a", k.prog.array_of(k.i32, 2U)}, {"n", k.i32}})};
+        return k.strukt("T", {{"v", k.prog.array_of(k.st(W), 2U)}, {"k", k.i32}});
+    };
+    // the places of the seven cells of the object at `base`, in the order of the one enumeration
+    auto tplaces = [](Kit& k, const Expr* base)
+    {
+        std::vector<const Expr*> out;
+        for (const char* i : {"0", "1"})
+        {
+            const Expr* el {k.b.elem_addr(k.mem(base, 0), k.num(k.i32, i), k.at())};
+            out.push_back(k.b.elem_addr(k.mem(el, 0), k.num(k.i32, "0"), k.at()));
+            out.push_back(k.b.elem_addr(k.mem(el, 0), k.num(k.i32, "1"), k.at()));
+            out.push_back(k.mem(el, 1));
+        }
+        out.push_back(k.mem(base, 1));
+        return out;
+    };
+    // void g(struct T t) requires(t.k == 7) trusted;  void f(void) { struct T x; <cells 1..6, k = 7>; g(<the value of x>, `shift`: one cell late at the front: x0, x0, x1, ..., x5>); }
+    auto call_t = [=](Kit& k, bool shift) -> const Expr*
+    {
+        StructType* S {mkT(k)};
+        Function* g {k.fn("g", k.vd, {{"t", k.st(S)}})};
+        g->mark_address_taken(g->param_var(0));
+        k.req(g, k.eq_c(k.b.field(k.F(g, 0), 1, k.at()), k.i32, "7"));
+        k.trusted(g);
+        Function* f {k.fn("f", k.vd)};
+        Var* x {k.scell(f, "x", S)};
+        std::vector<const Stmt*> body {k.decl(x, nullptr)};
+        static const char* const vals[] {"1", "2", "3", "4", "5", "6", "7"};
+        const std::vector<const Expr*> ps {tplaces(k, k.addr(x))};
+        for (size_t i {0U}; i < ps.size(); ++i)
+        {
+            body.push_back(k.store(ps[i], N(k, vals[i])));
+        }
+        std::vector<const Expr*> args;
+        for (const Expr* p : tplaces(k, k.addr(x)))
+        {
+            args.push_back(k.deref(p));
+        }
+        if (shift)
+        {
+            args.insert(args.begin(), args.front());
+            args.pop_back();
+        }
+        const Expr* call {k.call(g, {k.b.aggregate(k.st(S), args, k.at())})};
+        body.push_back(k.es(call));
+        tail(k, body);
+        f->body = k.blkc(body);
+        k.done(f);
+        return call;
+    };
+    lcv("e1e2e_dvalue_nested_call_by_value",
+        "g(x) of a structure whose member is an array of structures with an array leaf: the value is the 7 cells in order (v[0].a[0], v[0].a[1], v[0].n, v[1].a[0], v[1].a[1], v[1].n, k), g requires t.k == 7 and the caller's cells are right",
+        [=](Kit& k)
+        {
+            call_t(k, false);
+        });
+    lc("e1e2e_dvalue_nested_call_shifted_fail",
+       "the same with the caller's cells one place late (the first cell twice): the callee's t.k is the caller's v[1].n (6) and the precondition fails",
+       [=](Kit& k)
+       {
+           k.fail("precondition", call_t(k, true)->loc);
+       });
+    // int h(struct T t) ensures(res == t.k) { return <the cell n of t.v[1] of the parameter's own copy, or its k>; }
+    auto param_t = [=](Kit& k, bool wrong) -> const Stmt*
+    {
+        StructType* S {mkT(k)};
+        Function* h {k.fn("h", k.i32, {{"t", k.st(S)}})};
+        h->mark_address_taken(h->param_var(0));
+        k.ens(h, k.eq(k.R(h), k.b.field(k.F(h, 0), 1, k.at())));
+        const std::vector<const Expr*> ps {tplaces(k, k.addr(h->param_var(0)))};
+        const Stmt* r {k.ret(k.deref(ps[wrong ? 5U : 6U]))};
+        h->body = k.blk({r});
+        k.done(h);
+        return r;
+    };
+    lc("e1e2e_dvalue_nested_param_cell",
+       "h(t) returns the cell k of its own copy: the entry copy writes each of the seven formals into its own cell, so the read is the contract's t.k",
+       [=](Kit& k)
+       {
+           param_t(k, false);
+       });
+    lc("e1e2e_dvalue_nested_param_cell_wrong_fail",
+       "the same returning t.v[1].n (the cell before k): the postcondition fails",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", param_t(k, true)->loc);
+       });
+    // struct T id(struct T t) ensures(res.k == t.k) { return (struct T){the cells of t's own copy}; }   (`swap`: the last two cells exchanged)
+    auto id_t = [=](Kit& k, bool swap) -> const Stmt*
+    {
+        StructType* S {mkT(k)};
+        Function* id {k.fn("id", k.st(S), {{"t", k.st(S)}})};
+        id->mark_address_taken(id->param_var(0));
+        k.ens(id, k.eq(k.b.field(k.R(id), 1, k.at()), k.b.field(k.F(id, 0), 1, k.at())));
+        std::vector<const Expr*> args;
+        for (const Expr* p : tplaces(k, k.addr(id->param_var(0))))
+        {
+            args.push_back(k.deref(p));
+        }
+        if (swap)
+        {
+            std::swap(args[5], args[6]);
+        }
+        const Stmt* ret {k.ret(k.b.aggregate(k.st(S), args, k.at()))};
+        id->body = k.blk({ret});
+        k.done(id);
+        return ret;
+    };
+    lc("e1e2e_dvalue_nested_return_the_parameter",
+       "id(t) returns the value of its own copy: the result's k is the argument's",
+       [=](Kit& k)
+       {
+           id_t(k, false);
+       });
+    lc("e1e2e_dvalue_nested_return_the_parameter_swapped_fail",
+       "the same returning v[1].n and k exchanged: the postcondition res.k == t.k fails",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", id_t(k, true)->loc);
+       });
+    // the limit of 7 accepts exactly 7 cells reached through an index step: struct U7 { int a; int m[2][3]; int b[1]; int c; } passed by value (the 8-cell struct is the rejection case
+    // e1e2e_rej_value_parameter_matrix_member_beyond_the_limit)
+    lc("e1e2e_dvalue_seven_cells",
+       "a structure with a matrix member of 6 cells and an array member of 1: 7 cells reached through an index step are accepted by value (the 8th is rejected): g(u) requires v.a == 1 && v.b[0] == 8 && v.c == 9",
+       [=](Kit& k)
+       {
+           StructType* S {k.strukt("U7", {{"a", k.i32},
+                                          {"m", k.prog.array_of(k.prog.array_of(k.i32, 3U), 2U)},
+                                          {"b", k.prog.array_of(k.i32, 1U)},
+                                          {"c", k.i32}})};
+           Function* g {k.fn("g", k.vd, {{"v", k.st(S)}})};
+           g->mark_address_taken(g->param_var(0));
+           const Expr* v {k.F(g, 0)};
+           k.req(g, k.land(k.land(k.eq_c(k.b.field(v, 0, k.at()), k.i32, "1"),
+                                  k.eq_c(k.b.elem_value(v, 2, N(k, "0"), k.at()), k.i32, "8")),
+                           k.eq_c(k.b.field(v, 3, k.at()), k.i32, "9")));
+           k.trusted(g);
+           Function* f {k.fn("f", k.vd)};
+           std::vector<const Expr*> args;
+           for (const char* c : {"1", "2", "3", "4", "5", "6", "7", "8", "9"})
+           {
+               args.push_back(N(k, c));
+           }
+           f->body = k.blk({k.es(k.call(g, {k.b.aggregate(k.st(S), args, k.at())}))});
+           k.done(f);
+       });
+}
+
+// ---- decision 0064 item 12 (Part E, slice 4b): the WHOLE-STRUCTURE COPY of a type of depth 2, in the statements the encoder traces (edg-backend-report-18, "4b: the encoder's statements"): every scalar
+// member and matrix cell read into a temporary before the first store, the scalar members and the matrix cells stored from them, a scalar array member (b) by `copy_arr_int` LAST; the guard `d != s` only
+// where the two places can be one object ----
+void define_part_e_deep_copy_cases()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto mkU = [](Kit& k) -> StructType*
+    {
+        return k.strukt("U", {{"a", k.i32},
+                              {"m", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)},
+                              {"b", k.prog.array_of(k.i32, 2U)},
+                              {"c", k.i32}});
+    };
+    auto mplace = [](Kit& k, const Expr* base, const char* i, const char* j)
+    {
+        return k.b.elem_addr(k.b.elem_addr(k.mem(base, 1), k.num(k.i32, i), k.at()), k.num(k.i32, j), k.at());
+    };
+    auto bplace = [](Kit& k, const Expr* base, const char* i)
+    {
+        return k.b.elem_addr(k.mem(base, 2), k.num(k.i32, i), k.at());
+    };
+    auto places = [=](Kit& k, const Expr* base)
+    {
+        return std::vector<const Expr*> {k.mem(base, 0),
+                                         mplace(k, base, "0", "0"),
+                                         mplace(k, base, "0", "1"),
+                                         mplace(k, base, "1", "0"),
+                                         mplace(k, base, "1", "1"),
+                                         bplace(k, base, "0"),
+                                         bplace(k, base, "1"),
+                                         k.mem(base, 3)};
+    };
+    // `d = s` for struct objects at the base expressions `dst()` and `src()`, in the statements the encoder traces (build/m4.5e1e2d/probeV/trace, both modes): a and c read into temporaries (copy_0,
+    // copy_3), the four matrix cells row major into temporaries (copy_agg_0 .. 3), a then c stored from their temporaries, the four matrix cells stored, and the array copy of b LAST;
+    // `skip` (1 to 4, the matrix cell in cell order) is left out of the stores
+    struct CopyOut
+    {
+        std::vector<const Stmt*> stmts;
+        std::vector<const Expr*> reads; // the reads of the source: a, the four matrix cells, c
+        const Stmt* acopy {nullptr};
+    };
+    auto copy_stmts = [=](Kit& k, Function* f, const std::function<const Expr*()>& dst,
+                          const std::function<const Expr*()>& src, int skip)
+    {
+        CopyOut out;
+        const std::vector<const Expr*> sp {places(k, src())};
+        Var* ta {k.local(f, "copy_0", k.i32)};
+        Var* tc {k.local(f, "copy_3", k.i32)};
+        const Expr* read_a {k.deref(sp[0])};
+        const Expr* read_c {k.deref(sp[7])};
+        out.stmts.push_back(k.decl(ta, read_a));
+        out.stmts.push_back(k.decl(tc, read_c));
+        std::vector<Var*> tmp;
+        std::vector<const Expr*> mreads;
+        for (size_t c {1U}; c <= 4U; ++c)
+        {
+            Var* t {k.local(f, "copy_agg_" + std::to_string(c - 1U), k.i32)};
+            tmp.push_back(t);
+            const Expr* read {k.deref(sp[c])};
+            mreads.push_back(read);
+            out.stmts.push_back(k.decl(t, read));
+        }
+        out.reads.push_back(read_a);
+        for (const Expr* r : mreads)
+        {
+            out.reads.push_back(r);
+        }
+        out.reads.push_back(read_c);
+        const std::vector<const Expr*> dp {places(k, dst())};
+        out.stmts.push_back(k.store(dp[0], k.v(ta)));
+        out.stmts.push_back(k.store(dp[7], k.v(tc)));
+        for (size_t c {1U}; c <= 4U; ++c)
+        {
+            if (static_cast<int>(c) != skip)
+            {
+                out.stmts.push_back(k.store(dp[c], k.v(tmp[c - 1U])));
+            }
+        }
+        out.acopy = k.b.array_copy(k.mem(dst(), 2), k.mem(src(), 2), k.at());
+        out.stmts.push_back(out.acopy);
+        return out;
+    };
+    // the eight cells of the object `u` written with 1 .. 8 (the cell `skip`, 0 to 7, left unwritten)
+    auto fill = [=](Kit& k, const Var* u, int skip, std::vector<const Stmt*>& body)
+    {
+        body.push_back(k.decl(u, nullptr));
+        static const char* const vals[] {"1", "2", "3", "4", "5", "6", "7", "8"};
+        const std::vector<const Expr*> ps {places(k, k.addr(u))};
+        for (size_t i {0U}; i < ps.size(); ++i)
+        {
+            if (static_cast<int>(i) != skip)
+            {
+                body.push_back(k.store(ps[i], N(k, vals[i])));
+            }
+        }
+    };
+    // check(w.a == 1 && w.m[0][0] == 2 && ... && w.c == 8), the cell `bad` (0 to 7) compared with one more than it holds
+    auto all_cells = [=](Kit& k, const Var* w, int bad) -> const Stmt*
+    {
+        static const char* const vals[] {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
+        const std::vector<const Expr*> ps {places(k, k.addr(w))};
+        const Expr* all {nullptr};
+        for (size_t i {0U}; i < ps.size(); ++i)
+        {
+            const Expr* e {k.eq_c(k.deref(ps[i]), k.i32, static_cast<int>(i) == bad ? vals[i + 1U] : vals[i])};
+            all = all == nullptr ? e : k.land(all, e);
+        }
+        return k.chk(all);
+    };
+    auto tail = [](Kit& k, std::vector<const Stmt*>& body)
+    {
+        if (k.vac_tail)
+        {
+            const Stmt* v {k.chk(k.no())};
+            body.push_back(v);
+            k.vac_loc = v->loc;
+        }
+    };
+    auto lcv = [](const char* name, const char* doc, const std::function<void(Kit&)>& build)
+    {
+        lc(name, doc, build);
+        lc(std::string(name) + "_vacuity",
+           "the same with check(false) after everything: it fails (the rows are consistent)",
+           [build](Kit& k)
+           {
+               k.vac_tail = true;
+               build(k);
+               k.fail("check", k.vac_loc);
+           });
+    };
+    // void f(void) { struct U u, w; <u: 1..8>; w = u; check(every cell of w is the cell of u); w.m[0][0] = 9; check(u.m[0][0] == 2); }   (`bad`: the cell the check names wrongly)
+    auto locals = [=](Kit& k, int bad, int skip = 0) -> const Stmt*
+    {
+        StructType* S {mkU(k)};
+        Function* f {k.fn("f", k.vd)};
+        Var* u {k.scell(f, "u", S)};
+        Var* w {k.scell(f, "w", S)};
+        std::vector<const Stmt*> body;
+        fill(k, u, -1, body);
+        body.push_back(k.decl(w, nullptr));
+        if (skip != 0)
+        {
+            // the cell whose store is left out holds 0 (w is otherwise written by the copy only)
+            body.push_back(k.store(places(k, k.addr(w))[static_cast<size_t>(skip)], N(k, "0")));
+        }
+        for (const Stmt* c : copy_stmts(
+                                 k, f,
+                                 [&]
+                                 {
+                                     return k.addr(w);
+                                 },
+                                 [&]
+                                 {
+                                     return k.addr(u);
+                                 },
+                                 skip)
+                                 .stmts)
+        {
+            body.push_back(c);
+        }
+        const Stmt* chk {all_cells(k, w, bad)};
+        body.push_back(chk);
+        body.push_back(k.store(mplace(k, k.addr(w), "0", "0"), N(k, "9")));
+        body.push_back(k.chk(k.eq_c(k.deref(mplace(k, k.addr(u), "0", "0")), k.i32, "2")));
+        tail(k, body);
+        f->body = k.blkc(body);
+        k.done(f);
+        return chk;
+    };
+    lcv("e1e2e_dcopy_locals",
+        "w = u of a structure with a matrix member between two locals: every cell of u read into a temporary, then stored: w holds all eight cells in order, and w is independent of u",
+        [=](Kit& k)
+        {
+            locals(k, -1);
+        });
+    for (int bad : {1, 4, 5})
+    {
+        lc("e1e2e_dcopy_locals_wrong_cell" + std::to_string(bad) + "_fail",
+           "the same checking cell " + std::to_string(bad) + " of w against the next cell's value: the check fails",
+           [=](Kit& k)
+           {
+               k.fail("check", locals(k, bad)->loc);
+           });
+    }
+    // `d = s` with d and s the struct objects `x` and `y` (`x == y`: a self-copy): the source's cell `unwritten` (0 to 7) never written; returns the location the failure is at
+    auto unwritten_copy = [=](Kit& k, bool self, int unwritten) -> SrcLoc
+    {
+        StructType* S {mkU(k)};
+        Function* f {k.fn("f", k.vd)};
+        Var* u {k.scell(f, "u", S)};
+        Var* w {k.scell(f, "w", S)};
+        std::vector<const Stmt*> body;
+        fill(k, u, unwritten, body);
+        if (!self)
+        {
+            body.push_back(k.decl(w, nullptr));
+        }
+        Var* dst {self ? u : w};
+        const CopyOut co {copy_stmts(
+            k, f,
+            [&]
+            {
+                return k.addr(dst);
+            },
+            [&]
+            {
+                return k.addr(u);
+            },
+            0)};
+        for (const Stmt* c : co.stmts)
+        {
+            body.push_back(c);
+        }
+        f->body = k.blkc(body);
+        k.done(f);
+        // a, a matrix cell and c are read into temporaries: the failure is at that read (co.reads is a, the four matrix cells, c); a cell of b at the array copy's source rows
+        if (unwritten >= 0 && unwritten <= 4)
+        {
+            return co.reads[static_cast<size_t>(unwritten)]->loc;
+        }
+        return unwritten == 7 ? co.reads[5]->loc : co.acopy->loc;
+    };
+    lc("e1e2e_dcopy_unwritten_matrix_cell_fail",
+       "w = u with u.m[1][0] never written: the read of that cell into its temporary is uninitialized",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", unwritten_copy(k, false, 3));
+       });
+    lc("e1e2e_dcopy_unwritten_array_cell_fail",
+       "w = u with u.b[1] never written: the array copy's source flags are not all set: uninitialized at the copy",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", unwritten_copy(k, false, 6));
+       });
+    lc("e1e2e_dcopy_self_unwritten_matrix_cell_fail",
+       "u = u with u.m[0][0] never written: the source's rows come before anything is stored, so the self-copy reports what a copy reports",
+       [=](Kit& k)
+       {
+           k.fail("uninitialized", unwritten_copy(k, true, 1));
+       });
+    // void f(void) { struct U u; <1..8>; u = u; check(every cell of u is as it was); }
+    lcv("e1e2e_dcopy_self",
+        "u = u: every matrix cell is read into a temporary before the first store, so a self-copy rewrites each cell with its own value (the array copy of a place with itself does nothing)",
+        [=](Kit& k)
+        {
+            StructType* S {mkU(k)};
+            Function* f {k.fn("f", k.vd)};
+            Var* u {k.scell(f, "u", S)};
+            std::vector<const Stmt*> body;
+            fill(k, u, -1, body);
+            for (const Stmt* c : copy_stmts(
+                                     k, f,
+                                     [&]
+                                     {
+                                         return k.addr(u);
+                                     },
+                                     [&]
+                                     {
+                                         return k.addr(u);
+                                     },
+                                     0)
+                                     .stmts)
+            {
+                body.push_back(c);
+            }
+            body.push_back(all_cells(k, u, -1));
+            tail(k, body);
+            f->body = k.blkc(body);
+            k.done(f);
+        });
+    // void g(struct U *p, struct U *q) requires(owns(*p) && reads(*q)) ensures(owns(*p) && reads(*q) && <p's cells == q's cells>) { *p = *q; }   (`skip`: a matrix cell left out of the stores)
+    auto through_pointers = [=](Kit& k, int skip) -> SrcLoc
+    {
+        StructType* S {mkU(k)};
+        Function* g {k.fn("g", k.vd, {{"p", k.ptr(k.st(S))}, {"q", k.ptr(k.st(S))}})};
+        auto atom = [&](AtomKind kind, int which)
+        {
+            return k.b.atom(kind, k.b.text(k.F(g, which), which == 0 ? "p" : "q"), which, k.at());
+        };
+        k.req(g, k.land(atom(AtomKind::Owns, 0), atom(AtomKind::Reads, 1)));
+        const Expr* eqs {nullptr};
+        const std::vector<const Expr*> pp {places(k, k.F(g, 0))};
+        const std::vector<const Expr*> qp {places(k, k.F(g, 1))};
+        for (size_t i {0U}; i < pp.size(); ++i)
+        {
+            if (skip != 0 && static_cast<int>(i) != skip)
+            {
+                continue; // the twin names only the cell whose store is left out (eight false-able conjuncts took 364 s)
+            }
+            const Expr* e {k.eq(k.deref(pp[i]), k.deref(qp[i]))};
+            eqs = eqs == nullptr ? e : k.land(eqs, e);
+        }
+        k.ens(g, k.land(k.land(atom(AtomKind::Owns, 0), atom(AtomKind::Reads, 1)), eqs));
+        const CopyOut co {copy_stmts(
+            k, g,
+            [&]
+            {
+                return k.pv(g, 0);
+            },
+            [&]
+            {
+                return k.pv(g, 1);
+            },
+            skip)};
+        g->body = k.blk(co.stmts);
+        k.done(g);
+        return g->end_loc;
+    };
+    lc("e1e2e_dcopy_through_pointers",
+       "*p = *q under owns(*p) and reads(*q): every cell of *q into a temporary, then stored through p (the array copy guarded where the places may be one object): p's cells equal q's in the postcondition",
+       [=](Kit& k)
+       {
+           through_pointers(k, 0);
+       });
+    // (the false twin of the full structure's shape, *p = *q with the postcondition p->m[1][0] == q->m[1][0] + 1, took 428 s in lane il and Silicon reported a second error at the end of the
+    // postcondition: it is not in the tree, see report 8; the two-pointer shape's failing twins are the struct U2 cases below)
+    // struct U2 { int m[2][2]; int c; }: the copy as the encoder writes it (c and the four cells read into temporaries, c stored, then the four cells); `skip` (1 to 4): that matrix cell's store is left out; the postcondition names that cell (m[1][0]) of *p equal to *q's
+    // (a twin whose postcondition says it differs ends in 116 s: not in the tree)
+    auto u2_pointers = [=](Kit& k, int skip) -> SrcLoc
+    {
+        StructType* S {k.strukt("U2", {{"m", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)}, {"c", k.i32}})};
+        Function* g {k.fn("g", k.vd, {{"p", k.ptr(k.st(S))}, {"q", k.ptr(k.st(S))}})};
+        auto atom = [&](AtomKind kind, int which)
+        {
+            return k.b.atom(kind, k.b.text(k.F(g, which), which == 0 ? "p" : "q"), which, k.at());
+        };
+        auto cell = [&](const Expr* base, const char* i, const char* j)
+        {
+            return k.b.elem_addr(k.b.elem_addr(k.mem(base, 0), k.num(k.i32, i), k.at()), k.num(k.i32, j), k.at());
+        };
+        k.req(g, k.land(atom(AtomKind::Owns, 0), atom(AtomKind::Reads, 1)));
+        const Expr* e {k.eq(k.deref(cell(k.F(g, 0), "1", "0")), k.deref(cell(k.F(g, 1), "1", "0")))};
+        k.ens(g, k.land(k.land(atom(AtomKind::Owns, 0), atom(AtomKind::Reads, 1)), e));
+        std::vector<const Stmt*> body;
+        Var* tc {k.local(g, "copy_1", k.i32)};
+        body.push_back(k.decl(tc, k.deref(k.mem(k.pv(g, 1), 1))));
+        std::vector<Var*> tmp;
+        size_t n {0U};
+        for (const char* i : {"0", "1"})
+        {
+            for (const char* j : {"0", "1"})
+            {
+                Var* t {k.local(g, "copy_agg_" + std::to_string(n++), k.i32)};
+                tmp.push_back(t);
+                body.push_back(k.decl(t, k.deref(cell(k.pv(g, 1), i, j))));
+            }
+        }
+        body.push_back(k.store(k.mem(k.pv(g, 0), 1), k.v(tc)));
+        n = 0U;
+        for (const char* i : {"0", "1"})
+        {
+            for (const char* j : {"0", "1"})
+            {
+                if (static_cast<int>(n) + 1 != skip)
+                {
+                    body.push_back(k.store(cell(k.pv(g, 0), i, j), k.v(tmp[n])));
+                }
+                ++n;
+            }
+        }
+        g->body = k.blk(body);
+        k.done(g);
+        return g->end_loc;
+    };
+    lc("e1e2e_dcopy_u2_through_pointers",
+       "struct U2 { int m[2][2]; int c; }: *p = *q under owns(*p) and reads(*q): p->m[1][0] == q->m[1][0]",
+       [=](Kit& k)
+       {
+           u2_pointers(k, 0);
+       });
+    lc("e1e2e_dcopy_u2_through_pointers_missing_store_fail",
+       "the same with the store of p->m[1][0] left out and the postcondition p->m[1][0] == q->m[1][0]: it does not follow",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", u2_pointers(k, 3));
+       });
+    // (a twin of the same shape through pointers verifies its failure correctly but takes 361 s in lane il, one conjunct or eight: listed in report 7; the twin below is the locals' shape)
+    lc("e1e2e_dcopy_locals_missing_store_fail",
+       "the copy w = u with the store of w.m[1][0] left out (w.m[1][0] was 0): the check that every cell of w is u's cell fails",
+       [=](Kit& k)
+       {
+           k.fail("check", locals(k, -1, 3)->loc);
+       });
+    // void g(struct U *p) requires(owns(*p)) ensures(owns(*p) && p->b[1] == old(p->b[1]) && p->m[1][0] == old(p->m[1][0])) { *p = *p; }  (`unguarded`: the contract names b[1] against 0)
+    auto same_pointer = [=](Kit& k, bool wrong) -> SrcLoc
+    {
+        StructType* S {mkU(k)};
+        Function* g {k.fn("g", k.vd, {{"p", k.ptr(k.st(S))}})};
+        auto atom = [&]
+        {
+            return k.b.atom(AtomKind::Owns, k.b.text(k.F(g, 0), "p"), 0, k.at());
+        };
+        k.req(g, atom());
+        const std::vector<const Expr*> fp {places(k, k.F(g, 0))};
+        const Expr* b1 {k.deref(fp[6])};
+        const Expr* m10 {k.deref(fp[3])};
+        k.ens(g, k.land(atom(), k.land(k.eq(b1, wrong ? N(k, "0") : k.old(k.deref(places(k, k.F(g, 0))[6]))),
+                                       k.eq(m10, k.old(k.deref(places(k, k.F(g, 0))[3]))))));
+        const CopyOut co {copy_stmts(
+            k, g,
+            [&]
+            {
+                return k.pv(g, 0);
+            },
+            [&]
+            {
+                return k.pv(g, 0);
+            },
+            0)};
+        g->body = k.blk(co.stmts);
+        k.done(g);
+        return g->end_loc;
+    };
+    lc("e1e2e_dcopy_through_the_same_pointer",
+       "*p = *p under owns(*p): the places can be one object, so the array copy is guarded by d != s and the matrix cells are rewritten with their own values: b[1] and m[1][0] are as they were",
+       [=](Kit& k)
+       {
+           same_pointer(k, false);
+       });
+    lc("e1e2e_dcopy_through_the_same_pointer_wrong_fail",
+       "the same with the postcondition p->b[1] == 0: it does not follow",
+       [=](Kit& k)
+       {
+           k.fail("postcondition", same_pointer(k, true));
+       });
+    // the Sequencer's key of a matrix cell in a struct Store (decision 0064 item 11): `u = (struct U){1, 2, 3, 4, <x>++, 6, 7, 8}` with x the cell u.m[1][1] (rejected: the value writes a cell of the
+    // destination) or w.m[1][1] of another object (accepted: u.m[1][1] == 5 and w.m[1][1] == 6 after)
+    auto seq_store = [=](Kit& k, bool other, const Stmt** chk_out) -> const Expr*
+    {
+        StructType* S {mkU(k)};
+        Function* f {k.fn("f", k.vd)};
+        Var* u {k.scell(f, "u", S)};
+        Var* w {k.scell(f, "w", S)};
+        const Expr* place {mplace(k, k.addr(other ? w : u), "1", "1")};
+        const Expr* inc {k.b.inc_dec_store_expr(place, true, true, k.at())};
+        const Expr* value {k.b.aggregate(
+            k.st(S), {N(k, "1"), N(k, "2"), N(k, "3"), N(k, "4"), inc, N(k, "6"), N(k, "7"), N(k, "8")}, k.at())};
+        std::vector<const Stmt*> body {k.decl(u, nullptr), k.decl(w, nullptr)};
+        if (other)
+        {
+            body.push_back(k.store(mplace(k, k.addr(w), "1", "1"), N(k, "5")));
+        }
+        body.push_back(k.store(k.addr(u), value));
+        if (chk_out != nullptr)
+        {
+            *chk_out = k.chk(k.land(k.eq_c(k.deref(mplace(k, k.addr(u), "1", "1")), k.i32, "5"),
+                                    k.eq_c(k.deref(mplace(k, k.addr(w), "1", "1")), k.i32, "6")));
+            body.push_back(*chk_out);
+        }
+        f->body = k.blkc(body);
+        k.done(f);
+        return inc;
+    };
+    rc("e1e2e_rej_dcopy_struct_store_writes_a_matrix_cell", "unsequenced modification of",
+       [=](Kit& k)
+       {
+           seq_store(k, false, nullptr);
+       });
+    lc("e1e2e_dcopy_struct_store_writes_another_objects_cell",
+       "u = (struct U){1, 2, 3, 4, w.m[1][1]++, 6, 7, 8}: the increment is of another object, so the store is sequenced: u.m[1][1] == 5 and w.m[1][1] == 6",
+       [=](Kit& k)
+       {
+           const Stmt* c {nullptr};
+           seq_store(k, true, &c);
+       });
+    // the same through a POINTER base: g(struct U *p, struct U *q) requires(owns(*p) && owns(*q)) { *p = (struct U){1, 2, 3, 4, <x>++, 6, 7, 8}; } with x the cell p->m[1][1] (the value writes a leaf of
+    // the structure it is stored to: the path-precise rows reject it, decision 0064 item 11) or q->m[1][1] (another pointer: the two may be one object)
+    auto seq_store_ptr = [=](Kit& k, bool other_pointer, bool post) -> SrcLoc
+    {
+        StructType* S {mkU(k)};
+        Function* g {k.fn("g", k.vd, {{"p", k.ptr(k.st(S))}, {"q", k.ptr(k.st(S))}})};
+        auto atom = [&](int which)
+        {
+            return k.b.atom(AtomKind::Owns, k.b.text(k.F(g, which), which == 0 ? "p" : "q"), which, k.at());
+        };
+        k.req(g, k.land(k.land(atom(0), atom(1)), k.eq_c(k.deref(mplace(k, k.F(g, 1), "1", "1")), k.i32, "5")));
+        if (post)
+        {
+            k.ens(g, k.land(k.land(atom(0), atom(1)),
+                            k.land(k.eq_c(k.deref(mplace(k, k.F(g, 0), "1", "1")), k.i32, "5"),
+                                   k.eq_c(k.deref(mplace(k, k.F(g, 1), "1", "1")), k.i32, "6"))));
+        }
+        const Expr* inc {
+            k.b.inc_dec_store_expr(mplace(k, k.pv(g, other_pointer ? 1 : 0), "1", "1"), true, true, k.at())};
+        const Expr* value {k.b.aggregate(
+            k.st(S), {N(k, "1"), N(k, "2"), N(k, "3"), N(k, "4"), inc, N(k, "6"), N(k, "7"), N(k, "8")}, k.at())};
+        g->body = k.blk({k.store(k.pv(g, 0), value)});
+        k.done(g);
+        return g->end_loc;
+    };
+    rc("e1e2e_rej_dcopy_struct_store_writes_a_matrix_cell_through_the_pointer", "unsequenced modification of",
+       [=](Kit& k)
+       {
+           seq_store_ptr(k, false, false);
+       });
+    lc("e1e2e_dcopy_struct_store_writes_another_pointers_cell",
+       "*p = (struct U){1, 2, 3, 4, q->m[1][1]++, 6, 7, 8} under owns(*p) && owns(*q) and q->m[1][1] == 5: the two atoms are distinct objects, so the store is sequenced: p->m[1][1] == 5 and q->m[1][1] == 6",
+       [=](Kit& k)
+       {
+           seq_store_ptr(k, true, true);
+       });
+    // (the same with a wrong postcondition, q->m[1][1] == 5, verifies its failure correctly but took 357 s in lane il: not in the tree, as for `*p = *q` in report 7)
+    // ---- the second type of the record, copied whole: struct W { int a[2]; int n; }; struct T { struct W v[2]; int k; }: k read into a temporary (copy_1), the six cells of v in value_cells order
+    // (copy_agg_0 .. 5), k stored first, then the six cells, no array copy (edg-backend-report-18, "T: whole copy and values") ----
+    auto mkT = [](Kit& k) -> StructType*
+    {
+        StructType* W {k.strukt("W", {{"a", k.prog.array_of(k.i32, 2U)}, {"n", k.i32}})};
+        return k.strukt("T", {{"v", k.prog.array_of(k.st(W), 2U)}, {"k", k.i32}});
+    };
+    // the places of the seven cells of the object at `base`: the six cells of v, then k
+    auto tplaces = [](Kit& k, const Expr* base)
+    {
+        std::vector<const Expr*> out;
+        for (const char* i : {"0", "1"})
+        {
+            const Expr* el {k.b.elem_addr(k.mem(base, 0), k.num(k.i32, i), k.at())};
+            out.push_back(k.b.elem_addr(k.mem(el, 0), k.num(k.i32, "0"), k.at()));
+            out.push_back(k.b.elem_addr(k.mem(el, 0), k.num(k.i32, "1"), k.at()));
+            out.push_back(k.mem(el, 1));
+        }
+        out.push_back(k.mem(base, 1));
+        return out;
+    };
+    // `d = s` as traced; `skip` (0 to 5, a cell of v) is left out of the stores
+    auto tcopy_stmts = [=](Kit& k, Function* f, const std::function<const Expr*()>& dst,
+                           const std::function<const Expr*()>& src, int skip)
+    {
+        std::vector<const Stmt*> out;
+        const std::vector<const Expr*> sp {tplaces(k, src())};
+        Var* tk {k.local(f, "copy_1", k.i32)};
+        out.push_back(k.decl(tk, k.deref(sp[6])));
+        std::vector<Var*> tmp;
+        for (size_t c {0U}; c < 6U; ++c)
+        {
+            Var* t {k.local(f, "copy_agg_" + std::to_string(c), k.i32)};
+            tmp.push_back(t);
+            out.push_back(k.decl(t, k.deref(sp[c])));
+        }
+        const std::vector<const Expr*> dp {tplaces(k, dst())};
+        out.push_back(k.store(dp[6], k.v(tk)));
+        for (size_t c {0U}; c < 6U; ++c)
+        {
+            if (static_cast<int>(c) != skip)
+            {
+                out.push_back(k.store(dp[c], k.v(tmp[c])));
+            }
+        }
+        return out;
+    };
+    // void f(void) { struct T u, w; <u: 1..7>; w = u; check(every cell of w is u's); w.v[0].a[0] = 9; check(u.v[0].a[0] == 1); }   (`bad`: the cell the check names wrongly; `skip`: a store left out,
+    // w's cell holding 0 before; `self`: u = u and the check on u)
+    auto tlocals = [=](Kit& k, int bad, int skip, bool self) -> const Stmt*
+    {
+        StructType* S {mkT(k)};
+        Function* f {k.fn("f", k.vd)};
+        Var* u {k.scell(f, "u", S)};
+        Var* w {k.scell(f, "w", S)};
+        std::vector<const Stmt*> body {k.decl(u, nullptr)};
+        static const char* const vals[] {"1", "2", "3", "4", "5", "6", "7", "8"};
+        const std::vector<const Expr*> ps {tplaces(k, k.addr(u))};
+        for (size_t i {0U}; i < ps.size(); ++i)
+        {
+            body.push_back(k.store(ps[i], N(k, vals[i])));
+        }
+        Var* dst {self ? u : w};
+        if (!self)
+        {
+            body.push_back(k.decl(w, nullptr));
+            if (skip >= 0)
+            {
+                body.push_back(k.store(tplaces(k, k.addr(w))[static_cast<size_t>(skip)], N(k, "0")));
+            }
+        }
+        for (const Stmt* c : tcopy_stmts(
+                 k, f,
+                 [&]
+                 {
+                     return k.addr(dst);
+                 },
+                 [&]
+                 {
+                     return k.addr(u);
+                 },
+                 skip))
+        {
+            body.push_back(c);
+        }
+        const std::vector<const Expr*> wp {tplaces(k, k.addr(dst))};
+        const Expr* all {nullptr};
+        for (size_t i {0U}; i < wp.size(); ++i)
+        {
+            const Expr* e {k.eq_c(k.deref(wp[i]), k.i32, static_cast<int>(i) == bad ? vals[i + 1U] : vals[i])};
+            all = all == nullptr ? e : k.land(all, e);
+        }
+        const Stmt* chk {k.chk(all)};
+        body.push_back(chk);
+        if (!self)
+        {
+            body.push_back(k.store(tplaces(k, k.addr(w))[0], N(k, "9")));
+            body.push_back(k.chk(k.eq_c(k.deref(tplaces(k, k.addr(u))[0]), k.i32, "1")));
+        }
+        tail(k, body);
+        f->body = k.blkc(body);
+        k.done(f);
+        return chk;
+    };
+    lcv("e1e2e_dcopy_nested_locals",
+        "w = u of a structure with an array of structures with an array leaf: k and the six cells of v read into temporaries, k stored first, then the six cells: w holds all seven cells, and w is independent of u",
+        [=](Kit& k)
+        {
+            tlocals(k, -1, -1, false);
+        });
+    for (int bad : {0, 5})
+    {
+        lc("e1e2e_dcopy_nested_locals_wrong_cell" + std::to_string(bad) + "_fail",
+           "the same checking cell " + std::to_string(bad) + " of w against the next cell's value: the check fails",
+           [=](Kit& k)
+           {
+               k.fail("check", tlocals(k, bad, -1, false)->loc);
+           });
+    }
+    lc("e1e2e_dcopy_nested_locals_missing_store_fail",
+       "the copy with the store of w.v[1].a[0] left out (it was 0): the check that every cell of w is u's fails",
+       [=](Kit& k)
+       {
+           k.fail("check", tlocals(k, -1, 3, false)->loc);
+       });
+    lcv("e1e2e_dcopy_nested_self",
+        "u = u of the same type: every cell is read into a temporary before the first store, so a self-copy rewrites each cell with its own value",
+        [=](Kit& k)
+        {
+            tlocals(k, -1, -1, true);
+        });
+    lc("e1e2e_dcopy_nested_self_wrong_fail", "u = u and the check naming v[0].n against the next cell's value: fails",
+       [=](Kit& k)
+       {
+           k.fail("check", tlocals(k, 2, -1, true)->loc);
+       });
+}
+
+// ---- the CALL of a function whose contract has TWO `reads` atoms of a structure with a matrix member or a member array of structures (the second internal error of the first-member-matrix
+// family: "an array has no cell fields of its own", the call rows' pairing of two reads atoms); shape 0 struct U { int n; int m[2][2]; }, 1 struct U2 { int m[2][2]; int c; },
+// 2 struct T { struct W v[2]; int k; } with struct W { int a[2]; int n; } ----
+void define_part_e_reads_reads_call_cases()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto mkS = [](Kit& k, int shape) -> StructType*
+    {
+        const Type mat {k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)};
+        if (shape == 0)
+        {
+            return k.strukt("U", {{"n", k.i32}, {"m", mat}});
+        }
+        if (shape == 1)
+        {
+            return k.strukt("U2", {{"m", mat}, {"c", k.i32}});
+        }
+        StructType* W {k.strukt("W", {{"a", k.prog.array_of(k.i32, 2U)}, {"n", k.i32}})};
+        return k.strukt("T", {{"v", k.prog.array_of(k.st(W), 2U)}, {"k", k.i32}});
+    };
+    // the places of every cell of the object at `base`, in declaration order, and the index among them of the scalar the contracts read
+    auto cells = [](Kit& k, int shape, const Expr* base) -> std::vector<const Expr*>
+    {
+        std::vector<const Expr*> out;
+        auto mcell = [&](int member, const char* i, const char* j)
+        {
+            return k.b.elem_addr(k.b.elem_addr(k.mem(base, member), k.num(k.i32, i), k.at()), k.num(k.i32, j), k.at());
+        };
+        if (shape == 0)
+        {
+            out.push_back(k.mem(base, 0));
+            for (const char* i : {"0", "1"})
+            {
+                for (const char* j : {"0", "1"})
+                {
+                    out.push_back(mcell(1, i, j));
+                }
+            }
+        }
+        else if (shape == 1)
+        {
+            for (const char* i : {"0", "1"})
+            {
+                for (const char* j : {"0", "1"})
+                {
+                    out.push_back(mcell(0, i, j));
+                }
+            }
+            out.push_back(k.mem(base, 1));
+        }
+        else
+        {
+            for (const char* i : {"0", "1"})
+            {
+                const Expr* el {k.b.elem_addr(k.mem(base, 0), k.num(k.i32, i), k.at())};
+                out.push_back(k.b.elem_addr(k.mem(el, 0), k.num(k.i32, "0"), k.at()));
+                out.push_back(k.b.elem_addr(k.mem(el, 0), k.num(k.i32, "1"), k.at()));
+                out.push_back(k.mem(el, 1));
+            }
+            out.push_back(k.mem(base, 1));
+        }
+        return out;
+    };
+    auto scalar_cell = [](int shape) -> size_t
+    {
+        return shape == 0 ? 0U : (shape == 1 ? 4U : 6U);
+    };
+    auto scalar_member = [](int shape) -> int
+    {
+        return shape == 0 ? 0 : 1;
+    };
+    // the stores of every cell of `x`: the scalar 5, the others 1, 2, ...
+    auto fill = [=](Kit& k, int shape, const Var* x, std::vector<const Stmt*>& body, int skip = -1)
+    {
+        body.push_back(k.decl(x, nullptr));
+        const std::vector<const Expr*> ps {cells(k, shape, k.addr(x))};
+        for (size_t i {0U}; i < ps.size(); ++i)
+        {
+            if (static_cast<int>(i) == skip)
+            {
+                continue;
+            }
+            body.push_back(
+                k.store(ps[i], i == scalar_cell(shape) ? N(k, "5") : k.num(k.i32, std::to_string(i + 1U).c_str())));
+        }
+    };
+    // int g(struct S *p, struct S *q) requires(reads(*p) && reads(*q)) ensures(reads(*p) && reads(*q) && result == p-><scalar>);  declared, defined elsewhere
+    auto make_g = [=](Kit& k, StructType* S, int shape) -> Function*
+    {
+        Function* g {k.fn("g", k.i32, {{"p", k.ptr(k.st(S))}, {"q", k.ptr(k.st(S))}})};
+        auto atom = [&](int which)
+        {
+            return k.b.atom(AtomKind::Reads, k.b.text(k.F(g, which), which == 0 ? "p" : "q"), which, k.at());
+        };
+        k.req(g, k.land(atom(0), atom(1)));
+        k.ens(g,
+              k.land(k.land(atom(0), atom(1)), k.eq(k.R(g), k.leaf(k.b.text(k.F(g, 0), "p"), scalar_member(shape)))));
+        k.trusted(g);
+        return g;
+    };
+    // void f(void) { struct S u; struct S v; <fill>; int r = g(&u, <&u | &v>); check(r == <5 | 6>); [u.<scalar> = 1; check(u.<scalar> == 1);] }
+    auto caller = [=](Kit& k, int shape, bool same, bool wrong, bool write_after, int skip = -1,
+                      const Expr** call_out = nullptr) -> const Stmt*
+    {
+        StructType* S {mkS(k, shape)};
+        Function* g {make_g(k, S, shape)};
+        Function* f {k.fn("f", k.vd)};
+        Var* u {k.scell(f, "u", S)};
+        Var* v {k.scell(f, "v", S)};
+        Var* r {k.local(f, "r", k.i32)};
+        std::vector<const Stmt*> body;
+        fill(k, shape, u, body);
+        if (!same)
+        {
+            fill(k, shape, v, body, skip);
+        }
+        const Expr* callx {k.call(g, {k.addr(u), same ? k.addr(u) : k.addr(v)})};
+        if (call_out != nullptr)
+        {
+            *call_out = callx;
+        }
+        body.push_back(k.decl(r, callx));
+        const Stmt* c {k.chk(k.eq(k.v(r), N(k, wrong ? "6" : "5")))};
+        body.push_back(c);
+        if (write_after)
+        {
+            // the caller lent a fraction of u twice and holds the rest: it can write the scalar and the check after sees it
+            body.push_back(k.store(cells(k, shape, k.addr(u))[scalar_cell(shape)], N(k, "1")));
+            body.push_back(k.chk(k.eq(k.deref(cells(k, shape, k.addr(u))[scalar_cell(shape)]), N(k, "1"))));
+        }
+        f->body = k.blkc(body);
+        k.done(f);
+        return c;
+    };
+    static const char* const names[] {"u", "u2", "t"};
+    static const char* const docs[] {
+        "struct U { int n; int m[2][2]; }", "struct U2 { int m[2][2]; int c; }",
+        "struct T { struct W v[2]; int k; } (a member array of structures with an array member)"};
+    for (int shape : {0, 1, 2})
+    {
+        const std::string n {std::string("e1e2e_rrcall_") + names[shape]};
+        const std::string d {docs[shape]};
+        lc(n + "_distinct", d + ": g(&u, &v) with reads(*p) && reads(*q): both lend their cells, r == u's scalar",
+           [=](Kit& k)
+           {
+               caller(k, shape, false, false, false);
+           });
+        // (struct T's two cases that take two objects of seven cells each to a failing verdict, the wrong value and the unwritten cell, took 123 s and 145 s in lane il: not in the tree)
+        if (shape != 2)
+        {
+            lc(n + "_distinct_wrong_fail", d + ": the same checking r == 6: the check fails",
+               [=](Kit& k)
+               {
+                   k.fail("check", caller(k, shape, false, true, false)->loc);
+               });
+            // the cell `skip` of the second structure (a matrix cell, or a cell of a member array's element) never written: the call's flag row for the part's rows reports it
+            lc(n + "_unwritten_matrix_cell_fail",
+               d + ": g(&u, &v) with v's cell " + std::to_string(shape == 1 ? 2 : 3) +
+                   " never written: uninitialized at the call",
+               [=](Kit& k)
+               {
+                   const Expr* callx {nullptr};
+                   caller(k, shape, false, false, false, shape == 1 ? 2 : 3, &callx);
+                   // the rows of the call that name an initialized cell (the scalar's of both objects, the whole matrix's of both) are four; the one that fails is the row over the second
+                   // object's part
+                   k.fail_only("uninitialized", callx->loc, 4U, 3U);
+               });
+        }
+        lc(n + "_alias",
+           d + ": g(&u, &u): two reads of one object are allowed; the caller keeps what it lent and writes the scalar afterwards",
+           [=](Kit& k)
+           {
+               caller(k, shape, true, false, true);
+           });
+        lc(n + "_alias_wrong_fail", d + ": g(&u, &u) checking r == 6: the check fails",
+           [=](Kit& k)
+           {
+               k.fail("check", caller(k, shape, true, true, false)->loc);
+           });
+    }
+    // int h(struct S *p) requires(reads(*p)) ensures(reads(*p) && result == p-><scalar>) { [p-><scalar> = 1;] return g(p, p); }   (the caller holds only reads: the minimum-amount rows)
+    auto reads_only = [=](Kit& k, int shape, bool writes) -> const Stmt*
+    {
+        StructType* S {mkS(k, shape)};
+        Function* g {make_g(k, S, shape)};
+        Function* h {k.fn("h", k.i32, {{"p", k.ptr(k.st(S))}})};
+        auto atom = [&]
+        {
+            return k.b.atom(AtomKind::Reads, k.b.text(k.F(h, 0), "p"), 0, k.at());
+        };
+        k.req(h, atom());
+        k.ens(h, k.land(atom(), k.eq(k.R(h), k.leaf(k.b.text(k.F(h, 0), "p"), scalar_member(shape)))));
+        std::vector<const Stmt*> body;
+        const Stmt* w {nullptr};
+        if (writes)
+        {
+            w = k.store(cells(k, shape, k.pv(h, 0))[scalar_cell(shape)], N(k, "1"));
+            body.push_back(w);
+        }
+        body.push_back(k.ret(k.call(g, {k.pv(h, 0), k.pv(h, 0)})));
+        h->body = k.blk(body);
+        k.done(h);
+        return w;
+    };
+    for (int shape : {0, 1, 2})
+    {
+        const std::string n {std::string("e1e2e_rrcall_") + names[shape]};
+        lc(n + "_reads_only",
+           std::string(docs[shape]) +
+               ": h(p) holding only reads(*p) calls g(p, p): the two lent fractions are within what h holds, and h returns p's scalar",
+           [=](Kit& k)
+           {
+               reads_only(k, shape, false);
+           });
+        lc(n + "_reads_only_writes_fail",
+           std::string(docs[shape]) + ": the same writing p's scalar first: permission at the store",
+           [=](Kit& k)
+           {
+               k.fail("permission", reads_only(k, shape, true)->loc);
+           });
+    }
+    // two reads of ONE object where a callee has just lowered the caller's permission at a matrix cell (the sum form of audit round 3, B1, as rngc_reads_meet_kept for ranges): void keep_cell(int *x)
+    // requires(reads(*x)) ensures(live(x)) {}; keep_cell(&u.m[1][1]); g(&u, &u): each atom's own amount would pass at the cell, the sum of the two does not: a permission error at the second call
+    for (int shape : {0, 1})
+    {
+        const std::string n {std::string("e1e2e_rrcall_") + names[shape]};
+        lc(n + "_meet_kept_fail",
+           std::string(docs[shape]) +
+               ": keep_cell(&u.m[1][1]) leaves the cell with a fraction, then g(&u, &u) takes two amounts of it: the sum of the two does not fit: permission at the call",
+           [=](Kit& k)
+           {
+               StructType* S {mkS(k, shape)};
+               Function* g {make_g(k, S, shape)};
+               Function* keep {k.fn("keep_cell", k.vd, {{"x", k.ptr(k.i32)}})};
+               k.req(keep, k.b.atom(AtomKind::Reads, k.b.text(k.F(keep, 0), "x"), 0, k.at()));
+               k.ens(keep, k.b.atom(AtomKind::Live, k.b.text(k.F(keep, 0), "x"), 1, k.at()));
+               keep->body = k.blk({});
+               k.done(keep);
+               Function* f {k.fn("f", k.vd)};
+               Var* u {k.scell(f, "u", S)};
+               std::vector<const Stmt*> body;
+               fill(k, shape, u, body);
+               body.push_back(k.es(k.call(keep, {cells(k, shape, k.addr(u))[shape == 0 ? 4U : 3U]})));
+               const Expr* c2 {k.call(g, {k.addr(u), k.addr(u)})};
+               body.push_back(k.es(c2));
+               f->body = k.blkc(body);
+               k.done(f);
+               // the marked rows of the call's matrix part (a value row and a flag row for each of the two atoms) are four; the first, the sum-form row over every cell of every row, fails alone
+               // with insufficient permission (a failed marked row ends its path)
+               Expect e {"permission",          c2->loc.line, 4U, "assert.failed[insufficient.permission]",
+                         "needs to read `u.m`", -1,           0};
+               k.expects.push_back(e);
+           });
+    }
+    // two GLOBAL structures read by two atoms: struct U gu, gv (n = 7, m = {{1, 2}, {3, 4}});  int f(void) requires(reads(gu) && reads(gv)) ensures(reads(gu) && reads(gv) && r == gu.n) { return gu.n; }
+    // int main(void) { int rv = f(); check(rv == <7 | 8>); return 0; }
+    auto global_pair = [=](Kit& k, bool wrong) -> const Stmt*
+    {
+        StructType* S {mkS(k, 0)};
+        std::vector<Global*> gs;
+        for (const char* name : {"gu", "gv"})
+        {
+            Global* g {k.prog.add_global(name, k.st(S), k.at(), nullptr)};
+            GlobalLeaf ln;
+            ln.kind = GlobalInit::Value;
+            ln.init = N(k, "7");
+            ln.value = "7";
+            ln.loc = k.at();
+            g->leaves.push_back(ln);
+            GlobalLeaf lm;
+            lm.kind = GlobalInit::Value;
+            lm.rest = ArrayRest::Zero;
+            lm.loc = k.at();
+            for (const std::vector<const char*>& r : std::vector<std::vector<const char*>> {{"1", "2"}, {"3", "4"}})
+            {
+                GlobalLeaf row;
+                row.kind = GlobalInit::Value;
+                row.rest = ArrayRest::Zero;
+                row.loc = k.at();
+                for (const char* v : r)
+                {
+                    GlobalLeaf c;
+                    c.kind = GlobalInit::Value;
+                    c.value = v;
+                    c.init = N(k, v);
+                    c.loc = k.at();
+                    row.elems.push_back(c);
+                }
+                lm.elems.push_back(row);
+            }
+            g->leaves.push_back(lm);
+            gs.push_back(g);
+        }
+        auto atom = [&](int which)
+        {
+            return k.b.global_atom(AtomKind::Reads, k.b.global_addr(gs[static_cast<size_t>(which)], k.at()), which,
+                                   k.at(), false);
+        };
+        auto gn = [&]
+        {
+            return k.deref(k.mem(k.b.global_addr(gs[0], k.at()), 0));
+        };
+        Function* f {k.fn("f", k.i32)};
+        k.req(f, k.land(atom(0), atom(1)));
+        k.ens(f, k.land(k.land(atom(0), atom(1)), k.eq(k.R(f), gn())));
+        f->body = k.blk({k.ret(gn())});
+        k.done(f);
+        Function* m {k.fn("main", k.i32)};
+        Var* rv {k.local(m, "rv", k.i32)};
+        const Stmt* c {k.chk(k.eq(k.v(rv), N(k, wrong ? "8" : "7")))};
+        m->body = k.blkc({k.decl(rv, k.call(f, {})), c, k.ret(N(k, "0"))});
+        k.done(m);
+        k.prog.set_entry(m);
+        return c;
+    };
+    lc("e1e2e_rrcall_global_pair",
+       "two global structures with a matrix member read by two atoms: f() takes reads(gu) && reads(gv); program_start gives gu.n == 7",
+       [=](Kit& k)
+       {
+           global_pair(k, false);
+       });
+    lc("e1e2e_rrcall_global_pair_wrong_fail", "the same checking rv == 8: the check fails",
+       [=](Kit& k)
+       {
+           k.fail("check", global_pair(k, true)->loc);
        });
 }

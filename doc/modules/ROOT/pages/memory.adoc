@@ -917,9 +917,14 @@ on the structure (`+cerastes_owns(*p)+`) holds every cell of the member, and
 `cerastes_owns(p->m)` holds the member alone; a contract may then read
 `p->m[i][j]`. These atoms are written unguarded: an atom on such a structure after
 a condition and `||`, or as an arm of `?:`, is rejected for now. A structure with
-such a member cannot yet be passed, returned or copied as a whole value, and
-<<array-members>> lists what a structure whose array member holds arrays cannot do
-yet (the heap, owners, markers).
+such a member is passed, returned and copied as a whole value (`f(b)`, `return b;`,
+`c = b;`, `*p = *q;`) cell by cell, with every cell of the source needing a value, as
+long as its array members hold at most 7 cells in all (a whole copy counts only the
+cells of the matrix); a larger one is rejected with a diagnostic. A contract cannot yet read a cell of such a value
+(`v.m[i][j]` of a by-value parameter), nor code a cell of a returned one
+(`+f().m[1][2]+`): copy the value into a local first. <<array-members>> lists what a
+structure whose array member holds arrays cannot do yet (the heap, owners,
+markers).
 
 Not supported yet, each rejected with a diagnostic: a matrix whose cells are
 structures (`struct point m[2][2];`); a pointer to an array anywhere but a parameter
@@ -2348,7 +2353,8 @@ These are rejected with a diagnostic, never approximated
   owning or marked member (<<arrays-of-structures>>, <<arrays-of-arrays>>); a
   structure with an array of arrays as a member, or with a member array of
   structures that have an array member, passed, returned or copied as a whole
-  value (<<arrays-of-arrays>>); a structure whose array member holds structures or
+  value when those members hold more than 7 cells (<<arrays-of-arrays>>); a
+  structure whose array member holds structures or
   arrays that is allocated with `malloc` or `calloc`, that also has an `owning` or marked
   member, whose pointer is `owning` or marked `ref_to_uninit` or `must_init`,
   that is reached through a pointer read from memory, or that is named by an

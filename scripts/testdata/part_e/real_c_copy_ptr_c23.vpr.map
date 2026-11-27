@@ -1,0 +1,795 @@
+30	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+31	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+32	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+33	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+34	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+35	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+36	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+37	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+38	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+38	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+39	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+39	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+40	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+40	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+41	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+41	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+42	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+42	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+43	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+43	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+44	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+44	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+45	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: well-formedness of the trusted contract of the copy of an array of `int`
+45	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the trusted contract of the copy of an array of `int`
+50	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+50	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+51	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+51	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+52	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+52	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+53	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+53	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+54	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+54	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+55	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+55	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+56	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+56	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+57	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+57	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+58	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+58	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+59	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+59	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+60	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+60	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+61	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+61	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+62	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+62	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	8	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+67	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr`
+68	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr`
+69	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr`
+70	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr`
+71	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+72	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+73	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+74	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+75	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+76	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+77	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+78	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+79	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+80	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+81	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+82	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+83	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+84	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+85	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+86	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+87	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+88	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+89	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+90	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+91	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+92	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+93	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+94	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+95	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+96	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+97	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+98	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+99	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+100	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+101	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+102	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+103	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+104	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+105	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+106	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+107	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+108	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+109	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+110	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+111	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+112	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+113	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+114	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+115	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+116	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+117	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+118	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+119	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+120	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+121	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+122	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+123	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+124	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+125	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+126	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+127	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+128	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+129	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+130	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+131	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+132	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+133	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+134	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	16	5	internal check: well-formedness of the contract of `copy_ptr`
+135	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+135	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+136	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+136	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+137	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+137	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+138	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+138	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+139	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+139	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+140	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+140	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+141	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+141	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+142	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+142	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+143	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+143	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+144	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+144	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+145	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+145	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+146	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+146	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+147	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+147	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+148	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+148	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+149	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+149	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+150	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+150	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+151	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+151	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+152	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+152	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+153	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+153	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+154	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+154	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+155	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+155	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+156	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+156	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+157	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+157	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+158	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+158	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+159	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+159	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+160	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+160	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+161	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+161	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+162	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+162	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+163	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+163	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+164	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+164	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+165	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+165	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+166	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+166	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+167	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+167	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+168	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+168	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+169	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+169	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+170	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+170	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+171	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+171	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+172	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+172	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+173	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+173	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+174	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+174	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+175	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+175	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+176	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+176	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+177	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+177	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+178	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+178	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+179	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+179	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+180	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+180	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+181	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+181	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+182	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+182	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+183	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+183	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+184	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+184	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+185	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+185	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+186	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+186	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+187	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+187	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+188	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+188	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+189	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+189	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+190	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+190	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+191	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+191	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+192	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+192	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+193	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+193	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+194	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+194	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+195	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+195	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+196	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+196	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+197	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+197	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+198	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+198	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+199	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+199	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+200	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+200	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+201	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+201	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+202	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+202	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+203	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+203	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+204	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+204	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+205	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+205	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+206	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: well-formedness of the contract of `copy_ptr`
+206	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	17	5	internal check: Silicon's own check of the postcondition of `copy_ptr`
+233	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `q`, which may be null
+234	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->a` without owning it: the object it points to may have ended
+235	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	19	6	`q->a` may be read here before it is given a value
+237	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `q`, which may be null
+238	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->c` without owning it: the object it points to may have ended
+239	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	19	6	`q->c` may be read here before it is given a value
+241	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `q`, which may be null
+242	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[0][0]`, whose first index may be outside `q->m`
+243	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[0][0]`, whose second index may be outside `q->m[0]`
+244	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[0][0]` without owning it: a callee may have kept its object
+245	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	19	6	`q->m[0][0]` may be read here before it is given a value
+247	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `q`, which may be null
+248	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[0][1]`, whose first index may be outside `q->m`
+249	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[0][1]`, whose second index may be outside `q->m[0]`
+250	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[0][1]` without owning it: a callee may have kept its object
+251	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	19	6	`q->m[0][1]` may be read here before it is given a value
+253	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `q`, which may be null
+254	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[1][0]`, whose first index may be outside `q->m`
+255	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[1][0]`, whose second index may be outside `q->m[1]`
+256	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[1][0]` without owning it: a callee may have kept its object
+257	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	19	6	`q->m[1][0]` may be read here before it is given a value
+259	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `q`, which may be null
+260	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[1][1]`, whose first index may be outside `q->m`
+261	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[1][1]`, whose second index may be outside `q->m[1]`
+262	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	reads `q->m[1][1]` without owning it: a callee may have kept its object
+263	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	19	6	`q->m[1][1]` may be read here before it is given a value
+265	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `p`, which may be null
+267	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->a` without owning it: the object it points to may have ended
+270	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `p`, which may be null
+272	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->c` without owning it: the object it points to may have ended
+275	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `p`, which may be null
+276	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[0][0]`, whose first index may be outside `p->m`
+277	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[0][0]`, whose second index may be outside `p->m[0]`
+279	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[0][0]` without owning it: a callee may have kept its object
+282	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `p`, which may be null
+283	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[0][1]`, whose first index may be outside `p->m`
+284	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[0][1]`, whose second index may be outside `p->m[0]`
+286	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[0][1]` without owning it: a callee may have kept its object
+289	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `p`, which may be null
+290	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[1][0]`, whose first index may be outside `p->m`
+291	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[1][0]`, whose second index may be outside `p->m[1]`
+293	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[1][0]` without owning it: a callee may have kept its object
+296	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `p`, which may be null
+297	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[1][1]`, whose first index may be outside `p->m`
+298	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[1][1]`, whose second index may be outside `p->m[1]`
+300	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->m[1][1]` without owning it: a callee may have kept its object
+303	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `p`, which may be null
+304	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	19	6	dereferences `q`, which may be null
+308	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	copies `q->b`, whose elements the function may not hold (a callee may have kept them)
+309	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	copies `q->b`, whose elements the function may not hold (a callee may have kept them)
+310	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	copies `q->b`, whose elements the function may not hold (a callee may have kept them)
+311	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	19	6	copies `*q`, whose member `q->b` may hold an element without a value
+312	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->b` without owning every element of it: the object it belongs to may have ended
+313	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	19	6	writes `p->b` without owning every element of it: the object it belongs to may have ended
+315	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: the two arrays of a copy are distinct blocks
+316	call.precondition	internal	build/tm11s4/matrix_value_copy_ptr.c	19	6	internal check: Silicon's own check of the copy of an array member
+318	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+319	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+320	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+321	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+322	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+323	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+324	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+325	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+326	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+327	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+328	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns `*p` and `*q` as owned places, but they may be the same object	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+329	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+330	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	20	1	internal check: WF of a pointer parameter
+331	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	20	1	internal check: a pointer parameter points into its block
+332	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+333	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+334	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+335	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+336	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+337	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+338	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+339	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+340	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+341	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+342	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	20	1	internal check: WF of a pointer parameter
+343	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	20	1	internal check: a pointer parameter points into its block
+344	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+345	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+346	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+347	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+348	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+349	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+350	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+351	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+352	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `*q`, which it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+354	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+355	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+356	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+357	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+359	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+360	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+361	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+362	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+364	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->m` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+365	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->m` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+366	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->m` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+367	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->m` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+369	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->b` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+370	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->b` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+371	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->b` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+372	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	20	1	returns without the permission to read `q->b` it borrowed	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+373	assert.failed	postcondition	build/tm11s4/matrix_value_copy_ptr.c	20	1	the postcondition of `copy_ptr` may not hold	build/tm11s4/matrix_value_copy_ptr.c:17:this is the postcondition
+379	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr`
+380	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr`
+381	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+382	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+383	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+384	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+385	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+386	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+387	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+388	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+389	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+390	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+391	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+392	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+393	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+394	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+395	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+396	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+397	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+398	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+399	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+400	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+401	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+402	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+403	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+404	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+405	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+406	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+407	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+408	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+409	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+410	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+411	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+412	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	23	5	internal check: well-formedness of the contract of `self_ptr`
+413	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+413	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+414	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+414	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+415	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+415	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+416	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+416	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+417	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+417	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+418	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+418	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+419	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+419	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+420	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+420	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+421	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+421	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+422	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+422	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+423	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+423	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+424	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+424	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+425	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+425	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+426	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+426	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+427	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+427	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+428	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+428	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+429	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+429	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+430	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+430	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+431	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+431	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+432	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+432	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+433	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+433	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+434	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+434	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+435	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+435	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+436	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+436	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+437	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+437	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+438	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+438	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+439	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+439	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+440	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+440	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+441	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+441	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+442	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+442	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+443	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+443	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+444	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+444	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+445	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+445	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+446	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+446	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+447	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+447	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+448	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+448	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+449	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+449	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+450	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+450	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+451	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+451	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+452	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: well-formedness of the contract of `self_ptr`
+452	postcondition.violated	internal	build/tm11s4/matrix_value_copy_ptr.c	24	5	internal check: Silicon's own check of the postcondition of `self_ptr`
+474	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+475	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->a` without owning it: the object it points to may have ended
+476	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	26	6	`p->a` may be read here before it is given a value
+478	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+479	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->c` without owning it: the object it points to may have ended
+480	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	26	6	`p->c` may be read here before it is given a value
+482	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+483	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[0][0]`, whose first index may be outside `p->m`
+484	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[0][0]`, whose second index may be outside `p->m[0]`
+485	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[0][0]` without owning it: a callee may have kept its object
+486	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	26	6	`p->m[0][0]` may be read here before it is given a value
+488	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+489	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[0][1]`, whose first index may be outside `p->m`
+490	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[0][1]`, whose second index may be outside `p->m[0]`
+491	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[0][1]` without owning it: a callee may have kept its object
+492	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	26	6	`p->m[0][1]` may be read here before it is given a value
+494	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+495	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[1][0]`, whose first index may be outside `p->m`
+496	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[1][0]`, whose second index may be outside `p->m[1]`
+497	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[1][0]` without owning it: a callee may have kept its object
+498	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	26	6	`p->m[1][0]` may be read here before it is given a value
+500	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+501	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[1][1]`, whose first index may be outside `p->m`
+502	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[1][1]`, whose second index may be outside `p->m[1]`
+503	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	reads `p->m[1][1]` without owning it: a callee may have kept its object
+504	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	26	6	`p->m[1][1]` may be read here before it is given a value
+506	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+508	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->a` without owning it: the object it points to may have ended
+511	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+513	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->c` without owning it: the object it points to may have ended
+516	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+517	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[0][0]`, whose first index may be outside `p->m`
+518	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[0][0]`, whose second index may be outside `p->m[0]`
+520	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[0][0]` without owning it: a callee may have kept its object
+523	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+524	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[0][1]`, whose first index may be outside `p->m`
+525	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[0][1]`, whose second index may be outside `p->m[0]`
+527	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[0][1]` without owning it: a callee may have kept its object
+530	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+531	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[1][0]`, whose first index may be outside `p->m`
+532	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[1][0]`, whose second index may be outside `p->m[1]`
+534	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[1][0]` without owning it: a callee may have kept its object
+537	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+538	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[1][1]`, whose first index may be outside `p->m`
+539	assert.failed	out-of-bounds	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[1][1]`, whose second index may be outside `p->m[1]`
+541	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->m[1][1]` without owning it: a callee may have kept its object
+544	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+545	assert.failed	null-dereference	build/tm11s4/matrix_value_copy_ptr.c	26	6	dereferences `p`, which may be null
+549	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	copies `p->b`, whose elements the function may not hold (a callee may have kept them)
+550	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	copies `p->b`, whose elements the function may not hold (a callee may have kept them)
+551	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	copies `p->b`, whose elements the function may not hold (a callee may have kept them)
+552	assert.failed	uninitialized	build/tm11s4/matrix_value_copy_ptr.c	26	6	copies `*p`, whose member `p->b` may hold an element without a value
+553	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->b` without owning every element of it: the object it belongs to may have ended
+554	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	26	6	writes `p->b` without owning every element of it: the object it belongs to may have ended
+556	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	26	6	internal check: the two arrays of a copy are distinct blocks
+557	call.precondition	internal	build/tm11s4/matrix_value_copy_ptr.c	26	6	internal check: Silicon's own check of the copy of an array member
+559	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+560	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	27	1	internal check: WF of a pointer parameter
+561	assert.failed	internal	build/tm11s4/matrix_value_copy_ptr.c	27	1	internal check: a pointer parameter points into its block
+562	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+563	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+564	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+565	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+566	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+567	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+568	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+569	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+570	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `*p`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+572	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+573	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+574	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+575	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->m`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+577	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+578	assert.failed[insufficient.permission]	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+579	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+580	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	27	1	returns without owning `p->b`, which its contract promises	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+581	assert.failed	postcondition	build/tm11s4/matrix_value_copy_ptr.c	27	1	the postcondition of `self_ptr` may not hold	build/tm11s4/matrix_value_copy_ptr.c:24:this is the postcondition
+587	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+588	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+589	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+590	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+591	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+592	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+593	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+594	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+595	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+596	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+597	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+598	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+599	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+600	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+601	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+602	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+603	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+604	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+605	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+606	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+607	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+608	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+609	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+610	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+611	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+612	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+613	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+614	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+615	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+616	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+617	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+618	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+619	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+620	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+621	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+622	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+623	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+624	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+625	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+626	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+627	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+628	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+629	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+630	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+631	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+632	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+633	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+634	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+635	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+636	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+637	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+638	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+639	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+640	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+641	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+642	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+643	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+644	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+645	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+646	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+647	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+648	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+649	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+650	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+651	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+652	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+653	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+654	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+655	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+656	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+657	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+658	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+659	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+660	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+661	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+662	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+663	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+664	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+665	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+666	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+667	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+668	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+669	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+670	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+671	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+672	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+673	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+674	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+675	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+676	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+677	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+678	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+679	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+680	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+681	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+682	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+683	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+684	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+685	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+686	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+687	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+688	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+689	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+690	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+691	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+692	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+693	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+694	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+695	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+696	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+697	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+698	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+699	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+700	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+701	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+702	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+703	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+704	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+705	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+706	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+707	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+708	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+709	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+710	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+711	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+712	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+713	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+714	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+715	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+716	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+717	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+718	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+719	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+720	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+721	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+722	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+723	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+724	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	15	6	internal check: well-formedness of the contract of `copy_ptr (well-formedness)`
+727	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	88	the contract of `copy_ptr` reads `p->m[0][0]` without owning it
+728	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	102	the contract of `copy_ptr` reads `q->m[0][0]` without owning it
+729	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	116	the contract of `copy_ptr` reads `p->m[0][1]` without owning it
+730	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	130	the contract of `copy_ptr` reads `q->m[0][1]` without owning it
+731	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	144	the contract of `copy_ptr` reads `p->m[1][0]` without owning it
+732	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	158	the contract of `copy_ptr` reads `q->m[1][0]` without owning it
+733	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	172	the contract of `copy_ptr` reads `p->m[1][1]` without owning it
+734	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	186	the contract of `copy_ptr` reads `q->m[1][1]` without owning it
+735	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	197	the contract of `copy_ptr` reads `p->b[0]` without owning it
+736	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	208	the contract of `copy_ptr` reads `q->b[0]` without owning it
+737	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	219	the contract of `copy_ptr` reads `p->b[1]` without owning it
+738	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	17	230	the contract of `copy_ptr` reads `q->b[1]` without owning it
+743	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+744	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+745	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+746	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+747	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+748	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+749	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+750	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+751	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+752	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+753	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+754	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+755	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+756	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+757	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+758	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+759	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+760	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+761	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+762	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+763	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+764	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+765	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+766	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+767	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+768	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+769	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+770	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+771	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+772	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+773	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+774	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+775	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+776	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+777	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+778	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+779	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+780	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+781	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+782	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+783	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+784	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+785	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+786	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+787	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+788	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+789	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+790	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+791	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+792	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+793	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+794	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+795	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+796	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+797	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+798	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+799	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+800	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+801	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+802	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+803	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+804	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+805	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+806	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+807	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+808	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+809	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+810	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+811	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+812	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+813	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+814	not.wellformed	internal	build/tm11s4/matrix_value_copy_ptr.c	22	6	internal check: well-formedness of the contract of `self_ptr (well-formedness)`
+817	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	80	the contract of `self_ptr` reads `p->m[0][0]` without owning it
+818	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	5	the contract of `self_ptr` reads `p->m[0][0]` without owning it
+819	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	122	the contract of `self_ptr` reads `p->m[0][1]` without owning it
+820	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	5	the contract of `self_ptr` reads `p->m[0][1]` without owning it
+821	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	164	the contract of `self_ptr` reads `p->m[1][0]` without owning it
+822	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	5	the contract of `self_ptr` reads `p->m[1][0]` without owning it
+823	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	206	the contract of `self_ptr` reads `p->m[1][1]` without owning it
+824	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	5	the contract of `self_ptr` reads `p->m[1][1]` without owning it
+825	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	245	the contract of `self_ptr` reads `p->b[0]` without owning it
+826	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	5	the contract of `self_ptr` reads `p->b[0]` without owning it
+827	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	281	the contract of `self_ptr` reads `p->b[1]` without owning it
+828	assert.failed	permission	build/tm11s4/matrix_value_copy_ptr.c	24	5	the contract of `self_ptr` reads `p->b[1]` without owning it

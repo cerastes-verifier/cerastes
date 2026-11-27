@@ -179,9 +179,51 @@ std::vector<StructLeaf> struct_object_leaves(const StructType& s, const std::str
     return leaves_in_view(s, root_text, arrow, LeafView::Object);
 }
 
+// Decision 0064 item 12 (Part E, slice 4): the value view of a type of depth 2 or more IS value_cells, cell for cell (one enumeration, defined once: the encoder reads the same list).  Each leaf
+// carries the cell's `steps`; `path` is its member steps, `elem` its first index step; the flags are those of the last member on the way (as the leaves of depth 1 have them).
 std::vector<StructLeaf> struct_value_leaves(const StructType& s, const std::string& root_text, bool arrow)
 {
-    return leaves_in_view(s, root_text, arrow, LeafView::Value);
+    const Type self {Type::structure(&s)};
+    if (type_index_depth(self) < 2U)
+    {
+        return leaves_in_view(s, root_text, arrow, LeafView::Value);
+    }
+    std::vector<StructLeaf> out;
+    for (const ValueCell& c : value_cells(self, root_text, arrow))
+    {
+        StructLeaf l;
+        l.type = c.type;
+        l.text = c.text;
+        l.steps = c.steps;
+        Type cur {self};
+        const StructMember* last {nullptr};
+        for (const ValueStep& st : c.steps)
+        {
+            if (!st.index)
+            {
+                l.path.push_back(static_cast<int>(st.value));
+                last = cur.struct_type != nullptr && st.value < cur.struct_type->members.size()
+                           ? &cur.struct_type->members[static_cast<size_t>(st.value)]
+                           : nullptr;
+                cur = last != nullptr ? last->type : Type::void_type();
+            }
+            else
+            {
+                if (l.elem < 0)
+                {
+                    l.elem = static_cast<int>(st.value);
+                }
+                cur = cur.element != nullptr ? *cur.element : Type::void_type();
+            }
+        }
+        if (last != nullptr)
+        {
+            l.owning = last->owning;
+            l.ref_to_uninit = last->ref_to_uninit;
+        }
+        out.push_back(std::move(l));
+    }
+    return out;
 }
 
 unsigned long long LeafPath::cells() const
@@ -305,7 +347,7 @@ void collect_cells(const Type& t, std::vector<ValueStep>& steps, const std::stri
     {
         for (unsigned long long i {0U}; i < t.count && complete; ++i)
         {
-            steps.push_back(ValueStep {true, i});
+            steps.push_back(ValueStep {true, i, t.element->is_array()});
             collect_cells(*t.element, steps, text + "[" + std::to_string(i) + "]", false, indexes + 1U,
                           aggregate || indexes > 0U, out, complete, max_cells, depth + 1);
             steps.pop_back();

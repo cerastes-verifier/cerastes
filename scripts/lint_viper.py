@@ -782,13 +782,16 @@ def parse_struct_member(text: str, root: str = "r") -> tuple[int, ...] | None:
     return None if inner is None else inner + (int(m.group("k")),)
 
 
-def struct_wf_lens_problem(parts: list[str], root: str, counts: dict[tuple[int, ...], int] | None = None) -> str | None:
+def struct_wf_lens_problem(parts: list[str], root: str, counts: dict[tuple[int, ...], int] | None = None,
+                           scalar_counts: dict[tuple[int, ...], int] | None = None) -> str | None:
     """The guarded conjunct of `WF_S(v)` in a `program_start` row (decision 0043 item 8): under `v != null && offset_of(v) < len(block_of(v))`
     only `len(member(<chain>, k)) == 1` with a literal k, each member block once, a member of a member only inside a nested struct member,
     and the slot facts `A != B` exactly for the pairs of the root or a nested slot A and a nested slot B below it, chains rooted at the value.
     An array member of the structure states its count instead (decision 0063 items 3 and 15): `len(member(<chain>, k)) == N` with the `N` of
     `counts` (the array members of the allocation `alloc_struct_<n>_<tag>` of that structure, by member key); a count other than 1 for a
-    member the allocation does not state as an array is refused.  Returns the reason, or None."""
+    member the allocation does not state as an array is refused.  `scalar_counts` (decision 0064 items 3 and 12, slice 4: the guarded facts of a pointer to a structure that has a matrix member or a member
+    array of structures AND a direct array member of scalars, `struct U { int a; int m[2][2]; int b[2]; int c; }`): for a member `counts` does not tie, the count the unit's own allocation states for that
+    member's array of scalars (`_SCALAR_ARRAY_COUNTS`) is admitted besides 1, never another count.  Returns the reason, or None."""
     members: list[tuple[int, ...]] = []
     facts: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
     for part in parts:
@@ -801,7 +804,8 @@ def struct_wf_lens_problem(parts: list[str], root: str, counts: dict[tuple[int, 
             continue
         m = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", part)
         key = parse_struct_member(m.group("m"), root) if m else None
-        if key is None or int(m.group("n")) != (counts or {}).get(key, 1):
+        if key is None or (int(m.group("n")) != (counts or {}).get(key, 1)
+                           and not (key not in (counts or {}) and (scalar_counts or {}).get(key) == int(m.group("n")))):
             if key is not None and key in (counts or {}):
                 return (f"`{part}`: the allocation of the structure states `{(counts or {})[key]}` elements for the array member {key} "
                         "(decision 0063 item 15: the count of the allocation)")
@@ -7156,7 +7160,10 @@ def struct_lens_conjuncts_problem(lens: list[str], v: str) -> str | None:
         if key in counts:
             return f"the quantifier of the member {key} twice"
         counts[key] = int(qb["hi"])
-    why = struct_wf_lens_problem(others, v, counts)
+    # slice 4 (decision 0064 items 3 and 12): the unit's table of arrays of scalars is read here ONLY by a structure that also has a quantified member (a matrix member or a member array of structures: `counts`
+    # is not empty), the shape of `struct U { int a; int m[2][2]; int b[2]; int c; }`; a structure with no quantifier stays closed for a count other than 1 (question 374's site, pinned by
+    # `test_only_the_range_atoms_sites_read_the_unit_table`)
+    why = struct_wf_lens_problem(others, v, counts, dict(_SCALAR_ARRAY_COUNTS) if counts else None)
     if why is not None:
         return why
     stated = {parse_struct_member(m.group(1), v) for x in others if (m := re.fullmatch(r"len\((.*)\)==[0-9]+", x))}

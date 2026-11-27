@@ -217,6 +217,20 @@ struct StructType
     std::vector<StructMember> members; // in declaration order; add with Program::add_member
 };
 
+// One step from an object to a cell of its value (a member or an element); see ValueCell and decision 0064 item 12
+struct ValueStep
+{
+    bool index {false}; // false: member `value` of a structure; true: element `value` of an array
+    unsigned long long value {0U};
+    // an index step only: the array's element is itself an array (a row of a matrix, a matrix of a cube): the element's slot then holds the row as a block of its own (member 0 of the slot), so a
+    // place walks `loc(member(<slot>, 0), j)` for the next step (decision 0064 items 3 and 13, slice 4)
+    bool elem_array {false};
+    bool operator==(const ValueStep& o) const
+    {
+        return index == o.index && value == o.value && elem_array == o.elem_array;
+    }
+};
+
 // One leaf of a struct type: a scalar or pointer member reached through nested struct members (decision 0043 item 3).  `path` is the
 // member indices from the root (the last one the leaf itself), `type` the leaf's Bool, Int or Ptr type, `text` its source spelling.
 // Decision 0063 item 4 (M4.5e1e1 part A): a struct may have an array member, and a leaf then has one of three shapes, by the VIEW that built it: struct_leaves
@@ -244,6 +258,11 @@ struct StructLeaf
     // element's leaf (`{v, x}`, a nested structure's members after it), `elem` the element's index, `index_after` the number of members of `path` before the index step (the array member's
     // position in `path` plus one; -1 for every other leaf, whose index step, when it has one, is last); `text` is `t.v[i].x`
     int index_after {-1};
+    // struct_value_leaves only, decision 0064 item 12 (Part E, slice 4): the leaf of a structure VALUE whose type has a leaf path of two or more index steps (a matrix member, an element
+    // structure's array leaf in a member array of structures: type_index_depth >= 2).  Such a value's leaves are vir::value_cells, cell for cell: `steps` is the cell's way from the object
+    // (members and elements, every step), the only complete description of where the cell is; `path` is its member steps in order, `elem` the value of its FIRST index step (-1 for a
+    // cell with none), `index_after` -1.  Every consumer that finds a cell of an object by a leaf reads `steps` when it is not empty (lowering's leaf_place); empty for every other leaf.
+    std::vector<ValueStep> steps;
     // Decision 0064 item 4 (M4.5e1e2 part A): the member is an array whose ELEMENT is a structure or an array.  None of the three views above has a leaf for it: struct_leaves and
     // struct_object_leaves return it as the one leaf of the array's type (the object view with `array` true and `element` the aggregate), struct_value_leaves as one leaf of the array's
     // type (no expansion).  Every consumer of the three views reports an internal error on such a leaf (lowering's guarded `object_leaves`, `value_leaves` and `leaves_of`) until its
@@ -303,16 +322,7 @@ std::vector<LeafPath> object_leaf_paths(const Type& t, const std::string& root_t
 // other: depth first, the members of a structure in declaration order, every array's elements in index order (a matrix row major).  `struct S { struct E v[2]; }` with `struct E { int a[2]; int n;
 // }` lists v[0].a[0], v[0].a[1], v[0].n, v[1].a[0], v[1].a[1], v[1].n.  The encoder reads a value, an aggregate and a copy through this list and the lowering's value view (param_vars,
 // result_vars, elem_value, leaf_span) reads the same list, so there is one definition of "the k-th cell of a value".  For a type of leaf-path depth 0 or 1, the types decision 0063 and Part C2
-// accepted by value, the list is struct_value_leaves' list, cell for cell (a self-check pins it); struct_value_leaves itself flags a type of depth 2 or more as one aggregate leaf, never expanded.
-struct ValueStep
-{
-    bool index {false}; // false: member `value` of a structure; true: element `value` of an array
-    unsigned long long value {0U};
-    bool operator==(const ValueStep& o) const
-    {
-        return index == o.index && value == o.value;
-    }
-};
+// accepted by value, the list is struct_value_leaves' list, cell for cell (a self-check pins it); for a type of depth 2 or more (Part E, slice 4) struct_value_leaves IS this list, built from it: one leaf per cell, `steps` the cell's.
 struct ValueCell
 {
     std::vector<ValueStep> steps; // from the object to the cell

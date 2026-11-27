@@ -97,6 +97,16 @@ std::string path_suffix(const std::vector<int>& path)
 // The name suffix of a leaf of the VALUE view (decision 0063 item 13): its path, and `_e<i>` for element `i` of an array member: `p_s__0_m1_e2`, `res_m1_e0`.
 std::string value_suffix(const StructLeaf& l)
 {
+    if (!l.steps.empty())
+    {
+        // decision 0064 item 12 (Part E, slice 4): a leaf of a value of depth 2 or more is named by every step of its cell, in order: `_m1_e0_e2` (member 1, element 0, element 2)
+        std::string r;
+        for (const ValueStep& st : l.steps)
+        {
+            r += (st.index ? "_e" : "_m") + std::to_string(st.value);
+        }
+        return r;
+    }
     return path_suffix(l.path) + (l.elem >= 0 ? "_e" + std::to_string(l.elem) : std::string());
 }
 // The number of leaves of a struct (1 for any other type): the width of a value's tuple.  An array member contributes one leaf per element (the value view, decision 0063 item 13).
@@ -3316,8 +3326,31 @@ private:
     // (the block term of the member's first slot: no local, no bound row: `i` is inside the member by construction and `len(member(X, k)) == N` is a fact of every structure object).
     // Decision 0064 item 12 (Part C2): for a leaf of an element of a member that is an array of structures (`index_after` >= 0) the slot `loc(member(X, k), i)` of the element, then the
     // leaf's member path inside it (`loc(member(loc(member(X, k), i), j), 0)`)
-    E leaf_place(const E& base, const std::vector<int>& path, int elem, int index_after = -1)
+    E leaf_place(const E& base, const std::vector<int>& path, int elem, int index_after = -1,
+                 const std::vector<ValueStep>& steps = {})
     {
+        if (!steps.empty())
+        {
+            // decision 0064 item 12 (Part E, slice 4): a leaf of a value of depth 2 or more is found by every step of its cell.  A member step is `loc(member(<slot>, k), 0)`; an index step the
+            // element's slot `loc(<block>, i)`, and when the element is itself an array (a row) its block is member 0 of that slot (row_slot's `loc(member(loc(B, k), 0), j)`)
+            E r {base};
+            for (const ValueStep& st : steps)
+            {
+                if (!st.index)
+                {
+                    r = member_ref(r, static_cast<int>(st.value));
+                }
+                else
+                {
+                    r = elem_slot(r, low::int_lit(std::to_string(st.value)));
+                    if (st.elem_array)
+                    {
+                        r = member_ref(r, 0);
+                    }
+                }
+            }
+            return r;
+        }
         if (index_after >= 0 && elem >= 0 && static_cast<size_t>(index_after) <= path.size())
         {
             const std::vector<int> head(path.begin(), path.begin() + index_after);
@@ -3329,7 +3362,7 @@ private:
     }
     E leaf_place(const E& base, const StructLeaf& l)
     {
-        return leaf_place(base, l.path, l.elem, l.index_after);
+        return leaf_place(base, l.path, l.elem, l.index_after, l.steps);
     }
     // One cell of a struct object: the Ref of a leaf, its type and its spelling.
     struct Cell
@@ -8942,7 +8975,10 @@ private:
                 {
                     // decision 0064 item 7 (Part C2): the first leaf is a member array of structures: its first slot is a structure slot, no cell; the first CELL is the first leaf of its
                     // first element (`loc(member(loc(member(p, k), 0), j), 0)`)
-                    const std::vector<ElemLeaf> el {elem_leaves_ext(ls.front().element)};
+                    // a MATRIX member (the element is a row, not a structure): the row's one leaf (`row_leaf`, path {0}): the first cell is `loc(member(loc(member(p, k), 0), 0), 0)`
+                    const std::vector<ElemLeaf> el {is_row(ls.front().element)
+                                                        ? std::vector<ElemLeaf> {row_leaf(ls.front().element)}
+                                                        : elem_leaves_ext(ls.front().element)};
                     if (!el.empty())
                     {
                         fa = chain_ref(fa, el.front().path);
@@ -11755,6 +11791,16 @@ private:
     int leaf_key(const Expr& a, const StructLeaf& l)
     {
         std::vector<int> more {l.path};
+        if (!l.steps.empty())
+        {
+            // decision 0064 item 12 (Part E, slice 4): every step of the cell is in the key (an index step as -(i + 1), so that no index is a member): two cells of a matrix are two objects
+            more.clear();
+            for (const ValueStep& st : l.steps)
+            {
+                more.push_back(st.index ? -1 - static_cast<int>(st.value) : static_cast<int>(st.value));
+            }
+            return key_of_addr_leaf(a, more);
+        }
         if (l.elem >= 0)
         {
             more.push_back(l.elem);
@@ -14195,7 +14241,7 @@ private:
                 const S& c {a.range ? b : a};
                 for (const Cell& cl : c.cells)
                 {
-                    if (r.synth && cell_suffix(cl.type) != cell_suffix(*r.t))
+                    if (r.synth && cell_suffix(cl.type) != range_suffix(*r.t))
                     {
                         continue;
                     }
@@ -14479,7 +14525,10 @@ private:
                         }
                         for (const Cell& cj : ss[j].cells)
                         {
-                            if (cell_suffix(cj.type) != cell_suffix(*x.t))
+                            // (a part of ROWS or of structures: its slots are row or structure slots, no scalar cell of another site is one, so `range_suffix` (the row's or the structure's
+                            // own name, never a cell field) skips it; the rows' own cells are the leaves' below.  A matrix member read by two `reads` atoms ended here in an
+                            // internal error: "an array has no cell fields of its own")
+                            if (cell_suffix(cj.type) != range_suffix(*x.t))
                             {
                                 continue;
                             }
@@ -27039,6 +27088,8 @@ private:
         int elem {-1}; // the index in the array member at `path` (decision 0063 item 13: the value view), else -1
         int index_after {
             -1}; // decision 0064 item 12: the members of `path` before the index step of an element leaf of an array of structures, else -1
+        std::vector<ValueStep>
+            steps; // decision 0064 item 12 (Part E, slice 4): the cell's steps for a value of depth 2 or more, else empty
     };
     std::vector<LeafVar> param_vars(const Function& f, int k) const
     {
@@ -27049,12 +27100,12 @@ private:
             for (const StructLeaf& l : checked_value_leaves(*t.struct_type))
             {
                 const std::string n {formal_name(f, k) + value_suffix(l)};
-                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem, l.index_after});
+                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem, l.index_after, l.steps});
             }
         }
         else
         {
-            r.push_back(LeafVar {low::var(formal_name(f, k)), t, formal_name(f, k), {}});
+            r.push_back(LeafVar {low::var(formal_name(f, k)), t, formal_name(f, k), {}, -1, -1, {}});
         }
         return r;
     }
@@ -27067,12 +27118,12 @@ private:
             for (const StructLeaf& l : checked_value_leaves(*f.ret.struct_type))
             {
                 const std::string n {std::string(kResult) + value_suffix(l)};
-                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem, l.index_after});
+                r.push_back(LeafVar {low::var(n), l.type, n, l.path, l.elem, l.index_after, l.steps});
             }
         }
         else if (!f.ret.is_void())
         {
-            r.push_back(LeafVar {low::var(kResult), f.ret, kResult, {}});
+            r.push_back(LeafVar {low::var(kResult), f.ret, kResult, {}, -1, -1, {}});
         }
         return r;
     }
@@ -27287,7 +27338,7 @@ private:
                 for (const LeafVar& lv : fv)
                 {
                     const std::string t {new_temp(low::LType::Ref)};
-                    assign(m.body, t, leaf_place(root, lv.path, lv.elem, lv.index_after));
+                    assign(m.body, t, leaf_place(root, lv.path, lv.elem, lv.index_after, lv.steps));
                     emit_assert(m.body, may_write(low::var(t), lv.type, false),
                                 meta("internal", copy.loc,
                                      "internal check: the entry copy of `" + copy.name + "` is writable"));

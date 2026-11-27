@@ -16641,5 +16641,59 @@ class PartECLevelStructTTests(unittest.TestCase):
                 refused(edited, label)
 
 
+class Slice4PointerWfTests(unittest.TestCase):
+    """Decision 0064 items 3, 12 and 17 (Part E, slice 4: structure values and copies of depth 2).  A pointer to a structure that has a matrix member AND a direct array member of scalars
+    (`struct U { int a; int m[2][2]; int b[2]; int c; }`, the copy `*p = *q` and `*p = *p`) states in the guarded conjunct of its well-formedness `len(member(p, 2)) == 2` for the scalar
+    array `b`: `struct_wf_lens_problem` takes that count, besides 1, only from the unit's own allocation (`_SCALAR_ARRAY_COUNTS`), for a member the quantifiers do not tie.  The fixtures
+    `scripts/testdata/part_e/real_dcopy_*.vpr` are REAL output of the VIR self-test (taken from il212's output, build/m4.5e1e2d/tm11/il212-vir; BYTE-IDENTICAL, `cmp`, to the same-named files of build/m4.5e1e2d/e4-vir, the PROVED il213's output, checked 2026-11-27) and `real_c_copy_ptr_c23.vpr` is the C-LEVEL text of tests/memory/matrix_value_copy_ptr.c (`cerastes verify --keep-vpr` on lane edg, edg48, c23: its `copy_ptr`, `self_ptr` and their `__wf` methods).  The refusing twins edit the one well-formedness row: another count, another member, a count the allocation does not state."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    NAMES = ("real_dcopy_through_the_same_pointer", "real_dcopy_through_pointers", "real_c_copy_ptr_c23")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def wf_line(self, lines, root):
+        return next(i for i, l in enumerate(lines, start=1) if l.startswith("  requires") and f"len(member({root}, 2)) == 2" in l and "forall k: Int" in l)
+
+    def test_the_scalar_array_count_is_the_allocations_own(self):
+        for name, root in (("real_dcopy_through_the_same_pointer", "p_p__0"), ("real_dcopy_through_pointers", "p_p__0"), ("real_dcopy_through_pointers", "p_q__1"),
+                           ("real_c_copy_ptr_c23", "p_p__0"), ("real_c_copy_ptr_c23", "p_q__1")):
+            text, mp = self.pair(name)
+            lines = text.split("\n")
+            n = self.wf_line(lines, root)
+            for label, old, new in (("another count than the allocation's", f"len(member({root}, 2)) == 2", f"len(member({root}, 2)) == 3"),
+                                    ("the count at a member the allocation has no array at", f"len(member({root}, 3)) == 1", f"len(member({root}, 3)) == 2"),
+                                    ("the count at the first member", f"len(member({root}, 0)) == 1", f"len(member({root}, 0)) == 2"),
+                                    ("a count of 0", f"len(member({root}, 2)) == 2", f"len(member({root}, 2)) == 0")):
+                with self.subTest(name=name, root=root, label=label):
+                    self.assertIn(old, lines[n - 1])
+                    edited = list(lines)
+                    edited[n - 1] = edited[n - 1].replace(old, new, 1)
+                    self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in self.problems("\n".join(edited), mp)), label)
+
+    def test_a_count_the_unit_does_not_state_is_refused(self):
+        # the allocation's array of scalars is `len(member(r, 2)) == 2` over `forall j :: ... acc(loc(member(r, 2), j).v_int)`: with its clauses changed to 3 cells the same unit states 3 and the row's 2 is refused
+        name = "real_dcopy_through_the_same_pointer"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith("method alloc_struct_0_U"))
+        edited = list(lines)
+        for i in range(a, a + 16):
+            if "member(r, 2)" in edited[i]:
+                edited[i] = edited[i].replace("== 2", "== 3").replace("(j < 2)", "(j < 3)")
+        n = self.wf_line(lines, "p_p__0")
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in self.problems("\n".join(edited), mp)))
+
+
 if __name__ == "__main__":
     unittest.main()

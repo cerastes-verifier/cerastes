@@ -1233,10 +1233,6 @@ private:
             {
                 err(f.loc, "the return type of '" + f.c_name + "' is a struct that is not in the program");
             }
-            else if (deep_value_type(f.ret))
-            {
-                err(f.loc, "the return type of '" + f.c_name + "' is " + f.ret.str() + ", " + kDeepValue);
-            }
             else if (value_array_elems(*f.ret.struct_type) > kMaxByValueArrayElements)
             {
                 err(f.loc,
@@ -1276,11 +1272,6 @@ private:
                 {
                     err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
                                              "' is a struct that is not in the program");
-                }
-                else if (deep_value_type(f.params[k].type))
-                {
-                    err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name + "' is " +
-                                             f.params[k].type.str() + ", " + kDeepValue);
                 }
                 else if (value_array_elems(*f.params[k].type.struct_type) > kMaxByValueArrayElements)
                 {
@@ -4811,11 +4802,6 @@ private:
             err(e.loc, "an expression of the struct type " + e.type.str() + ", which is not in the program");
             return;
         }
-        if (deep_value_type(e.type))
-        {
-            err(e.loc, "an expression of the struct type " + e.type.str() + ", " + kDeepValue);
-            return;
-        }
         if (value_array_elems(*e.type.struct_type) > kMaxByValueArrayElements)
         {
             err(e.loc, "a struct value of " + e.type.str() + ", which holds more than " +
@@ -4896,6 +4882,13 @@ private:
                            std::to_string(st.members.size()) + " members");
             return;
         }
+        if (st.members[static_cast<size_t>(e.index)].type.is_array())
+        {
+            err(e.loc,
+                "the array member '" + st.members[static_cast<size_t>(e.index)].name + "' of " + st.c_name +
+                    " read as a value: an array is never a value, its elements are read one by one (decision 0063 item 13)");
+            return;
+        }
         if (e.type != st.members[static_cast<size_t>(e.index)].type)
         {
             err(e.loc, "the member '" + st.members[static_cast<size_t>(e.index)].name + "' of " + st.c_name +
@@ -4938,6 +4931,15 @@ private:
             return;
         }
         const Type& el {*st.members[static_cast<size_t>(e.index)].type.element};
+        if (el.is_array())
+        {
+            // question 364 (decision 0064 item 12): a row of a matrix member of a structure VALUE is not a value (array values are M4.5f3); `v.m[i][j]` of a by-value parameter or a result is refused
+            err(e.loc,
+                "an element of the matrix member '" + st.members[static_cast<size_t>(e.index)].name + "' of " +
+                    st.c_name +
+                    " is a row, and an array is never a value: a cell of a matrix member of a structure value is not read (decision 0064 item 12, question 364: array values are M4.5f3)");
+            return;
+        }
         if (e.type != el)
         {
             err(e.loc, "an element of the array member '" + st.members[static_cast<size_t>(e.index)].name + "' of " +
@@ -4955,11 +4957,6 @@ private:
         if (!e.type.is_struct() || e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0U)
         {
             err(e.loc, "an aggregate of the type " + e.type.str() + ", not a struct of the program");
-            return;
-        }
-        if (deep_value_type(e.type))
-        {
-            err(e.loc, "an aggregate of " + e.type.str() + ", " + kDeepValue);
             return;
         }
         if (value_array_elems(*e.type.struct_type) > kMaxByValueArrayElements)
@@ -5117,15 +5114,9 @@ private:
                a->type.pointee->element != nullptr &&
                (a->type.pointee->element->is_struct() || a->type.pointee->element->is_array());
     }
-    // Decision 0064 item 12 (Part E, question 353): a structure VALUE (a by-value parameter or result, an expression of structure type: a call, an aggregate, a load, a member, a store's
-    // value; a whole-structure copy is expanded by the encoder into stores) whose type has a leaf path of two or more index steps (a matrix member, an element structure with an array member
-    // in a member array of structures) is refused until the lowering's value view reads the one enumeration of cells (vir::value_cells); the value view flags such a type as one aggregate leaf
-    static bool deep_value_type(const Type& t)
-    {
-        return t.is_struct() && t.struct_type != nullptr && type_index_depth(t) >= 2U;
-    }
-    static constexpr const char* kDeepValue =
-        "decision 0064 item 12, question 353: a structure value whose type has a leaf path of two or more index steps is not accepted yet";
+    // Decision 0064 item 12 (Part E, slice 4, question 353): a structure VALUE of depth 2 or more (a matrix member; an element structure with an array member in a member array of structures) is
+    // the tuple of vir::value_cells: struct_value_leaves is that list, the aggregate's arguments, a parameter's and a result's formals and a call's targets are read over it, and the limit of 7
+    // counts the cells reached through an index step (value_index_cells).  What stays rejected: a value past the limit (below) and a read of a matrix member's cell of a value (elem_value).
     static constexpr const char* kItem15 =
         "decision 0064 item 15, question 348: a structure whose array member holds structures or arrays is not accepted here";
     // Whether `t` is a pointer to a structure that has an array member anywhere in its nest (decision 0064 item 4)

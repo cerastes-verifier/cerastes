@@ -7,10 +7,27 @@
   arrays of arrays and of structures; an element structure with an array member of scalars (`v[i].a[j]`) as
   a local, under a parameter's range, as a global and a `static` local and as a member; the element copy;
   with items 2, 5, 6, 7, 9, 10, 11 and 12 as amended for them (questions 358 to 389, `internal/handoff.md`
-  §8). NOT built by that commit, and rejected by the encoder with pins: three dimensions (item 2: the next
-  session's first step), whole structure values that hold a matrix or a member array of structures with an
-  array member (item 12: not built by that commit), a matrix of structures (question 363), and the listed rejections of
-  questions 377 and 381 to 384. Four audit rounds read Part E (E1 on the local and parameter forms, E2a on
+  §8); **and item 12's structure values of depth 2 by its Commit 6: a structure with a matrix member, or
+  with a member array of structures that have an array member, passed, returned and copied as a whole
+  value cell by cell under the limit of 7, the cells enumerated once (`vir::value_cells`) for the encoder
+  and the lowering.** NOT built, and rejected by the encoder with pins: three dimensions (item 2: the next
+  session's first step, before Part F), a matrix of structures (question 363), a contract read of a cell
+  of such a value and a cell of a returned one (question 364), and the listed rejections of questions 377
+  and 381 to 384. **Commit 5's tree has two defects that Commit 6 fixes** (each fail closed, an internal error,
+  exit 3, found after that commit by the cases and probes written for item 12): a structure whose FIRST
+  member is a matrix, under `owns(*p)` beside `reads(*q)` or `owns(*q)` of two pointers in one function
+  (`overlap_pairs` asked a row for the leaves of a structure element); and a CALL of a function whose
+  contract has two `reads` atoms of a structure with a matrix member, wherever the matrix stands
+  (`call_atoms` asked a row for a cell's field). The earlier audit rounds' two-pointer probes used an owned
+  and a read pointer to a structure whose matrix is not its first member, and one `reads` atom at a call.
+  **A third defect of that family is known and NOT fixed by Commit 6** (fail closed, exit 3; found by the
+  short audit read of Commit 6's tree, in code older than that commit): a structure with a matrix member
+  in a function that needs a pointer split, that is, beside a pointer to a scalar whose target is not
+  known (`int q04(const struct U2 *p, int *q)` with `reads(*p)`; a structure local beside `int *r =
+  pick(&x);`; a pointer loaded from memory; and a by-value call, stored result or whole copy of such a
+  structure that also has a pointer member or pointer cells): `split_candidates` asks a row for the
+  leaves of a structure element. A structure whose member is an array of structures with an array member
+  is not affected. Four audit rounds read Part E (E1 on the local and parameter forms, E2a on
   loops, ties, global matrices and the first member form, E3a on members under atoms, global structures,
   contract reads, `v[i].a[j]` and the ties of question 376, E3b on the member form of `v[i].a[j]`, the
   copy, the Sequencer's key and the four rejections taken on E3a's findings): no wrong program verified in
@@ -908,6 +925,15 @@ doc example holds.
     seconds). The lowering's own case of the three-element copy with a failing claim ends in 16 s. M4.8's
     cost items. **In C++** `struct T t = (struct T){…};` is the initializer's braced list and is accepted
     for a local of any structure type that a braced initializer is; C reads it as a structure value.
+    **Structure values of depth 2, costs and notes** (the short audit read of Commit 6's tree; each fail
+    closed): no verdict in 300 s in C for a whole copy of a 9-cell structure with a false claim after it
+    (C++ fails as it must in about 170 s), for `*p = *q` of the four-member structure under two `reads`
+    atoms (the smaller structure is `permission` in seconds), and for `*p = *q; *q = a;` under two `owns`
+    atoms, a true program; the failing twin of the two-pointer copy takes 380 s a mode on a quiet box
+    (`tests/long`). In C++ only, `struct U w = *p;` with a pointer to `const` is rejected (C accepts it).
+    The lowering takes the enumeration's list without checking its `complete` flag (past 4,096 cells a
+    cut list would end in an internal error or `uninitialized`, never in a shifted cell; the encoder
+    checks the flag).
 13. **Arrays of arrays** (amends 0060 item 15, 0063 item 14). A row is an array object in its own block; a
     matrix's leaf path has two index steps, and so has an array member of an element structure (`v[i].a[j]`).
     - **Array-of-rows parameters.** `T a[][M]`, `T a[N][M]` and `T (*a)[M]` declare a parameter of type pointer
@@ -1377,7 +1403,15 @@ doc example holds.
       well-formedness row of a pointer is tied leaf by leaf, by number, across the unit's allocations
       (a row may state an element no structure of the unit has, where two allocations supply the two
       counts); `leaf_value` (369); the older rules of 373, 379 and 380; no completeness rule for a
-      structure local's scope exit; an `ensures` amount is not tied to its `requires`'.
+      structure local's scope exit; an `ensures` amount is not tied to its `requires`'. **Rule A of
+      Commit 6** (question 391; the short audit read: "stands with a change", the change being the
+      table keyed by type): the guarded well-formedness row of a pointer to a structure that has a
+      matrix (or a member array of structures) AND a direct scalar array member may state that array's
+      length, tied by number to the unit's allocations; so a length that is not the type's own passes
+      where another DECLARED structure has a scalar array at that member index, an understated length
+      of 1 passes, and a second declared structure with another count at that index makes the right row
+      refused. Without the rule the previous commit's lint refuses the Viper of a plain `owns(*p)` on
+      such a structure (by the auditor's inference from that commit's lint on this commit's text).
     - **The receiver grammar** gains index steps: a quantified row's receiver is a chain of `loc(<block>, <bound
       variable or 0>)` and `member(<ref>, <literal>)` steps from `block_of(<bound local>)` in code and from a
       block term of 0063 item 15's grammar where a line has no local, with one bound variable per index step,

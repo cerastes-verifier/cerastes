@@ -10475,8 +10475,9 @@ private:
     // row parameter or a range.  kOpenValueDepth2: a structure VALUE whose type has a leaf path of two or more index steps (a by-value parameter or result, a
     // literal, an argument, `return u;`, a whole-structure copy).  While one is false the encoder rejects its shapes at their C line, whatever check.cpp would do
     // with them; true gives the encoder the behaviour it had before the constant (the shapes reach check.cpp).
+    // Commit 6 (the fourth session of M4.5e1e2) opens kOpenValueDepth2; kOpenDepth3 stays closed: depth 3 is the next session's.
     static constexpr bool kOpenDepth3 {false};
-    static constexpr bool kOpenValueDepth2 {false};
+    static constexpr bool kOpenValueDepth2 {true};
     // The depth the encoder opens: three with kOpenDepth3, two before it.
     static constexpr int kOpenIndexDepth {kOpenDepth3 ? 3 : 2};
     // The words of a depth rejection: depth 3 is the next step of M4.5e1e2 while slice 4 is closed, anything deeper is M8's.

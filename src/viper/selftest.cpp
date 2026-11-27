@@ -1908,6 +1908,9 @@ int main(int argc, char** argv)
     define_part_e_member_struct_array_leaf_copy_cases();
     define_part_e_struct_array_leaf_sequencer_cases();
     define_part_e_audit_e3a_cases();
+    define_part_e_deep_value_cases();
+    define_part_e_deep_copy_cases();
+    define_part_e_reads_reads_call_cases();
     int bad {0};
     for (const Case& c : lowering_cases())
     {
