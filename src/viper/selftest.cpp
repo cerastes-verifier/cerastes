@@ -1911,6 +1911,7 @@ int main(int argc, char** argv)
     define_part_e_deep_value_cases();
     define_part_e_deep_copy_cases();
     define_part_e_reads_reads_call_cases();
+    define_part_e_split_matrix_cases();
     int bad {0};
     for (const Case& c : lowering_cases())
     {

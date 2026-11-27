@@ -20,18 +20,26 @@
   contract has two `reads` atoms of a structure with a matrix member, wherever the matrix stands
   (`call_atoms` asked a row for a cell's field). The earlier audit rounds' two-pointer probes used an owned
   and a read pointer to a structure whose matrix is not its first member, and one `reads` atom at a call.
-  **A third defect of that family is known and NOT fixed by Commit 6** (fail closed, exit 3; found by the
+  **A third defect of that family is in Commit 5 and in Commit 6, and Commit 7 fixes it** (fail closed, exit 3; found by the
   short audit read of Commit 6's tree, in code older than that commit): a structure with a matrix member
   in a function that needs a pointer split, that is, beside a pointer to a scalar whose target is not
   known (`int q04(const struct U2 *p, int *q)` with `reads(*p)`; a structure local beside `int *r =
   pick(&x);`; a pointer loaded from memory; and a by-value call, stored result or whole copy of such a
-  structure that also has a pointer member or pointer cells): `split_candidates` asks a row for the
+  structure that also has a pointer member or pointer cells): `split_candidates` asked a row for the
   leaves of a structure element. A structure whose member is an array of structures with an array member
-  is not affected. Four audit rounds read Part E (E1 on the local and parameter forms, E2a on
+  was not affected. With Commit 7 the split's candidate for a matrix member is the first cell of its first
+  row, as for a local matrix (the split is the no-op branch of record 0037 item 3, which tells Silicon
+  which cell an unknown pointer may be; it adds precision and carries no verdict, and for an array it
+  names the first cell only: the other cells are record 0059's listed limit), and
+  those programs get their ordinary verdicts (the first example is a `lifetime` error: it compares a
+  pointer that no atom covers, as it would for a structure without a matrix). Four audit rounds read Part E (E1 on the local and parameter forms, E2a on
   loops, ties, global matrices and the first member form, E3a on members under atoms, global structures,
   contract reads, `v[i].a[j]` and the ties of question 376, E3b on the member form of `v[i].a[j]`, the
   copy, the Sequencer's key and the four rejections taken on E3a's findings): no wrong program verified in
-  any round; none asked a change of the lowering or the encoder after the last join (E3b: findings in tests, the record and the pages only).** item 15 (Part D) by the continuation's second session
+  any round; none asked a change of the lowering or the encoder after the last join (E3b: findings in tests, the record and the pages only). A short read S4 took Commit 6's tree in full (no wrong program verified; it found the
+  third defect), and a shorter one S5 took Commit 7's fix (no wrong program verified; no verdict rests on
+  the split; its should-fix items, none taken into this commit, are in handoff §8, questions 393 and 394
+  and the list after them).** item 15 (Part D) by the continuation's second session
   (2026-11-26: the leftovers of a structure with an array member, for array members of scalars; two audit
   rounds and a short read, below; the full check green at its Commit 4 `86442ce`);** those of the continuation's first session (2026-11-26:
   Parts R, C1 and C2, named below: items 5, 16 and 19 as amended, items 7 to 9, and the range, global and
@@ -931,9 +939,15 @@ doc example holds.
     atoms (the smaller structure is `permission` in seconds), and for `*p = *q; *q = a;` under two `owns`
     atoms, a true program; the failing twin of the two-pointer copy takes 380 s a mode on a quiet box
     (`tests/long`). In C++ only, `struct U w = *p;` with a pointer to `const` is rejected (C accepts it).
-    The lowering takes the enumeration's list without checking its `complete` flag (past 4,096 cells a
-    cut list would end in an internal error or `uninitialized`, never in a shifted cell; the encoder
-    checks the flag).
+    The enumeration stops at 4,096 cells and says so through a flag, which the encoder checks. The
+    lowering does not see the flag; since Commit 7 it stops every structure value whose list has 4,096
+    cells or more with an internal error (exit 3, fail closed), which catches every cut list (a cut list
+    has exactly 4,096 entries). The stop is wider than its message: a value of 4,096 or more scalar cells
+    with no array in it is stopped too, although nothing was cut. Just under it, a by-value structure of
+    4,095 scalar cells ends the tool with a segmentation fault (exit 139; stack exhaustion by the
+    auditor's test with an unlimited stack; no diagnostic, nothing reported verified). That is older than
+    this session: on the build of its base both 4,095 and 4,096 cells end so (measured), so Commit 7's
+    stop turns the second into an internal error with a message and leaves the first (question 393).
 13. **Arrays of arrays** (amends 0060 item 15, 0063 item 14). A row is an array object in its own block; a
     matrix's leaf path has two index steps, and so has an array member of an element structure (`v[i].a[j]`).
     - **Array-of-rows parameters.** `T a[][M]`, `T a[N][M]` and `T (*a)[M]` declare a parameter of type pointer

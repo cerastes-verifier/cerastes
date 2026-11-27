@@ -2073,8 +2073,78 @@ owner's review** (written as each was settled; 363 is the owner's):
   the commit after the last audit read, and no test holds the shapes (record 0064 item 17 has the
   list). The alternative: write the three rules, or reject the three shapes, before the commit, with
   another audit read.
+- **391** (the Viper lint; nothing in the verifier; on question 357's boundary). The test-mutator's lint
+  change for structure values (11 lines, "Rule A") loosens a rule at question 374's site: the guarded
+  well-formedness row of a pointer to a structure that has a matrix and a direct scalar array member may
+  state that array's length (the Viper of `*p = *q` needs it, and so does a plain `owns(*p)` on such a
+  structure). The agent flagged it instead of settling it. **Answer taken (the short audit read: "stands
+  with a change"; the advisor: it stays as built in this session):** the change the auditor asks for,
+  the lint's table keyed by the structure's type instead of by member index over the whole unit, is the
+  lint step that opens the next session; until then a length that is not the type's own passes where
+  another declared structure has a scalar array at that member index, an understated length of 1
+  passes, and a second declared structure with another count at that index makes the right row refused
+  (record 0064 item 17). **For the owner**, with question 374: this is the third place in the session
+  where a guard-shaped or kept-flag-shaped lint rule was widened (374, 375, 391).
+- **392** (fail closed: internal errors, exit 3; how each was handled). The cases written for structure
+  values found two internal errors in the tree of this session's first commit, and the audit read of the
+  second commit's tree found a third, all in one family (a row of a matrix asked for something only a
+  structure or a cell has): a structure whose first member is a matrix beside an owned or read second
+  pointer; a call of a function with two `reads` atoms of a structure with a matrix member; a structure
+  with a matrix member in a function that needs a pointer split. **Answer taken (the plan's stop rule: an
+  exit 3 is settled within its part; the first two decided by the orchestrator and confirmed by the
+  advisor afterwards, the third with the advisor):** the first two were fixed at once, with cases,
+  mutation checks, C-level pairs and an audit read, in the second commit; the third was fixed in a third
+  commit of its own (16 lines of the lowering, 16 cases, a C-level pair, its own short audit read), inside a
+  time box of about forty minutes set with the advisor: had it not been proved in that time, the check
+  would have run on the second commit and this error would have been the owner's first question. With the
+  fix those programs get their ordinary verdicts. **The first commit alone has all three and the second
+  alone has the third** (each measured on a build of that commit). *Alternative not taken:* list the third
+  for the next session. *What the lowering owner's table of the family rests on:* reading, not proof (every
+  caller of each function that raises one of the two internal-error texts; a group of 14 sites for atoms
+  written in loops rests on the encoder's rejections of question 348): `build/m4.5e1e2d/il-analyst-report-10.md`.
 
-The next questions start at 391.
+- **393** (fail closed, but without a diagnostic: the tool is killed by a signal, exit status 139; nothing
+  is reported verified; older than this session). A structure of about 4,095 scalar members passed by
+  value ends `cerastes verify` in a segmentation fault. The last audit read found it beside the fix's new
+  stop (a value of 4,096 cells or more now ends in an internal error, exit 3, with a message whose words
+  "is cut there" are wrong for a structure without an array). Measured: on the build of this session's
+  base (`42880a1`) 4,095 and 4,096 cells both end in exit 139, in both modes; on the audited build 4,095
+  cells end so and 4,096 in the exit 3; 3,000 cells do not crash in 25 s; with an unlimited stack the
+  4,095-cell program does not crash (the auditor's run), so it is stack exhaustion; where the recursion is
+  was not looked for. **Answer taken (advisor): not fixed in this session** (a change under `src/` after
+  the last audit read costs a new snapshot, join, proof and read, and no verdict is wrong); listed here
+  and in record 0064 item 12. *Recommended:* the encoder rejects a by-value structure above a stated
+  number of cells with a diagnostic at its C line (invariant 3: rejected, never a crash), chosen where
+  the tool still answers (the audit saw no verdict in 240 s for 100 cells on a busy box), in M4.8 with
+  the other costs; *alternative:* the next session, with the stop's message.
+- **394** (fail closed: a false alarm of the base, on any structure; not from this session's code). A
+  function that owns `*p` (a structure) and `*y` (an `int`), calls a declared `int *pick(int *a)` whose
+  contract keeps `owns(*a)` and returns `r != NULL && owns(*r)`, writes `*r` and returns under
+  `ensures(owns(*p))` is reported as "returns without owning `*p`", although the C is fine; the twins
+  whose callee takes nothing verify. The cause is the auditor's reading of the kept Viper, not a trace:
+  the call lends half of ALL the function holds on the liveness cell of `y`'s block to a callee that
+  keeps the atom, and where `*p` and `*y` may share a block what is left can be under `*p`'s own amount.
+  For a structure with a matrix member this shape was exit 3 before the third fix and has the base's row
+  now. **Answer taken (advisor): listed.** *Recommended:* M4.5e1f (range call rows), which rewrites the
+  amounts lent at a call, decides whether the amount lent for an atom the callee keeps is bounded by
+  that atom's own amount; *alternative:* M4.8 with the cost of aliasing `reads`/`live` parameters
+  (question 66).
+- **Not taken from the last audit read (S5), each with its reason** (none is a wrong verdict; each
+  changes `src/` or `tests/` after the read, which would cost a new snapshot, join, proof and, for `src/`,
+  another read): (1) the text pin of the self-test cases `e1e2e_split_*_local_pick_*`, the only guard of
+  the split's candidate for a matrix member, cannot tell the matrix's first cell from the first row's
+  slot (by the auditor's reading, a lowering that dropped the row step would pass it): the pin should
+  name each form with its own member index: **first item of the three-dimensions step, which reopens
+  `split_candidates`**; (2) no C-level failing twin where the unknown pointer is a matrix cell (invariant
+  2 is met by the lowering's case; the auditor's twin text is in its report, finding 5): with (1); (3)
+  the 4,096 stop's message (393); (4) the prose in the header of
+  `tests/long/memory/negative/matrix_value_copy_ptr_two_wrong.c` still says the file moved with
+  `// timeout: 1800`, while its header line is 3000 since the third commit; (5) measured again: in C the
+  address of a matrix cell of a GLOBAL structure as a call argument inside a declaration's initializer
+  (`int *q = pick2(&g.m[1][0], &x, c);`) is rejected (`unsupported_type`), in C++ accepted: the listed
+  initializer form of record 0064 item 13, one step wider than the record's example.
+
+The next questions start at 395.
 
 ### Questions for the owner (after the second session of M4.5e1e2's continuation, 2026-11-26)
 

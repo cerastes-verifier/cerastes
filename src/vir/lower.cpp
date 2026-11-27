@@ -2694,6 +2694,14 @@ private:
                                                  bool arrow = false) const
     {
         std::vector<StructLeaf> out {struct_value_leaves(st, root_text, arrow)};
+        // (audit round S4, note 5: `struct_value_leaves` of a type of depth 2 or more is `value_cells`, which stops at its default cut of 4,096 cells and says so only through a flag this view does
+        // not carry: a list that long is cut, or exactly complete (never practical), and is stopped either way, so that `leaf_span`, which counts every member, cannot disagree with it)
+        if (out.size() >= 4096U)
+        {
+            errors_.push_back(Diag {
+                st.loc,
+                "a structure value of 4,096 cells or more reached lowering: the enumeration of its cells is cut there (decision 0064 item 12)"});
+        }
         report_aggregate_element(out, st);
         return out;
     }
@@ -17336,8 +17344,12 @@ private:
                 {
                     if (l.aggregate_element)
                     {
-                        // decision 0064 item 4 (Part C2): a member that is an array of structures is split against its first element's leaves (e1a's listed limit)
-                        for (const ElemLeaf& el : elem_leaves_ext(l.element))
+                        // decision 0064 item 4 (Part C2): a member that is an array of structures is split against its first element's leaves (e1a's listed limit); a MATRIX member (the
+                        // element is a row of scalars) against the first cell of its first row: the row's one leaf (`row_leaf`, path {0}), as the local matrix's split below does
+                        const std::vector<ElemLeaf> first_leaves {is_row(l.element)
+                                                                      ? std::vector<ElemLeaf> {row_leaf(l.element)}
+                                                                      : elem_leaves_ext(l.element)};
+                        for (const ElemLeaf& el : first_leaves)
                         {
                             if (cell_suffix(el.type) == sfx)
                             {

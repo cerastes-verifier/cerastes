@@ -10340,3 +10340,186 @@ void define_part_e_reads_reads_call_cases()
            k.fail("check", global_pair(k, true)->loc);
        });
 }
+
+// ---- the CASE SPLITS of a pointer the function obtained from elsewhere (split_candidates, decision 0037 item 3), beside a structure with a MATRIX member: the third internal error of the
+// first-member-matrix family ("the leaves of an array element that is not a structure were asked for"): a member that is an array of ROWS went to the leaves of a structure element.  Shape 0
+// struct U { int n; int m[2][2]; }, 1 struct U2 { int m[2][2]; int c; } ----
+void define_part_e_split_matrix_cases()
+{
+    auto N = [](Kit& k, const char* v)
+    {
+        return k.num(k.i32, v);
+    };
+    auto mkS = [](Kit& k, int shape) -> StructType*
+    {
+        const Type mat {k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)};
+        return shape == 0 ? k.strukt("U", {{"n", k.i32}, {"m", mat}}) : k.strukt("U2", {{"m", mat}, {"c", k.i32}});
+    };
+    auto scalar = [](Kit& k, int shape, const Expr* base) -> const Expr*
+    {
+        return k.mem(base, shape == 0 ? 0 : 1);
+    };
+    auto mcell = [](Kit& k, int shape, const Expr* base, const char* i, const char* j) -> const Expr*
+    {
+        return k.b.elem_addr(k.b.elem_addr(k.mem(base, shape == 0 ? 1 : 0), k.num(k.i32, i), k.at()), k.num(k.i32, j),
+                             k.at());
+    };
+    auto atom = [](Kit& k, Function* f, AtomKind kind, int param, int partner)
+    {
+        return k.b.atom(kind, k.b.text(k.F(f, param), f->params[static_cast<size_t>(param)].name), partner, k.at());
+    };
+    static const char* const names[] {"u", "u2"};
+    static const char* const docs[] {"struct U { int n; int m[2][2]; }", "struct U2 { int m[2][2]; int c; }"};
+    for (int shape : {0, 1})
+    {
+        const std::string n {std::string("e1e2e_split_") + names[shape]};
+        const std::string d {docs[shape]};
+        // int f(struct S *p, int *q) requires(reads(*p)) ensures(reads(*p)) { return q == NULL ? p-><scalar> : 0; }   (the auditor's q04: q has no atom; comparing it is a use of the pointer:
+        // `lifetime` at the comparison, as for every pointer without an atom)
+        lc(n + "_reads_param_unatomed_q_compared_fail",
+           d + ": f(p, q) with reads(*p) and no atom on q, returning q == NULL ? p->scalar : 0: q is split against p's cells (the matrix's first cell among them); the comparison is a use of a pointer nothing holds: lifetime",
+           [=](Kit& k)
+           {
+               StructType* S {mkS(k, shape)};
+               Function* f {k.fn("f", k.i32, {{"p", k.ptr(k.st(S))}, {"q", k.ptr(k.i32)}})};
+               k.req(f, atom(k, f, AtomKind::Reads, 0, 0));
+               k.ens(f, atom(k, f, AtomKind::Reads, 0, 0));
+               const Expr* qv {k.pv(f, 1)};
+               const Expr* cmp {k.eq(qv, k.nul(k.ptr(k.i32)))};
+               f->body = k.blk({k.ret(k.cond(cmp, k.deref(scalar(k, shape, k.pv(f, 0))), N(k, "0")))});
+               k.done(f);
+               k.fail("lifetime", qv->loc);
+           });
+        // void f(struct S *p, int *q) requires(owns(*p)) ensures(owns(*p)) { *q = 1; }   (q has no atom: the store is held by nothing)
+        lc(n + "_owns_param_unatomed_q_write_fail",
+           d + ": f(p, q) with owns(*p) and no atom on q writing *q: permission at the store (q may point anywhere; the split against p's cells does not hold it)",
+           [=](Kit& k)
+           {
+               StructType* S {mkS(k, shape)};
+               Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.st(S))}, {"q", k.ptr(k.i32)}})};
+               k.req(f, atom(k, f, AtomKind::Owns, 0, 0));
+               k.ens(f, atom(k, f, AtomKind::Owns, 0, 0));
+               const Stmt* w {k.store(k.pv(f, 1), N(k, "1"))};
+               f->body = k.blk({w});
+               k.done(f);
+               k.fail("null-dereference", w->loc);
+               k.fail("permission", w->loc);
+           });
+        // int *pick(int *a, int *b, int c) requires(owns(*a) && owns(*b)) ensures(owns(*a) && owns(*b) && r == (c != 0 ? a : b)) trusted;
+        // void f(int c) { struct S u, w; <cells written>; int *r = pick(<&u.x>, <&w.x>, c); *r = 5; check(<u.x == 5 || w.x == 5 | u.x == 5>); }
+        // `cellkind`: 0 the scalar, 1 the matrix cell [1][1]
+        auto local_pick = [=](Kit& k, int cellkind, bool wrong) -> const Stmt*
+        {
+            StructType* S {mkS(k, shape)};
+            Function* g {k.fn("pick", k.ptr(k.i32), {{"a", k.ptr(k.i32)}, {"b", k.ptr(k.i32)}, {"c", k.i32}})};
+            k.req(g, k.land(atom(k, g, AtomKind::Owns, 0, 0), atom(k, g, AtomKind::Owns, 1, 1)));
+            k.ens(g, k.land(k.land(atom(k, g, AtomKind::Owns, 0, 0), atom(k, g, AtomKind::Owns, 1, 1)),
+                            k.eq(k.R(g), k.cond(k.ne(k.F(g, 2), N(k, "0")), k.F(g, 0), k.F(g, 1)))));
+            k.trusted(g);
+            Function* f {k.fn("f", k.vd, {{"c", k.i32}})};
+            Var* u {k.scell(f, "u", S)};
+            Var* w {k.scell(f, "w", S)};
+            Var* r {k.local(f, "r", k.ptr(k.i32))};
+            auto cell = [&](const Var* x) -> const Expr*
+            {
+                return cellkind == 0 ? scalar(k, shape, k.addr(x)) : mcell(k, shape, k.addr(x), "1", "1");
+            };
+            std::vector<const Stmt*> body {k.decl(u, nullptr), k.decl(w, nullptr)};
+            for (const Var* x : {u, w})
+            {
+                body.push_back(k.store(cell(x), N(k, "1")));
+            }
+            body.push_back(k.decl(r, k.call(g, {cell(u), cell(w), k.pv(f, 0)})));
+            body.push_back(k.store(k.v(r), N(k, "5")));
+            const Expr* is_u {k.eq(k.deref(cell(u)), N(k, "5"))};
+            const Stmt* c {k.chk(wrong ? is_u : k.lor(is_u, k.eq(k.deref(cell(w)), N(k, "5"))))};
+            body.push_back(c);
+            f->body = k.blkc(body);
+            k.done(f);
+            k.text_checks.push_back(
+                [=](const std::string& vpr) -> std::string
+                {
+                    // the result is split against the first cells of each of the two structures: `if (t__n == <cell>) { }` for the scalar's cell `loc(member(v_u__m, s), 0)` and the matrix's
+                    // first cell `loc(member(loc(member(v_u__m, k), 0), 0), 0)`: four distinct splits
+                    static const std::regex split {
+                        R"(if \(t__[0-9]+ == (loc\(member\((?:loc\(member\()?v_[a-z]+__[0-9]+, [01]\)(?:, 0\), 0\))?, 0\))\) \{ \})"};
+                    std::set<std::string> seen;
+                    for (std::sregex_iterator it {vpr.begin(), vpr.end(), split}, end; it != end; ++it)
+                    {
+                        seen.insert((*it)[1].str());
+                    }
+                    return seen.size() == 4U
+                               ? ""
+                               : "expected four case splits of the result (the scalar's cell and the matrix's first cell of each structure), found " +
+                                     std::to_string(seen.size());
+                });
+            return c;
+        };
+        lc(n + "_local_pick_scalar",
+           d + ": r = pick(&u.x, &w.x, c) beside two locals of the type; *r = 5; one of them holds 5 (the result is split against the cells of both structures, the matrix's first cell among them)",
+           [=](Kit& k)
+           {
+               local_pick(k, 0, false);
+           });
+        lc(n + "_local_pick_scalar_wrong_fail",
+           d + ": the same checking u.x == 5 alone (r may be w's cell): the check fails",
+           [=](Kit& k)
+           {
+               k.fail("check", local_pick(k, 0, true)->loc);
+           });
+        lc(n + "_local_pick_matrix_cell",
+           d + ": r = pick(&u.m[1][1], &w.m[1][1], c); *r = 5: the arguments are matrix cells (the split names only each matrix's first cell: a no-op branch, the write still verifies)",
+           [=](Kit& k)
+           {
+               local_pick(k, 1, false);
+           });
+        lc(n + "_local_pick_matrix_cell_wrong_fail", d + ": the same checking u.m[1][1] == 5 alone: the check fails",
+           [=](Kit& k)
+           {
+               k.fail("check", local_pick(k, 1, true)->loc);
+           });
+        // void g(struct S *p, int *q) requires(owns(*p)) trusted;  void f(void) { struct S u; <cells>; g(&u, &u.m[1][1]); }   (the pointer IS a matrix cell's address; q has no atom)
+        lc(n + "_cell_address_to_unatomed_q",
+           d + ": g(&u, &u.m[1][1]) with owns(*p) and no atom on q: accepted (no obligation names q)",
+           [=](Kit& k)
+           {
+               StructType* S {mkS(k, shape)};
+               Function* g {k.fn("g", k.vd, {{"p", k.ptr(k.st(S))}, {"q", k.ptr(k.i32)}})};
+               k.req(g, atom(k, g, AtomKind::Owns, 0, 0));
+               k.ens(g, atom(k, g, AtomKind::Owns, 0, 0));
+               k.trusted(g);
+               Function* f {k.fn("f", k.vd)};
+               Var* u {k.scell(f, "u", S)};
+               std::vector<const Stmt*> body {k.decl(u, nullptr)};
+               for (const char* i : {"0", "1"})
+               {
+                   for (const char* j : {"0", "1"})
+                   {
+                       body.push_back(k.store(mcell(k, shape, k.addr(u), i, j), N(k, "1")));
+                   }
+               }
+               body.push_back(k.store(scalar(k, shape, k.addr(u)), N(k, "1")));
+               body.push_back(k.es(k.call(g, {k.addr(u), mcell(k, shape, k.addr(u), "1", "1")})));
+               f->body = k.blkc(body);
+               k.done(f);
+           });
+        // int f(struct S *p, int **pp) requires(owns(*p) && owns(*pp)) ensures(owns(*p) && owns(*pp)) { int *r = *pp; return r == NULL ? p-><scalar> : 0; }   (a pointer loaded from memory)
+        lc(n + "_loaded_pointer_compared_fail",
+           d + ": a pointer loaded from memory beside owns(*p): split against p's cells, compared with NULL: lifetime at the comparison",
+           [=](Kit& k)
+           {
+               StructType* S {mkS(k, shape)};
+               Function* f {k.fn("f", k.i32, {{"p", k.ptr(k.st(S))}, {"pp", k.ptr(k.ptr(k.i32))}})};
+               k.req(f, k.land(atom(k, f, AtomKind::Owns, 0, 0), atom(k, f, AtomKind::Owns, 1, 1)));
+               k.ens(f, k.land(atom(k, f, AtomKind::Owns, 0, 0), atom(k, f, AtomKind::Owns, 1, 1)));
+               Var* r {k.local(f, "r", k.ptr(k.i32))};
+               const Expr* load {k.deref(k.pv(f, 1))};
+               const Expr* cmp {k.eq(k.v(r), k.nul(k.ptr(k.i32)))};
+               f->body =
+                   k.blkc({k.decl(r, load), k.ret(k.cond(cmp, k.deref(scalar(k, shape, k.pv(f, 0))), N(k, "0")))});
+               k.done(f);
+               // the loaded pointer is a use of a pointer nothing holds: the lifetime row sits at the load
+               k.fail("lifetime", load->loc);
+           });
+    }
+}
