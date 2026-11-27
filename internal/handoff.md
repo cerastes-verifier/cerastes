@@ -32,7 +32,7 @@ plan's "Inputs".
   `origin/m4.5e1e2c-arrays-of-structures`). **`origin/main` was still `f07d80a` when the session started**,
   which accepts every unsound `restrict` form; local `main` rejects them. Pushing and merging are the
   owner's (§2, step 1).
-- **The third session of M4.5e1e2's continuation** (2026-11-26 20:17 UTC to 2026-11-27 17:20 UTC; plan
+- **The third session of M4.5e1e2's continuation** (2026-11-26 20:17 UTC to 2026-11-27 17:06 UTC; plan
   `.claude/plans/m4-5e1e2b-arrays-of-structures.md`; record 0064, accepted for the items built) landed
   **Part E through two dimensions** in three commits: **Commit 5 `670ae10`** (matrices as locals, row
   parameters, globals, `static` locals and members; ranges over rows; contract reads; loops; an element
@@ -84,13 +84,16 @@ plan's "Inputs".
 
 1. **Push `main`, then merge and push this session's branch; recommended now.** The branch
    `m4.5e1e2d-arrays-of-structures` is a fast-forward of local `main` (`42880a1`): `git merge --ff-only
-   m4.5e1e2d-arrays-of-structures` on `main`, then push (never reset or rebase). **The main checkout
-   (`/Users/mattborland/Documents/cerastes/cerastes`) had an uncommitted change of the owner's to `plan.md`
-   during this session** (M4's "Acceptance": sentences on security evaluations by a Claude Mythos 5.2 agent
-   before the work is accepted). This session did not touch it. Its close-out commit also edits `plan.md`
-   (other paragraphs), so git refuses the fast-forward while that change is uncommitted: commit it on `main`
-   first (the merge is then a real merge of two edits to different parts of the file, not a fast-forward)
-   or stash it, merge, and apply the stash. The full check is green at the branch's last code commit (`0a4eb26`); the commit after it changes only
+   m4.5e1e2d-arrays-of-structures` on `main`, then push (never reset or rebase). **A change of the owner's to `plan.md` is in a stash of the main checkout**
+   (`/Users/mattborland/Documents/cerastes/cerastes`): at 14:21 UTC on 2026-11-27 that checkout had an
+   uncommitted edit of `plan.md` (M4's "Acceptance": sentences on security evaluations by a Claude Mythos
+   5.2 agent before the work is accepted); at 17:03 UTC it was clean, with `stash@{0}` ("On main: WIP on
+   main", made at 14:24 UTC) holding exactly that edit, and `main` still at `42880a1`. No command of this
+   session or of its agents made the stash (a search of the session's transcript and of its 32 agent
+   transcripts finds no stash command), and nothing here applied, popped or dropped it. So the
+   fast-forward merge goes through as it is; afterwards `git stash pop` in the main checkout brings the
+   edit back: it applies cleanly to this branch's `plan.md` (`git apply --check`, one trailing-whitespace
+   warning), whose close-out edits are in other paragraphs. The full check is green at the branch's last code commit (`0a4eb26`); the commit after it changes only
    `internal/` and `plan.md`.
 2. **Answer, when convenient (none blocks the next session; §8, "Questions for the owner"):** 392 (the three internal errors: nothing to decide, the handling to review); 363 (a matrix
    of structures); 374 with 391 (the lint's guard-shaped branch and its second site: let them stand as
@@ -124,7 +127,11 @@ plan's "Inputs".
    them), scratch files of auditor S4 in lane `audit` on the box (its report names the directory), and an
    `rm -f` of a probe directory that did not exist yet (edg-backend's report 21; nothing to remove):
    harmless, the owner's to remove. On the
-   box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go.
+   box, `~/cerastes-e1d/` and `~/cerastes-e1e1/` may go, and two leftovers of this session: the bundle
+   `~/cerastes-s8/e1e2d-c7.bundle` (the branch as shipped to the check lane) and `/tmp/orc393` inside the
+   container `cerastes-e1e2-base` (two probe files for question 393). The check container
+   `cerastes-s8-ubuntu-26.04` shows 342 defunct `z3` entries left by earlier check runs (zombies; not this
+   session's, untouched; a restart of the container clears them).
 6. **The macOS re-approval of rebuilt binaries** (three ways out, the owner's choice): move the repository
    out of `~/Documents`; give the launching application Full Disk Access; or sign the binaries with a stable
    identity in a post-link step. Until one is done, the rule of §6 stands: compile on the Mac, run in the
@@ -2245,11 +2252,12 @@ The next questions start at 395.
 
 ### Questions for the owner (after the second session of M4.5e1e2's continuation, 2026-11-26)
 
-**Nothing here blocks the next session; it can start as it is.** Each item is explained above under its number.
+**Still open from that session; nothing here blocks the next session.** Each item is explained above
+under its number.
 
-1. **Pushing** (§2, step 1): `origin/main` (`f07d80a`) still accepts every unsound `restrict` form; local `main`
-   has the merge the owner made and one commit of this session (the owner's handoff answers). **Recommended:**
-   push `main`, then `git merge --ff-only m4.5e1e2c-arrays-of-structures` and push again.
+(Its item 1, pushing, is §2 step 1 now: local `main` already holds that session's branch, and
+`origin/main` was still `f07d80a` when the third session started. The items below are still open.)
+
 2. **354, the limit on `calloc`** (fail closed: a rejection with a diagnostic). A structure with an array
    member can be allocated with `calloc` only if it holds at most 24 values in all (each array element and
    each other member counted); above that the call is rejected and the diagnostic says to use `malloc`.
@@ -2328,7 +2336,8 @@ The full text of each is above in this section under its number.
    first.
 8. **The macOS re-approval of rebuilt binaries** (§2, step 6): which of the three ways out, if any.
 9. **Four deletions agents were refused by the permission system** (§2, step 5): the owner's to make.
-   **And the uncommitted `plan.md` change in the main checkout** (§2, step 1) before the merge.
+   **And the owner's `plan.md` edit, which is in a stash of the main checkout** (§2, step 1): pop it
+   after the merge.
 10. **393, a segmentation fault** (fail closed, but with no diagnostic: the tool is killed, exit status
    139, nothing is reported verified; older than this session, measured on its base's build). A structure
    of about 4,095 scalar members passed by value crashes `cerastes verify` (stack exhaustion). Since this

@@ -33,15 +33,16 @@ session's step after its lint step, before Part F; a matrix of structures (quest
 verifies. **Three internal errors of one family** (a row of a matrix asked for what only a structure or a
 cell has; each fail closed: exit 3, "the program was not checked", never a wrong proof) were found in the
 first commit's tree after it was cut: the second commit fixes two and the third commit fixes the third, so **a checkout of the first or of
-the second commit alone still has them** (below). **The owner's attention is asked for** (handoff §8, in this order): question 363; the lint's
+the second commit alone still has them** (below). **The owner's attention is asked for** (handoff §8, "Questions for the owner"): question 363; the lint's
 guard-shaped branch (question 374, with 385, 386 and 389) and its second site (391); three shapes that worked in the auditor's probes
 and are rejected because the lint cannot check their Viper or the record did not name them (382, 383, 384);
 two listed rejections (377, 381); a first step for the next session that the owner already agreed to (the
 lint step: 369, 373, 379, 380 and the table collision); the three internal errors and how each was
 handled (392); two older defects the last audit read met (393: a crash, with no diagnostic, on a by-value
 structure of about 4,095 members; 394: a false alarm at a call); the macOS re-approval of rebuilt binaries; four deletions that agents were denied and
-nobody made in their place; an uncommitted change of the owner's to `plan.md` in the main checkout, which
-stops the fast-forward merge until it is committed or stashed; and the review of the questions settled
+nobody made in their place; an edit of the owner's to `plan.md` that was uncommitted in the main checkout at 14:21 UTC and is in a
+stash there since 14:24 UTC (not made, applied or dropped by this session: handoff §2, step 1), to pop
+after the merge; and the review of the questions settled
 with the advisor (358 to 394).
 
 Plan: `.claude/plans/m4-5e1e2b-arrays-of-structures.md` (the continuation plan), executed from Part E after
@@ -51,7 +52,7 @@ the part. Record 0064 (accepted for the items built: item 13 through two dimensi
 the commit the last full check passed on, is an ancestor and nothing under `src`, `include`, `tests`,
 `scripts` or `doc` differs from it). **`origin/main` was `f07d80a` and `origin/m4.5e1e2c-arrays-of-structures`
 was `42880a1` at the start; nothing was pushed by this session.** Branch `m4.5e1e2d-arrays-of-structures`,
-worktree `.claude/worktrees/m4.5e1e2d`. Session from 2026-11-26 20:17 UTC to 2026-11-27 17:20 UTC (about 21 hours, against the plan's twelve: the owner lifted the limit at 03:38). The owner
+worktree `.claude/worktrees/m4.5e1e2d`. Session from 2026-11-26 20:17 UTC to 2026-11-27 17:06 UTC (about 21 hours, against the plan's twelve: the owner lifted the limit at 03:38). The owner
 gave no overnight rule; every question went to the Fable advisor first.
 
 **The owner's decisions in the session.** (21:56) "I have approved the file access" (a macOS consent prompt
