@@ -217,7 +217,7 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
     `int` leaf, at any depth) is one of the places beside which a `restrict T*` parameter is rejected, since a pointer
     passed in it is not based on the `restrict` parameter; so is a struct global named by the contract (`owns(g)` with an
     `int *` leaf in `g`), which 0043 item 10's global rule already covers. The check also runs after the implicit atoms of
-    `static` locals (item 9) are added.
+    `static` locals (item 9) are added. **(Withdrawn by record 0064 item 19 as rewritten on 2026-11-26, M4.5e1e2's continuation, question 326: every `restrict` parameter is rejected, and this clause's code is removed.)**
 12. **Loop invariants and measures that read through a loaded pointer** (P69; audit S5). Only `**pp` is rejected in a
     loop invariant or measure, by its spelling (0040 item 5); `p->q->x`, `*p->q` and `*gp` have always reached the loop's
     read chains (0038 item 6), unpinned, and a by-value parameter's `*s.q` joins them. They are accepted, by this argument:
@@ -286,3 +286,5 @@ results, `f().x`, temporaries (`S{…}`, `S()`, compound literals), and struct o
 *2026-11-24, amended by 0062 (M4.5e1d): item 4 — a `pure` function that takes or returns a structure by value is rejected, its message naming M4.5f1 (0062 item 1).*
 
 *2026-11-25, amended by 0063 (M4.5e1e1): item 7 — a compound literal used as an object whose element writes (an assignment, `++`, `--`, a compound assignment; a call itself exempt) is rejected unless the literal is the whole full expression or a declaration's initializer: the sequencing rules did not see the element's writes against the enclosing expression's (audit round 2 of M4.5e1e1, B1; question 308; 0063 item 12). Items 2, 3, 4, 7 and 8 — array members and array globals (0063 items 6, 9 and 13).*
+
+*2026-11-26, amended by 0064 (M4.5e1e2): items 2–5 — an element of an array of structures is copied, passed and returned as a structure value, and a structure with a member that is an array of structures has one value per leaf of each element, up to 7 in all (0064 item 12); a contract cannot read an element of such a value. Item 8 — global and `static` local arrays of structures, and structure globals with such a member, with `program_start`'s row groups per leaf (0064 item 9). Item 11's `restrict` clause is withdrawn (0064 item 19).*

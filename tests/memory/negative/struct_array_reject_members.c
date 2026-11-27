@@ -1,14 +1,14 @@
-// expect: rejected cerastes-unsupported_declaration @ L21
 // expect: rejected cerastes-unsupported_declaration @ L26
+// (L21, an owning member beside an array member, was rejected here until Part D lifted it: tests/memory/struct_array_owner_beside.c; the line stays)
 // expect: rejected cerastes-unsupported_declaration @ L31
-// expect: rejected cerastes-unsupported_declaration @ L36
+// (the member struct P v[2] at L36 drew unsupported_declaration here until Part C2 lifted it; its row is retired, the line stays)
 // expect: rejected cerastes-unsupported_declaration @ L41
 // expect: rejected cerastes-unsupported_annotation @ L46
 // expect: rejected cerastes-unsupported_annotation @ L51
 // expect: rejected cerastes-unsupported_declaration @ L56
 // mode: c23, c++20
 // twin: tests/memory/struct_array_member_declared.c
-// Pins: 0063 items 1 and 2: array members that stay rejected, at the member's declaration: beside an owning member (question 293: the closure of an owning field over an array member is M4.5e1e2), a const array (M4.6), a volatile element (M8), an array of structures and an array of arrays (M4.5e1e2), a zero-length member (M8), and owning and ref_to_uninit on an array member itself (M4.8, unsupported_annotation: the two lines the plan's table gives that tag; the structure may print a declaration error too). The structures are used as pointees so that each one is read. Tags, lines and the one-error-per-structure behaviour are to confirm at the joined run (a zero-length member may be the front end's own error: then it moves to a file of its own)
+// Pins: 0063 items 1 and 2: array members that stay rejected, at the member's declaration: beside an owning member (question 293: the closure of an owning field over an array member is M4.5e1e2), a const array (M4.6), a volatile element (M8), an array of structures and an array of arrays (M4.5e1e2), a zero-length member (M8), and owning and ref_to_uninit on an array member itself (M4.8, unsupported_annotation: the two lines the plan's table gives that tag; the structure may print a declaration error too). The structures are used as pointees so that each one is read. Tags, lines and the one-error-per-structure behaviour are to confirm at the joined run (a zero-length member may be the front end's own error: then it moves to a file of its own) [Part C2 (0064 item 1): the row of L36, an array of structures as a member, is lifted: tests/memory/struct_member_array_struct_access.c holds that program; the other rows stay]
 // Pre-registered from record 0063 items 1 and 2 (Part C), before any run: rejected (tags from edg-backend's plan C1)
 #include <cerastes.h>
 

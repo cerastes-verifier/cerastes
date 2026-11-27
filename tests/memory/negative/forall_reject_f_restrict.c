@@ -2,7 +2,7 @@
 // mode: c23
 // c-only: restrict does not exist in C++20 (EDG, clang++ and g++ refuse it, decision 0037 item 2)
 // twin: tests/memory/forall_requires_read.c
-// Pins: 0061 item 3 (audit round 1 S13, 0037 items 2 and 15): a restrict parameter of f is rejected with the tag it has on a function with no contract
+// Pins: 0061 item 3 (audit round 1 S13, 0037 items 2 and 15): a restrict parameter of f is rejected with the tag it has on a function with no contract [0064 item 19: unchanged: a pure function's and a quantifier function's restrict parameter keep this rejection (0043 item 10, 0061 item 3), checked before item 19's]
 // Pre-registered from record 0061 item 3 (Part B), before the code
 #include <cerastes.h>
 #include <stddef.h>

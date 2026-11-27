@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L14
 // c-only: restrict and compound literal objects do not exist in C++
-// twin: tests/memory/struct_global_restrict.c
-// Pins: 0044 item 11 (0043 item 10): a restrict int * beside owns(g) of a struct global with an int * leaf: a pointer loaded from g is not based on p
+// twin: tests/memory/restrict_dropped.c
+// Pins: 0044 item 11 (0043 item 10): a restrict int * beside owns(g) of a struct global with an int * leaf: a pointer loaded from g is not based on p [0064 item 19, question 326: every restrict parameter is now rejected by that one rule, whatever the contract; this pin's row keeps its tag and line and its condition no longer matters]
 #include <cerastes.h>
 
 struct P {

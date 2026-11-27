@@ -22,6 +22,8 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -84,6 +86,8 @@ public:
     };
     std::vector<RowCount> row_counts;
     LowerOptions lower_options;
+    // Checks on the emitted Viper of a lowering case: each returns the problem, or "" (decision 0064 item 6, audit round 1 issue 8: the scope exits give up what the allocation gave)
+    std::vector<std::function<std::string(const std::string&)>> text_checks;
     // A vacuity twin (record 0060 Part C): the builders of the range-call cases end their caller with `check(false)` and record its position here
     bool vac_tail {false};
     SrcLoc vac_loc;
@@ -1550,6 +1554,8 @@ void define_quantifier_loops();
 #include "selftest_cases32.inc"
 #include "selftest_cases33.inc"
 #include "selftest_cases34.inc"
+#include "selftest_cases35.inc"
+#include "selftest_cases36.inc"
 
 namespace {
 
@@ -1643,6 +1649,14 @@ bool run_lowering_case(const Case& c, const std::string& dir, std::string& probl
     }
     cerastes::viper::Emitted first {cerastes::viper::emit(lr.program)};
     const std::vector<MapRow> rows {parse_map(first.map)};
+    for (const auto& check : k.text_checks)
+    {
+        if (const std::string why {check(first.vpr)}; !why.empty())
+        {
+            problem = "the emitted Viper: " + why;
+            return false;
+        }
+    }
     if (std::getenv("CERASTES_SELFTEST_DUMP") != nullptr)
     { // debugging aid: keep the program of a case whose expectations do not match
         std::ofstream(dir + "/" + c.name + ".dump.vpr", std::ios::binary | std::ios::trunc) << first.vpr;
@@ -1850,6 +1864,21 @@ int main(int argc, char** argv)
     define_member_arrays();
     define_struct_array_values();
     define_array_literals();
+    define_aggregate_element_guards();
+    define_restrict_backstop_cases();
+    define_struct_range_cases();
+    define_member_struct_array_cases();
+    define_global_struct_array_cases();
+    define_audit_c1_cases();
+    define_audit_c1_site_cases();
+    define_audit_c2c_binder_cases();
+    define_part_d_load_cases();
+    define_part_d_heap_cases();
+    define_part_d_reject_cases();
+    define_part_d_marker_cases();
+    define_array_of_structures_lowering();
+    define_array_of_structures_loops();
+    define_array_of_structures_pairs_and_copies();
     int bad {0};
     for (const Case& c : lowering_cases())
     {
@@ -1944,6 +1973,7 @@ int main(int argc, char** argv)
         }
     }
     bad += check_array_views();
+    bad += check_leaf_paths();
     std::printf("cerastes-vir-selftest: %zu lowering cases written to %s, %zu rejection cases checked, %d problems\n",
                 lowering_cases().size(), dir.c_str(), reject_cases().size(), bad);
     return bad == 0 ? 0 : 1;

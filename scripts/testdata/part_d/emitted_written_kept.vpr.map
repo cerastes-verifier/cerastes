@@ -1,0 +1,81 @@
+30	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+30	postcondition.violated	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+31	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+31	postcondition.violated	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+32	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+32	postcondition.violated	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+33	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+33	postcondition.violated	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+34	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+34	postcondition.violated	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+35	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+35	postcondition.violated	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+36	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct S`
+36	postcondition.violated	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct S`
+41	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	3	6	internal check: well-formedness of the contract of `f`
+42	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	3	6	internal check: well-formedness of the contract of `f`
+43	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	3	6	internal check: well-formedness of the contract of `f`
+44	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	4	5	internal check: well-formedness of the contract of `f`
+57	assert.failed	lifetime	build/e1e2c-tm9/pv/src/b3_entry_missing.c	6	17	uses `p` after the object it points to may have ended
+59	assert.failed	lifetime	build/e1e2c-tm9/pv/src/b3_entry_missing.c	7	7	uses `q` after the object it points to may have ended
+62	assert.failed[insufficient.permission]	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->a`, which its invariant needs
+63	assert.failed[insufficient.permission]	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->a`, which its invariant needs
+65	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->a`, which its invariant needs
+68	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->a`, which its invariant needs
+76	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+77	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+78	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+79	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+80	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+81	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+82	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+83	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+84	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+85	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	55	enters this loop without owning `p->n`, which its invariant needs
+88	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: automatic range invariant of `i`
+88	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: automatic range invariant of `i`
+89	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+89	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+90	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+90	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+91	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+91	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+92	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+92	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+93	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+93	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+94	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+94	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+95	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+95	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+96	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+96	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+97	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+97	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+98	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+98	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+99	invariant.not.established	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+99	invariant.not.preserved	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	11	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+100	invariant.not.established	invariant-entry	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	3	this loop invariant may not hold on entry
+100	invariant.not.preserved	invariant-preserved	build/e1e2c-tm9/pv/src/b3_entry_missing.c	9	3	this loop invariant may not be preserved by an iteration
+101	invariant.not.established	overflow	build/e1e2c-tm9/pv/src/b3_entry_missing.c	10	24	signed `int` subtraction may overflow
+101	invariant.not.preserved	overflow	build/e1e2c-tm9/pv/src/b3_entry_missing.c	10	24	signed `int` subtraction may overflow
+102	termination.failed	termination	build/e1e2c-tm9/pv/src/b3_entry_missing.c	10	3	the measure of this loop may not decrease, or may not be bounded below by zero
+104	assert.failed	overflow	build/e1e2c-tm9/pv/src/b3_entry_missing.c	12	7	signed `int` addition may overflow
+106	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+107	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+108	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+109	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+110	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+111	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+112	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+113	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+114	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+115	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->n`, which its invariant needs
+116	assert.failed[insufficient.permission]	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+117	assert.failed[insufficient.permission]	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+119	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+122	assert.failed	permission	build/e1e2c-tm9/pv/src/b3_entry_missing.c	13	3	an iteration of this loop ends without owning `p->a`, which its invariant needs
+130	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	3	6	internal check: well-formedness of the contract of `f (well-formedness)`
+131	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	3	6	internal check: well-formedness of the contract of `f (well-formedness)`
+132	not.wellformed	internal	build/e1e2c-tm9/pv/src/b3_entry_missing.c	3	6	internal check: well-formedness of the contract of `f (well-formedness)`

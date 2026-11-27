@@ -854,6 +854,46 @@ the function, and the `return` of a pure function that `cerastes_forall` names, 
   `a != 0`), which is always true or always false (clang's
   `-Wpointer-bool-conversion` and `-Wtautological-pointer-compare`, GCC's
   `-Waddress`);
+* a truth test or a null comparison of an address formed with an index: of an
+  element of an array, of an element a pointer is indexed to, or of a member of
+  such an element (`if (&a[1])`, `&v[1].x == NULL`, `&p[1] != NULL`,
+  `&s.a[i] == NULL`), which is never null (GCC's `-Waddress`):
+  `array_address_null_test`. `&p[0]` is rejected with the other indexes,
+  although GCC does not warn about that one form, and so is a test that a
+  macro writes (`assert(&a[1] != NULL)`), on which the compilers are silent;
+  `p == NULL` for a pointer variable and a comparison of two addresses
+  (`&a[1] == q`) are ordinary comparisons. For an array with static storage
+  and a constant index (`&table[2]` of a global), the front end folds the
+  address into a constant: in C a test of that address (`if (&table[2])`,
+  `x && &table[2]`) is rejected in the same way, while a test that folds as a
+  whole (`!&table[2]`, `&table[2] != NULL`), and every such test in pass:[C++],
+  is rejected as `unsupported_expression` instead;
+* a braced initializer that leaves out the braces of an inner structure or array
+  (`-Wmissing-braces`, which clang reports in both languages and GCC in C):
+** a list of values (`struct line l = {1, 2, 3, 4};`, `struct point v[2] = {1,
+   2, 3, 4};`) is rejected in both languages;
+** in C, `+{0}+` as the whole initializer of an object is the universal zero
+   initializer and is accepted whatever the object holds (`+struct line l = {0};+`,
+   `+struct point v[2] = {0};+`), but a list inside the initializer whose `0`
+   leaves out braces is rejected (`+struct w { struct line l; int k; } x =
+   {{0}};+`), as GCC reports it;
+** in C, that zero must be written as an integer literal (`0`, `0u`, `0x0`, a
+   macro that expands to one) where the braces it leaves out belong to an
+   element of an array or to a member of a structure with two or more members:
+   `+{'\0'}+`, `+{false}+`, `+{NULL}+`, an enumerator, `+{1 - 1}+` and `+{(int)0}+`
+   are rejected there (`unsupported_expression`), as clang reports them; a
+   parenthesized `+{(0)}+` is still accepted, although clang reports it too;
+** in pass:[C++], `+{0}+` is rejected when a structure or array whose braces it
+   leaves out is an element of an array or a member of a structure with two or
+   more members (`+struct point v[2] = {0};+`, and `+{0}+` for a structure whose
+   first of several members is a structure or an array), as clang reports it,
+   and accepted when each one is the only member of its structure;
+** `{}` leaves out nothing and sets every member to zero in both languages;
+** a designator with a braced value changes none of this (`+{.l = {0}}+` is read
+   like `+{{0}}+`). A designator whose value for a structure or array member has no
+   braces of its own (`{.l = 0}`) is accepted in C when the value is `0` and
+   rejected otherwise; in pass:[C++] it is always rejected, as clang reports it
+   without a flag (`-Wc99-designator`);
 * in C, a braced initializer with more elements than its array or structure
   (`int a[3] = {1, 2, 3, 4};`), which both compilers report by default and
   pass:[C++] refuses: the front end drops the extra elements, so its warning
@@ -1242,7 +1282,8 @@ The constructs that are rejected in this version are:
   defined in another file (`extern` with no definition here), arrays other than
   those xref:memory.adoc#arrays[Arrays] describes (arrays of scalars as locals,
   parameters, globals, `static` locals, structure members and compound literals in
-  C: arrays of structures and arrays of arrays are not supported yet), a global
+  C, and arrays of structures as locals, globals, `static` locals and structure
+  members: arrays of arrays are not supported yet), a global
   array declared without a bound (`int a[];`), designators in
   array initializers (`{[2] = 5}`), an unused array typedef in a function (both
   compilers warn about it), classes
@@ -1263,7 +1304,8 @@ The constructs that are rejected in this version are:
   that vlibc covers (`annotation_reserved_library`).
 * *Types:* pointers other than those xref:memory.adoc[Memory and ownership]
   describes (`void *` other than an allocation's result converted at once and
-  the argument of `free`, `restrict` other than on a C parameter the contract owns,
+  the argument of `free`, `restrict` (on a parameter: cerastes does not model it;
+  drop the keyword),
   and pointers to unions, to functions and to structures that are not supported
   are rejected, and so are
   pointer conversions other than adding `const` to the object pointed to; its
@@ -1280,7 +1322,9 @@ The constructs that are rejected in this version are:
   `sizeof(char[65536u * 65536u + 1])` (which a compiler makes 1) is reported as
   xref:error-messages.adoc#_overflow[`overflow`] at the bound. An array type
   reached through a typedef of a system header (`jmp_buf`) is rejected, since its
-  bound is not checked here; so are arrays of arrays and of structures in a type,
+  bound is not checked here; so are arrays of arrays and of structures in a type
+  (`sizeof(struct point[3])`, a typedef; `sizeof(v)` of a local array of
+  structures is accepted),
   `_BitInt`, vector types and class templates with a constant argument
   (`std::array<char, 4>`), as the operand of `sizeof`, `_Alignof`, `typeof` or
   `decltype` too, and `sizeof("abc")`.

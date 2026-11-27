@@ -1,0 +1,545 @@
+// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field v_ptr_struct_0_S: Ref
+field d_ptr_struct_0_S: Bool
+field tok: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__0(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of a local of type struct S: a fresh one-slot block whose members are blocks, a cell member of length 1 and an array member of its length, every leaf and every element uninitialized with full permission (each array member's permissions as quantifiers of their own), and the block's liveness token (decisions 0043 item 4, 0063 item 6)
+method alloc_struct_0_S() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures len(member(r, 0)) == 4
+  ensures forall j: Int :: { loc(member(r, 0), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 0), j).v_int)
+  ensures forall j: Int :: { loc(member(r, 0), j) } ((0 <= j) && (j < 4)) ==> acc(loc(member(r, 0), j).d_int)
+  ensures forall j: Int :: { loc(member(r, 0), j) } ((0 <= j) && (j < 4)) ==> (!loc(member(r, 0), j).d_int)
+  ensures (((len(member(r, 1)) == 1) && acc(loc(member(r, 1), 0).v_int)) && acc(loc(member(r, 1), 0).d_int)) && (!loc(member(r, 1), 0).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  // cerastes:owning-global GB_g__0
+  ensures (len(GB_g__0()) == 1) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))
+  ensures (((acc(loc(GB_g__0(), 0).v_ptr_struct_0_S) && acc(loc(GB_g__0(), 0).d_ptr_struct_0_S)) && loc(GB_g__0(), 0).d_ptr_struct_0_S) && (loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) && acc(lvloc(GB_g__0()).lv)
+  decreases _
+
+// C/C++ function `f`
+method f_f__0(amt_0: Perm)
+  requires (len(GB_g__0()) == 1) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))
+  requires (none < amt_0) && (amt_0 < write)
+  requires ((((((((loc(GB_g__0(), 0) != null) && ((loc(GB_g__0(), 0) == null) || (((loc(GB_g__0(), 0) == loc(block_of(loc(GB_g__0(), 0)), offset_of(loc(GB_g__0(), 0)))) && (0 <= offset_of(loc(GB_g__0(), 0)))) && (offset_of(loc(GB_g__0(), 0)) <= len(block_of(loc(GB_g__0(), 0))))))) && (offset_of(loc(GB_g__0(), 0)) < len(block_of(loc(GB_g__0(), 0))))) && acc(loc(GB_g__0(), 0).v_ptr_struct_0_S)) && acc(loc(GB_g__0(), 0).d_ptr_struct_0_S)) && loc(GB_g__0(), 0).d_ptr_struct_0_S) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))))) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) < len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))) ==> ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1))))) && acc(lvloc(block_of(loc(GB_g__0(), 0))).lv, amt_0)) && ((!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> ((((((((((((((((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && ((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) == 0)) && acc(loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok)) && loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok) && (lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-2)))) && acc(lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)).lv)) && ((len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == 1) && ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1)))) && acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int)) && acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int)) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int ==> (((-2147483648) <= loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int <= 2147483647)))) && loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int))) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).d_int))) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).d_int ==> (((-2147483648) <= loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int <= 2147483647))))) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).d_int)))
+  ensures ((((((((loc(GB_g__0(), 0) != null) && ((loc(GB_g__0(), 0) == null) || (((loc(GB_g__0(), 0) == loc(block_of(loc(GB_g__0(), 0)), offset_of(loc(GB_g__0(), 0)))) && (0 <= offset_of(loc(GB_g__0(), 0)))) && (offset_of(loc(GB_g__0(), 0)) <= len(block_of(loc(GB_g__0(), 0))))))) && (offset_of(loc(GB_g__0(), 0)) < len(block_of(loc(GB_g__0(), 0))))) && acc(loc(GB_g__0(), 0).v_ptr_struct_0_S)) && acc(loc(GB_g__0(), 0).d_ptr_struct_0_S)) && loc(GB_g__0(), 0).d_ptr_struct_0_S) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))))) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) < len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))) ==> ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1))))) && acc(lvloc(block_of(loc(GB_g__0(), 0))).lv, amt_0)) && ((!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> ((((((((((((((((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && ((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) == 0)) && acc(loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok)) && loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok) && (lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-2)))) && acc(lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)).lv)) && ((len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == 1) && ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1)))) && acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int)) && acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int)) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int ==> (((-2147483648) <= loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int <= 2147483647)))) && loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int))) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).d_int))) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).d_int ==> (((-2147483648) <= loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).v_int <= 2147483647))))) && (forall k: Int :: { loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k) } ((0 <= k) && (k < 4)) ==> loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), k).d_int)))
+  decreases
+{
+  var v_i__0: Int
+  var held_GB_g__0: Bool
+  var eb_0: Ref
+  var lb_1__0: Ref
+  var kl_GB_g__0__0: Perm
+  var kv_GB_g__0__0: Perm
+  var kd_GB_g__0__0: Perm
+  var vs_GB_g__0__0: Ref
+  var ds_GB_g__0__0: Bool
+  var ab_q0__0: Ref
+  var abp_0__0: Ref
+  var wef_0_0__0: Bool
+  var wea_0_0__0: Bool
+  var t__0: Ref
+  var t__1: Ref
+  var t__2: Bool
+  var t__3: Ref
+  var t__4: Ref
+  var t__5: Ref
+  var t__6: Ref
+  var t__7: Ref
+  var t__8: Ref
+  var t__9: Ref
+  var t__10: Ref
+  var t__11: Ref
+  var t__12: Ref
+  var t__13: Ref
+  var t__14: Bool
+  var t__15: Ref
+  var t__16: Ref
+  var t__17: Ref
+  var t__18: Ref
+  var t__19: Ref
+  var t__20: Bool
+  var t__21: Ref
+  var t__22: Ref
+  var t__23: Ref
+  var t__24: Ref
+  var t__25: Ref
+  var t__26: Ref
+  var t__27: Ref
+  var t__28: Ref
+  var t__29: Ref
+  var t__30: Ref
+  var t__31: Ref
+  var t__32: Ref
+  var t__33: Ref
+  var t__34: Ref
+  var t__35: Ref
+  var t__36: Ref
+  var t__37: Ref
+  var t__38: Ref
+  var t__39: Ref
+  eb_0 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (lvloc(block_of(eb_0)) != lvloc(block_of(loc(GB_g__0(), 0))))
+  t__0 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  held_GB_g__0 := t__0 != null
+  v_i__0 := 0
+  lb_1__0 := null
+  if (perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none) {
+    lb_1__0 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  }
+  if (lvloc(block_of(eb_0)) == lvloc(block_of(loc(GB_g__0(), 0)))) { }
+  if (lvloc(block_of(lb_1__0)) == lvloc(block_of(loc(GB_g__0(), 0)))) { }
+  kl_GB_g__0__0 := perm(lvloc(block_of(loc(GB_g__0(), 0))).lv)
+  kv_GB_g__0__0 := perm(loc(GB_g__0(), 0).v_ptr_struct_0_S)
+  kd_GB_g__0__0 := perm(loc(GB_g__0(), 0).d_ptr_struct_0_S)
+  ds_GB_g__0__0 := false
+  if (kd_GB_g__0__0 > none) {
+    ds_GB_g__0__0 := loc(GB_g__0(), 0).d_ptr_struct_0_S
+  }
+  if (kv_GB_g__0__0 > none) {
+    vs_GB_g__0__0 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  }
+  if ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) {
+    abp_0__0 := (kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null
+  }
+  if (lvloc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null)) == lvloc(block_of(loc(GB_g__0(), 0)))) { }
+  t__1 := (kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null
+  t__2 := !(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)
+  if (!(t__2 ==> (t__1 != null))) {
+    assert false
+  }
+  if (!(t__2 ==> ((t__1 == null) || (((t__1 == loc(block_of(t__1), offset_of(t__1))) && (0 <= offset_of(t__1))) && (offset_of(t__1) <= len(block_of(t__1))))))) {
+    assert false
+  }
+  if (!(t__2 ==> (!((perm(loc(block_of(t__1), (-1)).tok) != write) || (!loc(block_of(t__1), (-1)).tok))))) {
+    assert false
+  }
+  if (!(t__2 ==> (offset_of(t__1) == 0))) {
+    assert false
+  }
+  if (!(t__2 ==> (lvloc(block_of(t__1)) == loc(block_of(t__1), (-2))))) {
+    assert false
+  }
+  if (!(t__2 ==> (perm(lvloc(block_of(t__1)).lv) == write))) {
+    assert false
+  }
+  if (!(t__2 ==> ((len(block_of(t__1)) == 1) && ((len(member(t__1, 0)) == 4) && (len(member(t__1, 1)) == 1))))) {
+    assert false
+  }
+  if (!(t__2 ==> (!((perm(loc(member(t__1, 1), 0).v_int) != write) || (perm(loc(member(t__1, 1), 0).d_int) != write))))) {
+    assert false
+  }
+  if (!(t__2 ==> (loc(member(t__1, 1), 0).d_int ==> (((-2147483648) <= loc(member(t__1, 1), 0).v_int) && (loc(member(t__1, 1), 0).v_int <= 2147483647))))) {
+    assert false
+  }
+  if (t__2) {
+    t__3 := loc(member(t__1, 0), 0)
+  }
+  if (t__2) {
+    assert forall k: Int :: { loc(block_of(t__3), k) } ((offset_of(t__3) <= k) && (k < (offset_of(t__3) + 4))) ==> acc(loc(block_of(t__3), k).v_int)
+  }
+  if (t__2) {
+    t__4 := loc(member(t__1, 0), 0)
+  }
+  if (t__2) {
+    assert forall k: Int :: { loc(block_of(t__4), k) } ((offset_of(t__4) <= k) && (k < (offset_of(t__4) + 4))) ==> acc(loc(block_of(t__4), k).d_int)
+  }
+  if (t__2) {
+    t__5 := loc(member(t__1, 0), 0)
+  }
+  if (!(t__2 ==> (forall k: Int :: { loc(block_of(t__5), k) } ((offset_of(t__5) <= k) && (k < (offset_of(t__5) + 4))) ==> (loc(block_of(t__5), k).d_int ==> (((-2147483648) <= loc(block_of(t__5), k).v_int) && (loc(block_of(t__5), k).v_int <= 2147483647)))))) {
+    assert false
+  }
+  if (!((t__2 && (t__1 != null)) ==> (lvloc(block_of(t__1)) != lvloc(block_of(loc(GB_g__0(), 0)))))) {
+    assert false
+  }
+  if (!(held_GB_g__0 == (loc(GB_g__0(), 0).v_ptr_struct_0_S != null))) {
+    assert false
+  }
+  wef_0_0__0 := false
+  if (((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && (perm(loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).d_int) > none)) {
+    wef_0_0__0 := loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).d_int
+  }
+  wea_0_0__0 := false
+  if (((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && (perm(loc(member(abp_0__0, 0), 0).d_int) > none)) {
+    wea_0_0__0 := forall k: Int :: { loc(member(abp_0__0, 0), k) } ((0 <= k) && (k < 4)) ==> loc(member(abp_0__0, 0), k).d_int
+  }
+  while (((v_i__0 < 3) ? 1 : 0) != 0)
+    invariant ((-2147483648) <= v_i__0) && (v_i__0 <= 2147483647)
+    invariant acc(loc(GB_g__0(), 0).v_ptr_struct_0_S, kv_GB_g__0__0) && acc(loc(GB_g__0(), 0).d_ptr_struct_0_S, kd_GB_g__0__0)
+    invariant acc(lvloc(block_of(loc(GB_g__0(), 0))).lv, kl_GB_g__0__0)
+    invariant ((none < kv_GB_g__0__0) && (kv_GB_g__0__0 < write)) ==> (loc(GB_g__0(), 0).v_ptr_struct_0_S == vs_GB_g__0__0)
+    invariant (((kv_GB_g__0__0 > none) && (kd_GB_g__0__0 > none)) && loc(GB_g__0(), 0).d_ptr_struct_0_S) ==> (((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))))) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) < len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))) ==> ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1))))
+    invariant ((kd_GB_g__0__0 > none) && ds_GB_g__0__0) ==> loc(GB_g__0(), 0).d_ptr_struct_0_S
+    invariant (!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) ==> (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (acc(loc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null), (-1)).tok) && loc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null), (-1)).tok)
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (acc(loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).v_int) && acc(loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).d_int))
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> acc(lvloc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null)).lv)
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == abp_0__0)
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (forall k: Int :: { loc(member(abp_0__0, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(abp_0__0, 0), k).v_int))
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (forall k: Int :: { loc(member(abp_0__0, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(abp_0__0, 0), k).d_int))
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (((offset_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == 0) && (lvloc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null)) == loc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null), (-2)))) && ((len(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null)) == 1) && ((len(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 0)) == 4) && (len(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1)) == 1))))
+    invariant (((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).d_int) ==> (((-2147483648) <= loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).v_int) && (loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).v_int <= 2147483647))
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (forall k: Int :: { loc(member(abp_0__0, 0), k) } ((0 <= k) && (k < 4)) ==> (loc(member(abp_0__0, 0), k).d_int ==> (((-2147483648) <= loc(member(abp_0__0, 0), k).v_int) && (loc(member(abp_0__0, 0), k).v_int <= 2147483647))))
+    invariant ((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) ==> (lvloc(block_of(abp_0__0)) != lvloc(block_of(loc(GB_g__0(), 0))))
+    invariant held_GB_g__0 == (loc(GB_g__0(), 0).v_ptr_struct_0_S != null)
+    invariant (((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && wef_0_0__0) ==> loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).d_int
+    invariant (((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && wea_0_0__0) ==> (forall k: Int :: { loc(member(abp_0__0, 0), k) } ((0 <= k) && (k < 4)) ==> loc(member(abp_0__0, 0), k).d_int)
+    invariant (((((0 <= v_i__0) ? 1 : 0) != 0) && (((v_i__0 <= 3) ? 1 : 0) != 0)) ? 1 : 0) != 0
+    invariant ((((((0 <= v_i__0) ? 1 : 0) != 0) && (((v_i__0 <= 3) ? 1 : 0) != 0)) ? 1 : 0) != 0) ==> (!(((3 - v_i__0) < (-2147483648)) || (2147483647 < (3 - v_i__0))))
+    decreases 3 - v_i__0
+  {
+    ab_q0__0 := (kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null
+    if (lvloc(block_of(ab_q0__0)) == lvloc(block_of(loc(GB_g__0(), 0)))) { }
+    assert loc(GB_g__0(), 0) != null
+    assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none
+    assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+    t__6 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+    if (t__6 == lb_1__0) { }
+    assert (!(t__6 == null)) ==> ((t__6 == null) || (((t__6 == loc(block_of(t__6), offset_of(t__6))) && (0 <= offset_of(t__6))) && (offset_of(t__6) <= len(block_of(t__6)))))
+    assert (!(t__6 == null)) ==> (!((perm(loc(block_of(t__6), (-1)).tok) != write) || (!loc(block_of(t__6), (-1)).tok)))
+    assert (!(t__6 == null)) ==> (offset_of(t__6) == 0)
+    assert (!(t__6 == null)) ==> (lvloc(block_of(t__6)) == loc(block_of(t__6), (-2)))
+    assert (!(t__6 == null)) ==> (perm(lvloc(block_of(t__6)).lv) == write)
+    assert (!(t__6 == null)) ==> ((len(block_of(t__6)) == 1) && ((len(member(t__6, 0)) == 4) && (len(member(t__6, 1)) == 1)))
+    assert (!(t__6 == null)) ==> (!((perm(loc(member(t__6, 1), 0).v_int) != write) || (perm(loc(member(t__6, 1), 0).d_int) != write)))
+    assert (!(t__6 == null)) ==> (loc(member(t__6, 1), 0).d_int ==> (((-2147483648) <= loc(member(t__6, 1), 0).v_int) && (loc(member(t__6, 1), 0).v_int <= 2147483647)))
+    if (!(t__6 == null)) {
+      t__7 := loc(member(t__6, 0), 0)
+    }
+    if (!(t__6 == null)) {
+      assert forall k: Int :: { loc(block_of(t__7), k) } ((offset_of(t__7) <= k) && (k < (offset_of(t__7) + 4))) ==> acc(loc(block_of(t__7), k).v_int)
+    }
+    if (!(t__6 == null)) {
+      t__8 := loc(member(t__6, 0), 0)
+    }
+    if (!(t__6 == null)) {
+      assert forall k: Int :: { loc(block_of(t__8), k) } ((offset_of(t__8) <= k) && (k < (offset_of(t__8) + 4))) ==> acc(loc(block_of(t__8), k).d_int)
+    }
+    if (!(t__6 == null)) {
+      t__9 := loc(member(t__6, 0), 0)
+    }
+    assert (!(t__6 == null)) ==> (forall k: Int :: { loc(block_of(t__9), k) } ((offset_of(t__9) <= k) && (k < (offset_of(t__9) + 4))) ==> (loc(block_of(t__9), k).d_int ==> (((-2147483648) <= loc(block_of(t__9), k).v_int) && (loc(block_of(t__9), k).v_int <= 2147483647))))
+    f_free__1(t__6)
+    held_GB_g__0 := (held_GB_g__0 && (perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none)) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) == 0)) && (perm(loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok) > none))
+    t__10 := f_calloc__2()
+    held_GB_g__0 := (held_GB_g__0 && (perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none)) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) == 0)) && (perm(loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok) > none))
+    assert (t__10 != null) ==> (!((!((perm(lvloc(block_of(t__10)).lv) > none) || (lvloc(block_of(t__10)) == lvloc(GB_g__0())))) || (!(((t__10 == null) || (((t__10 == loc(block_of(t__10), offset_of(t__10))) && (0 <= offset_of(t__10))) && (offset_of(t__10) <= len(block_of(t__10))))) && (((t__10 != null) && (offset_of(t__10) < len(block_of(t__10)))) ==> ((len(member(t__10, 0)) == 4) && (len(member(t__10, 1)) == 1)))))))
+    t__11 := loc(GB_g__0(), 0)
+    assert t__11 != null
+    assert !((perm(t__11.v_ptr_struct_0_S) != write) || (perm(t__11.d_ptr_struct_0_S) != write))
+    t__12 := t__10
+    if (!(held_GB_g__0 ==> (loc(GB_g__0(), 0).v_ptr_struct_0_S == t__12))) {
+      assert false
+    }
+    if (!((t__12 != null) ==> ((offset_of(t__12) == 0) && (perm(loc(block_of(t__12), (-1)).tok) == write)))) {
+      assert false
+    }
+    t__11.v_ptr_struct_0_S := t__12
+    t__11.d_ptr_struct_0_S := true
+    held_GB_g__0 := t__12 != null
+    assert !(((v_i__0 + 1) < (-2147483648)) || (2147483647 < (v_i__0 + 1)))
+    v_i__0 := v_i__0 + 1
+    assert !(((perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) < kv_GB_g__0__0) || (perm(loc(GB_g__0(), 0).d_ptr_struct_0_S) < kd_GB_g__0__0)) || (perm(lvloc(block_of(loc(GB_g__0(), 0))).lv) < kl_GB_g__0__0))
+    t__13 := (kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null
+    t__14 := !(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)
+    if (!(t__14 ==> (t__13 != null))) {
+      assert false
+    }
+    if (!(t__14 ==> ((t__13 == null) || (((t__13 == loc(block_of(t__13), offset_of(t__13))) && (0 <= offset_of(t__13))) && (offset_of(t__13) <= len(block_of(t__13))))))) {
+      assert false
+    }
+    if (!(t__14 ==> (!((perm(loc(block_of(t__13), (-1)).tok) != write) || (!loc(block_of(t__13), (-1)).tok))))) {
+      assert false
+    }
+    if (!(t__14 ==> (offset_of(t__13) == 0))) {
+      assert false
+    }
+    if (!(t__14 ==> (lvloc(block_of(t__13)) == loc(block_of(t__13), (-2))))) {
+      assert false
+    }
+    if (!(t__14 ==> (perm(lvloc(block_of(t__13)).lv) == write))) {
+      assert false
+    }
+    if (!(t__14 ==> ((len(block_of(t__13)) == 1) && ((len(member(t__13, 0)) == 4) && (len(member(t__13, 1)) == 1))))) {
+      assert false
+    }
+    if (!(t__14 ==> (!((perm(loc(member(t__13, 1), 0).v_int) != write) || (perm(loc(member(t__13, 1), 0).d_int) != write))))) {
+      assert false
+    }
+    if (!(t__14 ==> (loc(member(t__13, 1), 0).d_int ==> (((-2147483648) <= loc(member(t__13, 1), 0).v_int) && (loc(member(t__13, 1), 0).v_int <= 2147483647))))) {
+      assert false
+    }
+    if (t__14) {
+      t__15 := loc(member(t__13, 0), 0)
+    }
+    if (t__14) {
+      assert forall k: Int :: { loc(block_of(t__15), k) } ((offset_of(t__15) <= k) && (k < (offset_of(t__15) + 4))) ==> acc(loc(block_of(t__15), k).v_int)
+    }
+    if (t__14) {
+      t__16 := loc(member(t__13, 0), 0)
+    }
+    if (t__14) {
+      assert forall k: Int :: { loc(block_of(t__16), k) } ((offset_of(t__16) <= k) && (k < (offset_of(t__16) + 4))) ==> acc(loc(block_of(t__16), k).d_int)
+    }
+    if (t__14) {
+      t__17 := loc(member(t__13, 0), 0)
+    }
+    if (!(t__14 ==> (forall k: Int :: { loc(block_of(t__17), k) } ((offset_of(t__17) <= k) && (k < (offset_of(t__17) + 4))) ==> (loc(block_of(t__17), k).d_int ==> (((-2147483648) <= loc(block_of(t__17), k).v_int) && (loc(block_of(t__17), k).v_int <= 2147483647)))))) {
+      assert false
+    }
+    if (t__14 && (t__13 != null)) {
+      abp_0__0 := t__13
+    }
+    if (!((t__14 && (t__13 != null)) ==> (lvloc(block_of(t__13)) != lvloc(block_of(loc(GB_g__0(), 0)))))) {
+      assert false
+    }
+    if (!(held_GB_g__0 == (loc(GB_g__0(), 0).v_ptr_struct_0_S != null))) {
+      assert false
+    }
+    if (!((((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && wef_0_0__0) ==> loc(member((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null, 1), 0).d_int)) {
+      assert false
+    }
+    if (((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && wea_0_0__0) {
+      t__18 := loc(member(abp_0__0, 0), 0)
+    }
+    if (!((((!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)) && wea_0_0__0) ==> (forall k: Int :: { loc(block_of(t__18), k) } ((offset_of(t__18) <= k) && (k < (offset_of(t__18) + 4))) ==> loc(block_of(t__18), k).d_int))) {
+      assert false
+    }
+    t__19 := (kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null
+    t__20 := (!(((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) == null)) && (((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null) != null)
+    assert forperm t: Ref [t.tok] :: t__20 && (t == loc(block_of(t__19), (-1)))
+  }
+  if (lvloc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null)) == lvloc(block_of(loc(GB_g__0(), 0)))) { }
+  if (lvloc(block_of((kv_GB_g__0__0 > none) ? loc(GB_g__0(), 0).v_ptr_struct_0_S : null)) == lvloc(block_of(loc(GB_g__0(), 0)))) { }
+  assert loc(GB_g__0(), 0) != null
+  assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none
+  assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+  t__21 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  assert (t__21 != null) ==> ((perm(lvloc(block_of(t__21)).lv) > none) || (lvloc(block_of(t__21)) == lvloc(GB_g__0())))
+  if (((t__21 == null) ? 1 : 0) != 0) {
+    assert loc(GB_g__0(), 0) != null
+    assert (loc(GB_g__0(), 0) == null) || (((loc(GB_g__0(), 0) == loc(block_of(loc(GB_g__0(), 0)), offset_of(loc(GB_g__0(), 0)))) && (0 <= offset_of(loc(GB_g__0(), 0)))) && (offset_of(loc(GB_g__0(), 0)) <= len(block_of(loc(GB_g__0(), 0)))))
+    assert offset_of(loc(GB_g__0(), 0)) < len(block_of(loc(GB_g__0(), 0)))
+    assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) == write
+    assert perm(loc(GB_g__0(), 0).d_ptr_struct_0_S) == write
+    assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+    assert ((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))))) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) < len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))) ==> ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1)))
+    assert perm(lvloc(block_of(loc(GB_g__0(), 0))).lv) >= amt_0
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (loc(GB_g__0(), 0).v_ptr_struct_0_S != null)
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> ((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))))
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (!((perm(loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok) != write) || (!loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok)))
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) == 0)
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-2)))
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (perm(lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)).lv) == write)
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> ((len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == 1) && ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1)))
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (!((perm(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int) != write) || (perm(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int) != write)))
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int ==> (((-2147483648) <= loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int <= 2147483647)))
+    if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+      t__22 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+    }
+    if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+      assert forall k: Int :: { loc(block_of(t__22), k) } ((offset_of(t__22) <= k) && (k < (offset_of(t__22) + 4))) ==> acc(loc(block_of(t__22), k).v_int)
+    }
+    if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+      t__23 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+    }
+    if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+      assert forall k: Int :: { loc(block_of(t__23), k) } ((offset_of(t__23) <= k) && (k < (offset_of(t__23) + 4))) ==> acc(loc(block_of(t__23), k).d_int)
+    }
+    if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+      t__24 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+    }
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (forall k: Int :: { loc(block_of(t__24), k) } ((offset_of(t__24) <= k) && (k < (offset_of(t__24) + 4))) ==> loc(block_of(t__24), k).d_int)
+    if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+      t__25 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+    }
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (forall k: Int :: { loc(block_of(t__25), k) } ((offset_of(t__25) <= k) && (k < (offset_of(t__25) + 4))) ==> (loc(block_of(t__25), k).d_int ==> (((-2147483648) <= loc(block_of(t__25), k).v_int) && (loc(block_of(t__25), k).v_int <= 2147483647))))
+    assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) != lvloc(block_of(loc(GB_g__0(), 0))))
+    goto l_end
+  }
+  assert loc(GB_g__0(), 0) != null
+  assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none
+  assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+  t__26 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  assert t__26 != null
+  t__27 := loc(member(t__26, 1), 0)
+  assert !((perm(t__27.v_int) != write) || (perm(t__27.d_int) != write))
+  t__27.v_int := 0
+  t__27.d_int := true
+  assert loc(GB_g__0(), 0) != null
+  assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none
+  assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+  t__28 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  assert t__28 != null
+  assert !((0 < 0) || (len(member(t__28, 0)) <= 0))
+  t__29 := loc(member(t__28, 0), 0)
+  assert !((perm(t__29.v_int) != write) || (perm(t__29.d_int) != write))
+  t__29.v_int := 0
+  t__29.d_int := true
+  assert loc(GB_g__0(), 0) != null
+  assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none
+  assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+  t__30 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  assert t__30 != null
+  assert !((1 < 0) || (len(member(t__30, 0)) <= 1))
+  t__31 := loc(member(t__30, 0), 1)
+  assert !((perm(t__31.v_int) != write) || (perm(t__31.d_int) != write))
+  t__31.v_int := 0
+  t__31.d_int := true
+  assert loc(GB_g__0(), 0) != null
+  assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none
+  assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+  t__32 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  assert t__32 != null
+  assert !((2 < 0) || (len(member(t__32, 0)) <= 2))
+  t__33 := loc(member(t__32, 0), 2)
+  assert !((perm(t__33.v_int) != write) || (perm(t__33.d_int) != write))
+  t__33.v_int := 0
+  t__33.d_int := true
+  assert loc(GB_g__0(), 0) != null
+  assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) > none
+  assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+  t__34 := loc(GB_g__0(), 0).v_ptr_struct_0_S
+  assert t__34 != null
+  assert !((3 < 0) || (len(member(t__34, 0)) <= 3))
+  t__35 := loc(member(t__34, 0), 3)
+  assert !((perm(t__35.v_int) != write) || (perm(t__35.d_int) != write))
+  t__35.v_int := 0
+  t__35.d_int := true
+  assert loc(GB_g__0(), 0) != null
+  assert (loc(GB_g__0(), 0) == null) || (((loc(GB_g__0(), 0) == loc(block_of(loc(GB_g__0(), 0)), offset_of(loc(GB_g__0(), 0)))) && (0 <= offset_of(loc(GB_g__0(), 0)))) && (offset_of(loc(GB_g__0(), 0)) <= len(block_of(loc(GB_g__0(), 0)))))
+  assert offset_of(loc(GB_g__0(), 0)) < len(block_of(loc(GB_g__0(), 0)))
+  assert perm(loc(GB_g__0(), 0).v_ptr_struct_0_S) == write
+  assert perm(loc(GB_g__0(), 0).d_ptr_struct_0_S) == write
+  assert loc(GB_g__0(), 0).d_ptr_struct_0_S
+  assert ((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))))) && (((loc(GB_g__0(), 0).v_ptr_struct_0_S != null) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) < len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))) ==> ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1)))
+  assert perm(lvloc(block_of(loc(GB_g__0(), 0))).lv) >= amt_0
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (loc(GB_g__0(), 0).v_ptr_struct_0_S != null)
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> ((loc(GB_g__0(), 0).v_ptr_struct_0_S == null) || (((loc(GB_g__0(), 0).v_ptr_struct_0_S == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (0 <= offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S))) && (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) <= len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)))))
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (!((perm(loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok) != write) || (!loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1)).tok)))
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) == 0)
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-2)))
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (perm(lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)).lv) == write)
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> ((len(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) == 1) && ((len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0)) == 4) && (len(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1)) == 1)))
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (!((perm(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int) != write) || (perm(loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int) != write)))
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).d_int ==> (((-2147483648) <= loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int) && (loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 1), 0).v_int <= 2147483647)))
+  if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+    t__36 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+  }
+  if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+    assert forall k: Int :: { loc(block_of(t__36), k) } ((offset_of(t__36) <= k) && (k < (offset_of(t__36) + 4))) ==> acc(loc(block_of(t__36), k).v_int)
+  }
+  if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+    t__37 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+  }
+  if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+    assert forall k: Int :: { loc(block_of(t__37), k) } ((offset_of(t__37) <= k) && (k < (offset_of(t__37) + 4))) ==> acc(loc(block_of(t__37), k).d_int)
+  }
+  if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+    t__38 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+  }
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (forall k: Int :: { loc(block_of(t__38), k) } ((offset_of(t__38) <= k) && (k < (offset_of(t__38) + 4))) ==> loc(block_of(t__38), k).d_int)
+  if (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) {
+    t__39 := loc(member(loc(GB_g__0(), 0).v_ptr_struct_0_S, 0), 0)
+  }
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (forall k: Int :: { loc(block_of(t__39), k) } ((offset_of(t__39) <= k) && (k < (offset_of(t__39) + 4))) ==> (loc(block_of(t__39), k).d_int ==> (((-2147483648) <= loc(block_of(t__39), k).v_int) && (loc(block_of(t__39), k).v_int <= 2147483647))))
+  assert (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) ==> (lvloc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S)) != lvloc(block_of(loc(GB_g__0(), 0))))
+  label l_end
+  assert forperm t: Ref [t.tok] :: (!(loc(GB_g__0(), 0).v_ptr_struct_0_S == null)) && ((offset_of(loc(GB_g__0(), 0).v_ptr_struct_0_S) == 0) && (t == loc(block_of(loc(GB_g__0(), 0).v_ptr_struct_0_S), (-1))))
+}
+
+// C/C++ function `free`
+// cerastes:trusted-contract vlibc: free ends the allocation ptr is the start of; free(NULL) does nothing (C23 7.24.3.3); typed view: one struct S (20 bytes), decision 0047
+method f_free__1(p_ptr__0: Ref)
+  requires (len(GB_g__0()) == 1) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))
+  requires ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))) && (((p_ptr__0 != null) && (offset_of(p_ptr__0) < len(block_of(p_ptr__0)))) ==> ((len(member(p_ptr__0, 0)) == 4) && (len(member(p_ptr__0, 1)) == 1)))
+  requires (!(p_ptr__0 == null)) ==> ((((((((((((((p_ptr__0 != null) && ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0)))))) && (offset_of(p_ptr__0) == 0)) && acc(loc(block_of(p_ptr__0), (-1)).tok)) && loc(block_of(p_ptr__0), (-1)).tok) && (lvloc(block_of(p_ptr__0)) == loc(block_of(p_ptr__0), (-2)))) && acc(lvloc(block_of(p_ptr__0)).lv)) && ((len(block_of(p_ptr__0)) == 1) && ((len(member(p_ptr__0, 0)) == 4) && (len(member(p_ptr__0, 1)) == 1)))) && acc(loc(member(p_ptr__0, 1), 0).v_int)) && acc(loc(member(p_ptr__0, 1), 0).d_int)) && (loc(member(p_ptr__0, 1), 0).d_int ==> (((-2147483648) <= loc(member(p_ptr__0, 1), 0).v_int) && (loc(member(p_ptr__0, 1), 0).v_int <= 2147483647)))) && (forall k: Int :: { loc(member(p_ptr__0, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(p_ptr__0, 0), k).v_int))) && (forall k: Int :: { loc(member(p_ptr__0, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(p_ptr__0, 0), k).d_int))) && (forall k: Int :: { loc(member(p_ptr__0, 0), k) } ((0 <= k) && (k < 4)) ==> (loc(member(p_ptr__0, 0), k).d_int ==> (((-2147483648) <= loc(member(p_ptr__0, 0), k).v_int) && (loc(member(p_ptr__0, 0), k).v_int <= 2147483647)))))
+  decreases _
+
+// C/C++ function `calloc`
+// cerastes:trusted-contract vlibc: calloc returns NULL or the start of a new allocation of nmemb * size bytes, all zero (C23 7.24.3.2); typed view: one struct S (20 bytes), decision 0047
+method f_calloc__2() returns (res: Ref)
+  requires (len(GB_g__0()) == 1) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))
+  ensures (!(res == null)) ==> (((((((((((((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))) && acc(loc(member(res, 1), 0).v_int)) && acc(loc(member(res, 1), 0).d_int)) && (loc(member(res, 1), 0).d_int ==> (((-2147483648) <= loc(member(res, 1), 0).v_int) && (loc(member(res, 1), 0).v_int <= 2147483647)))) && loc(member(res, 1), 0).d_int) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(res, 0), k).v_int))) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(res, 0), k).d_int))) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> (loc(member(res, 0), k).d_int ==> (((-2147483648) <= loc(member(res, 0), k).v_int) && (loc(member(res, 0), k).v_int <= 2147483647))))) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> loc(member(res, 0), k).d_int)) && ((((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 0))) ? loc(member(res, 0), 0).v_int : (((!(res == null)) && (((block_of(loc(member(res, 0), 0)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 0)))) && (offset_of(loc(member(res, 0), 0)) < (offset_of(loc(member(res, 0), 0)) + 4)))) ? loc(member(res, 0), 0).v_int : 0)) == 0)) && ((((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 1))) ? loc(member(res, 0), 1).v_int : (((!(res == null)) && (((block_of(loc(member(res, 0), 1)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 1)))) && (offset_of(loc(member(res, 0), 1)) < (offset_of(loc(member(res, 0), 0)) + 4)))) ? loc(member(res, 0), 1).v_int : 0)) == 0)) && ((((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 2))) ? loc(member(res, 0), 2).v_int : (((!(res == null)) && (((block_of(loc(member(res, 0), 2)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 2)))) && (offset_of(loc(member(res, 0), 2)) < (offset_of(loc(member(res, 0), 0)) + 4)))) ? loc(member(res, 0), 2).v_int : 0)) == 0)) && ((((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 3))) ? loc(member(res, 0), 3).v_int : (((!(res == null)) && (((block_of(loc(member(res, 0), 3)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 3)))) && (offset_of(loc(member(res, 0), 3)) < (offset_of(loc(member(res, 0), 0)) + 4)))) ? loc(member(res, 0), 3).v_int : 0)) == 0)) && (loc(member(res, 1), 0).v_int == 0))
+  decreases _
+
+// well-formedness of the contract of C/C++ function `f`
+method f_f__0__wf(amt_0: Perm, hv_g0_pre: Ref, hv_g0_post: Ref)
+  requires (len(GB_g__0()) == 1) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))
+  requires (none < amt_0) && (amt_0 < write)
+  requires ((hv_g0_pre == null) || (((hv_g0_pre == loc(block_of(hv_g0_pre), offset_of(hv_g0_pre))) && (0 <= offset_of(hv_g0_pre))) && (offset_of(hv_g0_pre) <= len(block_of(hv_g0_pre))))) && (((hv_g0_pre != null) && (offset_of(hv_g0_pre) < len(block_of(hv_g0_pre)))) ==> ((len(member(hv_g0_pre, 0)) == 4) && (len(member(hv_g0_pre, 1)) == 1)))
+  requires ((hv_g0_post == null) || (((hv_g0_post == loc(block_of(hv_g0_post), offset_of(hv_g0_post))) && (0 <= offset_of(hv_g0_post))) && (offset_of(hv_g0_post) <= len(block_of(hv_g0_post))))) && (((hv_g0_post != null) && (offset_of(hv_g0_post) < len(block_of(hv_g0_post)))) ==> ((len(member(hv_g0_post, 0)) == 4) && (len(member(hv_g0_post, 1)) == 1)))
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+
+// well-formedness of the contract of C/C++ function `free`
+method f_free__1__wf(p_ptr__0: Ref)
+  requires (len(GB_g__0()) == 1) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))
+  requires ((p_ptr__0 == null) || (((p_ptr__0 == loc(block_of(p_ptr__0), offset_of(p_ptr__0))) && (0 <= offset_of(p_ptr__0))) && (offset_of(p_ptr__0) <= len(block_of(p_ptr__0))))) && (((p_ptr__0 != null) && (offset_of(p_ptr__0) < len(block_of(p_ptr__0)))) ==> ((len(member(p_ptr__0, 0)) == 4) && (len(member(p_ptr__0, 1)) == 1)))
+  decreases
+{
+  // the contract has nothing that can be undefined
+}
+
+// well-formedness of the contract of C/C++ function `calloc`
+method f_calloc__2__wf(res: Ref, hv_r_m1_post: Int, hv_e0_post: Int, hv_e1_post: Int, hv_e2_post: Int, hv_e3_post: Int)
+  requires (len(GB_g__0()) == 1) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))
+  requires ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))
+  requires ((-2147483648) <= hv_r_m1_post) && (hv_r_m1_post <= 2147483647)
+  requires ((-2147483648) <= hv_e0_post) && (hv_e0_post <= 2147483647)
+  requires ((-2147483648) <= hv_e1_post) && (hv_e1_post <= 2147483647)
+  requires ((-2147483648) <= hv_e2_post) && (hv_e2_post <= 2147483647)
+  requires ((-2147483648) <= hv_e3_post) && (hv_e3_post <= 2147483647)
+  requires (loc(member(res, 1), 0) == loc(member(res, 0), 0)) ==> (hv_r_m1_post == hv_e0_post)
+  requires (loc(member(res, 1), 0) == loc(member(res, 0), 1)) ==> (hv_r_m1_post == hv_e1_post)
+  requires (loc(member(res, 1), 0) == loc(member(res, 0), 2)) ==> (hv_r_m1_post == hv_e2_post)
+  requires (loc(member(res, 1), 0) == loc(member(res, 0), 3)) ==> (hv_r_m1_post == hv_e3_post)
+  requires (loc(member(res, 0), 0) == loc(member(res, 0), 1)) ==> (hv_e0_post == hv_e1_post)
+  requires (loc(member(res, 0), 0) == loc(member(res, 0), 2)) ==> (hv_e0_post == hv_e2_post)
+  requires (loc(member(res, 0), 0) == loc(member(res, 0), 3)) ==> (hv_e0_post == hv_e3_post)
+  requires (loc(member(res, 0), 1) == loc(member(res, 0), 2)) ==> (hv_e1_post == hv_e2_post)
+  requires (loc(member(res, 0), 1) == loc(member(res, 0), 3)) ==> (hv_e1_post == hv_e3_post)
+  requires (loc(member(res, 0), 2) == loc(member(res, 0), 3)) ==> (hv_e2_post == hv_e3_post)
+  decreases
+{
+  assert ((!(res == null)) && (((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1))))) ==> (((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 0))) || ((!(res == null)) && (((block_of(loc(member(res, 0), 0)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 0)))) && (offset_of(loc(member(res, 0), 0)) < (offset_of(loc(member(res, 0), 0)) + 4)))))
+  assert ((!(res == null)) && ((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))) && (hv_e0_post == 0))) ==> (((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 1))) || ((!(res == null)) && (((block_of(loc(member(res, 0), 1)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 1)))) && (offset_of(loc(member(res, 0), 1)) < (offset_of(loc(member(res, 0), 0)) + 4)))))
+  assert ((!(res == null)) && (((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))) && (hv_e0_post == 0)) && (hv_e1_post == 0))) ==> (((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 2))) || ((!(res == null)) && (((block_of(loc(member(res, 0), 2)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 2)))) && (offset_of(loc(member(res, 0), 2)) < (offset_of(loc(member(res, 0), 0)) + 4)))))
+  assert ((!(res == null)) && ((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))) && (hv_e0_post == 0)) && (hv_e1_post == 0)) && (hv_e2_post == 0))) ==> (((!(res == null)) && (loc(member(res, 1), 0) == loc(member(res, 0), 3))) || ((!(res == null)) && (((block_of(loc(member(res, 0), 3)) == block_of(loc(member(res, 0), 0))) && (offset_of(loc(member(res, 0), 0)) <= offset_of(loc(member(res, 0), 3)))) && (offset_of(loc(member(res, 0), 3)) < (offset_of(loc(member(res, 0), 0)) + 4)))))
+}

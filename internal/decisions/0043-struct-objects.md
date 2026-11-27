@@ -261,6 +261,9 @@ under the attribute); a C23 compatible
       pointer to a structure with a leaf of field `T` at any depth (`struct S **`, a struct with a `struct S *` leaf, a
       `struct S *` global; audit round 2, S1: `&(*pp)->x` is an `int *` not based on `p`), since a pointer loaded from
       there is not based on `p`.
+    - **(Amended by record 0064 item 19, M4.5e1e2:** these conditions look at the contract only and do not keep
+      `restrict`'s promise (a body can reach the object by another name). The item as rewritten on 2026-11-26
+      (question 326) withdraws the acceptance: every `restrict` parameter is rejected.**)**
 11. **Loops** (amends 0038 item 3). Every leaf of every struct object in scope, and every leaf of a held struct place of a
     parameter, is an automatic place of its field, with its own value, flag and range rows. The liveness rows are written
     once per distinct liveness cell (one per root block, under 0038's guard `lvloc(block_of(a)) != lvloc(block_of(b))`

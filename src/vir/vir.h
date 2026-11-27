@@ -240,6 +240,15 @@ struct StructLeaf
     unsigned long long count {0U};
     // struct_value_leaves only: the index of this element in the array member at `path` (`text` is `member[elem]`); -1 for every other leaf
     int elem {-1};
+    // struct_value_leaves only, decision 0064 item 12 (Part C2): an element leaf of a member that is an ARRAY OF STRUCTURES: `path` is the member path through the array member down to the
+    // element's leaf (`{v, x}`, a nested structure's members after it), `elem` the element's index, `index_after` the number of members of `path` before the index step (the array member's
+    // position in `path` plus one; -1 for every other leaf, whose index step, when it has one, is last); `text` is `t.v[i].x`
+    int index_after {-1};
+    // Decision 0064 item 4 (M4.5e1e2 part A): the member is an array whose ELEMENT is a structure or an array.  None of the three views above has a leaf for it: struct_leaves and
+    // struct_object_leaves return it as the one leaf of the array's type (the object view with `array` true and `element` the aggregate), struct_value_leaves as one leaf of the array's
+    // type (no expansion).  Every consumer of the three views reports an internal error on such a leaf (lowering's guarded `object_leaves`, `value_leaves` and `leaves_of`) until its
+    // part gives the site `object_leaf_paths`.
+    bool aggregate_element {false};
 };
 // The leaves of `s` in declaration order, depth first (a nested struct's leaves in place).  `text` is `root_text` followed by `.name` for each
 // member on the way (`->name` for the first when `arrow`): struct_leaves(s, "t", false) gives "t.x", "t.u.y", struct_leaves(s, "p", true) "p->x", "p->u.y".
@@ -253,6 +262,43 @@ std::vector<StructLeaf> struct_object_leaves(const StructType& s, const std::str
 // THE VALUE VIEW (decision 0063 items 4 and 13): a struct VALUE is the tuple of these leaves; an array member contributes one leaf per element, in index
 // order (`elem` 0, 1, ...; `type` the element type; `text` `s.a[0]`, `s.a[1]`).  The view of by-value parameters, results, aggregates and copies.
 std::vector<StructLeaf> struct_value_leaves(const StructType& s, const std::string& root_text = "", bool arrow = false);
+// Decision 0064 item 4 (M4.5e1e2 part A): THE LEAF PATHS of an object type, the general view the three above are special cases of.  A leaf is reached by STEPS: a member `k` of a
+// structure, or an index into an array of `count` elements.  An array of structures or arrays is described by its element's paths with the index step before them, ONE PATH PER LEAF
+// whatever its counts (the path stands for `product of its index counts` cells).  `type` is the leaf's cell type (a Bool, an Int or a Ptr, never an aggregate).  For a type that decision 0063
+// accepted this is struct_object_leaves' list: a cell has member steps only, an array leaf member steps and then one index step, and `text` is the same spelling (the trailing index step
+// is not written; an index step that is followed by more steps is written `[]`: `v[].a`).  No path is deeper than the depth the checker allows (64 nested structures at most).
+struct LeafStep
+{
+    enum class Kind
+    {
+        Member,
+        Index
+    };
+    Kind kind {Kind::Member};
+    int member {0};                // Member: the index of the member
+    unsigned long long count {0U}; // Index: the number of elements
+    bool operator==(const LeafStep& o) const
+    {
+        return kind == o.kind && member == o.member && count == o.count;
+    }
+};
+struct LeafPath
+{
+    std::vector<LeafStep> steps;
+    Type type;
+    std::string text;
+    bool owning {false};
+    bool ref_to_uninit {false};
+    // the number of cells the path stands for: the product of its index counts (1 for a cell)
+    unsigned long long cells() const;
+    // the number of index steps
+    size_t indexes() const;
+    // the member indices of its Member steps, in order (struct_object_leaves' `path` for a type that decision 0063 accepted)
+    std::vector<int> members() const;
+};
+// The leaf paths of `t` in declaration order, depth first: a structure's (its members' in place), an array's (its element's, behind one index step), any other type's (one path, no steps).
+// `root_text` and `arrow` as struct_leaves.
+std::vector<LeafPath> object_leaf_paths(const Type& t, const std::string& root_text = "", bool arrow = false);
 // The most array elements a struct VALUE may hold when it is passed or returned by value (decision 0063 item 13, question 309): every element is a Viper formal or result and a write of the
 // entry copy, and Silicon's time grows steeply with the count (the worst shape, a structure in and out by value with a caller that fills and stores it: 6 elements 19 s, 7 elements 25 s, 8
 // elements 35 s, 12 elements 129 s, 16 elements past 120 s).  The one constant: check_program's backstop and the encoder's rejection both read it.  A copy between objects has no limit.
@@ -745,6 +791,9 @@ struct GlobalLeaf
     // an array leaf of a struct global (object view; the fields above are then unused): the listed prefix, and what the rest is (see ArrayRest)
     std::vector<GlobalLeaf> elems;
     ArrayRest rest {ArrayRest::Zero};
+    // decision 0064 item 9 (Part C2): an ELEMENT of an array of structures (an entry of `elems`, the fields above then unused): one entry per leaf of the element structure in
+    // struct_object_leaves order (every leaf, the ones its braced list leaves out as zero; every leaf Unknown when the array's rest is unknown)
+    std::vector<GlobalLeaf> leaves;
 };
 
 struct Global
@@ -826,8 +875,8 @@ struct Param
     Type type;
     SrcLoc loc;
     std::string c_type_name; // the C/C++ spelling of the type, for messages (empty: use type.str())
-    // `T *restrict p` (decision 0037 item 2): accepted only when the `requires` holds `owns(*p)` as a top-level conjunct or as `p == NULL ||
-    // owns(*p)` and the `ensures` returns the same atom; check_program repeats the rule as a backstop (the encoder reports it first).
+    // `T *restrict p`: cerastes does not model `restrict` (decision 0064 item 19, question 326).  The encoder refuses a function that has such a parameter, and check_program
+    // refuses any parameter that carries the flag, as a backstop.
     bool is_restrict {false};
     // `[[cerastes::ref_to_uninit]]` / `[[cerastes::must_init]]` on a pointer parameter (decision 0042 item 4).  Set by the encoder before the
     // contract is read, so a written read of the pointee is rejected there.
@@ -1130,7 +1179,7 @@ std::vector<AtomSite> loop_atoms(const Stmt& s);
 // pointer the invariant reads (a `Local` pointer variable, or a place reached from one or from a global through loads and members), `atom->amount` is -1.
 std::vector<AtomSite> loop_block_atoms(const Stmt& s);
 // The shape of a site's guards for pointer parameter `param`: none (the atom is a top-level conjunct, or an arm of `&&`), exactly `param == NULL` being false
-// (`param == NULL || atom`, with C's `bool_to_int`/`to_bool` wrapping of the comparison accepted), or anything else.  restrict_backed and the encoder's
+// (`param == NULL || atom`, with C's `bool_to_int`/`to_bool` wrapping of the comparison accepted), or anything else.  The encoder's
 // merge of `[[cerastes::owning]]` with an explicit atom (decision 0040 item 3) read it.
 enum class GuardShape
 {
@@ -1141,22 +1190,6 @@ enum class GuardShape
 GuardShape atom_guard_shape(const AtomSite& s, int param);
 // The number of ghost amounts of `f` (the atoms of its `requires`).
 int requires_atom_count(const Function& f);
-// Whether `f`'s contract backs `restrict` on parameter `param` (decision 0037 item 2): an `Owns` atom of that parameter in the `requires`, the `Owns`
-// atom with the same `amount` in the `ensures`, and, for EVERY OTHER pointer parameter of the same pointee type, an `Owns` or `Reads` atom of its own
-// in the `requires` (permissions follow cells, not provenance: without it a second pointer to the same cell could be written through).  Each atom is
-// unguarded or guarded by exactly `q == NULL` being false (`q == NULL || owns(*q)`).  Record 0060 item 14: an `OwnsRange` atom of the parameter (and its `ensures` partner of the
-// same kind) backs `restrict` like the `Owns`, and a range atom of another parameter covers it like an `Owns` or `Reads` atom does.  The atoms must already be numbered.  When it is false,
-// `*offender` (if given) is the other parameter that has no atom, or -1 when `param`'s own `owns` is the missing part.
-bool restrict_backed(const Function& f, int param, int* offender = nullptr);
-// Why `restrict` on pointer parameter `param` is refused whatever its contract owns (decision 0043 item 10, audit B2): empty when nothing is in the way.
-// The pointee of `param` is a struct (M8), or another pointer parameter's object or a global that an atom of the contract names can hold a pointer to the same
-// type (`int **`, a struct with an `int *` leaf or struct-pointer leaves that reach one, an `int *` global): a pointer loaded from there is not based on
-// `param`, so a write through it could alias `*param`.  A by-value struct parameter whose leaves can hold such a pointer (an `int *` leaf, or a `struct U *` leaf whose `U`
-// has an `int` leaf, at any depth) is one of those places too (decision 0044 item 11).  restrict_backed is false when this is not empty (the encoder reports it
-// first).  The message names the offender in source terms.  Decision 0045 item 10: an atom whose place is reached through loads or pointer leaves (`*gp`, `**pp`,
-// `*s.q`) is judged by its innermost root (place_root): a global by its type, the result by the function's result type, a Formal by the loop over the parameters;
-// any other root of such a place fails closed.  restrict_backed never counts such an atom (it requires the atom's operand to BE the Formal).
-std::string restrict_hazard(const Function& f, int param);
 // Whether the expression reads the heap: it contains a `Deref`, an `Atom` or an `Apply` (record 0062 item 4: an application counts as a read, whatever its
 // callee reads; an `Old` of one included).
 bool reads_heap(const Expr& e);

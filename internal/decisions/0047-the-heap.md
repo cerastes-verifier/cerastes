@@ -196,7 +196,7 @@ Three facts shape this record (the planning surveys; P72 confirms them):
    - **As an atom elsewhere** (audit N11): a block site on a `ref_to_uninit` (or `must_init`) parameter is that marker's
      atom (0042 item 4: a user `void my_free(int *p CERASTES_REF_TO_UNINIT) CERASTES_REQUIRES(p == NULL ||
      cerastes_owns_block(p))`); a `restrict` parameter whose only atom is a block site is rejected (0037 item 2's
-     `restrict_backed` reads `owns` atoms only; d2b may lift it).
+     `restrict_backed` reads `owns` atoms only; d2b may lift it). **(Withdrawn by record 0064 item 19 as rewritten on 2026-11-26, M4.5e1e2's continuation, question 326: every `restrict` parameter is rejected, and this clause's code is removed.)**
    - **Rejected,** each with its own message: the two-argument form, `cerastes_zeroed` and a `void*` operand outside a
      library file; an operand reached through a load (`owns_block(*pp)`, `owns_block(p->q)`), a global, under `old`, in
      a measure or in a loop invariant (d2b); beside `owns`/`reads`/`live` on the same root, or twice in one clause list;
@@ -401,3 +401,5 @@ Three facts shape this record (the planning surveys; P72 confirms them):
   stands behind them until a user links vlibc's. *(Amended by 0048 item 3, 2026-11-04: the platform's allocator stands
   behind `malloc`'s contract for good; vlibc's verified allocator is `vlibc_malloc`, which a program calls by that name.
   Item 2's shapes are read per allocator, and a block freed by the other allocator is `invalid-free` (0048 item 4).)*
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): items 2, 4, 6, 8 and 10 — `malloc`, `calloc`, `free` and `owns_block` take a structure with array members of scalars (0064 item 15; question 292): the typed view and the block site state the member lengths and hold each array leaf by quantified permissions and flags; `calloc`'s view has one zero clause per element and is accepted only up to 24 value clauses for such a structure (question 354); `free`'s rows are per array part (`invalid-free`); a held block's array part is a place of a loop, in programs where such a block can exist (the gate `array_block_possible`). A structure whose array member holds structures or arrays stays rejected (question 348).*

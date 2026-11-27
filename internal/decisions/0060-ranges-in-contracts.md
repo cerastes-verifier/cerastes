@@ -322,7 +322,10 @@ outcome to the branch of the plan's decision table it took.
 
 14. **`restrict`** (0037 item 2). `restrict_backed` takes `owns_range(p, n)`, unguarded or after `p == NULL ||`, in
     both lists, as the backing atom; every other parameter of the pointee type needs an `owns`, `reads`, `owns_range`
-    or `reads_range` of its own.
+    or `reads_range` of its own. **(Amended by record 0064 item 19, M4.5e1e2, 2026-11-25: a range atom whose
+    count can be 0 holds nothing and excludes nothing, and `restrict` beside such a range verified wrong
+    programs; the first version's "pair rule" still left one form open. The item as rewritten on 2026-11-26
+    (M4.5e1e2's continuation, question 326) withdraws this acceptance: every `restrict` parameter is rejected.)**
 
 15. **Array parameters.** `T a[]` and `T a[N]` are pointer parameters; a written bound is checked as a local array's is
     (0059 item 2) and otherwise ignored; `sizeof` of one is rejected like the compilers (a new tag); the matrix's other

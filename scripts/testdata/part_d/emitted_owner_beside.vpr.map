@@ -1,0 +1,197 @@
+33	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct B`
+33	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct B`
+34	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct B`
+34	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct B`
+35	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct B`
+35	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct B`
+36	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct B`
+36	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct B`
+37	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct B`
+37	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct B`
+38	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct B`
+38	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct B`
+39	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct B`
+39	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	10	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct B`
+44	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	15	6	internal check: well-formedness of the contract of `b_destroy`
+45	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	16	5	internal check: well-formedness of the contract of `b_destroy`
+56	assert.failed	internal	tests/memory/struct_array_owner_beside.c	15	6	internal check: two blocks the contract of `b_destroy` owns are different
+57	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	18	7	uses `b` after the object it points to may have ended
+59	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	19	11	dereferences `b`, which may be null
+60	assert.failed	permission	tests/memory/struct_array_owner_beside.c	19	11	reads `b->p` without owning it: the object it points to may have ended
+61	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	19	11	`b->p` may be read here before it is given a value
+63	assert.failed	internal	tests/memory/struct_array_owner_beside.c	19	9	frees `b->p`, which may not point to an allocation
+64	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	19	9	frees `b->p`, which may already be freed or may not be an allocation (a local, a global or a member)
+65	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	19	9	frees `b->p`, which may not be the start of an allocation
+66	assert.failed	internal	tests/memory/struct_array_owner_beside.c	19	9	the liveness cell of a block is at slot -2
+67	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	19	9	frees `b->p` while a pointer to it may still be in use elsewhere
+68	assert.failed	internal	tests/memory/struct_array_owner_beside.c	19	9	the lengths of a block
+69	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	19	9	frees `b->p` without owning all of it: `*b->p` is not owned here
+70	assert.failed	internal	tests/memory/struct_array_owner_beside.c	19	9	the range of the value under its flag
+71	call.precondition	internal	tests/memory/struct_array_owner_beside.c	19	9	internal check: Silicon's own check of the precondition of `free`
+72	assert.failed	internal	tests/memory/struct_array_owner_beside.c	20	9	frees `b`, which may not point to an allocation
+73	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	20	9	frees `b`, which may already be freed or may not be an allocation (a local, a global or a member)
+74	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	20	9	frees `b`, which may not be the start of an allocation
+75	assert.failed	internal	tests/memory/struct_array_owner_beside.c	20	9	the liveness cell of a block is at slot -2
+76	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	20	9	frees `b` while a pointer to it may still be in use elsewhere
+77	assert.failed	internal	tests/memory/struct_array_owner_beside.c	20	9	the lengths of a block
+78	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	20	9	frees `b` without owning all of it: `b->p` is not owned here
+79	assert.failed	internal	tests/memory/struct_array_owner_beside.c	20	9	the range of the value under its flag
+84	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_beside.c	20	9	frees `b` without owning all of it: `b->a` is not owned here
+90	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_beside.c	20	9	frees `b` without owning all of it: `b->a` is not owned here
+95	assert.failed	internal	tests/memory/struct_array_owner_beside.c	20	9	the range of the value under its flag
+96	call.precondition	internal	tests/memory/struct_array_owner_beside.c	20	9	internal check: Silicon's own check of the precondition of `free`
+99	assert.failed	leak	tests/memory/struct_array_owner_beside.c	22	1	`b_destroy` may return while it still owns an allocation that its `ensures` does not hand back
+104	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	24	5	internal check: well-formedness of the contract of `use`
+104	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	24	5	internal check: Silicon's own check of the postcondition of `use`
+105	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	25	5	internal check: well-formedness of the contract of `use`
+105	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	25	5	internal check: Silicon's own check of the postcondition of `use`
+123	call.precondition	internal	tests/memory/struct_array_owner_beside.c	27	35	internal check: Silicon's own check of the precondition of `calloc`
+124	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	27	35	uses the pointer after the object it points to may have ended
+126	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	28	7	uses `b` after the object it points to may have ended
+128	assert.failed	overflow	tests/memory/struct_array_owner_beside.c	29	12	negating the smallest value of `int` overflows
+130	assert.failed	postcondition	tests/memory/struct_array_owner_beside.c	29	5	the postcondition of `use` may not hold	tests/memory/struct_array_owner_beside.c:25:this is the postcondition
+133	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	31	11	dereferences `b`, which may be null
+134	assert.failed	out-of-bounds	tests/memory/struct_array_owner_beside.c	31	11	writes `b->a[1]`, whose index may be outside `b->a`
+136	assert.failed	permission	tests/memory/struct_array_owner_beside.c	31	11	writes `b->a[1]` without owning it: the object it points to may have ended
+139	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	32	8	dereferences `b`, which may be null
+140	call.precondition	internal	tests/memory/struct_array_owner_beside.c	32	23	internal check: Silicon's own check of the precondition of `malloc`
+141	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	32	23	uses the pointer after the object it points to may have ended
+143	assert.failed	permission	tests/memory/struct_array_owner_beside.c	32	8	writes `b->p` without owning it: the object it points to may have ended
+145	assert.failed	permission	tests/memory/struct_array_owner_beside.c	32	8	owning field `b->p` receives a pointer that is not the start of a block the function holds
+150	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	34	8	dereferences `b`, which may be null
+151	assert.failed	permission	tests/memory/struct_array_owner_beside.c	34	8	reads `b->p` without owning it: the object it points to may have ended
+152	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	34	8	`b->p` may be read here before it is given a value
+154	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	34	8	uses `b->p` after the object it points to may have ended
+156	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	35	7	dereferences `b`, which may be null
+157	assert.failed	permission	tests/memory/struct_array_owner_beside.c	35	7	reads `b->p` without owning it: the object it points to may have ended
+158	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	35	7	`b->p` may be read here before it is given a value
+160	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	35	11	dereferences `b->p`, which may be null
+161	assert.failed	permission	tests/memory/struct_array_owner_beside.c	35	11	writes `*b->p` without owning it: the object it points to may have ended
+164	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	36	11	dereferences `b`, which may be null
+165	assert.failed	permission	tests/memory/struct_array_owner_beside.c	36	11	reads `b->p` without owning it: the object it points to may have ended
+166	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	36	11	`b->p` may be read here before it is given a value
+168	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	36	9	dereferences `b->p`, which may be null
+169	assert.failed	permission	tests/memory/struct_array_owner_beside.c	36	9	reads `*b->p` without owning it: the object it points to may have ended
+170	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	36	9	`*b->p` may be read here before it is given a value
+171	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	36	21	dereferences `b`, which may be null
+172	assert.failed	out-of-bounds	tests/memory/struct_array_owner_beside.c	36	21	reads `b->a[1]`, whose index may be outside `b->a`
+173	assert.failed	permission	tests/memory/struct_array_owner_beside.c	36	21	reads `b->a[1]` without owning it: the object it points to may have ended
+174	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	36	21	`b->a[1]` may be read here before it is given a value
+175	assert.failed	overflow	tests/memory/struct_array_owner_beside.c	36	15	signed `int` addition may overflow
+178	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+179	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+180	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+181	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+182	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	the liveness cell of a block is at slot -2
+183	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+184	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	the lengths of a block
+185	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+186	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs `b->p` to have a value; it may not have one here
+187	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	the range of the value under its flag
+192	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+198	assert.failed[insufficient.permission]	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b` points to, without owning it
+203	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs `b->a` to have a value; it may not have one here
+207	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	the range of the value under its flag
+208	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b->p` points to, without owning it
+209	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b->p` points to, without owning it
+210	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b->p` points to, without owning it
+211	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b->p` points to, without owning it
+212	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	the liveness cell of a block is at slot -2
+213	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b->p` points to, without owning it
+214	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	the lengths of a block
+215	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs to own the whole allocation `b->p` points to, without owning it
+216	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	38	12	calls `b_destroy`, which needs `*b->p` to have a value; it may not have one here
+217	assert.failed	internal	tests/memory/struct_array_owner_beside.c	38	12	the range of the value under its flag
+218	assert.failed	permission	tests/memory/struct_array_owner_beside.c	38	12	passes `b` and `b->p` to `b_destroy`, which needs to own the whole allocation of both, but they may be the same object
+219	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	38	13	uses `b` after the object it points to may have ended
+222	call.precondition	internal	tests/memory/struct_array_owner_beside.c	38	12	internal check: Silicon's own check of the precondition of `b_destroy`
+224	assert.failed	postcondition	tests/memory/struct_array_owner_beside.c	39	3	the postcondition of `use` may not hold	tests/memory/struct_array_owner_beside.c:25:this is the postcondition
+226	assert.failed	missing-return	tests/memory/struct_array_owner_beside.c	40	1	control may reach the end of `use` without returning a value
+228	assert.failed	leak	tests/memory/struct_array_owner_beside.c	40	1	`use` may return while it still owns an allocation that its `ensures` does not hand back
+233	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	42	5	internal check: well-formedness of the contract of `array_after_owned_freed`
+233	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	42	5	internal check: Silicon's own check of the postcondition of `array_after_owned_freed`
+234	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	43	5	internal check: well-formedness of the contract of `array_after_owned_freed`
+234	postcondition.violated	internal	tests/memory/struct_array_owner_beside.c	43	5	internal check: Silicon's own check of the postcondition of `array_after_owned_freed`
+248	call.precondition	internal	tests/memory/struct_array_owner_beside.c	45	35	internal check: Silicon's own check of the precondition of `calloc`
+249	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	45	35	uses the pointer after the object it points to may have ended
+251	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	46	7	uses `b` after the object it points to may have ended
+253	assert.failed	overflow	tests/memory/struct_array_owner_beside.c	47	12	negating the smallest value of `int` overflows
+255	assert.failed	postcondition	tests/memory/struct_array_owner_beside.c	47	5	the postcondition of `array_after_owned_freed` may not hold	tests/memory/struct_array_owner_beside.c:43:this is the postcondition
+258	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	49	11	dereferences `b`, which may be null
+259	assert.failed	out-of-bounds	tests/memory/struct_array_owner_beside.c	49	11	writes `b->a[2]`, whose index may be outside `b->a`
+261	assert.failed	permission	tests/memory/struct_array_owner_beside.c	49	11	writes `b->a[2]` without owning it: the object it points to may have ended
+264	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	50	8	dereferences `b`, which may be null
+265	call.precondition	internal	tests/memory/struct_array_owner_beside.c	50	23	internal check: Silicon's own check of the precondition of `malloc`
+266	assert.failed	lifetime	tests/memory/struct_array_owner_beside.c	50	23	uses the pointer after the object it points to may have ended
+268	assert.failed	permission	tests/memory/struct_array_owner_beside.c	50	8	writes `b->p` without owning it: the object it points to may have ended
+270	assert.failed	permission	tests/memory/struct_array_owner_beside.c	50	8	owning field `b->p` receives a pointer that is not the start of a block the function holds
+274	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	51	9	dereferences `b`, which may be null
+275	assert.failed	permission	tests/memory/struct_array_owner_beside.c	51	9	reads `b->p` without owning it: the object it points to may have ended
+276	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	51	9	`b->p` may be read here before it is given a value
+278	assert.failed	internal	tests/memory/struct_array_owner_beside.c	51	7	frees `b->p`, which may not point to an allocation
+279	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	51	7	frees `b->p`, which may already be freed or may not be an allocation (a local, a global or a member)
+280	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	51	7	frees `b->p`, which may not be the start of an allocation
+281	assert.failed	internal	tests/memory/struct_array_owner_beside.c	51	7	the liveness cell of a block is at slot -2
+282	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	51	7	frees `b->p` while a pointer to it may still be in use elsewhere
+283	assert.failed	internal	tests/memory/struct_array_owner_beside.c	51	7	the lengths of a block
+284	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	51	7	frees `b->p` without owning all of it: `*b->p` is not owned here
+285	assert.failed	internal	tests/memory/struct_array_owner_beside.c	51	7	the range of the value under its flag
+286	call.precondition	internal	tests/memory/struct_array_owner_beside.c	51	7	internal check: Silicon's own check of the precondition of `free`
+287	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	52	8	dereferences `b`, which may be null
+289	assert.failed	permission	tests/memory/struct_array_owner_beside.c	52	8	writes `b->p` without owning it: the object it points to may have ended
+292	assert.failed	null-dereference	tests/memory/struct_array_owner_beside.c	53	15	dereferences `b`, which may be null
+293	assert.failed	out-of-bounds	tests/memory/struct_array_owner_beside.c	53	15	reads `b->a[2]`, whose index may be outside `b->a`
+294	assert.failed	permission	tests/memory/struct_array_owner_beside.c	53	15	reads `b->a[2]` without owning it: the object it points to may have ended
+295	assert.failed	uninitialized	tests/memory/struct_array_owner_beside.c	53	15	`b->a[2]` may be read here before it is given a value
+297	assert.failed	internal	tests/memory/struct_array_owner_beside.c	54	7	frees `b`, which may not point to an allocation
+298	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	54	7	frees `b`, which may already be freed or may not be an allocation (a local, a global or a member)
+299	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	54	7	frees `b`, which may not be the start of an allocation
+300	assert.failed	internal	tests/memory/struct_array_owner_beside.c	54	7	the liveness cell of a block is at slot -2
+301	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	54	7	frees `b` while a pointer to it may still be in use elsewhere
+302	assert.failed	internal	tests/memory/struct_array_owner_beside.c	54	7	the lengths of a block
+303	assert.failed	invalid-free	tests/memory/struct_array_owner_beside.c	54	7	frees `b` without owning all of it: `b->p` is not owned here
+304	assert.failed	internal	tests/memory/struct_array_owner_beside.c	54	7	the range of the value under its flag
+309	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_beside.c	54	7	frees `b` without owning all of it: `b->a` is not owned here
+315	assert.failed[insufficient.permission]	invalid-free	tests/memory/struct_array_owner_beside.c	54	7	frees `b` without owning all of it: `b->a` is not owned here
+320	assert.failed	internal	tests/memory/struct_array_owner_beside.c	54	7	the range of the value under its flag
+321	call.precondition	internal	tests/memory/struct_array_owner_beside.c	54	7	internal check: Silicon's own check of the precondition of `free`
+323	assert.failed	postcondition	tests/memory/struct_array_owner_beside.c	55	3	the postcondition of `array_after_owned_freed` may not hold	tests/memory/struct_array_owner_beside.c:43:this is the postcondition
+325	assert.failed	missing-return	tests/memory/struct_array_owner_beside.c	56	1	control may reach the end of `array_after_owned_freed` without returning a value
+327	assert.failed	leak	tests/memory/struct_array_owner_beside.c	56	1	`array_after_owned_freed` may return while it still owns an allocation that its `ensures` does not hand back
+333	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free`
+334	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free`
+340	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free`
+341	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free`
+347	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc`
+347	postcondition.violated	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: Silicon's own check of the postcondition of `calloc`
+348	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc`
+348	postcondition.violated	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: Silicon's own check of the postcondition of `calloc`
+354	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	45	7	internal check: well-formedness of the contract of `malloc`
+354	postcondition.violated	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	45	7	internal check: Silicon's own check of the postcondition of `malloc`
+355	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	45	7	internal check: well-formedness of the contract of `malloc`
+355	postcondition.violated	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	45	7	internal check: Silicon's own check of the postcondition of `malloc`
+360	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	15	6	internal check: well-formedness of the contract of `b_destroy (well-formedness)`
+361	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	15	6	internal check: well-formedness of the contract of `b_destroy (well-formedness)`
+369	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	24	5	internal check: well-formedness of the contract of `use (well-formedness)`
+372	assert.failed	overflow	tests/memory/struct_array_owner_beside.c	25	50	negating the smallest value of `int` overflows
+377	not.wellformed	internal	tests/memory/struct_array_owner_beside.c	42	5	internal check: well-formedness of the contract of `array_after_owned_freed (well-formedness)`
+380	assert.failed	overflow	tests/memory/struct_array_owner_beside.c	43	40	negating the smallest value of `int` overflows
+385	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free (well-formedness)`
+393	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	51	6	internal check: well-formedness of the contract of `free (well-formedness)`
+401	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+402	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+403	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+404	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+405	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+406	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+407	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+408	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+409	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+410	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+411	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+412	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	internal check: well-formedness of the contract of `calloc (well-formedness)`
+415	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it
+416	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it
+417	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it
+418	assert.failed	permission	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	48	7	the contract of `calloc` reads an element of a pointer without owning it
+423	not.wellformed	internal	/work/cerastes/third_party/vlibc/include/vlibc/stdlib.h	45	7	internal check: well-formedness of the contract of `malloc (well-formedness)`

@@ -1,0 +1,14 @@
+// Emitted by cerastes verify (snapshot refs/tmp/e1e2c-d-edg3 line, build/m4.5e1e2c/views/ptr_malloc.vpr, edg-backend report 6 (c)) for `struct S { int *a[4]; int n; }`: the typed view of `malloc`. Regenerated at the second interim joined build (refs/tmp/e1e2c-d-j6, 2026-11-26): the same program, byte-identical text.
+field v_int: Int
+field d_int: Bool
+field v_ptr_int: Ref
+field d_ptr_int: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `malloc`
+// cerastes:trusted-contract vlibc: malloc returns NULL or the start of a new allocation of size bytes, its contents indeterminate (C23 7.24.3.6); typed view: one struct S (40 bytes), decision 0047
+method f_malloc__1() returns (res: Ref)
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))
+  ensures (!(res == null)) ==> ((((((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 4) && (len(member(res, 1)) == 1)))) && acc(loc(member(res, 1), 0).v_int)) && acc(loc(member(res, 1), 0).d_int)) && (loc(member(res, 1), 0).d_int ==> (((-2147483648) <= loc(member(res, 1), 0).v_int) && (loc(member(res, 1), 0).v_int <= 2147483647)))) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(res, 0), k).v_ptr_int))) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(res, 0), k).d_ptr_int))) && (forall k: Int :: { loc(member(res, 0), k) } ((0 <= k) && (k < 4)) ==> (loc(member(res, 0), k).d_ptr_int ==> ((loc(member(res, 0), k).v_ptr_int == null) || (((loc(member(res, 0), k).v_ptr_int == loc(block_of(loc(member(res, 0), k).v_ptr_int), offset_of(loc(member(res, 0), k).v_ptr_int))) && (0 <= offset_of(loc(member(res, 0), k).v_ptr_int))) && (offset_of(loc(member(res, 0), k).v_ptr_int) <= len(block_of(loc(member(res, 0), k).v_ptr_int))))))))
+  decreases _

@@ -240,7 +240,7 @@
    - (c) **`owning` beside a block site** on one parameter in both lists: merged into the block site, which gives
      everything `owns(*p)` does but its liveness fraction (`apply_owning` sees block sites); a block site in one list only
      beside `owning` stays rejected.
-   - (d) **`restrict` beside a parameter whose only atom is a block site:** backed (`restrict_backed` counts block sites).
+   - (d) **`restrict` beside a parameter whose only atom is a block site:** backed (`restrict_backed` counts block sites). **(Withdrawn by record 0064 item 19 as rewritten on 2026-11-26, M4.5e1e2's continuation, question 326: every `restrict` parameter is rejected, and this clause's code is removed.)**
    - (e) **`f((free(p), 0), p)`:** `free`'s effect is registered on `*p`'s object, so it is `unsequenced`, not
      `permission`.
 
@@ -275,3 +275,5 @@
   variables declared owning; unannotated programs keep their diagnostics and their Viper.
 - `--strict-init` accepts P4222R3's marked locals; `malloc` into an unmarked local stays rejected in strict mode only.
 - d2b2 inherits block sites through loads, owning globals and fields, and P4418R0.
+
+*2026-11-26, amended by 0064 (M4.5e1e2, Part D): item 2 — an `ensures` atom with no `requires` partner may be on a structure with an array member of scalars: given per leaf, an array leaf by its quantified lines under the site's one output amount (0064 item 15). Item 2a is unchanged: in a function without a body such an atom on a FORMAL stays rejected (question 350).*

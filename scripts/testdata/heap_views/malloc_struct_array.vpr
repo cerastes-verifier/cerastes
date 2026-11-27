@@ -1,0 +1,13 @@
+// Fixture (M4.5e1e2c Part D): the typed view `f_malloc__0` of a struct with an array member (`struct SA { int n; int a[4]; }`) as the VIR self-test's emitter writes it for the case `e1e2d_heap_array_member`,
+// regenerated from refs/tmp/e1e2c-d-j6 (2026-11-26, byte-identical to the text taken at the earlier builds): the emitter's text for a VIR case, not `cerastes verify`'s text for a C program.
+field v_int: Int
+field d_int: Bool
+field tok: Bool
+field lv: Bool
+
+// C/C++ function `malloc`
+// cerastes:trusted-contract vlibc: malloc returns NULL or one new block; typed view: one struct SA, decision 0047
+method f_malloc__0() returns (res: Ref)
+  ensures ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res))))) && (((res != null) && (offset_of(res) < len(block_of(res)))) ==> ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 4)))
+  ensures (!(res == null)) ==> ((((((((((((((res != null) && ((res == null) || (((res == loc(block_of(res), offset_of(res))) && (0 <= offset_of(res))) && (offset_of(res) <= len(block_of(res)))))) && (offset_of(res) == 0)) && acc(loc(block_of(res), (-1)).tok)) && loc(block_of(res), (-1)).tok) && (lvloc(block_of(res)) == loc(block_of(res), (-2)))) && acc(lvloc(block_of(res)).lv)) && ((len(block_of(res)) == 1) && ((len(member(res, 0)) == 1) && (len(member(res, 1)) == 4)))) && acc(loc(member(res, 0), 0).v_int)) && acc(loc(member(res, 0), 0).d_int)) && (loc(member(res, 0), 0).d_int ==> (((-2147483648) <= loc(member(res, 0), 0).v_int) && (loc(member(res, 0), 0).v_int <= 2147483647)))) && (forall k: Int :: { loc(member(res, 1), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(res, 1), k).v_int))) && (forall k: Int :: { loc(member(res, 1), k) } ((0 <= k) && (k < 4)) ==> acc(loc(member(res, 1), k).d_int))) && (forall k: Int :: { loc(member(res, 1), k) } ((0 <= k) && (k < 4)) ==> (loc(member(res, 1), k).d_int ==> (((-2147483648) <= loc(member(res, 1), k).v_int) && (loc(member(res, 1), k).v_int <= 2147483647)))))
+  decreases _

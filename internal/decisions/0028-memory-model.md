@@ -348,3 +348,5 @@ axiom by the index range.
 *2026-11-24, amended by 0061 (M4.5e1c): item 2 — a user quantifier binds the absolute slots `q0`, `q1`, … of its read classes, one trigger set over every class's `loc(block_of(X), q_j)` term (T2), and in `f__wf` ghost functions `hvq_<method>__<formal>_<state>` of the slot (0061 items 6, 7).*
 
 *2026-11-25, amended by 0063 (M4.5e1e1): items 5 and 16 — global and `static` local arrays are one `GB_g()` block of N slots, array members the blocks `member(X, k)` of N slots, as designed here (0063 item 3).*
+
+*2026-11-26, amended by 0064 (M4.5e1e2): items 2 and 16 — arrays of structures are built on the layout designed here: member `k` of element `i` is the block `member(loc(B, i), k)`, for automatic local arrays (0064 items 2 to 6), a pointer parameter's range (item 7), global and `static` local arrays (item 9) and members that are arrays of structures (items 9, 10 and 12). Arrays of arrays (row `i` as `member(loc(B, i), 0)`) are decided by 0064 item 13 and not built yet.*

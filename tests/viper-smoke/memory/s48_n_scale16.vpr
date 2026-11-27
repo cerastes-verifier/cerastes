@@ -1,0 +1,542 @@
+// expect: verified
+// S48 (n) cost: S45 (k)'s scale program at K = 16 (s47_h_scale16_member's: 16 alloc_int locals, 15 neighbour swap calls, a check, the scope exits) with ONE array of structures (struct P v[3], two leaf places) held throughout instead of the structure with an array member: its quantified chunks are consulted by every perm and exhale of the cells. Time recorded.
+// (hand-written spike fixture of record 0064 (draft), not emitted by the tool and not checked by lint_viper.py; no `define`: every row is expanded as lowering will write it; no inhale or assume)
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract allocation of an address-taken local of type int: a fresh one-slot block, the cell uninitialized and the block's liveness token, full permission (decision 0032 item 4)
+method alloc_int() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures ((((lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(r.v_int)) && acc(r.d_int)) && (!r.d_int)) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of an automatic array of int with n elements (n >= 1): a fresh block of n slots, every element uninitialized, the block's liveness token; full permission to both fields of every slot in [0, n), each its own quantifier over the absolute slot (record 0059 item 3, draft)
+method alloc_arr_int(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (!loc(block_of(r), k).d_int)
+  decreases _
+
+// cerastes:trusted-contract the static-object part of an array initializer: it takes and returns the same permissions and ensures every element zero and initialized (record 0059 item 3, draft)
+method zero_arr_int(r: Ref, n: Int)
+  requires (1 <= n) && (r == loc(block_of(r), 0)) && (len(block_of(r)) == n)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  requires forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).v_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(r), k).d_int)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(r), k).v_int == 0)
+  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> loc(block_of(r), k).d_int
+  decreases _
+
+
+
+// cerastes:trusted-contract allocation of a local array of struct P with n elements (record 0064 item 6, S47 (x1)'s shape): each element a struct slot whose members are blocks of length 1; per leaf one quantifier for each permission, each with the trigger loc(member(loc(block_of(r), k), j), 0); every flag false
+method alloc_arr_P(n: Int) returns (r: Ref)
+  requires 1 <= n
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)
+  ensures forall k: Int :: { loc(block_of(r), k) } (((0 <= k) && (k < n))) ==> ((len(member(loc(block_of(r), k), 0)) == 1) && (len(member(loc(block_of(r), k), 1)) == 1))
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } (((0 <= k) && (k < n))) ==> acc(loc(member(loc(block_of(r), k), 0), 0).v_int)
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } (((0 <= k) && (k < n))) ==> acc(loc(member(loc(block_of(r), k), 0), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } (((0 <= k) && (k < n))) ==> (!loc(member(loc(block_of(r), k), 0), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 1), 0) } (((0 <= k) && (k < n))) ==> acc(loc(member(loc(block_of(r), k), 1), 0).v_int)
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 1), 0) } (((0 <= k) && (k < n))) ==> acc(loc(member(loc(block_of(r), k), 1), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 1), 0) } (((0 <= k) && (k < n))) ==> (!loc(member(loc(block_of(r), k), 1), 0).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+method swap(a: Ref, b: Ref, l_a: Perm, l_b: Perm)
+  requires none < l_a && l_a < write
+  requires none < l_b && l_b < write
+  requires (a == null) || (((a == loc(block_of(a), offset_of(a))) && (0 <= offset_of(a))) && (offset_of(a) <= len(block_of(a))))
+  requires (b == null) || (((b == loc(block_of(b), offset_of(b))) && (0 <= offset_of(b))) && (offset_of(b) <= len(block_of(b))))
+  requires (a != null) && (offset_of(a) < len(block_of(a))) && acc(a.v_int) && acc(a.d_int) && a.d_int
+  requires (b != null) && (offset_of(b) < len(block_of(b))) && acc(b.v_int) && acc(b.d_int) && b.d_int
+  requires acc(lvloc(block_of(a)).lv, l_a) && acc(lvloc(block_of(b)).lv, l_b)
+  ensures (offset_of(a) < len(block_of(a))) && acc(a.v_int) && acc(a.d_int) && a.d_int
+  ensures (offset_of(b) < len(block_of(b))) && acc(b.v_int) && acc(b.d_int) && b.d_int
+  ensures acc(lvloc(block_of(a)).lv, l_a) && acc(lvloc(block_of(b)).lv, l_b)
+  ensures a.v_int == old(b.v_int) && b.v_int == old(a.v_int)
+{
+  if (lvloc(block_of(a)) == lvloc(block_of(b))) { } // case split on the liveness cells
+  assert a != null && b != null ==> a != b // entry: separation of two single owned places of one field
+  var t: Int
+  assert a != null
+  assert perm(a.v_int) > none
+  assert perm(a.d_int) > none && a.d_int
+  t := a.v_int
+  assert b != null
+  assert perm(b.v_int) > none
+  assert perm(b.d_int) > none && b.d_int
+  assert a != null
+  assert perm(a.v_int) == write && perm(a.d_int) == write
+  a.v_int := b.v_int
+  a.d_int := true
+  assert b != null
+  assert perm(b.v_int) == write && perm(b.d_int) == write
+  b.v_int := t
+  b.d_int := true
+  assert perm(a.v_int) == write && perm(a.d_int) == write
+  assert a.d_int
+  assert perm(b.v_int) == write && perm(b.d_int) == write
+  assert b.d_int
+  assert perm(lvloc(block_of(a)).lv) >= l_a + (lvloc(block_of(a)) == lvloc(block_of(b)) ? l_b : none)
+  assert perm(lvloc(block_of(b)).lv) >= l_b + (lvloc(block_of(b)) == lvloc(block_of(a)) ? l_a : none)
+}
+
+method scale()
+{
+  var x0: Ref
+  var x1: Ref
+  var x2: Ref
+  var x3: Ref
+  var x4: Ref
+  var x5: Ref
+  var x6: Ref
+  var x7: Ref
+  var x8: Ref
+  var x9: Ref
+  var x10: Ref
+  var x11: Ref
+  var x12: Ref
+  var x13: Ref
+  var x14: Ref
+  var x15: Ref
+  var v_a: Ref
+  var tw: Ref
+  var tr: Ref
+  var lf1: Perm
+  var lf2: Perm
+  v_a := alloc_arr_P(3)
+  assert !((offset_of(v_a) + 0 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 0)) //BOUND
+  tw := loc(member(loc(block_of(v_a), offset_of(v_a) + 0), 0), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 1
+  tw.d_int := true
+  assert !((offset_of(v_a) + 0 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 0)) //BOUND
+  tw := loc(member(loc(block_of(v_a), offset_of(v_a) + 0), 1), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 2
+  tw.d_int := true
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  tw := loc(member(loc(block_of(v_a), offset_of(v_a) + 1), 0), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 11
+  tw.d_int := true
+  assert !((offset_of(v_a) + 1 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 1)) //BOUND
+  tw := loc(member(loc(block_of(v_a), offset_of(v_a) + 1), 1), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 12
+  tw.d_int := true
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  tw := loc(member(loc(block_of(v_a), offset_of(v_a) + 2), 0), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 21
+  tw.d_int := true
+  assert !((offset_of(v_a) + 2 < 0) || (len(block_of(v_a)) <= offset_of(v_a) + 2)) //BOUND
+  tw := loc(member(loc(block_of(v_a), offset_of(v_a) + 2), 1), 0)
+  assert !((perm(tw.v_int) != write) || (perm(tw.d_int) != write)) //WPERM
+  tw.v_int := 22
+  tw.d_int := true
+  x0 := alloc_int()
+  assert !((perm(x0.v_int) != write) || (perm(x0.d_int) != write)) //WPERM
+  x0.v_int := 0
+  x0.d_int := true
+  x1 := alloc_int()
+  assert !((perm(x1.v_int) != write) || (perm(x1.d_int) != write)) //WPERM
+  x1.v_int := 1
+  x1.d_int := true
+  x2 := alloc_int()
+  assert !((perm(x2.v_int) != write) || (perm(x2.d_int) != write)) //WPERM
+  x2.v_int := 2
+  x2.d_int := true
+  x3 := alloc_int()
+  assert !((perm(x3.v_int) != write) || (perm(x3.d_int) != write)) //WPERM
+  x3.v_int := 3
+  x3.d_int := true
+  x4 := alloc_int()
+  assert !((perm(x4.v_int) != write) || (perm(x4.d_int) != write)) //WPERM
+  x4.v_int := 4
+  x4.d_int := true
+  x5 := alloc_int()
+  assert !((perm(x5.v_int) != write) || (perm(x5.d_int) != write)) //WPERM
+  x5.v_int := 5
+  x5.d_int := true
+  x6 := alloc_int()
+  assert !((perm(x6.v_int) != write) || (perm(x6.d_int) != write)) //WPERM
+  x6.v_int := 6
+  x6.d_int := true
+  x7 := alloc_int()
+  assert !((perm(x7.v_int) != write) || (perm(x7.d_int) != write)) //WPERM
+  x7.v_int := 7
+  x7.d_int := true
+  x8 := alloc_int()
+  assert !((perm(x8.v_int) != write) || (perm(x8.d_int) != write)) //WPERM
+  x8.v_int := 8
+  x8.d_int := true
+  x9 := alloc_int()
+  assert !((perm(x9.v_int) != write) || (perm(x9.d_int) != write)) //WPERM
+  x9.v_int := 9
+  x9.d_int := true
+  x10 := alloc_int()
+  assert !((perm(x10.v_int) != write) || (perm(x10.d_int) != write)) //WPERM
+  x10.v_int := 10
+  x10.d_int := true
+  x11 := alloc_int()
+  assert !((perm(x11.v_int) != write) || (perm(x11.d_int) != write)) //WPERM
+  x11.v_int := 11
+  x11.d_int := true
+  x12 := alloc_int()
+  assert !((perm(x12.v_int) != write) || (perm(x12.d_int) != write)) //WPERM
+  x12.v_int := 12
+  x12.d_int := true
+  x13 := alloc_int()
+  assert !((perm(x13.v_int) != write) || (perm(x13.d_int) != write)) //WPERM
+  x13.v_int := 13
+  x13.d_int := true
+  x14 := alloc_int()
+  assert !((perm(x14.v_int) != write) || (perm(x14.d_int) != write)) //WPERM
+  x14.v_int := 14
+  x14.d_int := true
+  x15 := alloc_int()
+  assert !((perm(x15.v_int) != write) || (perm(x15.d_int) != write)) //WPERM
+  x15.v_int := 15
+  x15.d_int := true
+  assert x0 != x1 // call: separation of the two owns
+  assert x0 != null
+  assert perm(x0.v_int) == write && perm(x0.d_int) == write
+  assert x0.d_int
+  assert x1 != null
+  assert perm(x1.v_int) == write && perm(x1.d_int) == write
+  assert x1.d_int
+  if (lvloc(block_of(x0)) == lvloc(block_of(x1))) { }
+  assert perm(lvloc(block_of(x0)).lv) > none
+  lf1 := perm(lvloc(block_of(x0)).lv) / 2
+  lf2 := perm(lvloc(block_of(x1)).lv) / 2
+  assert perm(lvloc(block_of(x0)).lv) >= lf1 + (lvloc(block_of(x0)) == lvloc(block_of(x1)) ? lf2 : none)
+  assert perm(lvloc(block_of(x1)).lv) >= lf2 + (lvloc(block_of(x1)) == lvloc(block_of(x0)) ? lf1 : none)
+  swap(x0, x1, lf1, lf2)
+  assert perm(x0.v_int) > none //PERM
+  assert x0.d_int //INIT
+  assert perm(x1.v_int) > none //PERM
+  assert x1.d_int //INIT
+  assert x1 != x2 // call: separation of the two owns
+  assert x1 != null
+  assert perm(x1.v_int) == write && perm(x1.d_int) == write
+  assert x1.d_int
+  assert x2 != null
+  assert perm(x2.v_int) == write && perm(x2.d_int) == write
+  assert x2.d_int
+  if (lvloc(block_of(x1)) == lvloc(block_of(x2))) { }
+  assert perm(lvloc(block_of(x1)).lv) > none
+  lf1 := perm(lvloc(block_of(x1)).lv) / 2
+  lf2 := perm(lvloc(block_of(x2)).lv) / 2
+  assert perm(lvloc(block_of(x1)).lv) >= lf1 + (lvloc(block_of(x1)) == lvloc(block_of(x2)) ? lf2 : none)
+  assert perm(lvloc(block_of(x2)).lv) >= lf2 + (lvloc(block_of(x2)) == lvloc(block_of(x1)) ? lf1 : none)
+  swap(x1, x2, lf1, lf2)
+  assert perm(x1.v_int) > none //PERM
+  assert x1.d_int //INIT
+  assert perm(x2.v_int) > none //PERM
+  assert x2.d_int //INIT
+  assert x2 != x3 // call: separation of the two owns
+  assert x2 != null
+  assert perm(x2.v_int) == write && perm(x2.d_int) == write
+  assert x2.d_int
+  assert x3 != null
+  assert perm(x3.v_int) == write && perm(x3.d_int) == write
+  assert x3.d_int
+  if (lvloc(block_of(x2)) == lvloc(block_of(x3))) { }
+  assert perm(lvloc(block_of(x2)).lv) > none
+  lf1 := perm(lvloc(block_of(x2)).lv) / 2
+  lf2 := perm(lvloc(block_of(x3)).lv) / 2
+  assert perm(lvloc(block_of(x2)).lv) >= lf1 + (lvloc(block_of(x2)) == lvloc(block_of(x3)) ? lf2 : none)
+  assert perm(lvloc(block_of(x3)).lv) >= lf2 + (lvloc(block_of(x3)) == lvloc(block_of(x2)) ? lf1 : none)
+  swap(x2, x3, lf1, lf2)
+  assert perm(x2.v_int) > none //PERM
+  assert x2.d_int //INIT
+  assert perm(x3.v_int) > none //PERM
+  assert x3.d_int //INIT
+  assert x3 != x4 // call: separation of the two owns
+  assert x3 != null
+  assert perm(x3.v_int) == write && perm(x3.d_int) == write
+  assert x3.d_int
+  assert x4 != null
+  assert perm(x4.v_int) == write && perm(x4.d_int) == write
+  assert x4.d_int
+  if (lvloc(block_of(x3)) == lvloc(block_of(x4))) { }
+  assert perm(lvloc(block_of(x3)).lv) > none
+  lf1 := perm(lvloc(block_of(x3)).lv) / 2
+  lf2 := perm(lvloc(block_of(x4)).lv) / 2
+  assert perm(lvloc(block_of(x3)).lv) >= lf1 + (lvloc(block_of(x3)) == lvloc(block_of(x4)) ? lf2 : none)
+  assert perm(lvloc(block_of(x4)).lv) >= lf2 + (lvloc(block_of(x4)) == lvloc(block_of(x3)) ? lf1 : none)
+  swap(x3, x4, lf1, lf2)
+  assert perm(x3.v_int) > none //PERM
+  assert x3.d_int //INIT
+  assert perm(x4.v_int) > none //PERM
+  assert x4.d_int //INIT
+  assert x4 != x5 // call: separation of the two owns
+  assert x4 != null
+  assert perm(x4.v_int) == write && perm(x4.d_int) == write
+  assert x4.d_int
+  assert x5 != null
+  assert perm(x5.v_int) == write && perm(x5.d_int) == write
+  assert x5.d_int
+  if (lvloc(block_of(x4)) == lvloc(block_of(x5))) { }
+  assert perm(lvloc(block_of(x4)).lv) > none
+  lf1 := perm(lvloc(block_of(x4)).lv) / 2
+  lf2 := perm(lvloc(block_of(x5)).lv) / 2
+  assert perm(lvloc(block_of(x4)).lv) >= lf1 + (lvloc(block_of(x4)) == lvloc(block_of(x5)) ? lf2 : none)
+  assert perm(lvloc(block_of(x5)).lv) >= lf2 + (lvloc(block_of(x5)) == lvloc(block_of(x4)) ? lf1 : none)
+  swap(x4, x5, lf1, lf2)
+  assert perm(x4.v_int) > none //PERM
+  assert x4.d_int //INIT
+  assert perm(x5.v_int) > none //PERM
+  assert x5.d_int //INIT
+  assert x5 != x6 // call: separation of the two owns
+  assert x5 != null
+  assert perm(x5.v_int) == write && perm(x5.d_int) == write
+  assert x5.d_int
+  assert x6 != null
+  assert perm(x6.v_int) == write && perm(x6.d_int) == write
+  assert x6.d_int
+  if (lvloc(block_of(x5)) == lvloc(block_of(x6))) { }
+  assert perm(lvloc(block_of(x5)).lv) > none
+  lf1 := perm(lvloc(block_of(x5)).lv) / 2
+  lf2 := perm(lvloc(block_of(x6)).lv) / 2
+  assert perm(lvloc(block_of(x5)).lv) >= lf1 + (lvloc(block_of(x5)) == lvloc(block_of(x6)) ? lf2 : none)
+  assert perm(lvloc(block_of(x6)).lv) >= lf2 + (lvloc(block_of(x6)) == lvloc(block_of(x5)) ? lf1 : none)
+  swap(x5, x6, lf1, lf2)
+  assert perm(x5.v_int) > none //PERM
+  assert x5.d_int //INIT
+  assert perm(x6.v_int) > none //PERM
+  assert x6.d_int //INIT
+  assert x6 != x7 // call: separation of the two owns
+  assert x6 != null
+  assert perm(x6.v_int) == write && perm(x6.d_int) == write
+  assert x6.d_int
+  assert x7 != null
+  assert perm(x7.v_int) == write && perm(x7.d_int) == write
+  assert x7.d_int
+  if (lvloc(block_of(x6)) == lvloc(block_of(x7))) { }
+  assert perm(lvloc(block_of(x6)).lv) > none
+  lf1 := perm(lvloc(block_of(x6)).lv) / 2
+  lf2 := perm(lvloc(block_of(x7)).lv) / 2
+  assert perm(lvloc(block_of(x6)).lv) >= lf1 + (lvloc(block_of(x6)) == lvloc(block_of(x7)) ? lf2 : none)
+  assert perm(lvloc(block_of(x7)).lv) >= lf2 + (lvloc(block_of(x7)) == lvloc(block_of(x6)) ? lf1 : none)
+  swap(x6, x7, lf1, lf2)
+  assert perm(x6.v_int) > none //PERM
+  assert x6.d_int //INIT
+  assert perm(x7.v_int) > none //PERM
+  assert x7.d_int //INIT
+  assert x7 != x8 // call: separation of the two owns
+  assert x7 != null
+  assert perm(x7.v_int) == write && perm(x7.d_int) == write
+  assert x7.d_int
+  assert x8 != null
+  assert perm(x8.v_int) == write && perm(x8.d_int) == write
+  assert x8.d_int
+  if (lvloc(block_of(x7)) == lvloc(block_of(x8))) { }
+  assert perm(lvloc(block_of(x7)).lv) > none
+  lf1 := perm(lvloc(block_of(x7)).lv) / 2
+  lf2 := perm(lvloc(block_of(x8)).lv) / 2
+  assert perm(lvloc(block_of(x7)).lv) >= lf1 + (lvloc(block_of(x7)) == lvloc(block_of(x8)) ? lf2 : none)
+  assert perm(lvloc(block_of(x8)).lv) >= lf2 + (lvloc(block_of(x8)) == lvloc(block_of(x7)) ? lf1 : none)
+  swap(x7, x8, lf1, lf2)
+  assert perm(x7.v_int) > none //PERM
+  assert x7.d_int //INIT
+  assert perm(x8.v_int) > none //PERM
+  assert x8.d_int //INIT
+  assert x8 != x9 // call: separation of the two owns
+  assert x8 != null
+  assert perm(x8.v_int) == write && perm(x8.d_int) == write
+  assert x8.d_int
+  assert x9 != null
+  assert perm(x9.v_int) == write && perm(x9.d_int) == write
+  assert x9.d_int
+  if (lvloc(block_of(x8)) == lvloc(block_of(x9))) { }
+  assert perm(lvloc(block_of(x8)).lv) > none
+  lf1 := perm(lvloc(block_of(x8)).lv) / 2
+  lf2 := perm(lvloc(block_of(x9)).lv) / 2
+  assert perm(lvloc(block_of(x8)).lv) >= lf1 + (lvloc(block_of(x8)) == lvloc(block_of(x9)) ? lf2 : none)
+  assert perm(lvloc(block_of(x9)).lv) >= lf2 + (lvloc(block_of(x9)) == lvloc(block_of(x8)) ? lf1 : none)
+  swap(x8, x9, lf1, lf2)
+  assert perm(x8.v_int) > none //PERM
+  assert x8.d_int //INIT
+  assert perm(x9.v_int) > none //PERM
+  assert x9.d_int //INIT
+  assert x9 != x10 // call: separation of the two owns
+  assert x9 != null
+  assert perm(x9.v_int) == write && perm(x9.d_int) == write
+  assert x9.d_int
+  assert x10 != null
+  assert perm(x10.v_int) == write && perm(x10.d_int) == write
+  assert x10.d_int
+  if (lvloc(block_of(x9)) == lvloc(block_of(x10))) { }
+  assert perm(lvloc(block_of(x9)).lv) > none
+  lf1 := perm(lvloc(block_of(x9)).lv) / 2
+  lf2 := perm(lvloc(block_of(x10)).lv) / 2
+  assert perm(lvloc(block_of(x9)).lv) >= lf1 + (lvloc(block_of(x9)) == lvloc(block_of(x10)) ? lf2 : none)
+  assert perm(lvloc(block_of(x10)).lv) >= lf2 + (lvloc(block_of(x10)) == lvloc(block_of(x9)) ? lf1 : none)
+  swap(x9, x10, lf1, lf2)
+  assert perm(x9.v_int) > none //PERM
+  assert x9.d_int //INIT
+  assert perm(x10.v_int) > none //PERM
+  assert x10.d_int //INIT
+  assert x10 != x11 // call: separation of the two owns
+  assert x10 != null
+  assert perm(x10.v_int) == write && perm(x10.d_int) == write
+  assert x10.d_int
+  assert x11 != null
+  assert perm(x11.v_int) == write && perm(x11.d_int) == write
+  assert x11.d_int
+  if (lvloc(block_of(x10)) == lvloc(block_of(x11))) { }
+  assert perm(lvloc(block_of(x10)).lv) > none
+  lf1 := perm(lvloc(block_of(x10)).lv) / 2
+  lf2 := perm(lvloc(block_of(x11)).lv) / 2
+  assert perm(lvloc(block_of(x10)).lv) >= lf1 + (lvloc(block_of(x10)) == lvloc(block_of(x11)) ? lf2 : none)
+  assert perm(lvloc(block_of(x11)).lv) >= lf2 + (lvloc(block_of(x11)) == lvloc(block_of(x10)) ? lf1 : none)
+  swap(x10, x11, lf1, lf2)
+  assert perm(x10.v_int) > none //PERM
+  assert x10.d_int //INIT
+  assert perm(x11.v_int) > none //PERM
+  assert x11.d_int //INIT
+  assert x11 != x12 // call: separation of the two owns
+  assert x11 != null
+  assert perm(x11.v_int) == write && perm(x11.d_int) == write
+  assert x11.d_int
+  assert x12 != null
+  assert perm(x12.v_int) == write && perm(x12.d_int) == write
+  assert x12.d_int
+  if (lvloc(block_of(x11)) == lvloc(block_of(x12))) { }
+  assert perm(lvloc(block_of(x11)).lv) > none
+  lf1 := perm(lvloc(block_of(x11)).lv) / 2
+  lf2 := perm(lvloc(block_of(x12)).lv) / 2
+  assert perm(lvloc(block_of(x11)).lv) >= lf1 + (lvloc(block_of(x11)) == lvloc(block_of(x12)) ? lf2 : none)
+  assert perm(lvloc(block_of(x12)).lv) >= lf2 + (lvloc(block_of(x12)) == lvloc(block_of(x11)) ? lf1 : none)
+  swap(x11, x12, lf1, lf2)
+  assert perm(x11.v_int) > none //PERM
+  assert x11.d_int //INIT
+  assert perm(x12.v_int) > none //PERM
+  assert x12.d_int //INIT
+  assert x12 != x13 // call: separation of the two owns
+  assert x12 != null
+  assert perm(x12.v_int) == write && perm(x12.d_int) == write
+  assert x12.d_int
+  assert x13 != null
+  assert perm(x13.v_int) == write && perm(x13.d_int) == write
+  assert x13.d_int
+  if (lvloc(block_of(x12)) == lvloc(block_of(x13))) { }
+  assert perm(lvloc(block_of(x12)).lv) > none
+  lf1 := perm(lvloc(block_of(x12)).lv) / 2
+  lf2 := perm(lvloc(block_of(x13)).lv) / 2
+  assert perm(lvloc(block_of(x12)).lv) >= lf1 + (lvloc(block_of(x12)) == lvloc(block_of(x13)) ? lf2 : none)
+  assert perm(lvloc(block_of(x13)).lv) >= lf2 + (lvloc(block_of(x13)) == lvloc(block_of(x12)) ? lf1 : none)
+  swap(x12, x13, lf1, lf2)
+  assert perm(x12.v_int) > none //PERM
+  assert x12.d_int //INIT
+  assert perm(x13.v_int) > none //PERM
+  assert x13.d_int //INIT
+  assert x13 != x14 // call: separation of the two owns
+  assert x13 != null
+  assert perm(x13.v_int) == write && perm(x13.d_int) == write
+  assert x13.d_int
+  assert x14 != null
+  assert perm(x14.v_int) == write && perm(x14.d_int) == write
+  assert x14.d_int
+  if (lvloc(block_of(x13)) == lvloc(block_of(x14))) { }
+  assert perm(lvloc(block_of(x13)).lv) > none
+  lf1 := perm(lvloc(block_of(x13)).lv) / 2
+  lf2 := perm(lvloc(block_of(x14)).lv) / 2
+  assert perm(lvloc(block_of(x13)).lv) >= lf1 + (lvloc(block_of(x13)) == lvloc(block_of(x14)) ? lf2 : none)
+  assert perm(lvloc(block_of(x14)).lv) >= lf2 + (lvloc(block_of(x14)) == lvloc(block_of(x13)) ? lf1 : none)
+  swap(x13, x14, lf1, lf2)
+  assert perm(x13.v_int) > none //PERM
+  assert x13.d_int //INIT
+  assert perm(x14.v_int) > none //PERM
+  assert x14.d_int //INIT
+  assert x14 != x15 // call: separation of the two owns
+  assert x14 != null
+  assert perm(x14.v_int) == write && perm(x14.d_int) == write
+  assert x14.d_int
+  assert x15 != null
+  assert perm(x15.v_int) == write && perm(x15.d_int) == write
+  assert x15.d_int
+  if (lvloc(block_of(x14)) == lvloc(block_of(x15))) { }
+  assert perm(lvloc(block_of(x14)).lv) > none
+  lf1 := perm(lvloc(block_of(x14)).lv) / 2
+  lf2 := perm(lvloc(block_of(x15)).lv) / 2
+  assert perm(lvloc(block_of(x14)).lv) >= lf1 + (lvloc(block_of(x14)) == lvloc(block_of(x15)) ? lf2 : none)
+  assert perm(lvloc(block_of(x15)).lv) >= lf2 + (lvloc(block_of(x15)) == lvloc(block_of(x14)) ? lf1 : none)
+  swap(x14, x15, lf1, lf2)
+  assert perm(x14.v_int) > none //PERM
+  assert x14.d_int //INIT
+  assert perm(x15.v_int) > none //PERM
+  assert x15.d_int //INIT
+  assert x0.v_int == 1 //CHECK
+  assert !(((perm(x0.v_int) != write) || (perm(x0.d_int) != write)) || (perm(lvloc(block_of(x0)).lv) != write))
+  exhale (acc(x0.v_int) && acc(x0.d_int)) && acc(lvloc(block_of(x0)).lv)
+  assert !(((perm(x1.v_int) != write) || (perm(x1.d_int) != write)) || (perm(lvloc(block_of(x1)).lv) != write))
+  exhale (acc(x1.v_int) && acc(x1.d_int)) && acc(lvloc(block_of(x1)).lv)
+  assert !(((perm(x2.v_int) != write) || (perm(x2.d_int) != write)) || (perm(lvloc(block_of(x2)).lv) != write))
+  exhale (acc(x2.v_int) && acc(x2.d_int)) && acc(lvloc(block_of(x2)).lv)
+  assert !(((perm(x3.v_int) != write) || (perm(x3.d_int) != write)) || (perm(lvloc(block_of(x3)).lv) != write))
+  exhale (acc(x3.v_int) && acc(x3.d_int)) && acc(lvloc(block_of(x3)).lv)
+  assert !(((perm(x4.v_int) != write) || (perm(x4.d_int) != write)) || (perm(lvloc(block_of(x4)).lv) != write))
+  exhale (acc(x4.v_int) && acc(x4.d_int)) && acc(lvloc(block_of(x4)).lv)
+  assert !(((perm(x5.v_int) != write) || (perm(x5.d_int) != write)) || (perm(lvloc(block_of(x5)).lv) != write))
+  exhale (acc(x5.v_int) && acc(x5.d_int)) && acc(lvloc(block_of(x5)).lv)
+  assert !(((perm(x6.v_int) != write) || (perm(x6.d_int) != write)) || (perm(lvloc(block_of(x6)).lv) != write))
+  exhale (acc(x6.v_int) && acc(x6.d_int)) && acc(lvloc(block_of(x6)).lv)
+  assert !(((perm(x7.v_int) != write) || (perm(x7.d_int) != write)) || (perm(lvloc(block_of(x7)).lv) != write))
+  exhale (acc(x7.v_int) && acc(x7.d_int)) && acc(lvloc(block_of(x7)).lv)
+  assert !(((perm(x8.v_int) != write) || (perm(x8.d_int) != write)) || (perm(lvloc(block_of(x8)).lv) != write))
+  exhale (acc(x8.v_int) && acc(x8.d_int)) && acc(lvloc(block_of(x8)).lv)
+  assert !(((perm(x9.v_int) != write) || (perm(x9.d_int) != write)) || (perm(lvloc(block_of(x9)).lv) != write))
+  exhale (acc(x9.v_int) && acc(x9.d_int)) && acc(lvloc(block_of(x9)).lv)
+  assert !(((perm(x10.v_int) != write) || (perm(x10.d_int) != write)) || (perm(lvloc(block_of(x10)).lv) != write))
+  exhale (acc(x10.v_int) && acc(x10.d_int)) && acc(lvloc(block_of(x10)).lv)
+  assert !(((perm(x11.v_int) != write) || (perm(x11.d_int) != write)) || (perm(lvloc(block_of(x11)).lv) != write))
+  exhale (acc(x11.v_int) && acc(x11.d_int)) && acc(lvloc(block_of(x11)).lv)
+  assert !(((perm(x12.v_int) != write) || (perm(x12.d_int) != write)) || (perm(lvloc(block_of(x12)).lv) != write))
+  exhale (acc(x12.v_int) && acc(x12.d_int)) && acc(lvloc(block_of(x12)).lv)
+  assert !(((perm(x13.v_int) != write) || (perm(x13.d_int) != write)) || (perm(lvloc(block_of(x13)).lv) != write))
+  exhale (acc(x13.v_int) && acc(x13.d_int)) && acc(lvloc(block_of(x13)).lv)
+  assert !(((perm(x14.v_int) != write) || (perm(x14.d_int) != write)) || (perm(lvloc(block_of(x14)).lv) != write))
+  exhale (acc(x14.v_int) && acc(x14.d_int)) && acc(lvloc(block_of(x14)).lv)
+  assert !(((perm(x15.v_int) != write) || (perm(x15.d_int) != write)) || (perm(lvloc(block_of(x15)).lv) != write))
+  exhale (acc(x15.v_int) && acc(x15.d_int)) && acc(lvloc(block_of(x15)).lv)
+  assert forall k: Int :: { loc(member(loc(block_of(v_a), k), 0), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 0), 0).v_int) //MARKED
+  assert forall k: Int :: { loc(member(loc(block_of(v_a), k), 0), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 0), 0).d_int) //MARKED
+  assert forall k: Int :: { loc(member(loc(block_of(v_a), k), 1), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 1), 0).v_int) //MARKED
+  assert forall k: Int :: { loc(member(loc(block_of(v_a), k), 1), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 1), 0).d_int) //MARKED
+  assert perm(lvloc(block_of(v_a)).lv) == write //LIVE
+  exhale forall k: Int :: { loc(member(loc(block_of(v_a), k), 0), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 0), 0).v_int)
+  exhale forall k: Int :: { loc(member(loc(block_of(v_a), k), 0), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 0), 0).d_int)
+  exhale forall k: Int :: { loc(member(loc(block_of(v_a), k), 1), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 1), 0).v_int)
+  exhale forall k: Int :: { loc(member(loc(block_of(v_a), k), 1), 0) } (((0 <= k) && (k < 3))) ==> acc(loc(member(loc(block_of(v_a), k), 1), 0).d_int)
+  exhale acc(lvloc(block_of(v_a)).lv)
+}
+

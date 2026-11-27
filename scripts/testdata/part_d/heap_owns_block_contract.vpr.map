@@ -1,0 +1,91 @@
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+38	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+38	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+39	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct SA`
+39	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct SA`
+45	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `malloc`
+45	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the postcondition of `malloc`
+46	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `malloc`
+46	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `malloc`
+52	not.wellformed	internal	t.c	13	3	internal check: well-formedness of the contract of `free`
+53	not.wellformed	internal	t.c	21	3	internal check: well-formedness of the contract of `free`
+58	not.wellformed	internal	t.c	23	3	internal check: well-formedness of the contract of `use`
+59	not.wellformed	internal	t.c	27	3	internal check: well-formedness of the contract of `use`
+60	not.wellformed	internal	t.c	30	3	internal check: well-formedness of the contract of `use`
+60	postcondition.violated	internal	t.c	30	3	internal check: Silicon's own check of the postcondition of `use`
+70	assert.failed	null-dereference	t.c	36	3	dereferences the pointer, which may be null
+71	assert.failed	out-of-bounds	t.c	36	3	writes an element of the array, whose index may be outside ``
+73	assert.failed	permission	t.c	36	3	writes the object the pointer points to without owning it: the object it points to may have ended
+76	assert.failed	permission	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+77	assert.failed	internal	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+78	assert.failed	permission	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+79	assert.failed	permission	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+80	assert.failed	internal	t.c	39	3	the liveness cell of a block is at slot -2	t.c:30:this is the postcondition
+81	assert.failed	permission	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+82	assert.failed	internal	t.c	39	3	the lengths of a block	t.c:30:this is the postcondition
+83	assert.failed	permission	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+84	assert.failed	uninitialized	t.c	39	3	returns `p->n` without a value, but its contract promises the whole allocation with its contents	t.c:30:this is the postcondition
+85	assert.failed	internal	t.c	39	3	the range of the value under its flag	t.c:30:this is the postcondition
+87	assert.failed[insufficient.permission]	permission	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+89	assert.failed[insufficient.permission]	permission	t.c	39	3	returns without owning the whole allocation `p` points to, which its contract promises	t.c:30:this is the postcondition
+91	assert.failed	uninitialized	t.c	39	3	returns `p->a` without a value, but its contract promises the whole allocation with its contents	t.c:30:this is the postcondition
+93	assert.failed	internal	t.c	39	3	the range of the value under its flag	t.c:30:this is the postcondition
+95	assert.failed	leak	t.c	39	3	`use` may return while it still owns an allocation that its `ensures` does not hand back
+116	call.precondition	internal	t.c	76	3	internal check: Silicon's own check of the precondition of `malloc`
+117	assert.failed	lifetime	t.c	76	3	uses the pointer after the object it points to may have ended
+119	assert.failed	lifetime	t.c	78	3	uses `p` after the object it points to may have ended
+121	assert.failed	null-dereference	t.c	45	3	dereferences `p`, which may be null
+123	assert.failed	permission	t.c	45	3	writes `p->n` without owning it: the object it points to may have ended
+126	assert.failed	null-dereference	t.c	51	3	dereferences `p`, which may be null
+127	assert.failed	out-of-bounds	t.c	51	3	writes `p->a[0]`, whose index may be outside `p->a`
+129	assert.failed	permission	t.c	51	3	writes `p->a[0]` without owning it: the object it points to may have ended
+132	assert.failed	null-dereference	t.c	57	3	dereferences `p`, which may be null
+133	assert.failed	out-of-bounds	t.c	57	3	writes `p->a[1]`, whose index may be outside `p->a`
+135	assert.failed	permission	t.c	57	3	writes `p->a[1]` without owning it: the object it points to may have ended
+138	assert.failed	null-dereference	t.c	63	3	dereferences `p`, which may be null
+139	assert.failed	out-of-bounds	t.c	63	3	writes `p->a[2]`, whose index may be outside `p->a`
+141	assert.failed	permission	t.c	63	3	writes `p->a[2]` without owning it: the object it points to may have ended
+144	assert.failed	null-dereference	t.c	69	3	dereferences `p`, which may be null
+145	assert.failed	out-of-bounds	t.c	69	3	writes `p->a[3]`, whose index may be outside `p->a`
+147	assert.failed	permission	t.c	69	3	writes `p->a[3]` without owning it: the object it points to may have ended
+150	assert.failed	permission	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+151	assert.failed	internal	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+152	assert.failed	permission	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+153	assert.failed	permission	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+154	assert.failed	internal	t.c	71	3	the liveness cell of a block is at slot -2
+155	assert.failed	permission	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+156	assert.failed	internal	t.c	71	3	the lengths of a block
+157	assert.failed	permission	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+158	assert.failed	uninitialized	t.c	71	3	calls `use`, which needs `p->n` to have a value; it may not have one here
+159	assert.failed	internal	t.c	71	3	the range of the value under its flag
+161	assert.failed[insufficient.permission]	permission	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+163	assert.failed[insufficient.permission]	permission	t.c	71	3	calls `use`, which needs to own the whole allocation `p` points to, without owning it
+165	assert.failed	uninitialized	t.c	71	3	calls `use`, which needs `p->a` to have a value; it may not have one here
+167	assert.failed	internal	t.c	71	3	the range of the value under its flag
+168	assert.failed	lifetime	t.c	70	3	uses `p` after the object it points to may have ended
+169	call.precondition	internal	t.c	71	3	internal check: Silicon's own check of the precondition of `use`
+170	assert.failed	internal	t.c	74	3	frees `p`, which may not point to an allocation
+171	assert.failed	invalid-free	t.c	74	3	frees `p`, which may already be freed or may not be an allocation (a local, a global or a member)
+172	assert.failed	invalid-free	t.c	74	3	frees `p`, which may not be the start of an allocation
+173	assert.failed	internal	t.c	74	3	the liveness cell of a block is at slot -2
+174	assert.failed	invalid-free	t.c	74	3	frees `p` while a pointer to it may still be in use elsewhere
+175	assert.failed	internal	t.c	74	3	the lengths of a block
+176	assert.failed	invalid-free	t.c	74	3	frees `p` without owning all of it: `p->n` is not owned here
+177	assert.failed	internal	t.c	74	3	the range of the value under its flag
+182	assert.failed[insufficient.permission]	invalid-free	t.c	74	3	frees `p` without owning all of it: `p->a` is not owned here
+188	assert.failed[insufficient.permission]	invalid-free	t.c	74	3	frees `p` without owning all of it: `p->a` is not owned here
+193	assert.failed	internal	t.c	74	3	the range of the value under its flag
+194	call.precondition	internal	t.c	74	3	internal check: Silicon's own check of the precondition of `free`
+197	assert.failed	leak	t.c	84	3	`g` may return while it still owns an allocation that its `ensures` does not hand back
+202	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the contract of `malloc (well-formedness)`
+210	not.wellformed	internal	t.c	13	3	internal check: well-formedness of the contract of `free (well-formedness)`
+218	not.wellformed	internal	t.c	23	3	internal check: well-formedness of the contract of `use (well-formedness)`

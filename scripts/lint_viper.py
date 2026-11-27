@@ -89,6 +89,15 @@ status 1) on:
   the snapshot is what the method holds), and is never assigned inside a loop whose invariant mentions it (a
   havocked amount could exceed `write` and make the body vacuous); `acc(x.f, k)` with such an amount is allowed in
   an invariant, `perm(...)` in an invariant is refused (Viper refuses it; the snapshot is the way);
+* a heap block's array part as a loop place (decision 0064 item 15, Part D): its first slot is bound to a local X and its permissions are snapshotted at
+  the loop's entry in two `Perm` locals that the method assigns ONCE, `perm(X.v_t)` and `perm(X.d_t)` (`amount_snapshots`); under the part's guard
+  `g ==> ` (required) the permission conjunct is `forall k :: { loc(block_of(X), k) } offset_of(X) <= k && k < offset_of(X) + N ==> acc(loc(block_of(X),
+  k).f, K)` with K the snapshot of X and that same field f, the flag conjunct carries the antecedent `Kd > none`, the range conjunct `Kv > none && Kd > none`
+  and the value conjunct `Kv > none` (and `Kv < write` where a write can reach the field), each K the snapshot of the same X and the field the row reads;
+  the entry and back-edge marked rows at those amounts are `assert`s of the same range rows (a snapshot of another base, another field or a quantifier that
+  does not run from X's own offset is refused).  A conjunct without the antecedents is the older shape (a range place of a local array) and stays clean.
+  Not checked: that N is the array's length, that the liveness invariant's amount is the snapshot of its own cell (the value-less liveness place of a
+  structure with no cell is the older shape), that the guard names the pointer the part was bound under;
 * the heap's free token (decision 0047 items 6, 7 and 10): `field tok: Bool` is declared exactly in a program that uses it (a heap
   program, which has a view call or a block site: a file that declares it and never uses it, uses it undeclared or declares it
   with another type is a problem); `tok` appears only as `<slot>.tok` where the slot is `loc(block_of(...), -1)` (the token's slot
@@ -140,6 +149,26 @@ status 1) on:
   method's first `requires` and the views'; `struct_lens`' `len(member(...)) == N` of an unknown pointer's row equals the allocation's count;
   `copy_arr_<t>` is pinned by its clause set (source flags kept by its `ensures`) with `alloc_*` and `zero_arr_<t>`; all three are exempt from the global facts, and
   `copy_arr_<t>` from the ghost-amount bounds, by the clause set and not by the name;
+* ranges over structures (decision 0064 items 6, 7 and 17, M4.5e1e2 Part C1): in a method's `requires` and `ensures` (and the pure `assert` rows of a call) a
+  range atom over a pointer to structures is, per element `k` of `offset_of(X) <= k && k < offset_of(X) + n`, the length facts `forall k :: { loc(block_of(X), k) }
+  ... ==> len(member(<chain>, j)) == 1` for each member block of the element (a chain rooted at the slot, a nested structure's own members inside its block, no
+  block twice, the slot facts of decision 0043 item 4 exactly or none) and, per LEAF path, the rows of a scalar range atom with the leaf receiver `loc(member(
+  <chain>, j), 0)` as trigger and cell (`acc` of the value and of the flag with an amount that is a `Perm` formal, the flag, the type's range, the flag implication, in
+  an `ensures` `old(flag) ==> flag`); a leaf row needs the length-facts row of its range in the same clause kind and that row must state the member block of the leaf
+  and of every nested structure above it (a permission over a member block of unknown length is not an atom).  A method with `v := alloc_arr_<E>(N)` of an
+  aggregate element exhales at every exit exactly what the allocation gave: each run of `exhale forall` rows over `block_of(v)` is the allocation's set of (receiver,
+  field) rows over `0 <= k && k < N`, directly preceded (a `perm(lvloc(block_of(v)).lv) == write` assert may stand between) by a run of marked `assert`s of the same
+  set, and each `exhale acc(lvloc(block_of(v)).lv)` stands directly after the whole run of its exhales (a method's missing-return `assert false` hides nothing), a method that allocates and has no exit at all and no `assert false` is refused (the loops' back-edge rows are other runs).
+  The amount a call row divides for a `reads_range` over structures is `n > 0 ? <minimum> : <liveness>` where the minimum (nested conditionals) takes both the value and the
+  flag permission of each leaf cell of the range's first slot (`loc(member(<slot>, j), 0)`, nested for a nested leaf), the liveness cell and the method's own `Perm` formals, nothing else
+  (decision 0064 item 7, Amounts: `_struct_range_minimum_ok`)
+* arrays of structures in storage (decision 0064 items 3, 9 and 17, M4.5e1e2 Part C2): `program_start`'s group of an array global of structures is the length facts over the
+  slots, then per leaf of the element its three rows with the leaf receiver `loc(member(<chain>, j), 0)` as trigger, the listed values element by element (leaves in
+  declaration order), per leaf the quantifier of the rest (where the list ends) or of an unknown value's range, last `acc(lvloc(GB_g()).lv)` (`aggregate_global_group`; a
+  structure global's array member of structures has the same group over `member(loc(GB_g(), 0), k)` without the liveness row); `alloc_struct_<n>_<tag>` of a structure
+  whose member is such an array states `len(member(X, k)) == N`, the length facts of the slots, then the three rows per leaf (`aggregate_member_rows`); in a method's
+  `requires` and `ensures` the same rows over a block term, each leaf row tied to a length-facts row of the same range and clause kind that states its member blocks
+  (`parse_block_leaf_row`, `block_row_problem`, `lint_block_length_facts`)
 * the user quantifiers of decision 0061 item 11 (M4.5e1c; `cerastes_forall`): `forall q0: Int[, q1: Int ...] :: { loc(block_of(X), q0)[, ...] } body`, the
   binders named `q<j>`, ONE trigger set holding one term per binder with X a variable, an antecedent that holds the type's range of the bound
   variable (`lo_T <= (q0 - offset_of(X)) && (q0 - offset_of(X)) <= hi_T`), a body with no `acc`, `perm`, `forperm`, `inhale` or `forall` and no
@@ -795,6 +824,42 @@ def struct_wf_lens_problem(parts: list[str], root: str, counts: dict[tuple[int, 
     return None
 
 
+def aggregate_member_rows(middle: list[str], at: int, q1: dict[str, str], key: tuple[int, ...], n: int, declared: dict[str, set[str]]):
+    """The rows of an array member whose elements are structures in `alloc_struct_<n>_<tag>` (decision 0064 items 3 and 17), `q1` being the length-facts row
+    already read (clause `at - 1`): over `member(X, k)`'s slots `0 <= j && j < n`, `len(member(<chain>, i)) == 1` for each member block of the element (a nested
+    structure's own facts inside it); then, for each leaf of the element in declaration order, the quantified rows `acc(C.v_t)`, `acc(C.d_t)`, `!C.d_t` with
+    `C` the leaf receiver `loc(member(<chain>, i), 0)` rooted at the slot as the trigger.  Returns (the next clause, [(leaf, field suffix)]) or the reason."""
+    if parse_struct_member(q1["b"]) != key:
+        return f"the array member {key}: the length facts of its elements are over another block than the one `len(...) == {n}` states"
+    if q1["lo"] != "0" or q1["hi"] != str(n):
+        return f"the array member {key}: the length facts of its elements are not over `0 <= j && j < {n}`"
+    slot = f"loc({q1['b']},{q1['k']})"
+    keys, why = range_lens_members(q1["cons"], slot)
+    if why is not None or keys is None:
+        return f"the array member {key}: the length facts of its elements: {why}"
+    out: list[tuple[tuple[int, ...], str]] = []
+    for leaf in element_leaves(keys):
+        cell = leaf_receiver(slot, leaf)
+        suffix = ""
+        for off, (what, shape) in enumerate((("acc({c}.v_{t})", r"acc\({c}\.v_(?P<t>[\w$']+)\)"), ("acc({c}.d_{t})", r"acc\({c}\.d_(?P<t>[\w$']+)\)"),
+                                             ("!{c}.d_{t}", r"!{c}\.d_(?P<t>[\w$']+)"))):
+            if at >= len(middle):
+                return f"the array member {key}: the leaf {leaf} of its elements is not followed by its three quantified permissions (value, flag, `!flag`)"
+            q = parse_slot_row(middle[at][len("ensures "):])
+            at += 1
+            if q is None or q["trig"] != cell or q["lo"] != "0" or q["hi"] != str(n) or q["k"] != q1["k"]:
+                return (f"the array member {key}: a quantified row of the leaf {leaf} is not `forall j :: {{ {cell} }} 0 <= j && j < {n} ==> "
+                        f"{what.format(c=cell, t='T')}` (value permission, flag permission, `!flag`, in this order)")
+            cm = re.fullmatch(shape.format(c=re.escape(cell)), q["cons"])
+            if cm is None or (off and cm.group("t") != suffix):
+                return f"the array member {key}: a quantified row of the leaf {leaf} is not `{what.format(c=cell, t='T')}` of one field suffix"
+            suffix = cm.group("t")
+        if suffix not in declared["v"] or suffix not in declared["d"]:
+            return f"the field suffix `{suffix}` is not declared (`field v_{suffix}` and `field d_{suffix}`)"
+        out.append((leaf, suffix))
+    return at, out
+
+
 def struct_allocation_problem(src: Source, d: Decl, suffix: str) -> str | None:
     """Decision 0043 items 4 and 13: the trusted allocation `alloc_struct_<n>_<tag>` is pinned by its shape: bodyless, the header
     and `decreases _`; first the root facts of `alloc_<t>`; then clauses in which each member block has `len(member(X, k)) == 1`,
@@ -852,6 +917,17 @@ def struct_allocation_problem(src: Source, d: Decl, suffix: str) -> str | None:
                 return f"the array member {key} is not followed by its three quantified permissions (value, flag, `!flag`)"
             members.add(key)
             arrays.add(key)
+            if at < len(middle) and (q1 := parse_block_row(middle[at][len("ensures "):])) is not None and "len(member(" in q1["cons"]:
+                # an array member whose elements are structures (decision 0064 items 3 and 17): the length facts of the slots, then per leaf of the
+                # element the three quantified rows over the leaf receiver, in this order, each leaf once
+                at += 1
+                why = aggregate_member_rows(middle, at, q1, key, n, declared)
+                if isinstance(why, str):
+                    return why
+                at, agg_leaves = why
+                for leaf, t in agg_leaves:
+                    leaves.add((key + (-1,) + leaf, t))
+                continue
             suffix_seen: set[str] = set()
             for want in ("acc(loc(B,j).v_T)", "acc(loc(B,j).d_T)", "!loc(B,j).d_T"):
                 q = parse_block_row(middle[at][len("ensures "):])
@@ -1017,19 +1093,65 @@ def parse_block_row(text: str) -> dict[str, str] | None:
     """The fields of a block-term row (`text` is what follows the keyword; whitespace and grouping parentheses do not matter): k, b (the
     block term), lo, hi (literals) and cons (the consequent), or None when the text is not that shape (extra antecedents, a computed bound)."""
     m = BLOCK_ROW_RE.match(norm_viper(text))
-    return None if m is None else {key: m.group(key) for key in ("k", "b", "lo", "hi", "cons")}
+    if m is None:
+        return None
+    out = {key: m.group(key) for key in ("k", "b", "lo", "hi", "cons")}
+    close = text.find("}")
+    if close >= 0:  # the consequent as written, grouping kept (see `parse_slot_row`)
+        pieces = _split_top(_strip_wrap(text[close + 1:].strip()), "==>")
+        if len(pieces) >= 2:
+            out["raw"] = "==>".join(pieces[1:]).strip()
+    return out
 
 
-def block_term(b: str, gbs: set[str], roots: set[str]) -> tuple[str, str, tuple[int, ...]] | None:
+LOAD_FIELD_RE = re.compile(r"\.v_ptr_struct_[0-9]+_[\w$']+")
+
+
+def load_root(b: str, roots: set[str]) -> tuple[str, str] | None:
+    """Decision 0064 item 15 (contract places through a heap read, scalars only): the one pointer LOAD a block term is rooted at.  `b` (normalized)
+    holds exactly one `.v_ptr_struct_<n>_<tag>` read, of a cell `loc(member(<chain>, k), 0)` with at least one member step, the chain canonical and
+    rooted at one of `roots` (a formal, a result, `loc(GB_g(), 0)`); returns (the load's text, `b` with that text replaced by `LOAD`), or None."""
+    hits = list(LOAD_FIELD_RE.finditer(b))
+    if len(hits) != 1:
+        return None
+    end = hits[0].end()
+    close = hits[0].start() - 1
+    if close < 0 or b[close] != ")":
+        return None
+    depth, i = 0, close
+    while i >= 0:
+        depth += (b[i] == ")") - (b[i] == "(")
+        if depth == 0:
+            break
+        i -= 1
+    start = i - len("loc") if i >= 3 and b[i - 3:i] == "loc" else -1
+    if start < 0:
+        return None
+    cell = b[start:hits[0].start()]
+    for root in roots:
+        if parse_struct_chain(cell, root) is not None:  # the root cell itself (`loc(GB_g(), 0)`, a `T **` formal) or a member cell below it
+            return b[start:end], b[:start] + "LOAD" + b[end:]
+    return None
+
+
+def block_term(b: str, gbs: set[str], roots: set[str], loads: bool = False) -> tuple[str, str, tuple[int, ...]] | None:
     """What a normalized block term is: ("gb", `GB_g`, ()) for `GB_g()` of a declared global, ("member", root, chain+k) for `member(<chain>, k)`
-    over a canonical chain rooted at one of `roots` (formals and results of the method, `r`, `loc(GB_g(), 0)` of a declared global); None otherwise."""
+    over a canonical chain rooted at one of `roots` (formals and results of the method, `r`, `loc(GB_g(), 0)` of a declared global), or rooted at one
+    pointer load of such a chain (`load_root`: ("member", the load's text, chain+k)) where `loads` is set (only the rows of a contract, `block_row_problem`
+    and `block_clause_problem`: `bound_locals` roots chains at a Viper variable, never at an expression); None otherwise."""
     m = GB_TERM_RE.match(b)
     if m is not None:
         return ("gb", m.group(1), ()) if m.group(1) in gbs else None
-    for root in sorted(roots | {f"loc({g}(),0)" for g in gbs}):
+    all_roots = roots | {f"loc({g}(),0)" for g in gbs}
+    for root in sorted(all_roots):
         key = parse_struct_member(b, root)
         if key is not None:
             return "member", root, key
+    lr = load_root(b, all_roots) if loads else None
+    if lr is not None:
+        key = parse_struct_member(lr[1], "LOAD")
+        if key is not None:
+            return "member", lr[0], key
     return None
 
 
@@ -1197,7 +1319,7 @@ ARRAY_GROUP_FIRST_RE = re.compile(r"^forall[A-Za-z_$][\w$']*:Int::\{loc\(GB_")
 
 
 def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fields: dict[str, str], gbs: dict[str, int],
-                       counts: dict[str, dict[tuple[int, ...], int]]):
+                       counts: dict[str, dict[tuple[int, ...], int]], lens_q0: dict[str, str] | None = None):
     """The row group of an array global in `program_start` (decision 0063 items 9 and 15), starting at clause `i` (the value permission), in
     this order, each row its own `ensures`: the two quantified permissions and the flags over `[0, N)` (`acc(loc(GB_g(), k).v_t)`,
     `acc(... .d_t)`, `loc(GB_g(), k).d_t`); the values (known: one conjunct `loc(GB_g(), i).v_t == c` per listed element, i = 0, 1, ..., then
@@ -1206,7 +1328,7 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
     [(line, target)]) or None, [(line, why)]); after a problem the rest of the group is skipped (one report)."""
     problems: list[tuple[int, str]] = []
     first_line = clauses[i][1]
-    q0 = parse_block_row(clauses[i][2])
+    q0 = lens_q0 if lens_q0 is not None else parse_block_row(clauses[i][2])
     m0 = GB_TERM_RE.match(q0["b"]) if q0 else None
     g = m0.group(1) if m0 else ""
     key: tuple[int, ...] | None = None  # a structure global's array leaf: the member key; the group has no liveness row (the cell row has it)
@@ -1226,6 +1348,8 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
             j += 1
         return min(j + 1, end), None, problems
 
+    if q0 is not None and (m0 is not None or key is not None) and g in gbs and "len(member(" in q0["cons"]:
+        return aggregate_global_group(clauses, i, end, fields, counts, q0, g, key, fail, lens_q0 is not None)
     if q0 is None or (m0 is None and key is None) or g not in gbs:
         return fail(first_line, "the first row is not the value permission `forall k: Int :: { loc(GB_g(), k) } 0 <= k && k < N ==> acc(loc(GB_g(), k).v_t)` "
                                 "of a declared `GB_g` (or of an array member `member(loc(GB_g(), 0), k)` of a structure global)", i + 1)
@@ -1304,7 +1428,179 @@ def array_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fi
                                    f"{listed} on have no value row", j + 1)
     if listed < n and not zero_rest and not unknown and fields.get(t) == "Bool" and listed != 0:
         return fail(clauses[j][1], f"no zero rest for the elements from {listed} on", j + 1)
-    return (j if key is not None else j + 1), (g, n, t, targets, key), problems
+    return (j if key is not None else j + 1), (g, n, t, targets, key, None), problems
+
+
+# Decision 0064 items 9 and 17 (M4.5e1e2 Part C2): an array of STRUCTURES (a global, a `static` local, a structure global's array member) has, per LEAF
+# path of its element, the row group of an array of scalars, with the leaf receiver `loc(member(<chain>, j), 0)` rooted at the slot `loc(B, k)` as the
+# trigger and the cell, after one row of length facts over the slots (`forall k :: { loc(B, k) } 0 <= k && k < N ==> len(member(<chain>, j)) == 1 && ...`,
+# `range_lens_members`).  The only rows that name an element are the listed values, `loc(member(loc(B, i), j), 0).v_t == c`, one per leaf of each listed
+# element (element by element, the leaves in declaration order), then, per leaf in the same order, the quantifier of the elements the list does not reach
+# (`m <= k && k < N ==> <receiver>.v_t == 0`) or the type's range of an unknown value over `[0, N)`; last `acc(lvloc(GB_g()).lv)` for a global.
+SLOT_ROW_RE = re.compile(r"^forall(?P<k>[A-Za-z_$][\w$']*):Int::\{(?P<trig>.+?)\}(?P<lo>[0-9]+)<=(?P=k)&&(?P=k)<(?P<hi>[0-9]+)==>(?P<cons>.+)$")
+
+
+def parse_slot_row(text: str) -> dict[str, str] | None:
+    """The fields of a quantified row whose trigger is any one term (`parse_block_row` wants `loc(B, k)`; a leaf row of an element has the leaf
+    receiver): k, trig (the trigger), lo, hi (literals) and cons; None when the text is not that shape.  Whitespace and grouping parentheses do not matter."""
+    m = SLOT_ROW_RE.match(norm_viper(text))
+    if m is None:
+        return None
+    out = {key: m.group(key) for key in ("k", "trig", "lo", "hi", "cons")}
+    # the consequent as written (grouping kept): `cons` has lost its parentheses, which a guarded `a || b && (c ==> d)` needs back (audit round C2, finding 1)
+    close = text.find("}")
+    if close >= 0:
+        pieces = _split_top(_strip_wrap(text[close + 1:].strip()), "==>")
+        if len(pieces) >= 2:
+            out["raw"] = "==>".join(pieces[1:]).strip()
+    return out
+
+
+def parse_block_leaf_row(text: str) -> dict[str, str] | None:
+    """A row of `parse_block_row`'s kind over a LEAF of the elements of an array of structures: the trigger is the leaf receiver `loc(member(<chain>,
+    j), 0)` rooted at the slot `loc(B, k)` (B a block term), at least one member step.  The fields are those of `parse_block_row` (k, b, lo, hi, cons)
+    and `recv`, the receiver; None otherwise (including a row of the older shape)."""
+    q = parse_slot_row(text)
+    if q is None:
+        return None
+    k, trig = q["k"], q["trig"]
+    root = trig
+    steps = 0
+    while (m := _CHAIN_LOC_RE.match(root)) is not None:
+        root, steps = m.group("inner"), steps + 1
+    if steps == 0 or not root.startswith("loc(") or not root.endswith(f",{k})"):
+        return None
+    b = root[len("loc("):-len(f",{k})")]
+    if parse_struct_chain(trig, f"loc({b},{k})") is None:
+        return None
+    out = {"k": k, "b": b, "lo": q["lo"], "hi": q["hi"], "cons": q["cons"], "recv": trig}
+    if "raw" in q:
+        out["raw"] = q["raw"]
+    return out
+
+
+def leaf_receiver(slot: str, leaf: tuple[int, ...]) -> str:
+    """The receiver of the leaf `leaf` (member steps) of the element at `slot`: `loc(member(<...>, j), 0)`."""
+    r = slot
+    for j in leaf:
+        r = f"loc(member({r},{j}),0)"
+    return r
+
+
+def element_leaves(keys: list[tuple[int, ...]]) -> list[tuple[int, ...]]:
+    """The leaf paths of an element whose member blocks are `keys` (`range_lens_members`): the keys that are no prefix of another, in declaration order."""
+    kset = set(keys)
+    return sorted(k for k in kset if not any(o != k and o[:len(k)] == k for o in kset))
+
+
+def aggregate_global_group(clauses: list[tuple[str, int, str]], i: int, end: int, fields: dict[str, str], counts, q0: dict[str, str], g: str,
+                           key: tuple[int, ...] | None, fail, detached: bool = False):
+    """The row group of an array of structures in `program_start` (decision 0064 item 9; see the comment above); `i` is the first clause (the length
+    facts), `q0` its `parse_block_row`; `key` is the member key of a structure global's array member (no liveness row then); `detached`: the length facts were read from an earlier clause and `i` is the
+    first row of the leaves.  Returns what
+    `array_global_group` returns, with the field suffix of the first pointer leaf that holds an address (else of the first leaf)."""
+    first = clauses[i][1]
+    n, b, k = int(q0["hi"]), q0["b"], q0["k"]
+    if q0["lo"] != "0" or n < 1:
+        return fail(first, f"the length facts of the elements are over `0 <= k && k < N` with a literal N >= 1, found `{q0['lo']} <= k && k < {q0['hi']}`", i + 1)
+    keys, why = range_lens_members(q0["cons"], f"loc({b},{k})")
+    if why is not None or keys is None:
+        return fail(first, f"the length facts of the elements of an array of structures: {why}", i + 1)
+    leaves = element_leaves(keys)
+    suffixes: list[str] = []
+    j = i if detached else i + 1  # a structure global's length facts are a clause of their own, before the structure's cell row (`detached`)
+    for leaf in leaves:
+        cell = leaf_receiver(f"loc({b},{k})", leaf)
+        t = ""
+        for off, (what, shape) in enumerate((("the value permission", "acc({c}.v_{t})"), ("the flag permission", "acc({c}.d_{t})"), ("the flags (every one true)", "{c}.d_{t}"))):
+            if j >= end:
+                return fail(first, f"the group ends before {what} of the leaf {leaf}", j)
+            q = parse_slot_row(clauses[j][2])
+            if q is None or q["trig"] != cell or q["lo"] != "0" or q["hi"] != str(n) or q["k"] != k:
+                return fail(clauses[j][1], f"the row after the length facts is not {what} of the leaf {leaf} over `0 <= k && k < {n}` with the receiver `{cell}` as trigger", j + 1)
+            if off == 0:
+                mv = re.fullmatch(rf"acc\({re.escape(cell)}\.v_(?P<t>[\w$']+)\)", q["cons"])
+                if mv is None or mv.group("t") not in fields:
+                    return fail(clauses[j][1], f"the first row of the leaf {leaf} is not `acc({cell}.v_t)` of a declared field", j + 1)
+                t = mv.group("t")
+            elif q["cons"] != shape.format(c=cell, t=t):
+                return fail(clauses[j][1], f"the row after the value permission of the leaf {leaf} is not {what}", j + 1)
+            j += 1
+        suffixes.append(t)
+    listed = li = 0  # the next listed conjunct is the leaf `li` of the element `listed`
+    rest: list[int] = []  # the leaves whose quantifier of the rest or of an unknown value has been seen
+    targets: list[tuple[int, str | None]] = []
+    ptr_suffix: str | None = None
+    rest_lo: int | None = None
+    unknown = False
+    while j < end:
+        ln, text = clauses[j][1], norm_viper(clauses[j][2])
+        if text == f"acc(lvloc({g}()).lv)" and key is None:
+            break
+        q = parse_slot_row(clauses[j][2])
+        if q is not None:
+            if key is not None and q["trig"] not in {leaf_receiver(f"loc({b},{k})", lf) for lf in leaves}:
+                break  # the next array member's group
+            if li != 0:
+                return fail(ln, f"the element {listed} has only {li} of its {len(leaves)} leaves listed before the quantifier of the rest", j + 1)
+            at = len(rest)
+            if at >= len(leaves):
+                return fail(ln, "a quantifier of the values after every leaf has one", j + 1)
+            cell, t = leaf_receiver(f"loc({b},{k})", leaves[at]), suffixes[at]
+            zero = zero_literal(fields, t)
+            if q["trig"] != cell or q["hi"] != str(n) or q["k"] != k:
+                return fail(ln, f"the quantifier of the values of the leaf {leaves[at]} is over `{{ {cell} }}` up to `k < {n}` (the leaves in declaration order, each once)", j + 1)
+            if zero is not None and q["cons"] == f"{cell}.v_{t}=={zero}":
+                if unknown or int(q["lo"]) != listed:
+                    return fail(ln, f"the zero rest of the leaf {leaves[at]} starts at `{q['lo']}` but {listed} elements are listed (it starts where the list ends, for every leaf)", j + 1)
+                if listed >= n:
+                    return fail(ln, "a zero rest although every element is listed", j + 1)
+                rest_lo = listed
+            else:
+                good, target = leaf_value(fields, t, cell, q["cons"], counts)
+                if not good or target is not None or re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==[^|&<]+", q["cons"]):
+                    return fail(ln, f"the quantifier of the values of the leaf {leaves[at]} is neither the zero rest (`{cell}.v_{t} == {zero}`) nor the type's range / `WF` of an unknown value", j + 1)
+                if listed != 0 or q["lo"] != "0" or (rest_lo is not None):
+                    return fail(ln, "an unknown value's range quantifier stands alone over `0 <= k && k < N` (no element is listed, no zero rest beside it)", j + 1)
+                unknown = True
+            rest.append(at)
+            j += 1
+            continue
+        if rest:
+            if key is not None:
+                break  # the next group of the structure global starts here
+            return fail(ln, "a row after the quantifiers of the values (the group ends with `acc(lvloc(GB_g()).lv)`)", j + 1)
+        cell, t = leaf_receiver(f"loc({b},{listed})", leaves[li]), suffixes[li]
+        em = re.fullmatch(rf"{re.escape(cell)}\.v_{re.escape(t)}==(?P<v>.+)", text)
+        if em is None:
+            if key is not None:
+                break  # a structure global's group ends where the next row is no value of it
+            return fail(ln, f"`{text}` is not the listed value `{cell}.v_{t} == c` (the elements are listed from 0, each leaf in declaration order, once), the "
+                            f"quantifier of the rest or `acc(lvloc({g}()).lv)`", j + 1)
+        if listed >= n:
+            return fail(ln, f"an element at or past the count {n}", j + 1)
+        good, target = leaf_value(fields, t, cell, text, counts)
+        if not good or "||" in em.group("v") or "<=" in em.group("v"):
+            return fail(ln, f"the listed value `{em.group('v')}` is not a literal of its type, `null` or `loc(GB_h(), 0)` of a declared global", j + 1)
+        if target is not None:
+            if ptr_suffix not in (None, t):
+                return fail(ln, "addresses in pointer leaves of two types (the escape rule reads one pointer field of an array of structures)", j + 1)
+            ptr_suffix = t
+        targets.append((ln, target))
+        li += 1
+        if li == len(leaves):
+            listed, li = listed + 1, 0
+        j += 1
+    if li != 0:
+        return fail(clauses[min(j, end - 1)][1], f"the element {listed} has only {li} of its {len(leaves)} leaves listed", j)
+    if j >= end and key is None:
+        return fail(clauses[min(i, end - 1)][1], f"the group has no final `acc(lvloc({g}()).lv)`", end)
+    if rest and len(rest) != len(leaves):
+        return fail(clauses[min(j, end) - 1][1], f"the quantifier of the values is given for {len(rest)} of the {len(leaves)} leaves (every leaf, in declaration order)", j)
+    for idx, t in enumerate(suffixes):
+        if listed < n and not rest and zero_literal(fields, t) is not None and not (fields.get(t) == "Bool" and listed == 0):
+            return fail(clauses[min(j, end - 1)][1], f"no zero rest and no range of an unknown value: the elements from {listed} on have no value row for the leaf {leaves[idx]}", j + 1)
+    return (j if key is not None else j + 1), (g, n, ptr_suffix or suffixes[0], targets, key, frozenset(zip(leaves, suffixes))), []
 
 
 def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> tuple[bool, list[str] | None]:
@@ -1352,6 +1648,8 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
         # a struct global's array leaves (decision 0063 item 9): global -> {member key: (line, field suffix, N, [(line, target)])}
         sarrs: dict[str, dict[tuple[int, ...], tuple[int, str, int, list[tuple[int, str | None]]]]] = {}
         row_problems: list[tuple[int, str]] = []
+        ashapes: dict[str, frozenset] = {}  # an array global of structures -> its element's shape: the (leaf path, field suffix) pairs
+        pending_lens: dict[tuple[str, tuple[int, ...]], tuple[int, dict[str, str]]] = {}  # (global, member key or ()) -> (line, parse_block_row) of a length facts clause not yet followed by its group
         if d.has_body or header != want_head:
             problem = f"it must be a bodyless `{want_head}`"
         elif trusted_tag(src, d.line) is None:
@@ -1366,11 +1664,31 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                 at += 1
                 row = norm_viper(text)
                 if row.startswith("forall"):
+                    # a structure global's array member of structures: its length facts are a clause of their own right after the global facts, and the
+                    # member's row group follows the structure's cell row (decision 0064 item 9, as built in Part C2)
+                    ql = parse_block_row(text)
+                    if ql is not None and "len(member(" in ql["cons"]:
+                        gm = GB_TERM_RE.match(ql["b"])
+                        mk = (gm.group(1), ()) if gm is not None and gm.group(1) in gbs else next(
+                            ((cand, parse_struct_member(ql["b"], f"loc({cand}(),0)")) for cand in gbs
+                             if parse_struct_member(ql["b"], f"loc({cand}(),0)") is not None), None)
+                        if mk is not None and mk not in pending_lens:
+                            pending_lens[mk] = (ln, ql)
+                            continue
+                    sq = parse_slot_row(text) if pending_lens else None
+                    lens_hit = None
+                    if sq is not None:
+                        for pk, (_pl, pq) in pending_lens.items():
+                            pkeys, pwhy = range_lens_members(pq["cons"], f"loc({pq['b']},{pq['k']})")
+                            if pwhy is None and pkeys and sq["trig"] == leaf_receiver(f"loc({pq['b']},{pq['k']})", element_leaves(pkeys)[0]):
+                                lens_hit = pk
+                                break
                     # an array global's row group (decision 0063 items 9 and 15): several rows, one global
-                    at, group, why = array_global_group(clauses, at - 1, stop, fields, gbs, counts)
+                    at, group, why = array_global_group(clauses, at - 1, stop, fields, gbs, counts,
+                                                        pending_lens.pop(lens_hit)[1] if lens_hit is not None else None)
                     row_problems.extend(why)
                     if group is not None and group[4] is not None:
-                        ag, an, asuffix, atargets, akey = group
+                        ag, an, asuffix, atargets, akey, _ashape = group
                         if ag not in srows:
                             row_problems.append((ln, f"the array member {akey} of the structure global `{ag}` has its row group before the structure's cell row, or the "
                                                      "structure has no cell leaf (the cell row ends with `acc(lvloc(GB_g()).lv)`; decision 0063 item 9)"))
@@ -1379,11 +1697,13 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                         else:
                             sarrs.setdefault(ag, {})[akey] = (ln, asuffix, an, atargets)
                     elif group is not None:
-                        ag, an, asuffix, atargets, _akey = group
+                        ag, an, asuffix, atargets, _akey, ashape = group
                         if ag in rows or ag in srows or ag in arows:
                             row_problems.append((ln, f"a second `program_start` row for `{ag}` (two full permissions would make `main` vacuous)"))
                         else:
                             arows[ag] = (ln, asuffix, an, atargets)
+                            if ashape is not None:
+                                ashapes[ag] = ashape
                     continue
                 if row.startswith("acc(loc(member("):
                     r = struct_row(row, fields, counts)
@@ -1428,6 +1748,9 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                     row_problems.append((ln, f"a second `program_start` row for `{g}` (two full permissions would make `main` vacuous)"))
                     continue
                 rows[g] = (ln, suffix, target)
+            for (pg, pkey), (pln, _pq) in pending_lens.items():
+                row_problems.append((pln, f"the length facts of the array of structures `{pg}`{' (member ' + str(pkey) + ')' if pkey else ''} are not followed by its row group "
+                                          "(decision 0064 item 9)"))
             for g, (lln, lleaves) in srows.items():
                 if not lleaves and not sarrs.get(g):
                     row_problems.append((lln, f"the liveness row of `{g}` stands alone, and no array member of it has a row group: a structure global with no cell leaf "
@@ -1459,6 +1782,14 @@ def lint_globals(src: Source, decls: list[Decl], add: Callable[[int, str], None]
                 if rows[target][1] != pointee:
                     add(ln, f"the row of `{g}` points at `{target}`, which is not a declared global of the pointee's field "
                             f"`v_{pointee}` (decision 0041 item 4)")
+            elif target in ashapes:
+                # `struct P *pg = g;` is `loc(GB_g(), 0)`, the first element of an array global of structures (decision 0064 item 9): the pointee is a
+                # structure of the element's shape, as for a pointer to a structure global
+                if not pointee.startswith("struct_"):
+                    add(ln, f"the row of `{g}` points at the array of structures `{target}` in a field `v_{suffix}` that is not a pointer to a struct "
+                            "(decision 0064 item 9)")
+                elif shapes.setdefault(suffix, ashapes[target]) != ashapes[target]:
+                    add(ln, f"the field `v_{suffix}` points at globals of two different shapes (`{target}` is not of the pointee's type)")
             elif target in arows:
                 if arows[target][1] != pointee:  # `loc(GB_h(), 0)`: the first element of an array global (the decay, decision 0063 item 9)
                     add(ln, f"the row of `{g}` points at the array `{target}`, whose elements are not of the pointee's field "
@@ -1807,6 +2138,8 @@ def _site_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: dic
             kind = "slot"
         elif (cm := CELL_TERM_RE.match(cell)) is not None and parse_struct_member(cm.group("m"), root) is not None:
             kind = "cell"
+        elif (base := _agg_slot_base(cell)) is not None and (slots or {}).get(base) == root:
+            kind = "leaf"  # a leaf of the first slot of an array part whose elements are structures (decision 0064 items 7 and 17)
         else:
             return False
         held.setdefault((f"{kind}:{cell}", m.group("t")), set()).add(m.group("f"))
@@ -1815,6 +2148,48 @@ def _site_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: dic
         if len(held) != 1:
             return False
     return all(fs == {"v", "d"} for fs in held.values())
+
+
+def _agg_slot_base(cell: str) -> str | None:
+    """The base local B of a leaf cell of the first slot of an array part of structures: `loc(member(<S>, j), 0)` (one or more member steps) with
+    `<S>` the slot `loc(block_of(B), offset_of(B))` of a variable B; None otherwise.  Squashed text."""
+    steps = 0
+    while (m := re.fullmatch(r"loc\(member\((.+),\d+\),0\)", cell)) is not None:
+        cell, steps = m.group(1), steps + 1
+    sm = re.fullmatch(rf"loc\(block_of\(({IDENT})\),offset_of\(\1\)\)", cell)
+    return sm.group(1) if sm is not None and steps >= 1 else None
+
+
+def _first_slot_leaf(cell: str, slot: str) -> bool:
+    """Whether `cell` is a leaf of the first slot of a range over structures (decision 0064 item 7: the receiver of a leaf
+    path of the element at the range's first slot): `loc(member(<S>, j), 0)` with `<S>` the slot `loc(block_of(B), offset_of(B))`
+    itself or, for a leaf of a nested structure, another such cell, so `loc(member(loc(member(<slot>, 1), 0), 0), 0)`; at least one
+    member step (the slot itself is a scalar range's cell).  Squashed text."""
+    steps = 0
+    while cell != slot:
+        m = re.fullmatch(r"loc\(member\((.+),\d+\),0\)", cell)
+        if m is None:
+            return False
+        cell, steps = m.group(1), steps + 1
+    return steps >= 1
+
+
+def _struct_range_minimum_ok(leaves: list[str], slot: str, big: str, formals: frozenset[str]) -> bool:
+    """The minimum a `reads_range` over structures' call row divides (decision 0064 item 7, Amounts: the minimum over each leaf
+    path's first slot, the liveness cell and the caller's own read amounts): for every leaf cell of the first slot both its value and
+    its flag permission (of one type), the liveness cell `big`, and nothing else but the method's own `Perm` formals.  A leaf of
+    another range's slot, a cell of another variable, a `Perm` local, a literal or a missing value or flag is refused.  Not checked:
+    that every leaf of the element is in it (a missing leaf only leaves the amount above what that leaf holds, which the call's own
+    exhale reports as a false alarm, never a proof: `_site_amount_inner`'s note)."""
+    held: dict[tuple[str, str], set[str]] = {}
+    for leaf in leaves:
+        if leaf == big or leaf in formals:
+            continue
+        m = PERM_LEAF_FIELD_RE.match(leaf)
+        if m is None or not _first_slot_leaf(m.group("cell"), slot):
+            return False
+        held.setdefault((m.group("cell"), m.group("t")), set()).add(m.group("f"))
+    return big in leaves and all(fs == {"v", "d"} for fs in held.values())
 
 
 def _range_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: dict[str, str] | None = None) -> bool:
@@ -1841,6 +2216,8 @@ def _range_amount_inner(d: str, formals: frozenset[str] = frozenset(), slots: di
     if leaves is None:
         return False
     slot = f"loc(block_of({bb}),offset_of({bb}))"
+    if any((m := PERM_LEAF_FIELD_RE.match(leaf)) is not None and m.group("cell") != slot for leaf in leaves if leaf != big and leaf not in formals):
+        return _struct_range_minimum_ok(leaves, slot, big, formals)
     types = {m.group(1) for leaf in leaves if (m := re.fullmatch(rf"perm\({re.escape(slot)}\.v_({IDENT})\)", leaf))}
     if len(types) != 1:
         return False
@@ -2335,6 +2712,121 @@ def lint_loop_entry_ghosts(src: Source, decls: list[Decl], add: Callable[[int, s
 # implication whose antecedent names `P`, so a carrier never holds a token for a pointer its guard does not mention (a written site's
 # `P != null ==> ...`, an owner's `held_o && ... ==> ...`, a place's `... && P != null ==> ...`).
 TOK_ACC = "acc(loc(block_of("
+
+
+# The ghost pointer of a block site read through memory (decision 0064 item 15, step A and step 1): `abp_<i>__<loop>` (`Ref`) names the block whose array parts a
+# loop carries, because the quantified permissions need a variable as their trigger.  It is assigned in two shapes only, each under the single-statement
+# `if (C) {` ... `}` the emitter writes:
+#   (a) `if ((!(E == null)) && (E != null)) { abp := E }` with E `kv_<x> > none ? loc(GB_<g>(), 0).v_ptr_<t> : null`, a held global's pointer, at the loop's entry;
+#   (b) `if (G && (X != null)) { abp := X }` with G a `Bool` local and X a `Ref` local or formal, at the back edge of a loop that may write the pointer:
+#       the ghost takes the pointer the body ends with, and only where it is a block.
+ABP_ASSIGN_RE = re.compile(rf"^\s*(?P<n>abp_[\w$']*)\s*:=\s*(?P<rhs>.+?)\s*$")
+ABP_ENTRY_RE = re.compile(r"^(?P<kv>kv_[\w$']+)>none\?(?P<cell>loc\((?P<gb>GB_[\w$']+)\(\),0\)\.v_ptr_[\w$']+):null$")
+
+
+def _plain_assignments_at(src: Source, d: Decl, name: str) -> list[tuple[int, str]]:
+    """(line, the squashed right-hand side) of the statements `name := rhs` of the method `d`."""
+    out: list[tuple[int, str]] = []
+    for n in range(d.body_line, d.end_line + 1):
+        m = re.match(rf"^\s*{re.escape(name)}\s*:=\s*(?P<rhs>.+?)\s*$", src.code[n - 1])
+        if m is not None:
+            out.append((n, norm_viper(m.group("rhs"))))
+    return out
+
+
+def _plain_assignments(src: Source, d: Decl, name: str) -> list[str]:
+    """The squashed right-hand sides of the statements `name := rhs` of the method `d`."""
+    return [rhs for _, rhs in _plain_assignments_at(src, d, name)]
+
+
+def _enclosing_loop_start(src: Source, d: Decl, lineno: int) -> int | None:
+    """The line of the `{` that opens the body of the innermost `while` around line `lineno` of the method `d` (the emitter writes `while (c)`, its `invariant` and
+    `decreases` lines, then a `{` of its own), None outside every loop."""
+    stack: list[int | None] = []
+    pending = False
+    for n in range(max(d.body_line, 1) + 1, lineno):
+        code = src.code[n - 1].strip()
+        if code.startswith("while"):
+            pending = True
+        elif code.startswith("}"):
+            if stack:
+                stack.pop()
+            if code.endswith("{"):
+                stack.append(None)
+        elif code.endswith("{") and not code.endswith("{ }"):
+            stack.append(n if pending and code == "{" else None)
+            pending = False
+    inner = [x for x in stack if x is not None]
+    return inner[-1] if inner else None
+
+
+def _abp_tie_invariants(src: Source, d: Decl, name: str) -> set[str]:
+    """The squashed `E` of the loop invariants `G ==> E == <name>` of the method `d`: the pointer the ghost `name` stands for (decision 0064 item 15)."""
+    out: set[str] = set()
+    for n in range(d.body_line, d.end_line + 1):
+        m = INV_LINE_RE.match(src.code[n - 1])
+        if m is None:
+            continue
+        parts = norm_viper(m.group("rest")).split("==>", 1)
+        if len(parts) == 2 and parts[1].endswith(f"=={name}") and len(parts[1]) > len(name) + 2:
+            out.add(parts[1][:-(len(name) + 2)])
+    return out
+
+
+def lint_abp_ghosts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    gb_names = {m.group("name") for l in src.code if (m := GB_DECL_RE.match(l))}
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        refs = method_locals(src, d, REF_LOCAL_RE)
+        bools = method_locals(src, d, BOOL_LOCAL_RE)
+        perms = perm_local_names(src, d)
+        pointers = refs | set(_formal_names(src, d))
+        formals = set(_formal_names(src, d))
+        for n in range(d.body_line, d.end_line + 1):
+            m = ABP_ASSIGN_RE.match(src.code[n - 1])
+            if m is None:
+                continue
+            name, rhs = m.group("n"), norm_viper(m.group("rhs"))
+            prev = src.code[n - 2].strip() if n >= 2 else ""
+            nxt = src.code[n].strip() if n < len(src.code) else ""
+            im = re.match(r"^if\s*\((?P<c>.*)\)\s*\{$", prev)
+            cond = norm_viper(im.group("c")) if im is not None and nxt == "}" else None
+            if name not in refs:
+                add(n, f"`{name}` is assigned but is no declared `Ref` local of the method")
+            elif cond is None:
+                add(n, f"`{name}` is assigned outside a single-statement `if (C) {{ ... }}`: a ghost block pointer takes its value only where its guard holds")
+            elif (em := ABP_ENTRY_RE.match(rhs)) is not None:
+                if cond != f"!{rhs}==null&&{rhs}!=null" or em.group("gb") not in gb_names or em.group("kv") not in perms:
+                    add(n, f"`{name}` takes a held global's pointer under a guard that is not `(!(E == null)) && (E != null)` of that very E, or of a Perm local "
+                           "and a declared global that it does not name")
+                elif _plain_assignments(src, d, em.group("kv")) != [f"perm({em.group('cell')})"]:
+                    add(n, f"`{name}` reads a global's pointer under `{em.group('kv')}`, which is not the one snapshot `{em.group('kv')} := perm(<that very cell>)` "
+                           "of the method: the guard's amount and the pointer it guards are one cell's")
+                elif rhs not in _abp_tie_invariants(src, d, name):
+                    add(n, f"`{name}` takes `{m.group('rhs')}` but no loop invariant `G ==> <that pointer> == {name}` of the method ties the ghost to it")
+            elif re.fullmatch(IDENT, rhs) and rhs in pointers:
+                cm = re.fullmatch(rf"({IDENT})&&{re.escape(rhs)}!=null", cond)
+                if cm is None or cm.group(1) not in bools:
+                    add(n, f"`{name}` is retaken from `{rhs}` under a guard that is not `G && ({rhs} != null)` with G a `Bool` local")
+                else:
+                    ties = _abp_tie_invariants(src, d, name)
+                    g = cm.group(1)
+                    start = _enclosing_loop_start(src, d, n)
+                    xs = _plain_assignments_at(src, d, rhs)
+                    gs = _plain_assignments_at(src, d, g)
+                    # the pointer and the guard the ghost is retaken from are the ones the body ENDS with: each is assigned once, from the invariant's E, inside this
+                    # loop's body (a copy of E taken before the loop holds the entry's pointer, not the pointer the body leaves)
+                    x_ok = (len(xs) == 1 and xs[0][1] in ties and start is not None and xs[0][0] > start) or (rhs in formals and rhs in ties)
+                    g_ok = len(gs) == 1 and gs[0][1] in {f"!{e}==null" for e in ties} and start is not None and gs[0][0] > start
+                    if not ties:
+                        add(n, f"`{name}` is retaken from `{rhs}` but no loop invariant `G ==> <pointer> == {name}` of the method names the pointer it stands for")
+                    elif not x_ok:
+                        add(n, f"`{name}` is retaken from `{rhs}`, which is not (assigned once from) the pointer `E` of the invariant `G ==> E == {name}`")
+                    elif not g_ok:
+                        add(n, f"`{name}` is retaken under `{g}`, which is not the one local assigned `!(E == null)` for the pointer `E` of the invariant `G ==> E == {name}`")
+            else:
+                add(n, f"`{name}` is assigned `{m.group('rhs')}`: a ghost block pointer is a held global's pointer or a pointer local that is not null")
 
 
 def lint_carrier_clauses(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
@@ -3095,13 +3587,13 @@ def _chain_cell(chain: tuple[int, ...], root: str) -> str:
     return cell
 
 
-def _lens_members(parts: list[str], root: str) -> tuple[list[tuple[int, ...]], str | None]:
-    why = struct_wf_lens_problem(parts, root)
+def _lens_members(parts: list[str], root: str, counts: dict[tuple[int, ...], int] | None = None) -> tuple[list[tuple[int, ...]], str | None]:
+    why = struct_wf_lens_problem(parts, root, counts)
     if why is not None:
         return [], why
     keys = []
     for part in parts:
-        m = re.fullmatch(r"len\((?P<m>.*)\)==1", part)
+        m = re.fullmatch(r"len\((?P<m>.*)\)==[0-9]+", part)
         if m:
             keys.append(parse_struct_member(m.group("m"), root))
     return keys, None
@@ -3164,19 +3656,104 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
                 "and cell and `len == 1`")
     i = len(prefix)
     lens: list[str] = []
-    while i < len(atoms) and not atoms[i].startswith("acc("):
+    while i < len(atoms) and not atoms[i].startswith(("acc(", "forall")):
         lens.append(atoms[i])
         i += 1
     members: list[tuple[int, ...]] = []
+    counts: dict[tuple[int, ...], int] = {}
     if lens:
-        members, why = _lens_members(lens, root)
+        # decision 0064 item 15 (heap storage): an array member states its count, `len(member(<chain>, k)) == N`; the rows of its leaf decide
+        # whether the member is an array leaf (a cell has `len == 1` and `acc` lines)
+        for part in lens:
+            cm = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", part)
+            ck = parse_struct_member(cm.group("m"), root) if cm else None
+            if ck is not None and int(cm.group("n")) > 1:
+                counts[ck] = int(cm.group("n"))
+        members, why = _lens_members(lens, root, counts)
         if why is not None:
             return f"the structure's member blocks: {why}"
     structs = {k for k in members if any(o[:-1] == k for o in members)}
+    for key in counts:
+        if key in structs:
+            return f"the member block {key} is a nested structure and states `len == {counts[key]}`: only an array member states a count other than 1"
     leaf_chains = sorted(k for k in members if k not in structs) if lens else [()]
     # the leaves, in the text: `acc(C.v_t)`, `acc(C.d_t)` and the facts under the flag
     leaves: list[tuple[tuple[int, ...], str, str]] = []  # chain, suffix, the rebuilt facts
-    for chain in leaf_chains:
+    arrays: dict[tuple[int, ...], tuple[str, int, str, list[str]]] = {}  # array leaf: chain -> (suffix, N, the bound variable, its rows)
+    # the leaves in the order `block_conj` writes them (decision 0064 item 15): the cell leaves in member order (value permission, flag
+    # permission, the range under the flag), then (`calloc`: the cell flags), then the array leaves in member order (the three quantified rows
+    # each), then (`calloc`: the array flags); an array leaf is one whose member states a count other than 1 or whose rows are quantified
+    array_chains = [c for c in leaf_chains if lens and (c in counts or any(
+        re.match(r"forall[A-Za-z_$][\w$']*:Int::\{loc\(" + re.escape(norm_viper(f"member({_chain_cell(c[:-1], root)}, {c[-1]})")) + ",", a) for a in atoms))]
+    cell_chains = [c for c in leaf_chains if c not in array_chains]
+    order = cell_chains + array_chains
+    transitioned = False
+    for chain in order:
+        if chain in array_chains and not transitioned:
+            transitioned = True
+            if routine == "calloc":
+                while i < len(atoms) and not atoms[i].startswith("forall"):
+                    i += 1  # the cell flags: compared with the rebuilt text below
+        if chain in array_chains:
+            # an array leaf of scalars (decision 0064 item 15, question 292): three quantified rows over `[0, N)`, N the member's `len`, the
+            # trigger the element's cell `loc(member(<parent>, k), j)`, one field suffix: the value permission, the flag permission and (but for
+            # a `bool`) the type's range under the flag; each (receiver, field) pair once
+            n = counts.get(chain, 1)
+            blk = norm_viper(f"member({_chain_cell(chain[:-1], root)}, {chain[-1]})")
+            rows_text: list[str] = []
+            suffix = ""
+            kvar = ""
+            for off in range(3):
+                if i + off >= len(atoms):
+                    break
+                am = re.fullmatch(r"forall(?P<k>[A-Za-z_$][\w$']*):Int::\{loc\(" + re.escape(blk) + r",(?P=k)\)\}0<=(?P=k)&&(?P=k)<(?P<hi>[0-9]+)==>(?P<cons>.+)",
+                                  atoms[i + off])
+                if am is None or am.group("hi") != str(n) or (off and am.group("k") != kvar):
+                    return (f"array leaf {chain}: row {off + 1} is not `forall k: Int :: {{ loc({blk}, k) }} 0 <= k && k < {n} ==> ...` over the member's "
+                            f"own block with the count `len({blk}) == {n}` the view states (value permission, flag permission, the type's range under the flag)")
+                kvar = am.group("k")
+                cell = f"loc({blk},{kvar})"
+                if off == 0:
+                    vm = re.fullmatch(r"acc\(" + re.escape(cell) + r"\.v_(?P<t>[A-Za-z0-9_$']+)\)", am.group("cons"))
+                    if vm is None:
+                        return f"array leaf {chain}: row 1 is not `acc({cell}.v_<t>)`"
+                    suffix = vm.group("t")
+                    if suffix not in declared["v"] or suffix not in declared["d"]:
+                        return f"the field suffix `{suffix}` is not declared (`field v_{suffix}` and `field d_{suffix}`)"
+                    if _leaf_kind(suffix) == "ptr" and suffix.startswith("ptr_struct_"):
+                        return f"array leaf {chain}: an array of pointers to structures is not a pinned view shape"
+                    rows_text.append(f"acc({cell}.v_{suffix})")
+                elif off == 1:
+                    if am.group("cons") != f"acc({cell}.d_{suffix})":
+                        return f"array leaf {chain}: row 2 is not `acc({cell}.d_{suffix})`"
+                    rows_text.append(f"acc({cell}.d_{suffix})")
+                    if _leaf_kind(suffix) == "bool":
+                        break
+                elif _leaf_kind(suffix) == "ptr":
+                    # an array of pointers to scalars (the three clauses of a cell's pointer leaf, over the elements): the well-formedness of the value under the flag
+                    value, flag = f"{cell}.v_{suffix}", f"{cell}.d_{suffix}"
+                    if norm_viper(am.group("cons")) != norm_viper(f"{flag} ==> ({_view_wf(value)})"):
+                        return f"array leaf {chain}: row 3 is not `{flag} ==> WF({value})`"
+                    rows_text.append(f"{flag} ==> ({_view_wf(value)})")
+                else:
+                    value, flag = f"{cell}.v_{suffix}", f"{cell}.d_{suffix}"
+                    m2 = re.fullmatch(re.escape(flag) + r"==>(?P<lo>-?[0-9]+)<=" + re.escape(value) + "&&" + re.escape(value) + r"<=(?P<hi>-?[0-9]+)",
+                                      am.group("cons"))
+                    if m2 is None:
+                        return f"array leaf {chain}: row 3 is not `{flag} ==> lo <= value && value <= hi`"
+                    lo, hi = int(m2.group("lo")), int(m2.group("hi"))
+                    kind = _leaf_kind(suffix)
+                    ok = lo <= 0 <= hi if kind == "enum" else (lo, hi) == VIEW_INT_RANGES[suffix] if suffix in VIEW_INT_RANGES else (lo, hi) in VIEW_STANDARD_RANGES
+                    if not ok:
+                        return f"array leaf {chain}: the range [{lo}, {hi}] is not the range of its field `{suffix}` (decision 0018)"
+                    rows_text.append(f"{flag} ==> (({lo}) <= {value} && {value} <= {hi})")
+            need = 2 if _leaf_kind(suffix) == "bool" else 3
+            if len(rows_text) != need:
+                return f"array leaf {chain}: the rows of the leaf are cut short ({len(rows_text)} of {need})"
+            i += need
+            arrays[chain] = (suffix, n, kvar, [f"forall {kvar}: Int :: {{ loc({blk}, {kvar}) }} 0 <= {kvar} && {kvar} < {n} ==> ({t})" for t in rows_text])
+            leaves.append((chain, suffix, "<array>"))
+            continue
         cell = _chain_cell(chain, root)
         m = re.fullmatch(r"acc\((?P<c>.*)\.v_(?P<t>[A-Za-z0-9_$']+)\)", atoms[i]) if i < len(atoms) else None
         if m is None or m.group("c") != norm_viper(cell):
@@ -3204,7 +3781,13 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
                 if len(g) != 2:
                     return f"leaf {chain or 'res'}: the pointee's member blocks are not `guard ==> lens`"
                 pointee = [norm_viper(a) for a in _flatten_and(g[1])]
-                _members, why = _lens_members(pointee, norm_viper(value))
+                pcounts: dict[tuple[int, ...], int] = {}
+                for part in pointee:  # the pointee's array member states its count (decision 0064 item 15), as the view's own do
+                    pm = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", part)
+                    pk = parse_struct_member(pm.group("m"), norm_viper(value)) if pm else None
+                    if pk is not None and int(pm.group("n")) > 1:
+                        pcounts[pk] = int(pm.group("n"))
+                _members, why = _lens_members(pointee, norm_viper(value), pcounts)
                 if why is not None:
                     return f"leaf {chain or 'res'}: the pointee's member blocks: {why}"
                 facts = (f"{flag} ==> (({_view_wf(value)}) && (({value} != null && offset_of({value}) < len(block_of({value}))) "
@@ -3232,15 +3815,58 @@ def view_problem(src: Source, d: Decl, routine: str, declared: dict[str, set[str
         leaves.append((chain, t, facts))
     # rebuild the whole text
     body = [*prefix, *lens]
-    for chain, t, facts in leaves:
+    zero = {"bool": "false", "ptr": "null"}
+    cell_leaves = [(c, t, f) for c, t, f in leaves if c not in arrays]
+    for chain, t, facts in cell_leaves:
         cell = _chain_cell(chain, root)
         body += [f"acc({cell}.v_{t})", f"acc({cell}.d_{t})"] + ([facts] if facts else [])
+    if routine == "calloc" and arrays:
+        body += [f"{_chain_cell(c, root)}.d_{t}" for c, t, _ in cell_leaves]
+    for chain in arrays:
+        body += arrays[chain][3]
+    tail: list[str] = []
     if routine == "calloc":
-        zero = {"bool": "false", "ptr": "null"}
-        body += [f"{_chain_cell(c, root)}.d_{t}" for c, t, _ in leaves]
-        body += [f"{_chain_cell(c, root)}.v_{t} == {zero.get(_leaf_kind(t), '0')}" for c, t, _ in leaves]
+        if arrays:
+            # the array leaves' flags, then the zero clauses: a cell's `C.v_t == 0`; an array leaf of scalars (decision 0064 item 15, question 351,
+            # TO CONFIRM against the emitted text after the joined proof) one clause per ELEMENT, the contract read `root->a[j] == 0` as the
+            # lowering frames it (the slot of each cell leaf of the array's own field suffix, in member order, then the array's own range: `contract_read`'s framing of an `owns_block`
+            # site, cells before arrays whatever the member order), j a literal in `[0, N)`, each once; the zero clauses are
+            # compared as a multiset (their order is the lowering's)
+            for c in arrays:
+                t, n, kv, _rows = arrays[c]
+                blk = f"member({_chain_cell(c[:-1], root)}, {c[-1]})"
+                body.append(f"forall {kv}: Int :: {{ loc({blk}, {kv}) }} 0 <= {kv} && {kv} < {n} ==> loc({blk}, {kv}).d_{t}")
+                first_slot = f"loc({blk}, 0)"
+                for j in range(n):
+                    slot = f"loc({blk}, {j})"
+                    expr = zero.get(_leaf_kind(t), "0")
+                    tests = [f"(!({root} == null)) && ({_chain_cell(cc, root)} == {slot})" for cc, ct, _f0 in cell_leaves if ct == t]
+                    # then the range of EVERY array leaf of the same field suffix, in member order (the slot may be one of another array's slots)
+                    for c2, (t2, n2, _kv2, _rows2) in arrays.items():
+                        if t2 == t:
+                            blk2 = f"member({_chain_cell(c2[:-1], root)}, {c2[-1]})"
+                            first2 = f"loc({blk2}, 0)"
+                            tests.append(f"(!({root} == null)) && (((block_of({slot}) == block_of({first2})) && (offset_of({first2}) <= offset_of({slot}))) && "
+                                         f"(offset_of({slot}) < (offset_of({first2}) + {n2})))")
+                    for test in reversed(tests):
+                        expr = f"(({test}) ? {slot}.v_{t} : {expr})"
+                    tail.append(f"{expr} == {zero.get(_leaf_kind(t), '0')}")
+            tail += [f"{_chain_cell(c, root)}.v_{t} == {zero.get(_leaf_kind(t), '0')}" for c, t, _ in cell_leaves]
+        else:
+            body += [f"{_chain_cell(c, root)}.d_{t}" for c, t, _ in cell_leaves]
+            body += [f"{_chain_cell(c, root)}.v_{t} == {zero.get(_leaf_kind(t), '0')}" for c, t, _ in cell_leaves]
+    if arrays:
+        # the atoms are compared one by one (the text without grouping parentheses cannot tell a conjunct inside a quantifier from one beside it)
+        got = atoms[len(prefix) + len(lens):]
+        want_head = [norm_viper(b) for b in body[len(prefix) + len(lens):]]
+        want_tail = sorted(norm_viper(b) for b in tail)
+        if got[:len(want_head)] != want_head or sorted(got[len(want_head):]) != want_tail:
+            return ("the block part is not exactly what its type's leaves give: the cells' lines, each array leaf's rows once (value permission, "
+                    "flag permission, range under the flag), and for a `calloc` view the flags and one zero clause per element, each once, "
+                    "and nothing else")
+    body += tail
     expected_second = f"!({root} == null) ==> ({' && '.join(body)})"
-    if norm_viper(second) != norm_viper(expected_second):
+    if norm_viper(second) != norm_viper(expected_second) and not arrays:
         return ("the block part is not exactly what its type's leaves give" +
                 (" (a `calloc` view adds the flags and then the zero values of every leaf, and nothing else)" if routine == "calloc"
                  else " (a `malloc` view states no flag and no value, a `free` view only what `owns_block` takes)"))
@@ -3257,7 +3883,9 @@ VIEW_ROUTINE_TAG_RE = re.compile(r"vlibc:\s+(?:vlibc_)?(?:malloc|calloc|free)\b"
 
 
 def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None], has_globals: bool = False,
-               global_facts: list[str] | None = None) -> None:
+               global_facts: list[str] | None = None, accepted: set[int] | None = None) -> None:
+    """Decision 0047 items 2, 4 and 7, decision 0064 item 15: the pinned text of every typed view.  The lines of a view that passed (the pin is
+    the only rule that reads a quantifier of a view, `lint_quantified_rows` skips exactly these lines) are added to `accepted`."""
     declared = {"v": set(), "d": set()}
     for line in src.code:
         m = FIELD_ANY_RE.match(line)
@@ -3286,6 +3914,8 @@ def lint_views(src: Source, decls: list[Decl], add: Callable[[int, str], None], 
         why = view_problem(src, d, routine[len("vlibc_"):] if vlibc else routine, declared, has_globals, global_facts, vlibc)
         if why is not None:
             add(d.line, f"`method {d.name}` is not the trusted typed view of decision 0047 items 2 and 4: {why}")
+        elif accepted is not None:
+            accepted.update(range(d.line, d.end_line + 1))
 
 
 def _flatten_or(text: str) -> list[str]:
@@ -3688,6 +4318,10 @@ def array_allocation_problem(src: Source, d: Decl, field_types: dict[str, str]) 
     t = d.name[len(ARR_ALLOC_PREFIX if alloc else ARR_COPY_PREFIX if copy else ARR_ZERO_PREFIX):]
     if not ARR_SUFFIX_RE.match(t):
         return f"the element suffix `{t}` is not an identifier"
+    if not copy and any("member(" in src.code[n - 1] for n in range(d.line, d.end_line + 1)):
+        # an element that is a structure (decision 0064 item 17): the clauses name the element's members, so the layout is read from them
+        why = aggregate_array_problem(src, d, alloc, field_types)[0]
+        return None if why is None else f"(an element that is a structure, decision 0064 items 3 and 6) {why}"
     if f"v_{t}" not in field_types or f"d_{t}" not in field_types:
         return f"the field suffix `{t}` is not declared (`field v_{t}` and `field d_{t}`)"
     lines = [(n, src.code[n - 1]) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
@@ -3721,6 +4355,140 @@ def array_allocation_problem(src: Source, d: Decl, field_types: dict[str, str]) 
     return None
 
 
+# The trusted allocation of an automatic array whose element is a structure (decision 0064 items 3, 6 and 17): `alloc_arr_<E>(n)` and its zero fill
+# `zero_arr_<E>(r, n)`.  The element's layout is not in the name, so the clauses are read: the SLOT of element `k` is `loc(block_of(r), k)`; the length
+# facts are ONE quantifier over `[0, n)` with that slot as its trigger whose consequent is what `struct_wf_lens_problem` accepts of a structure at `slot`
+# (`len(member(<chain>, j)) == 1` for each member block, a nested structure's own members, the slot facts `A != B` of decision 0043 item 4); each LEAF (a
+# member block with no member of its own) has, as the leaf receiver `loc(<chain>, 0)` of the canonical chain rooted at the slot, three quantifiers over
+# `[0, n)` with that receiver as trigger (the value permission, the flag permission, `!flag`), each (receiver, field) once.  A leaf with an array member
+# (the second binder) and a count other than 1 are Part E's: the rule refuses them (`struct_wf_lens_problem` gets no counts).
+AGG_QUANT_RE = re.compile(r"^forall(?P<k>[A-Za-z_$][\w$']*):Int::\{(?P<trigger>[^{}]*)\}(?P<lo>[\w$']+)<=(?P=k)&&(?P=k)<(?P<hi>[\w$']+)==>(?P<cons>.+)$")
+AGG_SLOT = "loc(block_of(r),k)"
+AGG_ROOT_FACTS = norm_viper("((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)")
+AGG_LIVE_FACTS = norm_viper("(lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)")
+AGG_ZERO_ROOT_FACTS = norm_viper("((1 <= n) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)")
+_AGG_ACC_RE = re.compile(r"^acc\((?P<cell>.+)\.(?P<f>[vd])_(?P<t>[\w$']+)\)$")
+_AGG_NOT_FLAG_RE = re.compile(r"^!(?P<cell>.+)\.d_(?P<t>[\w$']+)$")
+_AGG_FLAG_RE = re.compile(r"^(?P<cell>.+)\.d_(?P<t>[\w$']+)$")
+_AGG_ZERO_RE = re.compile(r"^(?P<cell>.+)\.v_(?P<t>[\w$']+)==(?P<z>.+)$")
+
+
+def aggregate_array_problem(src: Source, d: Decl, alloc: bool, field_types: dict[str, str]) -> tuple[str | None, dict[tuple[int, ...], str]]:
+    """(why the trusted method `d` (an `alloc_arr_<E>` when `alloc`, else a `zero_arr_<E>`) is not the allocation or zero fill of an array of
+    structures, or None; the leaves it states: chain -> field suffix)."""
+    none: dict[tuple[int, ...], str] = {}
+    if d.has_body:
+        return "it has a body (a trusted method is bodyless)", none
+    lines = [(n, src.code[n - 1]) for n in range(d.line, d.end_line + 1) if src.code[n - 1].strip()]
+    header = " ".join(lines[0][1].split())
+    want_header = f"method {d.name}(n: Int) returns (r: Ref)" if alloc else f"method {d.name}(r: Ref, n: Int)"
+    if header != want_header:
+        return f"its header is not `{want_header}`", none
+    if " ".join(lines[-1][1].split()) != "decreases _":
+        return "it does not end with `decreases _`", none
+    clauses: list[tuple[str, str]] = []
+    for _n, code in lines[1:-1]:
+        c = _clause_split(code)
+        if c is None:
+            return f"a line that is not a `requires` or `ensures` clause: `{' '.join(code.split())}`", none
+        clauses.append(c)
+    seen: dict[str, int] = {}
+
+    def once(what: str) -> str | None:
+        seen[what] = seen.get(what, 0) + 1
+        return f"{what} twice" if seen[what] > 1 else None
+
+    lens_parts: list[str] | None = None
+    roles: dict[tuple[tuple[int, ...], str], dict[str, str]] = {}  # (chain, role) -> field suffix, one entry per quantified row
+    for kw, text in clauses:
+        if kw == "requires" and alloc:
+            if text not in ("1<=n", "n>=1"):
+                return f"the `requires {text}` is not `1 <= n`", none
+            if (why := once("`requires 1 <= n`")) is not None:
+                return why, none
+            continue
+        if text == (AGG_ROOT_FACTS if alloc else AGG_ZERO_ROOT_FACTS) and kw == ("ensures" if alloc else "requires"):
+            if (why := once("the root facts")) is not None:
+                return why, none
+            continue
+        if alloc and kw == "ensures" and text == AGG_LIVE_FACTS:
+            if (why := once("the liveness token")) is not None:
+                return why, none
+            continue
+        m = AGG_QUANT_RE.match(text)
+        if m is None:
+            return f"`{kw} {text}` is not one of the clauses of decision 0064 items 3 and 6", none
+        if m.group("k") != "k" or m.group("lo") != "0" or m.group("hi") != "n":
+            return f"`{kw} {text}`: a quantified clause is over `0 <= k && k < n` with the binder `k`", none
+        trigger, cons = m.group("trigger"), m.group("cons")
+        if trigger == AGG_SLOT:
+            if not (alloc and kw == "ensures"):
+                return "the length facts stand in the `ensures` of an allocation only", none
+            if (why := once("the length facts")) is not None:
+                return why, none
+            lens_parts = cons.split("&&")
+            continue
+        chain = parse_struct_chain(trigger, AGG_SLOT)
+        if not chain:
+            return (f"`{kw} {text}`: the trigger is not the slot `loc(block_of(r), k)` (the length facts) or a leaf receiver `loc(<chain>, 0)` "
+                    "of the canonical chain rooted at the slot (decision 0064 item 17)"), none
+        role = None
+        cm = _AGG_ACC_RE.match(cons)
+        if cm is not None and cm.group("cell") == trigger:
+            role = ("acc_" + cm.group("f"), cm.group("t"))
+        elif (cm := _AGG_NOT_FLAG_RE.match(cons)) is not None and cm.group("cell") == trigger and alloc and kw == "ensures":
+            role = ("not_d", cm.group("t"))
+        elif (cm := _AGG_FLAG_RE.match(cons)) is not None and cm.group("cell") == trigger and not alloc and kw == "ensures":
+            role = ("flag", cm.group("t"))
+        elif (cm := _AGG_ZERO_RE.match(cons)) is not None and cm.group("cell") == trigger and not alloc and kw == "ensures":
+            zero = ZERO_LITERAL.get(field_types.get(f"v_{cm.group('t')}", ""), "?")
+            if cm.group("z") != zero:
+                return f"`{kw} {text}`: the zero literal of the field `v_{cm.group('t')}` is `{zero}`", none
+            role = ("zero", cm.group("t"))
+        if role is None:
+            return f"`{kw} {text}`: the consequent is not one of the leaf's rows (`acc` of the value or the flag, `!flag`, the zero or the flag set) of the receiver", none
+        key = (chain, f"{kw} {role[0]}")
+        if key in roles:
+            return f"the leaf {chain}: `{kw} {role[0]}` twice (each (receiver, field) is given once)", none
+        roles[key] = {"t": role[1]}
+    if alloc:
+        if not {"`requires 1 <= n`", "the root facts", "the liveness token", "the length facts"} <= set(seen):
+            return "a clause is missing (`requires 1 <= n`, the root facts, the length facts or the liveness token)", none
+        assert lens_parts is not None
+        if (why := struct_wf_lens_problem(lens_parts, AGG_SLOT)) is not None:
+            return f"the length facts: {why}", none
+        members = {parse_struct_member(m.group("m"), AGG_SLOT) for p in lens_parts if (m := re.fullmatch(r"len\((?P<m>.*)\)==[0-9]+", p))}
+        members.discard(None)
+        want_leaves = {key for key in members if not any(o[:-1] == key and o != key for o in members)}
+        need = ("ensures acc_v", "ensures acc_d", "ensures not_d")
+    else:
+        if "the root facts" not in seen:
+            return "the `requires` of the root facts is missing", none
+        want_leaves = {chain for chain, _role in roles}
+        need = ("requires acc_v", "requires acc_d", "ensures acc_v", "ensures acc_d", "ensures zero", "ensures flag")
+    have = {chain for chain, _role in roles}
+    if have != want_leaves or not have:
+        return (f"the leaves {sorted(have)} of its quantified clauses are not the leaves {sorted(want_leaves)} of the element's members"
+                if alloc else "it states no leaf"), none
+    leaves: dict[tuple[int, ...], str] = {}
+    for chain in sorted(have):
+        suffixes = set()
+        for role in need:
+            row = roles.get((chain, role))
+            if row is None:
+                return f"the leaf {chain} lacks its `{role}` row", none
+            suffixes.add(row["t"])
+        if len({role for (c, role) in roles if c == chain} - set(need)):
+            return f"the leaf {chain} has a row that is not one of `{', '.join(need)}`", none
+        if len(suffixes) != 1:
+            return f"the leaf {chain}: its rows are over more than one field suffix", none
+        (t,) = suffixes
+        if f"v_{t}" not in field_types or f"d_{t}" not in field_types:
+            return f"the field suffix `{t}` is not declared (`field v_{t}` and `field d_{t}`)", none
+        leaves[chain] = t
+    return None, leaves
+
+
 def array_field_types(src: Source) -> dict[str, str]:
     field_types: dict[str, str] = {}
     for line in src.code:
@@ -3745,12 +4513,232 @@ def lint_array_allocations(src: Source, decls: list[Decl], add: Callable[[int, s
         if d.kind != "method" or not d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX, ARR_COPY_PREFIX)):
             continue
         why = array_allocation_problem(src, d, field_types)
+        if why is None and d.name.startswith(ARR_ZERO_PREFIX) and any("member(" in src.code[n - 1] for n in range(d.line, d.end_line + 1)):
+            # decision 0064 item 6: the zero fill of an element structure takes and gives the leaves its allocation gives
+            alloc = next((a for a in decls if a.kind == "method" and a.name == ARR_ALLOC_PREFIX + d.name[len(ARR_ZERO_PREFIX):]), None)
+            if alloc is not None and (alloc_why := aggregate_array_problem(src, alloc, True, field_types))[0] is None:
+                if aggregate_array_problem(src, d, False, field_types)[1] != alloc_why[1]:
+                    why = f"(an element that is a structure, decision 0064 items 3 and 6) its leaves are not the leaves of `{alloc.name}` (line {alloc.line})"
         if why is not None:
             if d.name.startswith(ARR_COPY_PREFIX):
                 add(d.line, f"`method {d.name}` is not the trusted array copy of decision 0063 item 13: {why}")
                 continue
             what = "trusted array allocation" if d.name.startswith(ARR_ALLOC_PREFIX) else "trusted zero fill"
             add(d.line, f"`method {d.name}` is not the {what} of decision 0059 item 3: {why}")
+
+
+# Decision 0064 item 6 (audit round 2, issue 7): every way out of the scope of an array of structures exhales exactly what its allocation gave.  In a method
+# with `X := alloc_arr_<E>(N)` (N a literal) of an aggregate element, each run of consecutive `exhale forall` rows over `block_of(X)` is the allocation's set of
+# (receiver, field) rows over `0 <= k && k < N` (each leaf's value and flag permission, each once), and is directly preceded (a `perm(lvloc(block_of(X)).lv) ==
+# write` assert may stand between) by a run of marked `assert forall` rows of the same set (the lifetime rows); a method that allocates and has no such exit
+# and no `assert false` (a path that never leaves) is refused.  A row over another variable is the older rules'.
+ALLOC_ARR_CALL_RE = re.compile(rf"^\s*(?P<v>{IDENT})\s*:=\s*(?P<alloc>alloc_arr_[A-Za-z0-9_$']+)\s*\((?P<n>[^()]*)\)\s*$")
+LIVE_EXHALE_RE = re.compile(rf"^\s*exhale\s+acc\(lvloc\(block_of\((?P<v>{IDENT})\)\)\.lv\)\s*$")
+END_LABEL_RE = re.compile(r"^\s*label\s+l_end\s*$")
+GOTO_END_RE = re.compile(r"^\s*goto\s+l_end\s*$")
+LIVE_WRITE_RE = re.compile(rf"^\s*assert\s+perm\(lvloc\(block_of\((?P<v>{IDENT})\)\)\.lv\)\s*==\s*write\b")
+
+
+def _aggregate_leaf_rows(src: Source, d: Decl) -> list[tuple[int, str, str, tuple[int, ...], str, str, str]]:
+    """(line, `assert` or `exhale`, X, leaf chain, field, lo, hi) of the unguarded quantified permission rows over a leaf of the elements of X in `d`."""
+    rows = []
+    for n in range(d.line, d.end_line + 1):
+        m = QUANT_STMT_RE.match(src.code[n - 1])
+        if m is None or m.group("kw") not in ("assert", "exhale"):
+            continue
+        guard, body = split_guard(m.group("rest"))
+        q = parse_leaf_row(body) if body is not None and guard is None else None
+        if q is None or q[2]:
+            continue
+        acc = _row_acc(q)
+        xm = BLOCK_BASE_RE.match(_squash(q[1]))
+        chain = parse_struct_chain(q[6], f"loc({_squash(q[1])},{q[0]})")
+        if acc is None or acc[1] is not None or xm is None or not chain:
+            continue
+        rows.append((n, m.group("kw"), xm.group(1), chain, acc[0], q[4], q[5]))
+    return rows
+
+
+def lint_scope_exits(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    """Decision 0064 item 6 (the lint half of `Every way out exhales exactly what the allocation gave`): see the comment above."""
+    field_types = array_field_types(src)
+    by_name = {d.name: d for d in decls if d.kind == "method"}
+    for d in decls:
+        if d.kind != "method" or not d.has_body:
+            continue
+        allocs: dict[str, tuple[int, int | None, set[tuple[tuple[int, ...], str]]]] = {}
+        for n in range(d.line, d.end_line + 1):
+            m = ALLOC_ARR_CALL_RE.match(src.code[n - 1])
+            ad = by_name.get(m.group("alloc")) if m else None
+            if m is None or ad is None or not any("member(" in src.code[k - 1] for k in range(ad.line, ad.end_line + 1)):
+                continue
+            why, leaves = aggregate_array_problem(src, ad, True, field_types)
+            if why is not None:
+                continue  # `lint_array_allocations` reports it
+            want = {(chain, f"{kind}_{t}") for chain, t in leaves.items() for kind in "vd"}
+            count = int(m.group("n")) if re.fullmatch(r"[0-9]+", m.group("n").strip()) else None
+            allocs[m.group("v")] = (n, count, want)
+        if not allocs:
+            continue
+        rows = [r for r in _aggregate_leaf_rows(src, d) if r[2] in allocs]
+        # runs of consecutive rows of one kind over one array
+        runs: list[list[tuple[int, str, str, tuple[int, ...], str, str, str]]] = []
+        for r in rows:
+            if runs and runs[-1][-1][1] == r[1] and runs[-1][-1][2] == r[2] \
+                    and all(not src.code[k - 1].strip() for k in range(runs[-1][-1][0] + 1, r[0])):
+                runs[-1].append(r)
+            else:
+                runs.append([r])
+        exits: dict[str, int] = {}
+        lifetime: set[int] = set()  # the first line of each marked run that stands directly before an exit's exhales (the loops' back-edge rows are others)
+        for run in runs:
+            if run[0][1] != "exhale":
+                continue
+            prev = run[0][0] - 1
+            while prev >= d.line and not src.code[prev - 1].strip():
+                prev -= 1
+            lm = LIVE_WRITE_RE.match(src.code[prev - 1]) if prev >= d.line else None
+            if lm is not None and lm.group("v") == run[0][2]:
+                prev -= 1
+                while prev >= d.line and not src.code[prev - 1].strip():
+                    prev -= 1
+            for rr in runs:
+                if rr[-1][0] == prev and rr[0][1] == "assert" and rr[0][2] == run[0][2]:
+                    lifetime.add(rr[0][0])
+        for i, run in enumerate(runs):
+            kind, x = run[0][1], run[0][2]
+            at, count, want = allocs[x]
+            if kind == "assert" and run[0][0] not in lifetime:
+                continue
+            got = [(r[3], r[4]) for r in run]
+            what = "the scope exit's `exhale`s" if kind == "exhale" else "the lifetime rows before a scope exit"
+            if len(set(got)) != len(got):
+                add(run[0][0], f"{what} over `{x}` give a (receiver, field) row twice (decision 0064 item 6)")
+            elif set(got) != want:
+                missing = sorted(want - set(got))
+                extra = sorted(set(got) - want)
+                add(run[0][0], f"{what} over `{x}` are not the rows of its allocation (line {at}): "
+                    + (f"missing {missing[0]}" if missing else f"unexpected {extra[0]}") + " (decision 0064 item 6: every way out exhales exactly what the allocation gave)")
+            bad = [r for r in run if r[5] != "0" or (count is not None and r[6] != str(count))]
+            if bad:
+                add(bad[0][0], f"{what} over `{x}` range over `{bad[0][5]} <= k && k < {bad[0][6]}`, not the allocation's `0 <= k && k < {count}` (line {at}; decision 0064 item 6)")
+            if kind != "exhale":
+                continue
+            exits[x] = exits.get(x, 0) + 1
+            prev = run[0][0] - 1
+            while prev >= d.line and not src.code[prev - 1].strip():
+                prev -= 1
+            lm = LIVE_WRITE_RE.match(src.code[prev - 1]) if prev >= d.line else None
+            if lm is not None and lm.group("v") == x:
+                prev -= 1
+                while prev >= d.line and not src.code[prev - 1].strip():
+                    prev -= 1
+            marked = next((r for r in rows if r[0] == prev), None)
+            if marked is None or marked[1] != "assert" or marked[2] != x:
+                add(run[0][0], f"the scope exit's `exhale`s over `{x}` are not directly preceded by its lifetime rows (marked `assert`s over the same rows, decision 0064 item 6)")
+            else:
+                chain_run = next((rr for rr in runs if rr[-1][0] == prev), None)
+                if chain_run is None or {(r[3], r[4]) for r in chain_run} != set(got):
+                    add(run[0][0], f"the lifetime rows before the exhale over `{x}` are not the same (receiver, field) rows as the exhale's (decision 0064 item 6)")
+        # the audit's b01x: every `exhale forall` of the exits blanked.  A method with a missing-return `assert false` is no help: the liveness cell is
+        # exhaled at each exit after the rows, so each `exhale acc(lvloc(block_of(v)).lv)` must stand directly after the whole run of its exhales
+        run_ends = {run[-1][0]: run[0][2] for run in runs if run[0][1] == "exhale"}
+        lv_exits: dict[str, int] = {}
+        for n in range(d.line, d.end_line + 1):
+            lm = LIVE_EXHALE_RE.match(src.code[n - 1])
+            if lm is None or lm.group("v") not in allocs:
+                continue
+            x = lm.group("v")
+            lv_exits[x] = lv_exits.get(x, 0) + 1
+            prev = n - 1
+            while prev >= d.line and not src.code[prev - 1].strip():
+                prev -= 1
+            if run_ends.get(prev) != x:
+                add(n, f"the exit's `exhale` of the liveness cell of `{x}` is not directly preceded by the exhales of its rows (decision 0064 item 6: every way out exhales "
+                       "exactly what the allocation gave)")
+        end_label = next((n for n in range(d.end_line, d.line - 1, -1) if END_LABEL_RE.match(src.code[n - 1])), None)
+        for x, (at, _count, _want) in allocs.items():
+            if end_label is None:
+                # a hand-written method (no `label l_end`): a path that never leaves has an `assert false` and no exit
+                never = any("assert false" in src.code[k - 1] for k in range(d.line, d.end_line + 1))
+                if exits.get(x, 0) == 0 and lv_exits.get(x, 0) == 0 and not never:
+                    add(at, f"the array `{x}` allocated here is never exhaled at a scope exit (decision 0064 item 6: every way out exhales exactly what the allocation gave)")
+                continue
+            # an emitted method (audit round C1, finding 6): the missing-return `assert false` that ends every method with a result hides nothing.  Walking
+            # from the allocation, the liveness cell's exhale (the last line of an exit) stands between the allocation, or the previous `goto l_end`, and
+            # each `goto l_end`, and before the `label l_end` that ends the method; a path that leaves without it is refused.  An array of an inner block
+            # has its exit at the block's end, which stands before a later `goto l_end` outside the block.
+            have = False
+            seen_goto = False
+            for n in range(at + 1, end_label + 1):
+                lm = LIVE_EXHALE_RE.match(src.code[n - 1])
+                if lm is not None and lm.group("v") == x:
+                    have = True
+                    continue
+                is_goto = GOTO_END_RE.match(src.code[n - 1]) is not None
+                if not is_goto and n != end_label:
+                    continue
+                if n == end_label:
+                    # after a `goto l_end` the missing-return `assert false` that ends a method with a result needs no exit of its own (the paths ended at
+                    # the gotos); with no `goto l_end` at all the end is the only way out
+                    prev = n - 1
+                    while prev > at and not src.code[prev - 1].strip():
+                        prev -= 1
+                    if seen_goto and src.code[prev - 1].strip() == "assert false":
+                        continue
+                if not have:
+                    where = "this `goto l_end`" if is_goto else "the end of the method"
+                    add(n, f"the array `{x}` allocated at line {at} is not exhaled before {where}: the exit's exhale of its liveness cell is missing "
+                           "(decision 0064 item 6: every way out exhales exactly what the allocation gave)")
+                have = False
+                seen_goto = seen_goto or is_goto
+
+
+# Decision 0064 item 7: the length facts a range atom over structures states are tied to the leaves its permission rows name.  In a method's `requires` or
+# `ensures`, the rows over one range of one pointer (the same clause kind, block and bounds): a row over a leaf receiver `loc(member(...), 0)` needs the
+# length-facts row of that range to state the member block of the leaf and of every nested structure member above it, and a leaf with no length-facts row at
+# all is refused (a permission row over a member block of unknown length is not a well-formed atom).
+def lint_range_length_facts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    for d in decls:
+        if d.kind != "method" or d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX, ARR_COPY_PREFIX, ALLOC_PREFIX)) or d.name == PROGRAM_START:
+            continue
+        lens: dict[tuple[str, str, str, str], tuple[int, set[tuple[int, ...]]]] = {}
+        leaves: dict[tuple[str, str, str, str], list[tuple[int, tuple[int, ...]]]] = {}
+        for n in range(d.line, (d.body_line or d.end_line + 1)):
+            m = QUANT_STMT_RE.match(src.code[n - 1])
+            if m is None or m.group("kw") not in ("requires", "ensures"):
+                continue
+            guard, body = split_guard(m.group("rest"))
+            if body is None:
+                continue
+            q = parse_range_quantifier_full(body)
+            if q is not None:
+                cs = _squash(q[3])
+                if not q[2] and "len(member(" in cs:
+                    keys, why = range_lens_members(cs, f"loc({_squash(q[1])},{q[0]})")
+                    if why is None and keys is not None:
+                        xm = BLOCK_BASE_RE.match(_squash(q[1]))
+                        lens[(m.group("kw"), xm.group(1) if xm else "", q[4], q[5])] = (n, set(keys))
+                continue
+            q = parse_leaf_row(body)
+            if q is None:
+                continue
+            chain = parse_struct_chain(q[6], f"loc({_squash(q[1])},{q[0]})")
+            xm = BLOCK_BASE_RE.match(_squash(q[1]))
+            if chain and xm:
+                leaves.setdefault((m.group("kw"), xm.group(1), q[4], q[5]), []).append((n, chain))
+        for key, rows in leaves.items():
+            have = lens.get(key)
+            if have is None:
+                add(rows[0][0], f"the rows over the leaves of the elements of `{key[1]}` in this `{key[0]}` have no length-facts row over the same range "
+                                "(decision 0064 item 7: `len(member(<chain>, j)) == 1` for each member block of the element)")
+                continue
+            for line, chain in rows:
+                need = [chain[:i] for i in range(1, len(chain) + 1)]
+                missing = [c for c in need if c not in have[1]]
+                if missing:
+                    add(line, f"the length facts (line {have[0]}) of `{key[1]}` do not state the member block {missing[0]} of this leaf {chain} (decision 0064 item 7)")
+                    break
 
 
 ARR_COPY_CALL_RE = re.compile(rf"^\s*(?P<name>copy_arr_[A-Za-z0-9_$']+)\s*\((?P<args>.*)\)\s*$")
@@ -3877,6 +4865,44 @@ def parse_range_quantifier(text: str):
     return None if q is None else q[:4]
 
 
+def parse_leaf_row(text: str):
+    """Decision 0064 item 17: a quantified row over a LEAF of the elements of an array of structures, `forall k: Int :: { R } lo <= k && k < hi ==>
+    CONSEQUENT` with R the leaf receiver, the canonical chain `loc(member(<chain>, j), 0)` (decision 0043 item 13's grammar) rooted at the slot
+    `loc(block_of(X), k)` of element `k` for a VARIABLE X, with at least one member step: (k, `block_of(X)`, antecedent extras, consequent, lo, hi, R).
+    The same fields as `parse_range_quantifier_full` and the receiver as a seventh; the older parser never sees this shape (its callers rebuild the
+    cell as `loc(b, k)`), so a leaf row is accepted only where a rule asks for it.  A second binder (a leaf that is an array member, or a row of a
+    matrix) is not read: Part E's."""
+    head = QUANT_HEAD_RE.match(text.strip())
+    if head is None:
+        return None
+    k = head.group("k")
+    trig = norm_viper(head.group("trigger"))
+    xs = re.findall(r"(?<![\w$'])block_of\(([A-Za-z_$][\w$']*)\)", trig)
+    if len(xs) != 1 or trig.count("block_of(") != 1:
+        return None
+    if not parse_struct_chain(trig, f"loc(block_of({xs[0]}),{k})"):
+        return None
+    parts = _split_top(head.group("body"), "==>")
+    if len(parts) != 2:
+        return None
+    try:
+        ante = [_squash(x) for x in _flatten_and(parts[0])]
+    except ValueError:
+        return None
+    if len(ante) < 2:
+        return None
+    lo = re.match(r"^(?P<lo>.+)<=" + re.escape(k) + r"$", ante[0])
+    hi = re.match(r"^" + re.escape(k) + r"<(?P<hi>.+)$", ante[1])
+    if lo is None or hi is None or not (_heap_free(lo.group("lo")) and _heap_free(hi.group("hi"))):
+        return None
+    return k, f"block_of({xs[0]})", ante[2:], _strip_wrap(parts[1]), lo.group("lo"), hi.group("hi"), trig
+
+
+def _row_acc(q) -> tuple[str, str | None] | None:
+    """`_range_acc` of a parsed quantified row `q` (a range row, or a leaf row whose cell is its receiver)."""
+    return _range_acc(q[3], q[0], q[1], q[6] if len(q) > 6 else None)
+
+
 def split_guard(rest: str) -> tuple[str | None, str | None]:
     """(guard, quantifier text) of what follows the keyword of a clause or statement: `forall ...`, `(forall ...)`, `g ==> forall ...`
     or `(g) ==> (forall ...)`; the guard is None for an unguarded quantifier, and the quantifier text None when the text is not one
@@ -3901,12 +4927,29 @@ def _std_type_range(cons: str, cell: str, t: str) -> bool:
     (`VIEW_INT_RANGES`) takes exactly that one, another integer field a standard range, an enumeration's field (`enum_<name>`)
     any `lo <= 0 <= hi` (its own range, decision 0018)."""
     try:
-        parts = [_squash(x) for x in _flatten_and(cons)]
+        raw = _flatten_and(cons)
+        parts = [_squash(x) for x in raw]
     except ValueError:
         return False
     v = f"{_squash(cell)}.v_{t}"
     if t.startswith("ptr_"):
-        return len(parts) == 1 and norm_viper(parts[0]) == norm_viper(_view_wf(v))
+        if len(parts) == 1:
+            return norm_viper(parts[0]) == norm_viper(_view_wf(v))
+        # audit round C1, finding 4: the element of a range over `T **` or the leaf of a range over a structure with a `struct S *` member, S a structure:
+        # WF followed by the guarded WF_S conjunct `v != null && offset_of(v) < len(block_of(v)) ==> len(member(<chain>, k)) == 1 && ...` (the leaf row of
+        # `check_view_wf`, decision 0043 item 8); the guard and the length facts are the ones `struct_wf_lens_problem` accepts.  Audit round C2, finding 1:
+        # when S has an array member of structures the facts hold its count and the quantifier over its elements, with a binder the slot does not
+        # mention (`struct_lens_conjuncts_problem`, decision 0064 item 3)
+        if len(parts) != 2 or norm_viper(parts[0]) != norm_viper(_view_wf(v)):
+            return False
+        sides = _split_top(_strip_wrap(raw[1]), "==>")
+        if len(sides) != 2 or norm_viper(sides[0]) != norm_viper(f"{v} != null && offset_of({v}) < len(block_of({v}))"):
+            return False
+        try:
+            lens = _flatten_and(sides[1])
+        except ValueError:
+            return False
+        return bool(lens) and struct_lens_conjuncts_problem(lens, v) is None
     if len(parts) != 2:
         return False
     lo = re.match(r"^\(*(-?\d+)\)*<=" + re.escape(v) + r"$", parts[0])
@@ -3921,6 +4964,344 @@ def _std_type_range(cons: str, cell: str, t: str) -> bool:
     return (low, high) in VIEW_STANDARD_RANGES
 
 
+# Decision 0064 items 3, 9 and 17 (Part C2): the length facts of an array of structures that a method's `requires` or `ensures` states over a block term
+# (`GB_g()` of a global, `member(<chain>, k)` of a structure's array member) are tied to the leaves its permission rows name, as `lint_range_length_facts`
+# ties a range over a pointer: a row over a leaf receiver needs the length-facts row of the same range and clause kind to state the member block of the
+# leaf and of every nested structure above it, and a leaf with no length-facts row at all is refused.
+def lint_block_length_facts(src: Source, decls: list[Decl], add: Callable[[int, str], None]) -> None:
+    for d in decls:
+        if d.kind != "method" or d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX, ARR_COPY_PREFIX, ALLOC_PREFIX)) or d.name == PROGRAM_START:
+            continue
+        lens: dict[tuple[str, str, str, str], tuple[int, set[tuple[int, ...]]]] = {}
+        leaves: dict[tuple[str, str, str, str], list[tuple[int, tuple[int, ...]]]] = {}
+        for kw, n, text in clause_texts(src, d):
+            if kw not in ("requires", "ensures"):
+                continue
+            guard, body = split_guard(text)
+            if body is None:
+                continue
+            ql = parse_block_leaf_row(body)
+            if ql is not None:
+                chain = parse_struct_chain(ql["recv"], f"loc({ql['b']},{ql['k']})")
+                if chain:
+                    leaves.setdefault((kw, ql["b"], ql["lo"], ql["hi"]), []).append((n, chain))
+                continue
+            qb = parse_block_row(body)
+            if qb is not None and "len(member(" in qb["cons"]:
+                keys, why = range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})")
+                if why is None and keys is not None:
+                    lens[(kw, qb["b"], qb["lo"], qb["hi"])] = (n, set(keys))
+        for key, rows in leaves.items():
+            have = lens.get(key)
+            if have is None:
+                add(rows[0][0], f"the rows over the leaves of the elements of `{key[1]}` in this `{key[0]}` have no length-facts row over the same range "
+                                "(decision 0064 items 3 and 9: `len(member(<chain>, j)) == 1` for each member block of the element)")
+                continue
+            for line, chain in rows:
+                need = [chain[:i] for i in range(1, len(chain) + 1)]
+                missing = [c for c in need if c not in have[1]]
+                if missing:
+                    add(line, f"the length facts (line {have[0]}) of `{key[1]}` do not state the member block {missing[0]} of this leaf {chain} (decision 0064 items 3 and 9)")
+                    break
+
+
+def range_lens_members(cons: str, slot: str) -> tuple[list[tuple[int, ...]] | None, str | None]:
+    """(the member blocks, why not) of the length-facts consequent `cons` (squashed) of a range atom over structures: `len(member(<chain>, j)) == 1`
+    for each member block of the element at `slot` (a chain of decision 0043 item 13 rooted at the slot, a literal j each), a member of a member only
+    inside a nested structure member, no block twice, and the slot facts `A != B` (decision 0043 item 4) either exactly the pairs of the root or a
+    nested slot and a nested slot below it, or none (the range atom's rows state the lengths only: S48 (c2))."""
+    try:
+        parts = [_squash(x) for x in _flatten_and(cons)]
+    except ValueError:
+        return None, "the length facts are not a conjunction"
+    members = [x for x in parts if "!=" not in x]
+    facts = [x for x in parts if "!=" in x]
+    keys: list[tuple[int, ...]] = []
+    for part in members:
+        m = re.fullmatch(r"len\((?P<m>.*)\)==(?P<n>[0-9]+)", part)
+        key = parse_struct_member(m.group("m"), slot) if m else None
+        if key is None or int(m.group("n")) != 1:
+            return None, f"`{part}` is not `len(member(<chain>, <literal>)) == 1` with a chain rooted at the slot `{slot}`"
+        if key in keys:
+            return None, f"the member block {key} twice"
+        keys.append(key)
+    if not keys:
+        return None, "no member block"
+    kset = set(keys)
+    for key in kset:
+        if key[:-1] and key[:-1] not in kset:
+            return None, f"the member block {key} is not inside a nested struct member"
+    if facts:
+        why = struct_wf_lens_problem(parts, slot)
+        if why is not None:
+            return None, why
+    return keys, None
+
+
+def range_lens_problem(cons: str, cell: str) -> str | None:
+    """Why `cons` is not the length facts of a range atom over structures (`range_lens_members`), or None."""
+    return range_lens_members(cons, cell)[1]
+
+
+def _mentions_name(text: str, name: str) -> bool:
+    """Whether the identifier `name` occurs in the normalized term `text` (a whole identifier: `k` is not in `k1`)."""
+    return re.search(r"(?<![\w$'])" + re.escape(name) + r"(?![\w$'])", text) is not None
+
+
+def struct_lens_conjuncts_problem(lens: list[str], v: str) -> str | None:
+    """The conjuncts `lens` (unsquashed) of the guarded length facts of the pointer value `v` (a variable, or a slot's leaf `loc(block_of(X), k).v_ptr_S`
+    of a range or of an element of an array): the structure's own `len(member(v, j)) == 1` and slot facts, and for each array member of structures its
+    `len(member(v, j)) == N` and the quantifier over its elements `forall b :: { loc(member(v, j), b) } 0 <= b && b < N ==> <the element's length
+    facts>` (decision 0064 items 3 and 17).  **The binder `b` must not occur in `member(v, j)`** (audit round C2, finding 1: `v` under a range's own
+    `forall k` mentions `k`, and an inner `forall k` would capture it; the lowering takes the first of k1, k2, ... that the slot does not mention):
+    a binder free in the slot expression is refused, and with it a reuse of the outer binder's name.  Returns None when the facts are exactly that,
+    else the reason."""
+    counts: dict[tuple[int, ...], int] = {}
+    others: list[str] = []
+    for part in lens:
+        if not _strip_wrap(part).startswith("forall"):
+            others.append(_squash(part))
+            continue
+        qb = parse_block_row(part)
+        key = parse_struct_member(qb["b"], v) if qb is not None else None
+        if qb is None or key is None or qb["lo"] != "0":
+            return f"`{_squash(part)}` is not a quantifier over the elements of an array member of `{v}` from 0"
+        if _mentions_name(qb["b"], qb["k"]):
+            return (f"the binder `{qb['k']}` of the quantifier over the member {key} occurs in its slot expression `{qb['b']}`: an inner quantifier "
+                    "that reuses a name its slot mentions captures it (decision 0064 item 3, a length quantifier under another quantifier)")
+        keys, why = range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})")
+        if why is not None:
+            return f"the length facts of the elements of the member {key}: {why}"
+        if key in counts:
+            return f"the quantifier of the member {key} twice"
+        counts[key] = int(qb["hi"])
+    why = struct_wf_lens_problem(others, v, counts)
+    if why is not None:
+        return why
+    stated = {parse_struct_member(m.group(1), v) for x in others if (m := re.fullmatch(r"len\((.*)\)==[0-9]+", x))}
+    for key, n in counts.items():
+        if key not in stated:
+            return f"the member {key} has a quantifier over its {n} elements and no `len(member(<chain>, <literal>)) == {n}`"
+    return None
+
+
+def block_clause_problem(kw: str, rest: str, gbs: set[str], arrays: dict[str, int], roots: set[str], lens: dict[str, set[int]],
+                         perm_formals: frozenset[str]) -> str | None:
+    """Decision 0064 item 15 (heap storage, owners, markers): the `requires` or `ensures` of a method that is one `owns_block` or `owns` site's whole
+    part written as a conjunction (not as the rows of one array atom): `P != null && <WF> && offset_of(P) == 0 && acc(loc(block_of(P), -1).tok) && ...`
+    under `!(P == null) ==>` (or `!(((P == null) ? 1 : 0) != 0) ==>`, as a parameter's site writes it); `P` a formal, a result, or (a global's cell
+    atom `owns(g)`: `loc(GB_g(), 0) != null && ... && acc(loc(GB_g(), 0).v_ptr_<t>) ...`) the global's cell; and, as a conjunct of its own under the
+    guard `!(L == null) ==>`, the same shape for the block of a pointer `L` the site's owner closure reaches (a canonical load).  Where a block holds an
+    array leaf of scalars its quantified conjuncts are rows over the block TERM of a member of that block's pointer (`member(<chain>, k)` over a
+    canonical chain rooted at the pointer, or at one load), each exactly a row `block_row_problem` accepts (`acc` of the value or the flag, the flags
+    set, the type's range under the flag or alone), over `0 <= k && k < N` with the N the clause's own length facts state.  Returns None when `rest`
+    is not such a clause (another rule looks at it), "" when every quantified conjunct is a row of that grammar, else the reason."""
+    text = _strip_wrap(rest.strip())
+    sides = _split_top(text, "==>")
+    if len(sides) > 2:
+        return None
+    guard_p = None
+    if len(sides) == 2:
+        # `!(P == null)`, or as a parameter's site writes it, `!(((P == null) ? 1 : 0) != 0)`; the pointer may be a load
+        gm = re.fullmatch(r"!(.+?)==null|!(?:\()?(.+?)==null\?1:0\)?!=0", norm_viper(sides[0]))
+        if gm is None:
+            return None
+        guard_p = gm.group(1) or gm.group(2)
+    body = sides[-1]
+    try:
+        conj = _flatten_and(body)
+    except ValueError:
+        return None
+    pm = re.fullmatch(r"(.+)!=null", norm_viper(conj[0]))
+    if pm is None:
+        return None
+    p = pm.group(1)
+    all_roots = roots | {f"loc({g}(),0)" for g in gbs}
+    is_load = load_root(p, all_roots) is not None and load_root(p, all_roots)[0] == p
+    if p not in all_roots and not is_load:
+        return None
+    # applicable: a block with its token, or a global's cell (the atom `owns(g)`) holding a pointer
+    has_tok = any(norm_viper(c) == f"acc(loc(block_of({p}),-1).tok)" for c in conj)
+    has_cell = p.startswith("loc(GB_") and any(norm_viper(c).startswith(f"acc({p}.v_ptr_") for c in conj)
+    # an object site `owns(*r)` of a structure with an owning member (decision 0064 item 15, question 293; il-analyst D3): the top-level pointer is no block
+    # (no token, no global cell) and its clause holds, as conjuncts of their own, the block clauses of the pointers its closure reaches
+    has_nested = any(FORALL_RE.search(c) is not None and len(_split_top(_strip_wrap(c.strip()), "==>")) == 2 for c in conj)
+    if not (has_tok or has_cell or has_nested):
+        return None
+    if guard_p is not None and guard_p != p:
+        return "the guard of an `owns_block` clause names another pointer than its block part"
+    for c in conj:
+        t = _strip_wrap(c).strip()
+        if FORALL_RE.match(t):
+            bq = parse_block_row(t)
+            if bq is None:
+                return ("a quantified conjunct of an `owns_block` clause is not a row `forall k: Int :: { loc(B, k) } 0 <= k && k < N ==> ...` over a block "
+                        "term B with literal bounds (decision 0064 item 15)")
+            bt = block_term(bq["b"], gbs, roots, loads=True)
+            if bt is None or bt[0] != "member" or not (bt[1] == p or bt[1].startswith(f"loc(member({p},")):
+                return f"the block `{bq['b']}` of a quantified conjunct is not a member block of the clause's own pointer `{p}`"
+            why = block_row_problem(kw, None, bq, gbs, arrays, roots, lens, perm_formals)
+            if why:
+                return why
+        elif FORALL_RE.search(t):
+            nested = block_clause_problem(kw, t, gbs, arrays, roots, lens, perm_formals)
+            if nested is None:
+                return "a conjunct of an `owns_block` clause holds a quantifier that is neither a row nor the block clause of a pointer its closure reaches"
+            if nested:
+                return nested
+    return ""
+
+
+def struct_wf_member_array_row(rest: str, expect_v: str | None = None) -> str | None:
+    """`WF(v) && (v != null && offset_of(v) < len(block_of(v)) ==> <lens>)`, the well-formedness row of a pointer to a structure with an array member
+    whose elements are structures (decision 0064 items 3, 7 and 17, as built in Part C2): the length facts the guarded conjunct states are the structure's
+    own (`len(member(v, j)) == 1`, `== N` for the array member of N elements) and, for each such array member, the quantifier over its elements
+    `forall k :: { loc(member(v, j), k) } 0 <= k && k < N ==> <the element's length facts>` of the same N.  Returns None when `rest` is not that shape (the
+    caller looks at it as another row), else "" when it is exactly it, else the reason."""
+    try:
+        parts = _flatten_and(rest)
+    except ValueError:
+        return None
+    if len(parts) != 2:
+        return None
+    head = re.match(r"\(*([A-Za-z_$][\w$']*|loc\(GB_[\w$']+\(\),0\))==null", _squash(parts[0]))
+    if head is None or norm_viper(parts[0]) != norm_viper(_view_wf(head.group(1))):
+        return None
+    v = head.group(1)
+    sides = _split_top(_strip_wrap(parts[1]), "==>")
+    if len(sides) != 2 or "forall" not in sides[1]:
+        return None
+    if expect_v is not None and v != expect_v:
+        return f"the well-formedness row is about `{v}`, not `{expect_v}`"
+    if norm_viper(sides[0]) != norm_viper(f"{v} != null && offset_of({v}) < len(block_of({v}))"):
+        return "the guard of the structure's length facts is not `v != null && offset_of(v) < len(block_of(v))`"
+    try:
+        lens = _flatten_and(sides[1])
+    except ValueError:
+        return "the length facts are not a conjunction"
+    why = struct_lens_conjuncts_problem(lens, v)
+    return "" if why is None else why
+
+
+def wf_store_assert_problem(rest: str) -> str | None:
+    """`V != null ==> !(!(perm(lvloc(block_of(V)).lv) > none) || !(ROW))`, the check of a pointer value `V` a body stores (an initializer or a store of a
+    pointer to a structure with an array member of structures, decision 0043 item 8 with decision 0064 item 3): ROW is the well-formedness row of the
+    same V (`struct_wf_member_array_row`, its length quantifier under `struct_lens_conjuncts_problem`).  None when `rest` is not that shape or holds no
+    such row, "" when it is exactly it, else the reason (audit round C2, finding 1: the kept Viper of a local array of `struct T *`)."""
+    parts = _split_top(rest.strip(), "==>")
+    if len(parts) < 2 or "forall" not in rest:
+        return None
+    g = re.fullmatch(r"([A-Za-z_$][\w$']*)!=null", norm_viper(parts[0]))
+    if g is None:
+        return None
+    v = g.group(1)
+    body = _strip_wrap("==>".join(parts[1:]).strip())
+    m = re.fullmatch(r"!\((.*)\)", body, re.S)
+    if m is None:
+        return None
+    ors = _split_top(m.group(1), "||")
+    if len(ors) != 2 or norm_viper(ors[0]) != norm_viper(f"!(perm(lvloc(block_of({v})).lv) > none)"):
+        return None
+    neg = re.fullmatch(r"!\((.*)\)", _strip_wrap(ors[1].strip()), re.S)
+    if neg is None:
+        return None
+    why = struct_wf_member_array_row(neg.group(1), v)
+    return None if why is None else why
+
+
+def _is_struct_lens_quantifier(text: str) -> bool:
+    """`v != null && offset_of(v) < len(block_of(v)) ==> forall k :: { loc(member(<chain>, j), k) } 0 <= k && k < N ==> <the element's length facts>`: one
+    conjunct of the well-formedness of a pointer to a structure with an array member of structures, as an `f__wf` prior holds it (decision 0064 items 3
+    and 17); the same quantifier `struct_wf_member_array_row` reads inside the one row."""
+    guard, body = split_guard(_strip_wrap(text))
+    if guard is None or body is None:
+        return False
+    g = re.fullmatch(r"([A-Za-z_$][\w$']*|loc\(GB_[\w$']+\(\),0\))!=null&&offset_of\(\1\)<len\(block_of\(\1\)\)", norm_viper(guard))
+    qb = parse_block_row(body)
+    if g is None or qb is None or qb["lo"] != "0" or parse_struct_member(qb["b"], g.group(1)) is None:
+        return False
+    return range_lens_members(qb["cons"], f"loc({qb['b']},{qb['k']})")[1] is None
+
+
+def _is_struct_wf_member_array_row(text: str) -> bool:
+    return struct_wf_member_array_row(text) == ""
+
+
+def struct_wf_prior_problem(rest: str) -> str | None:
+    """An obligation `assert PRIOR ==> CONCLUSION` of an `f__wf` method whose PRIOR holds the well-formedness row of a pointer to a structure with an
+    array member of structures (`struct_wf_member_array_row`) as a conjunct of its own (decision 0064 items 7 and 17, as built in Part C2): None when no
+    conjunct of the prior is that row (the line is judged as before), "" when the other conjuncts and the conclusion are heap-free with no quantifier,
+    else the reason."""
+    text = rest.strip()
+    parts = _split_top(text, "==>")
+    if len(parts) < 2:
+        return None
+    prior = parts[0]
+    try:
+        conjuncts = [_strip_wrap(c) for c in _flatten_and_keeping_quantifiers(prior, _is_struct_wf_member_array_row)]
+    except ValueError:
+        return None
+    if not any(_is_struct_wf_member_array_row(c) or _is_struct_lens_quantifier(c) for c in conjuncts):
+        return None
+    for c in conjuncts:
+        if not (_is_struct_wf_member_array_row(c) or _is_struct_lens_quantifier(c)) and (FORALL_RE.search(c) or not _heap_free(c)):
+            return "a conjunct of the prior besides the structure's well-formedness row is a quantifier or reads the heap"
+    conclusion = text[len(prior) + len("==>"):]
+    if FORALL_RE.search(conclusion) or not _heap_free(conclusion):
+        return "the conclusion of an obligation under a structure's well-formedness row is a quantifier or reads the heap"
+    return ""
+
+
+LOAD_CELL_RE = re.compile(r"^(?P<cell>loc\(.+\))\.v_ptr_[\w$']+$")
+
+
+def _canonical_load(text: str) -> bool:
+    """Whether `text` is ONE load of a pointer from a canonical cell chain: `loc(GB_g(), 0).v_ptr_<t>` or `loc(member(<chain>, k), 0).v_ptr_<t>` with the
+    chain rooted at one variable (decision 0043 item 13's grammar), and nothing else (no read inside the chain)."""
+    c = norm_viper(text)
+    m = LOAD_CELL_RE.match(c)
+    if m is None or len(LOAD_FIELD_RE.findall(c)) != 1:
+        return False
+    cell = m.group("cell")
+    gb = re.fullmatch(r"loc\((GB_[\w$']+)\(\),0\)", cell)
+    if gb is not None:
+        return True
+    root = re.search(rf"member\((?:member\()*({IDENT})", cell)
+    return root is not None and parse_struct_chain(cell, root.group(1)) is not None
+
+
+def _canonical_null_test(conjunct: str) -> bool:
+    """`!(L == null)`, `L != null`, or the owner member's `!((G ? L : null) == null)` with L a canonical load and G heap-free."""
+    c = _strip_wrap(conjunct.strip())
+    if c.startswith("!"):
+        inner = _strip_wrap(c[1:].strip())
+        sides = _split_top(inner, "==")
+        if len(sides) != 2 or _sq(sides[1]) != "null":
+            return False
+        left = _strip_wrap(sides[0].strip())
+        if _canonical_load(left):
+            return True
+        cond = _split_conditional(left)
+        return cond is not None and _heap_free(cond[0]) and _canonical_load(_strip_wrap(cond[1])) and _sq(cond[2]) == "null"
+    sides = _split_top(c, "!=")
+    if len(sides) != 2 or _sq(sides[1]) != "null":
+        return False
+    left = _strip_wrap(sides[0].strip())
+    if _canonical_load(left):
+        return True
+    cond = _split_conditional(left)
+    return cond is not None and _heap_free(cond[0]) and _canonical_load(_strip_wrap(cond[1])) and _sq(cond[2]) == "null"
+
+
+def _guard_has_only_null_tests(guard: str) -> bool:
+    """Whether every conjunct of `guard` that reads the heap is a canonical null test of a canonical load (the rest are heap-free)."""
+    try:
+        parts = _flatten_and(guard)
+    except ValueError:
+        return False
+    return all(_heap_free(c) or _canonical_null_test(c) for c in parts)
+
+
 def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str],
                            bound: Callable[[str], tuple[set[int], str] | None] | None = None) -> str | None:
     """Decision 0060 item 16: why the quantified `requires`, `ensures` or pure `assert` row `q` (under `guard`) is not one of the rows
@@ -3928,12 +5309,16 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
     offset_of(X) + n`): `acc(F.f[, a])` with `a` a `Perm` formal of the method (a `requires` or `ensures`; the marked `assert` rows are
     another rule), the flag `F.d_t`, the type's range of `F.v_t`, `F.d_t ==> range`, and `old(F.d_t) ==> F.d_t` (an `ensures` or an
     `assert`).  Nothing else holds a `forall` there."""
-    k, b, extra, cons, lo, hi = q
+    k, b, extra, cons, lo, hi = q[:6]
+    recv = q[6] if len(q) > 6 else None  # a leaf row's receiver (decision 0064 item 17), the cell its consequent is about
     x = BLOCK_BASE_RE.match(_squash(b)).group(1)
     if guard is not None:
         if GUARD_BAD_RE.search(guard):
             return "the guard holds a permission, a quantifier or a labelled `old`"
-        if kw == "assert" and not _heap_free(guard):
+        # a guard of an `assert` row may hold, besides heap-free conjuncts, only the CANONICAL null test of a canonical load (the loaded pointer an owner
+        # site's closure tests against null, as a cell atom's guard may: record 0045 item 3, decision 0064 item 15; audit round D1, finding 4): any other
+        # use of a pointer read (inside `offset_of`, `block_of`, a comparison with anything but null, arithmetic), a scalar value or a flag stays refused
+        if kw == "assert" and not _heap_free(guard) and not _guard_has_only_null_tests(guard):
             return "the guard of an `assert` row reads the heap"
         if not guard.strip():
             return "an empty guard"
@@ -3955,9 +5340,9 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
         rem = high[len(f"offset_of({x})+"):] if high.startswith(f"offset_of({x})+") else ""
         if not rem or re.search(rf"(?<![\w$']){re.escape(k)}(?![\w$'])", rem):
             return f"the range does not end at `offset_of({x}) + <a count that does not name {k}>`"
-    cell = f"loc({_squash(b)},{k})"
+    cell = recv if recv is not None else f"loc({_squash(b)},{k})"
     cells = re.escape(cell)
-    acc = _range_acc(cons, k, b)
+    acc = _range_acc(cons, k, b, recv)
     if acc is not None:
         if kw == "assert":
             return "a permission row (`acc`) is a marked row: unguarded, no wrapping, `assert` only with its own map entry"
@@ -3968,6 +5353,12 @@ def range_atom_row_problem(kw: str, guard: str | None, q, perm_formals: set[str]
     stripped = _strip_wrap(cons)
     sides = _split_top(stripped, "==>")
     cs = _squash(stripped)
+    mp = re.search(cells + r"\.v_(ptr_" + IDENT + ")", cs) if len(sides) == 1 else None
+    if mp and _std_type_range(stripped, cell, mp.group(1)):
+        return None  # the well-formedness of a pointer element, with its pointee's length facts when it points to a structure (audit round C1, finding 4)
+    if recv is None and len(sides) == 1 and "len(member(" in cs:
+        # decision 0064 item 7: the length facts of the elements of a range of structures, one quantifier over the slots with the slot as its trigger
+        return range_lens_problem(cs, cell)
     if len(sides) == 1:
         if re.fullmatch(cells + r"\.d_" + IDENT, cs):
             return None
@@ -4000,6 +5391,8 @@ def array_global_counts(src: Source, decls: list[Decl]) -> dict[str, int]:
             m = GB_TERM_RE.match(q["b"]) if q else None
             if q and m and q["lo"] == "0" and re.fullmatch(rf"acc\(loc\({re.escape(q['b'])},{re.escape(q['k'])}\)\.v_[\w$']+\)", q["cons"]):
                 out.setdefault(m.group(1), int(q["hi"]))
+            elif q and m and q["lo"] == "0" and "len(member(" in q["cons"]:
+                out.setdefault(m.group(1), int(q["hi"]))  # an array of structures: its group starts with the length facts (decision 0064 item 9)
     return out
 
 
@@ -4111,7 +5504,9 @@ def _block_type_range(cons: str, cell: str, t: str) -> bool:
     parses): an integer, boolean or enumeration range as before; the range of a pointer element `ptr_<t>` (an array member of pointers under `owns(*p)`)
     is `WF` of its value, compared in the same normal form (audit round 4 S1)."""
     if t.startswith("ptr_"):
-        return norm_viper(cons) == norm_viper(_view_wf(f"{cell}.v_{t}"))
+        # WF of the value, or WF with the guarded length facts of the pointee structure (audit round C2, finding 1: the leaf of an element of an array
+        # member that is a `struct S *`, S holding an array member of structures: the recursive type)
+        return norm_viper(cons) == norm_viper(_view_wf(f"{cell}.v_{t}")) or _std_type_range(cons, cell, t)
     return _std_type_range(cons, cell, t)
 
 
@@ -4127,10 +5522,13 @@ def block_row_problem(kw: str, guard: str | None, q: dict[str, str], gbs: set[st
             return "the guard holds a permission, a quantifier or a labelled `old`"
         if not guard.strip():
             return "an empty guard"
-    bt = block_term(q["b"], gbs, roots)
+    bt = block_term(q["b"], gbs, roots, loads=True)
     if bt is None:
         return (f"the block `{q['b']}` is neither `GB_g()` of a declared global nor `member(<chain>, k)` over the canonical chain rooted at a formal, "
                 "a result or `loc(GB_g(), 0)` (decision 0043 item 13)")
+    if bt[0] == "member" and LOAD_FIELD_RE.search(bt[1]) and "old(" in q["cons"]:
+        return ("a kept flag (`old(F.d_t) ==> F.d_t`) over a block reached through a heap read has no rule yet: it needs the tie of the loaded pointer "
+                "(decision 0058 item 4, audit B1), which `lint_marked_kept_rows` reads only in the cell form")
     if q["lo"] != "0":
         return f"the range starts at {q['lo']}, not 0 (a part of an array is M4.5e2's)"
     n = int(q["hi"])
@@ -4141,8 +5539,14 @@ def block_row_problem(kw: str, guard: str | None, q: dict[str, str], gbs: set[st
             return f"the count {n} is not the `len({bt[1]}()) == {arrays[bt[1]]}` of the facts"
     elif n not in lens.get(q["b"], set()):
         return f"the method states no `len({q['b']}) == {n}`: the count of a member's rows is the one its facts state"
-    cell = f"loc({q['b']},{q['k']})"
+    cell = q.get("recv") or f"loc({q['b']},{q['k']})"  # a leaf row's receiver (decision 0064 items 9 and 17), else the slot
     cons = q["cons"]
+    pm = re.search(rf"{re.escape(cell)}\.v_(ptr_[\w$']+)", cons)
+    if pm and q.get("raw") and _std_type_range(q["raw"], cell, pm.group(1)):
+        return None  # the leaf of a pointer to a structure: WF and the guarded length facts, possibly with a quantifier (finding 1)
+    if "recv" not in q and "len(member(" in cons:
+        # the length facts of the elements of an array of structures, one quantifier over the slots (decision 0064 item 3)
+        return range_lens_problem(cons, cell)
     m = re.fullmatch(rf"acc\({re.escape(cell)}\.(?P<f>[vd]_[\w$']+)(?:,(?P<amt>[^()&|=]+))?\)", cons)
     if m:
         if m.group("amt") is not None and not (re.fullmatch(IDENT, m.group("amt")) and m.group("amt") in perm_formals):
@@ -4165,8 +5569,11 @@ def block_row_problem(kw: str, guard: str | None, q: dict[str, str], gbs: set[st
     return "the consequent is not `acc(F.f)`, the flag, the type's range or a flag implication"
 
 
-def _range_acc(consequent: str, k: str, b: str) -> tuple[str, str | None] | None:
-    """(field, amount) of `acc(loc(B, k).f[, amount])`, or None."""
+def _range_acc(consequent: str, k: str, b: str, cell: str | None = None) -> tuple[str, str | None] | None:
+    """(field, amount) of `acc(loc(B, k).f[, amount])`, or None; with `cell` (a leaf row's receiver, normalized) of `acc(<cell>.f[, amount])`."""
+    if cell is not None:
+        lm = re.match(r"^acc\(" + re.escape(cell) + r"\.(?P<f>[vd]_[\w$']+)(?:,(?P<amt>.*))?\)$", _squash(consequent))
+        return None if lm is None else (lm.group("f"), lm.group("amt"))
     m = re.match(r"^acc\(\s*loc\(\s*" + re.escape(b) + r"\s*,\s*" + re.escape(k) + r"\s*\)\s*\.(?P<f>[vd]_[\w$']+)\s*(?:,(?P<amt>.*))?\)$",
                  consequent.strip(), re.S)
     if m is None:
@@ -4180,23 +5587,125 @@ def marked_row_shape(code: str) -> bool:
     m = QUANT_STMT_RE.match(code)
     if m is None or m.group("kw") != "assert":
         return False
-    q = parse_range_quantifier(m.group("rest"))
+    q = parse_range_quantifier_full(m.group("rest")) or parse_leaf_row(m.group("rest"))
+    if q is None:
+        # decision 0064 item 15, step B: a row of a written part over `member(X, j)`, the `acc` of one field with no amount (`lint_quantified_rows` ties it)
+        wq = parse_block_row(m.group("rest"))
+        if wq is not None and wq["b"].startswith("member("):
+            shape = written_part_shape(wq)
+            return shape is not None and shape[0] == "acc"
     if q is None or q[2]:
         return user_wildcard_row(code)
-    acc = _range_acc(q[3], q[0], q[1])
+    acc = _row_acc(q)
     return acc is not None and (acc[1] is None or _heap_free(acc[1]))
 
 
-def _loop_conjunct(q, perm_formals: frozenset[str] = frozenset()) -> tuple[str, list[str]] | None:
+SNAPSHOT_RHS_RE = re.compile(rf"^perm\(\s*(?P<x>{IDENT})\s*\.\s*(?P<f>[vd]_[\w$']+)\s*\)$")
+HELD_ANTECEDENT_RE = re.compile(rf"^(?P<n>{IDENT})>none$")
+BELOW_WRITE_RE = re.compile(rf"^(?P<n>{IDENT})<write$")
+ASSIGNMENT_RE = re.compile(r"(?<![\w$'.])(?P<n>[A-Za-z_$][\w$']*)\s*:=")
+
+
+def amount_snapshots(src: Source, d: Decl) -> dict[str, tuple[str, str]]:
+    """Decision 0064 item 15 (Part D, a heap block's array part as a loop place): the `Perm` locals of the method `d` that are assigned exactly ONCE
+    and then `perm(X.f)` for a variable X and a field `v_<t>` or `d_<t>` (the first slot's permissions at the loop's entry, S48 (k)'s ghost
+    amounts), as {local: (X, f)}.  A local assigned twice, or from anything but that one snapshot, is not here: it is no amount of this rule."""
+    out: dict[str, tuple[str, str]] = {}
+    if not d.has_body:
+        return out
+    names = perm_local_names(src, d)
+    rhs: dict[str, list[str]] = {}
+    for n in range(d.body_line, d.end_line + 1):
+        code = src.code[n - 1]
+        for m in ASSIGNMENT_RE.finditer(code):
+            if m.group("n") in names:
+                rhs.setdefault(m.group("n"), []).append(_statement_rhs(code, m.end()))
+    for name, rights in rhs.items():
+        if len(rights) == 1 and (sm := SNAPSHOT_RHS_RE.match(rights[0])) is not None:
+            out[name] = (sm.group("x"), sm.group("f"))
+    return out
+
+
+def _held_prefix(extra: list[str], amounts: dict[str, tuple[str, str]]) -> tuple[list[tuple[str, str]], list[str]]:
+    """The antecedent conjuncts `K > none` (and, right after one, `K < write`) of a heap array part's flag, range and value conjuncts, K a snapshot
+    local of `amounts`: ([(K, `>`|`<`) ...], the conjuncts after them)."""
+    held: list[tuple[str, str]] = []
+    i = 0
+    while i < len(extra):
+        m, w = HELD_ANTECEDENT_RE.match(extra[i]), BELOW_WRITE_RE.match(extra[i])
+        if m is not None and m.group("n") in amounts and not (held and held[-1][1] == "<"):
+            held.append((m.group("n"), ">"))
+        elif w is not None and w.group("n") in amounts and held and held[-1] == (w.group("n"), ">"):
+            held.append((w.group("n"), "<"))
+        else:
+            break
+        i += 1
+    return held, extra[i:]
+
+
+def _own_first_slot_range(q, amounts: dict[str, tuple[str, str]]) -> str | None:
+    """The base variable X of a heap array part's quantifier `forall k :: { loc(block_of(X), k) } offset_of(X) <= k && k < offset_of(X) + N ==> ...`
+    (the range runs over the N slots from X's own offset, X the part's bound local), or None."""
+    x = BLOCK_BASE_RE.match(_squash(q[1]))
+    if x is None or len(q) > 6:
+        return None
+    X = x.group(1)
+    if _sq(q[4]) != f"offset_of({X})" or re.fullmatch(rf"offset_of\({re.escape(X)}\)\+\d+", _sq(q[5])) is None:
+        return None
+    return X
+
+
+def leaf_is_none(q) -> bool:
+    """Whether the parsed row `q` is a plain range row (no leaf receiver, the older parser's shape)."""
+    return len(q) <= 6
+
+
+def _loop_conjunct(q, perm_formals: frozenset[str] = frozenset(), amounts: dict[str, tuple[str, str]] | None = None,
+                   guarded: bool = True) -> tuple[str, list[str]] | None:
     """(kind, labels read by old[...]) of item 8's four quantified loop conjuncts, or None.  The kinds: `acc` (full permission over
     the range), `flags` (`... && old[L](E.d_t) ==> E.d_t`), `range` (`... && E.d_t ==> lo_T <= E.v_t && E.v_t <= hi_T`) and
     `values` (`... ==> E.v_t == old[L](E.v_t)`).  The `acc` of a range place of a `reads_range` parameter carries the function's own
     amount (decision 0060 item 11): a `Perm` formal of the method (`perm_formals`), never a local or an expression.  The `range` of a pointer element `ptr_<t>` is `WF` of its value (S43 `s43_c_ptr_elem`); a pointer to a structure's extra `WF_S` conjunct is not accepted yet."""
     k, b, extra, cons = q[:4]
-    cell = rf"loc\({re.escape(_squash(b))},{re.escape(k)}\)"
+    if amounts and leaf_is_none(q):
+        # decision 0064 item 15 (Part D): a heap block's array part as a loop place.  Its permission conjunct is at the amount of the part's FIRST slot
+        # at the loop's entry, a `Perm` local that the method assigns once `perm(X.f)` (`amount_snapshots`), X the base of the quantifier and f its
+        # field, over the range from X's own offset; its flag, range and value conjuncts carry the antecedents `K > none` of the amounts they read (and
+        # `K < write` where a write can reach the field), K the snapshots of the same X and the same fields.  All of it under a guard `g ==> `, the one
+        # under which the snapshots are read (an unguarded one would read amounts of a part the method never bound).
+        X = _own_first_slot_range(q, amounts)
+        acc = _range_acc(_squash(cons), k, b, None) if not extra else None
+        if acc is not None and acc[1] is not None and acc[1] in amounts and acc[1] not in perm_formals:
+            return ("acc", []) if (X is not None and guarded and amounts[acc[1]] == (X, acc[0])) else None
+        held, rest = _held_prefix([_squash(x) for x in extra], amounts)
+        if held:
+            if X is None or not guarded:
+                return None
+            res = _loop_conjunct((k, b, rest, cons) + tuple(q[4:]), perm_formals)
+            cell0 = rf"loc\({re.escape(_squash(b))},{re.escape(k)}\)"
+            names = [n for n, _op in held]
+            if res is None:
+                return None
+            if res[0] == "flags":
+                m = re.match(rf"^{cell0}\.d_([\w$']+)$", _squash(cons))
+                ok = m is not None and held == [(names[0], ">")] and amounts[names[0]] == (X, f"d_{m.group(1)}")
+            elif res[0] == "range":
+                m = re.match(rf"^{cell0}\.d_([\w$']+)$", rest[0])
+                ok = m is not None and [op for _n, op in held] == [">", ">"] and \
+                    amounts[names[0]] == (X, f"v_{m.group(1)}") and amounts[names[1]] == (X, f"d_{m.group(1)}")
+            elif res[0] == "values":
+                m = re.match(rf"^{cell0}\.v_([\w$']+)==old\[", _squash(cons))
+                ok = m is not None and [op for _n, op in held] in ([">"], [">", "<"]) and len(set(names)) == 1 and \
+                    amounts[names[0]] == (X, f"v_{m.group(1)}")
+            else:
+                ok = False
+            return res if ok else None
+    raw_cons = cons
+    leaf = q[6] if len(q) > 6 else None  # a leaf row's receiver (decision 0064 item 17)
+    cell = rf"loc\({re.escape(_squash(b))},{re.escape(k)}\)" if leaf is None else re.escape(leaf)
     cons = _squash(cons)
     if not extra:
-        acc = _range_acc(cons, k, b)
+        acc = _range_acc(cons, k, b, leaf)
         if acc is not None and (acc[1] is None or (re.fullmatch(IDENT, acc[1]) and acc[1] in perm_formals)):
             return "acc", []
         m = re.match(rf"^({cell}\.v_[\w$']+)==old\[([\w$']+)\]\(?({cell}\.v_[\w$']+)\)?$", cons)
@@ -4220,8 +5729,11 @@ def _loop_conjunct(q, perm_formals: frozenset[str] = frozenset()) -> tuple[str, 
         # a pointer element: the range of its value is `WF` (null, or the pointer's own block with 0 <= offset <= len), the same
         # text as a view's, over the element read under the quantifier (S43 `s43_c_ptr_elem`); a pointer to a structure adds
         # the guarded `WF_S` conjunct (decision 0043 item 8), which is not accepted here yet
-        element = f"loc({_squash(b)},{k}).v_{m.group(2)}"
+        element = f"loc({_squash(b)},{k}).v_{m.group(2)}" if leaf is None else f"{leaf}.v_{m.group(2)}"
         if len(lows) == 1 and m.group(2).startswith("ptr_") and norm_viper(lows[0]) == norm_viper(_view_wf(element)):
+            return "range", []
+        # audit round C2, finding 1: WF with the guarded length facts of the pointee, which may hold the quantifier over an array member of structures
+        if m.group(2).startswith("ptr_") and len(lows) >= 2 and _std_type_range(raw_cons, f"loc({_squash(b)},{k})" if leaf is None else leaf, m.group(2)):
             return "range", []
     return None
 
@@ -4836,10 +6348,11 @@ def nb_not_equal(qbody: str, a: str, b: str, s: str) -> bool:
     return norm_viper(qbody) not in (f"{a}({s})=={b}({s})", f"{b}({s})=={a}({s})")
 
 
-def _flatten_and_keeping_quantifiers(text: str) -> list[str]:
-    """`_flatten_and`, but a conjunct that is a quantifier (or a guard over one) is not split at the `&&` of its own antecedent."""
+def _flatten_and_keeping_quantifiers(text: str, whole: Callable[[str], bool] | None = None) -> list[str]:
+    """`_flatten_and`, but a conjunct that is a quantifier (or a guard over one) is not split at the `&&` of its own antecedent; a conjunct for which
+    `whole` holds stays one (the well-formedness row of a pointer to a structure with an array member of structures, `struct_wf_member_array_row`)."""
     text = _strip_wrap(text)
-    if FORALL_RE.match(text) or (FORALL_RE.search(text) and split_guard(text)[1] is not None):
+    if FORALL_RE.match(text) or (FORALL_RE.search(text) and split_guard(text)[1] is not None) or (whole is not None and whole(text)):
         return [text]
     parts = _split_top(text, "&&")
     if len(parts) == 1:
@@ -4848,7 +6361,7 @@ def _flatten_and_keeping_quantifiers(text: str) -> list[str]:
         raise ValueError("an unparenthesized mix of `&&` with `||` or `==>`")
     out: list[str] = []
     for part in parts:
-        out += _flatten_and_keeping_quantifiers(part)
+        out += _flatten_and_keeping_quantifiers(part, whole)
     return out
 
 
@@ -4872,7 +6385,7 @@ def wf_assert_verdict(rest: str, ghosts: frozenset[str]) -> str | None:
     prior = parts[0]
     conclusion = _strip_wrap(text[len(prior) + len("==>"):])
     try:
-        conjuncts = [_strip_wrap(c) for c in _flatten_and_keeping_quantifiers(prior)]
+        conjuncts = [_strip_wrap(c) for c in _flatten_and_keeping_quantifiers(prior, _is_struct_wf_member_array_row)]
     except ValueError:
         return "the prior is a parenthesized conjunction"
     def guarded(t: str, what: str) -> str | None:
@@ -4886,6 +6399,8 @@ def wf_assert_verdict(rest: str, ghosts: frozenset[str]) -> str | None:
         return f"{what}: {why}" if why else None
 
     for c in conjuncts:
+        if _is_struct_wf_member_array_row(c) or _is_struct_lens_quantifier(c):
+            continue
         if FORALL_RE.match(c) or (FORALL_RE.search(c) and split_guard(c)[1] is not None):
             why = guarded(c, "a quantifier of the prior")
             if why:
@@ -5279,10 +6794,332 @@ def user_wildcard_row(code: str) -> bool:
     return q is not None and wildcard_row_problem(q) is None and "wildcard" in m.group("rest")
 
 
+WEA_ASSIGN_RE = re.compile(rf"^\s*(?P<n>wea_[\w$']*)\s*:=\s*(?P<f>.+?)\s*$")
+WEA_NAME_RE = re.compile(r"(?<![\w$'])wea_[\w$']*")
+IF_NOT_RE = re.compile(r"^\s*if\s*\(\s*!\s*\((?P<x>.+)\)\s*\)\s*\{\s*$")
+REF_LOCAL_RE = re.compile(rf"^\s*var\s+(?P<n>{IDENT})\s*:\s*Ref\s*$")
+BOOL_LOCAL_RE = re.compile(rf"^\s*var\s+(?P<n>{IDENT})\s*:\s*Bool\s*$")
+LEN_FACT_RE = re.compile(r"len\(((?:[^()]|\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))+)\)==([0-9]+)")
+
+
+def method_locals(src: Source, d: Decl, regex: re.Pattern[str]) -> set[str]:
+    """The names of the locals of kind `regex` (`var x: Ref`, `var x: Bool`) of the method `d`."""
+    out: set[str] = set()
+    if d.has_body:
+        for n in range(d.body_line, d.end_line + 1):
+            if (m := regex.match(src.code[n - 1])) is not None:
+                out.add(m.group("n"))
+    return out
+
+
+def method_all_len_facts(src: Source, d: Decl) -> dict[str, set[int]]:
+    """`method_len_facts` over EVERY line of the method (its loop invariants hold the counts of a carrier's block: `len(member(P, j)) == N`)."""
+    out = dict(method_len_facts(src, d))
+    aliases: list[tuple[str, str]] = []
+    for n in range(d.line, d.end_line + 1):
+        line = norm_viper(src.code[n - 1])
+        for b, k in LEN_FACT_RE.findall(line):
+            out.setdefault(b, set()).add(int(k))
+        # the pure conjunct of a ghost pointer, `invariant G ==> E == abp_<i>`: the ghost IS the loaded pointer E, so E's member counts are its own
+        am = re.match(rf"^invariant.*==>\(*(?P<e>.+)==(?P<a>abp_[\w$']*)\)*$", line)
+        if am is not None:
+            aliases.append((am.group("e"), am.group("a")))
+    for e, a in aliases:
+        for b, counts in list(out.items()):
+            if b.startswith(f"member({e},"):
+                out.setdefault(f"member({a},{b[len(f'member({e},'):]}", set()).update(counts)
+    return out
+
+
+def wea_snapshots(src: Source, d: Decl) -> tuple[dict[str, tuple[str, int]], list[tuple[int, str]]]:
+    """Decision 0064 item 15 (Part D, a written site's or an owner's array part in a loop): the `wea_<...>` Bool locals of `d` are assigned `true` and, once,
+    `forall k :: { loc(B, k) } 0 <= k && k < N ==> loc(B, k).d_t` (the flags of the part's block B at the loop's entry): ({name: (B, N)}, problems as
+    (line, text)).  A `wea_` local that is not a declared Bool, is assigned anything else, or has no or several flag assignments is a problem."""
+    info: dict[str, tuple[str, int]] = {}
+    problems: list[tuple[int, str]] = []
+    if not d.has_body:
+        return info, problems
+    bools = method_locals(src, d, BOOL_LOCAL_RE)
+    for n in range(d.body_line, d.end_line + 1):
+        m = WEA_ASSIGN_RE.match(src.code[n - 1])
+        if m is None:
+            continue
+        name, rhs = m.group("n"), m.group("f")
+        if name not in bools:
+            problems.append((n, f"`{name}` is assigned but is no declared `Bool` local"))
+        elif rhs.strip() == "true":
+            continue
+        elif FORALL_RE.match(rhs):
+            q = parse_block_row(rhs)
+            fl = None if q is None else re.fullmatch(rf"loc\({re.escape(q['b'])},{re.escape(q['k'])}\)\.d_[\w$']+", q["cons"])
+            if q is None or fl is None or q["lo"] != "0":
+                problems.append((n, f"a `wea_` snapshot is `true` or `forall k: Int :: {{ loc(B, k) }} 0 <= k && k < N ==> loc(B, k).d_t` (the flags of one block part)"))
+            elif name in info:
+                problems.append((n, f"`{name}` is assigned a flag quantifier twice"))
+            else:
+                info[name] = (q["b"], int(q["hi"]))
+        else:
+            problems.append((n, f"a `wea_` snapshot is `true` or a quantifier over the flags of one block part, not `{rhs}`"))
+    return info, problems
+
+
+def bound_block_of(src: Source, d: Decl, local: str) -> str | None:
+    """The block term B of a local assigned exactly once `loc(B, 0)` (the bound local of a part's rows), normalized, else None."""
+    rights: list[str] = []
+    for n in range(d.body_line, d.end_line + 1):
+        for m in ASSIGNMENT_RE.finditer(src.code[n - 1]):
+            if m.group("n") == local:
+                rights.append(_statement_rhs(src.code[n - 1], m.end()))
+    if len(rights) != 1:
+        return None
+    bm = re.fullmatch(r"loc\((?P<b>.+),\s*0\s*\)", rights[0].strip(), re.S)
+    return None if bm is None else norm_viper(bm.group("b"))
+
+
+def wea_tie_problem(guard: str | None, b: str, n: int, cons_is_flag: bool, info: dict[str, tuple[str, int]]) -> str | None:
+    """The `wea_<...>` names in the guard of a flag row of block B (count N): at most one; it must be a snapshot of B's own flags with the same count, and the
+    row's consequent the flag (a `wea` guards the flags kept, never another row)."""
+    names = WEA_NAME_RE.findall(guard or "")
+    if not names:
+        return None
+    if len(set(names)) != 1:
+        return "a guard that names several `wea_` snapshots"
+    if names[0] not in info:
+        return f"`{names[0]}` is no flag snapshot of the method"
+    if not cons_is_flag:
+        return f"the row under the flag snapshot `{names[0]}` is not the flag"
+    if info[names[0]] != (b, n):
+        return f"the flag snapshot `{names[0]}` is of `{info[names[0]][0]}` with count {info[names[0]][1]}, the row's block is `{b}` with count {n}"
+    return None
+
+
+# A heap read inside a carrier row's block term (`member(loc(member(v_p, 1), 0).v_ptr_struct_0_S, 0)`): no loop invariant or row of the emitter has one.
+CARRIER_HEAP_READ_RE = re.compile(r"\.v_ptr_")
+
+
+def carrier_row_problem(kw: str, guard: str | None, q: dict[str, str], gbs: set[str], arrays: dict[str, int], roots: set[str],
+                        lens: dict[str, set[int]], info: dict[str, tuple[str, int]]) -> str | None:
+    """Decision 0064 item 15 (Part D): an `invariant` of a written site's or an owner's array part in a loop, `G ==> forall k :: { loc(member(X, j), k) } 0 <= k &&
+    k < N ==> C`, X a variable (the site's pointer, the owner's variable, a ghost pointer `abp_...`): a row `block_row_problem` accepts at FULL permission
+    (`acc(F.v_t)`, `acc(F.d_t)`, no amount), the flag, the type's range under the flag, over the block `member(X, j)` with the count N some `len(member(X, j)) ==
+    N` of the method states; the guard reads the heap only by a canonical null test of a canonical load, and a `wea_` name in it is the flag snapshot of this
+    very block."""
+    if guard is not None and not _heap_free(guard) and not _guard_has_only_null_tests(guard):
+        return "the guard of a carrier row reads the heap other than by a canonical null test of a canonical load"
+    if CARRIER_HEAP_READ_RE.search(q["b"]):
+        return ("the block of a carrier row (an invariant, a marked or an ending row, the values kept) is `member(X, j)` with X a variable: a block reached "
+                "through a heap read stands in a contract clause only (`block_row_problem`), never in a loop's invariant or rows (decision 0064 item 15)")
+    why = block_row_problem(kw, guard, q, gbs, arrays, roots, lens, frozenset())
+    if why:
+        return why
+    cell = f"loc({q['b']},{q['k']})"
+    return wea_tie_problem(guard, q["b"], int(q["hi"]), re.fullmatch(rf"{re.escape(cell)}\.d_[\w$']+", q["cons"]) is not None, info)
+
+
+def enclosing_conditions(src: Source, d: Decl, lineno: int) -> list[str | None]:
+    """The blocks that enclose line `lineno` of the method `d`, outermost first: the squashed condition `C` of an `if (C) {`, None for any other block (a loop body,
+    an `else`).  Read from the lines' own braces (the emitter writes every `{` at a line's end and every `}` alone or as `} else {`)."""
+    stack: list[str | None] = []
+    for n in range(max(d.body_line, 1) + 1, lineno):
+        code = src.code[n - 1].strip()
+        if code.startswith("}"):
+            if stack:
+                stack.pop()
+            if code.endswith("{"):
+                stack.append(None)
+        elif code.endswith("{") and not code.endswith("{ }"):
+            im = re.match(r"^if\s*\((?P<c>.*)\)\s*\{$", code)
+            stack.append(_sq(im.group("c")) if im is not None else None)
+    return stack
+
+
+def bound_row_guard_problem(src: Source, d: Decl, local: str, lineno: int) -> str | None:
+    """A marked row over the bound local `local` (a slot `local := loc(B, 0)` that the method assigns once) stands under the `if (G) {` that encloses that
+    assignment, when the assignment stands under one: the local holds no block where G fails, so a row outside G reads a block nobody bound (decision 0064
+    item 15, a carrier's entry and back-edge rows)."""
+    sites = [n for n in range(d.body_line, d.end_line + 1) for m in ASSIGNMENT_RE.finditer(src.code[n - 1]) if m.group("n") == local]
+    if len(sites) != 1:
+        return None
+    needed = [c for c in enclosing_conditions(src, d, sites[0]) if c is not None]
+    if not needed:
+        return None
+    have = enclosing_conditions(src, d, lineno)
+    if needed[-1] not in have:
+        return f"the row over `{local}` stands outside the `if ({needed[-1]})` under which `{local}` is bound"
+    return None
+
+
+def _block_equality(conjunct: str) -> bool:
+    """`block_of(A) == block_of(B)`, the test inside a place's disjointness term."""
+    sides = _split_top(_strip_wrap(conjunct.strip()), "==")
+    return len(sides) == 2 and all(_strip_wrap(x.strip()).startswith("block_of(") for x in sides)
+
+
+def _na_conjunct(conjunct: str) -> bool:
+    """Whether a conjunct of a written part's guard is one of the disjointness terms that `wblock_part_distinct` and the place tests write (decision 0064
+    item 15, step B): `!(<guard> && <range test>)` with a `block_of(A) == block_of(B)` test inside it, `X ==> block_of(A) != block_of(B)` or a bare
+    `block_of(A) != block_of(B)`; any other conjunct (a `!`-led null test included) is the atom's own guard."""
+    c = _strip_wrap(conjunct.strip())
+    if c.startswith("!"):
+        try:
+            return any(_block_equality(x) for x in _flatten_and(_strip_wrap(c[1:].strip())))
+        except ValueError:
+            return False
+    sides = _split_top(c, "==>")
+    last = _strip_wrap(sides[-1].strip())
+    if len(sides) > 2:
+        return False
+    parts = _split_top(last, "!=")
+    return len(parts) == 2 and all(_strip_wrap(x.strip()).startswith("block_of(") for x in parts)
+
+
+def _row_block_guard(src: Source, lineno: int) -> str | None:
+    """The condition C of the `if (C) {` block that holds line `lineno` and nothing but quantified `assert` rows (the entry and back-edge rows of a guarded
+    atom: `if (g) { assert forall ... acc(F.v_t)  assert forall ... acc(F.d_t) }`), else None: a block with any other statement is a branch of the program."""
+    def is_row(i: int) -> bool:
+        return src.code[i - 1].strip().startswith("assert forall")
+    top, bottom = lineno, lineno
+    while top > 1 and is_row(top - 1):
+        top -= 1
+    while bottom < len(src.code) and is_row(bottom + 1):
+        bottom += 1
+    im = re.match(r"^if\s*\((?P<c>.*)\)\s*\{$", src.code[top - 2].strip()) if top >= 2 else None
+    closes = bottom < len(src.code) and src.code[bottom].strip() == "}"
+    return im.group("c") if im is not None and closes else None
+
+
+def _guard_set(guard: str | None, skip_na: bool) -> frozenset[str] | None:
+    """The normalized conjuncts of `guard` (the disjointness terms left out when `skip_na`), or None when the guard does not split into conjuncts."""
+    if guard is None:
+        return frozenset()
+    try:
+        parts = _flatten_and(guard)
+    except ValueError:
+        return None
+    return frozenset(norm_viper(c) for c in parts if not (skip_na and _na_conjunct(c)))
+
+
+def written_part_shape(q: dict[str, str]) -> tuple[str, ...] | None:
+    """What a quantified row `q` (`parse_block_row`) over `member(X, j)` says of its slot F = `loc(B, k)`, as a key the rows and the invariants of a written part
+    share: ("acc", f) for `acc(F.f)` with no amount, ("flag", t) for `F.d_t`, ("range", t, R) for the type's range R of `F.v_t` (alone, or under the flag
+    in an invariant), else None."""
+    cell = f"loc({q['b']},{q['k']})"
+    cons = q["cons"]
+    m = re.fullmatch(rf"acc\({re.escape(cell)}\.(?P<f>[vd]_[\w$']+)\)", cons)
+    if m is not None:
+        return ("acc", m.group("f"))
+    m = re.fullmatch(rf"{re.escape(cell)}\.d_(?P<t>[\w$']+)", cons)
+    if m is not None:
+        return ("flag", m.group("t"))
+    sides = _split_top(cons, "==>")
+    if len(sides) == 2:
+        am = re.fullmatch(rf"{re.escape(cell)}\.d_(?P<t>[\w$']+)", sides[0])
+        if am is not None and _block_type_range(sides[1], cell, am.group("t")):
+            return ("range", am.group("t"), sides[1])
+    elif len(sides) == 1:
+        rm = re.search(rf"{re.escape(cell)}\.v_(?P<t>{IDENT})", cons)
+        if rm is not None and _block_type_range(cons, cell, rm.group("t")):
+            return ("range", rm.group("t"), cons)
+    return None
+
+
+def written_part_partners(src: Source, d: Decl, gbs: set[str], arrays: dict[str, int], roots: set[str], lens: dict[str, set[int]],
+                          info: dict[str, tuple[str, int]]) -> set[tuple[str, int, tuple[str, ...], frozenset[str]]]:
+    """Decision 0064 item 15, step B (a written `owns(*p)` or `owns(p->a)` in a loop invariant): the loop invariants of method `d` over a member block, each
+    one `carrier_row_problem` accepts, as (block, count, `written_part_shape`, the atom's own guard: the guard's conjuncts without the disjointness terms)."""
+    out: set[tuple[str, int, tuple[str, ...], frozenset[str]]] = set()
+    if not d.has_body:
+        return out
+    for n in range(d.body_line, d.end_line + 1):
+        m = QUANT_STMT_RE.match(src.code[n - 1])
+        if m is None or m.group("kw") != "invariant":
+            continue
+        guard, body = split_guard(m.group("rest"))
+        cq = parse_block_row(body) if body is not None else None
+        if cq is None or not cq["b"].startswith("member(") or carrier_row_problem("invariant", guard, cq, gbs, arrays, roots, lens, info) is not None:
+            continue
+        shape = written_part_shape(cq)
+        own = _guard_set(guard, True)
+        if shape is not None and own is not None:
+            out.add((cq["b"], int(cq["hi"]), shape, own))
+    return out
+
+
+def written_part_kept(q: dict[str, str]) -> tuple[str, str] | None:
+    """(the type t, the label) of a values-kept conjunct of a written part (decision 0064 item 15, step B): `F.v_t == old[L](F.v_t)` over one slot F = `loc(B, k)`
+    of the block (the consequent of `parse_block_row`: no grouping parentheses survive, so the call of `old[L]` reads `old[L]F.v_t`), else None."""
+    cell = re.escape(f"loc({q['b']},{q['k']})")
+    m = re.fullmatch(rf"{cell}\.v_(?P<t>[\w$']+)==old\[(?P<l>[^\]]+)\]{cell}\.v_(?P=t)", q["cons"])
+    return None if m is None else (m.group("t"), m.group("l"))
+
+
+def written_part_kept_problem(guard: str | None, q: dict[str, str], kept: tuple[str, str], gbs: set[str], arrays: dict[str, int], roots: set[str],
+                              lens: dict[str, set[int]], info: dict[str, tuple[str, int]],
+                              partners: set[tuple[str, int, tuple[str, ...], frozenset[str]]]) -> str | None:
+    """Decision 0064 item 15, step B: why the invariant `G ==> forall k :: { loc(member(X, j), k) } 0 <= k && k < N ==> F.v_t == old[L](F.v_t)` (the values of a
+    written part kept) is not one, or None.  The block, the count and the guard are those of a row `carrier_row_problem` accepts (judged on the flag of the same
+    slot, no flag snapshot in the guard), and the block, the count and the atom's own guard are those of an `acc` of that very field among the invariants of the
+    method: the values a part keeps are the values of a part the loop holds."""
+    flag = dict(q, cons=f"loc({q['b']},{q['k']}).d_{kept[0]}")
+    if WEA_NAME_RE.search(guard or ""):
+        return "a values-kept conjunct stands under no flag snapshot"
+    why = carrier_row_problem("invariant", guard, flag, gbs, arrays, roots, lens, info)
+    if why:
+        return why
+    own = _guard_set(guard, True)
+    if own is None:
+        return "a guard that is not a conjunction of conditions"
+    if not any(p[0] == q["b"] and p[1] == int(q["hi"]) and p[2] == ("acc", f"v_{kept[0]}") and p[3] == own for p in partners):
+        return (f"no loop invariant of the method holds `acc` of `v_{kept[0]}` over `{q['b']}` with count {q['hi']} under the same guard: the values a loop "
+                "keeps are those of a part it holds")
+    return None
+
+
+def written_part_row_problem(src: Source, d: Decl, lineno: int, ending: bool, guard: str | None, q: dict[str, str], gbs: set[str], arrays: dict[str, int],
+                             roots: set[str], lens: dict[str, set[int]], info: dict[str, tuple[str, int]],
+                             partners: set[tuple[str, int, tuple[str, ...], frozenset[str]]]) -> str | None:
+    """Decision 0064 item 15, step B: why the quantified `assert` row `q` over `member(X, j)` (line `lineno` of `d`; `ending`: the `if (!(G ==> forall ...)) {
+    assert false }` row of the flags or the range, else a marked permission row) is no entry or back-edge row of a written `owns` part of a loop, or None.  The
+    row is a row `carrier_row_problem` accepts at full permission (no amount, one field, the count a length fact of the method, a guard that reads the heap only
+    by canonical null tests); a marked row is the `acc` row, an ending row the flag or the range; the block, the count, the field and the atom's own guard are
+    those of a loop invariant of the same method (`written_part_partners`): the row stands under that guard, as the `if (G) {` block of nothing but the part's
+    marked rows (a marked row) or as `G ==> ` (an ending row), and under no disjointness term (a row the part's invariant switches off is still checked)."""
+    shape = written_part_shape(q)
+    if shape is None:
+        if re.fullmatch(rf"acc\(loc\({re.escape(q['b'])},{re.escape(q['k'])}\)\.[vd]_[\w$']+,.+\)", q["cons"]):
+            return "the row of a written part has an amount: the part is held at full permission, with no amount term"
+        return "the consequent is not `acc(F.f)`, the flag or the type's range of one slot of the part"
+    if ending == (shape[0] == "acc"):
+        return ("an ending row (`if (!(...)) { assert false }`) is the flag or the range, never an `acc`" if ending
+                else "a marked row is an `acc` of one field, not the flag or the range (those are ending rows)")
+    effective = guard
+    if not ending:
+        if guard is not None:
+            return "a marked row stands under the `if (G) {` block of the part's rows, never as `G ==> forall`"
+        effective = _row_block_guard(src, lineno)
+    why = carrier_row_problem("assert", effective, q, gbs, arrays, roots, lens, info)
+    if why:
+        return why
+    row_guard = _guard_set(effective, False)
+    if row_guard is None:
+        return "a guard that is not a conjunction of conditions"
+    if any(_na_conjunct(c) for c in (_flatten_and(effective) if effective is not None else [])):
+        return "the row stands under one of the part's disjointness terms: the part's invariant is switched off there, its entry and back-edge rows are not"
+    matching = [p for p in partners if p[0] == q["b"] and p[1] == int(q["hi"]) and p[2] == shape]
+    if not matching:
+        return (f"no loop invariant of the method states `{shape[0]}` of `{q['b']}` with count {q['hi']} and the same field: a row of a written part has the "
+                "invariant it carries")
+    if all(p[3] != row_guard for p in matching):
+        return (f"the row's guard {sorted(row_guard) if row_guard else 'none'} is not the atom's own guard of its invariant "
+                f"({'; '.join(str(sorted(p[3])) for p in matching)})")
+    return None
+
+
 def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry] | None, add: Callable[[int, str], None],
-                         map_name: str = "", user: QuantifiedLines | None = None) -> None:
-    """Decision 0059 items 7, 8 and 12: where `forall` and `old[label]` may stand, the shape of a marked row, and the marks."""
-    skip: set[int] = set(pf_requires_problems(src, decls))  # decision 0062 item 6: reported by `lint_pf_requires`
+                         map_name: str = "", user: QuantifiedLines | None = None, view_lines: set[int] | frozenset[int] = frozenset()) -> None:
+    """Decision 0059 items 7, 8 and 12: where `forall` and `old[label]` may stand, the shape of a marked row, and the marks.  `view_lines`: the lines of
+    the typed views that `lint_views` accepted (decision 0064 item 15: their quantified rows are pinned there, as `alloc_arr_<t>`'s are)."""
+    skip: set[int] = set(pf_requires_problems(src, decls)) | set(view_lines)  # decision 0062 item 6: reported by `lint_pf_requires`
     for d in decls:
         if d.kind == "domain" or (d.kind == "method" and (d.name.startswith((ARR_ALLOC_PREFIX, ARR_ZERO_PREFIX)) or is_pinned_array_copy(src, d))):
             skip.update(range(d.line, d.end_line + 1))
@@ -5292,6 +7129,12 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
     array_counts = array_global_counts(src, decls)
     struct_counts = struct_array_counts(src, decls)
     block_ctx: dict[int, tuple[set[str], dict[str, set[int]]]] = {}
+
+    def block_ctx_of(md: Decl) -> tuple[set[str], dict[str, set[int]]]:
+        if md.line not in block_ctx:
+            block_ctx[md.line] = ({*_formal_names(src, md), *(n for n, _t in method_results(src, md))}, method_len_facts(src, md))
+        return block_ctx[md.line]
+
     bound_ctx: dict[int, dict[str, tuple[set[int], str]]] = {}
     labels_before: dict[int, set[str]] = {}
     for d in decls:
@@ -5319,6 +7162,34 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
             formals_of[d.line] = frozenset(m.group("name") for f in method_formals(src, d) if (m := PERM_FORMAL_RE.match(f)))
         return formals_of[d.line]
 
+    amounts_of_method: dict[int, dict[str, tuple[str, str]]] = {}
+
+    def amounts_at(lineno: int) -> dict[str, tuple[str, str]]:
+        d = method_of.get(lineno)
+        if d is None:
+            return {}
+        if d.line not in amounts_of_method:
+            amounts_of_method[d.line] = amount_snapshots(src, d)
+        return amounts_of_method[d.line]
+
+    wea_of_method: dict[int, tuple[dict[str, tuple[str, int]], list[tuple[int, str]]]] = {}
+
+    def wea_info_at(lineno: int):
+        d = method_of.get(lineno)
+        if d is None:
+            return {}, []
+        if d.line not in wea_of_method:
+            wea_of_method[d.line] = wea_snapshots(src, d)
+        return wea_of_method[d.line]
+
+    carrier_ctx: dict[int, tuple[set[str], dict[str, set[int]]]] = {}
+    wp_ctx: dict[int, tuple[set[str], dict[str, set[int]], dict[str, tuple[str, int]], set]] = {}
+
+    def carrier_ctx_of(md: Decl) -> tuple[set[str], dict[str, set[int]]]:
+        if md.line not in carrier_ctx:
+            carrier_ctx[md.line] = ({*block_ctx_of(md)[0], *method_locals(src, md, REF_LOCAL_RE)}, method_all_len_facts(src, md))
+        return carrier_ctx[md.line]
+
     if user is None:
         user = classify_quantified_lines(src, decls)
     for lineno, code in enumerate(src.code, start=1):
@@ -5336,29 +7207,77 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
             continue
         if not (has_q or has_old) or lineno in skip:
             continue
-        m = QUANT_STMT_RE.match(code)
+        if (wm := WEA_ASSIGN_RE.match(code)) is not None and FORALL_RE.search(code):
+            # a flag snapshot of a carrier (`wea_snapshots` reads and judges every such assignment)
+            md_w = method_of.get(lineno)
+            if md_w is not None and any(n == lineno for n, _w in wea_info_at(lineno)[1]):
+                add(lineno, next(w for n, w in wea_info_at(lineno)[1] if n == lineno))
+            elif md_w is None:
+                add(lineno, "a `wea_` snapshot outside a method")
+            continue
+        code_stmt = code
+        ending_row = False
+        if (im := IF_NOT_RE.match(code)) is not None and FORALL_RE.search(code) and lineno in method_of:
+            # the ENDING row of a carrier's flag or range conjunct, `if (!(G ==> (forall ...))) { assert false }` (decision 0038 item 4's shape for the
+            # rows that end their path): judged as the `assert` of the same text, and its next line must be `assert false`
+            code_stmt = "assert " + im.group("x")
+            ending_row = True
+            nxt = src.code[lineno] if lineno < len(src.code) else ""
+            if nxt.strip() != "assert false":
+                add(lineno, "the ending row of a carrier holds `assert false` on the next line (decision 0038 item 4)")
+        m = QUANT_STMT_RE.match(code_stmt)
         kind = m.group("kw") if m else ""
         guard, body = split_guard(m.group("rest")) if m else (None, None)
         plain = bool(m and FORALL_RE.match(m.group("rest").strip()))  # no guard, no wrapping: the older rows' text
         starts_q = body is not None
         q = parse_range_quantifier_full(body) if starts_q else None
+        if q is None and starts_q:
+            q = parse_leaf_row(body)  # decision 0064 item 17: a row over a leaf of an array of structures (a seventh field, its receiver)
+        leaf_row = q is not None and len(q) > 6
         old_labels: list[str] = []
+        kept_row = False
         ok = False
         why = ""
-        if starts_q and plain and kind in ("assert", "exhale") and (q is None or _range_acc(q[3], q[0], q[1]) is not None):
+        wp_row = parse_block_row(body) if (starts_q and q is None and kind == "assert" and m is not None and lineno in method_of) else None
+        if wp_row is not None and wp_row["b"].startswith("member("):
+            wmd = method_of[lineno]
+            if wmd.line not in wp_ctx:
+                wroots, wlens = carrier_ctx_of(wmd)
+                wp_ctx[wmd.line] = (wroots, wlens, wea_info_at(lineno)[0],
+                                    written_part_partners(src, wmd, gb_names, array_counts, wroots, wlens, wea_info_at(lineno)[0]))
+            if not wp_ctx[wmd.line][3]:
+                wp_row = None  # a method with no loop over a written part: the older rule's refusal stands
+        if wp_row is not None and wp_row["b"].startswith("member("):
+            # decision 0064 item 15, step B: an entry or back-edge row of a written part (a quantified `assert` over `member(X, j)`)
+            wroots, wlens, winfo, wpartners = wp_ctx[wmd.line]
+            why = written_part_row_problem(src, wmd, lineno, ending_row, guard, wp_row, gb_names, array_counts, wroots, wlens, winfo, wpartners) or ""
+            ok = not why
+            if ok and not ending_row:
+                marked_lines.add(lineno)
+        elif starts_q and plain and kind in ("assert", "exhale") and (q is None or _row_acc(q) is not None):
             # decision 0059 item 7's marked row (an `acc` of one field) or the range `exhale`
-            acc = _range_acc(q[3], q[0], q[1]) if q is not None else None
+            acc = _row_acc(q) if q is not None else None
             shaped = (q is not None and not q[2] and acc is not None and (acc[1] is None or _heap_free(acc[1]))
                       and (kind == "assert" or acc[1] is None))
             if shaped and kind == "assert":
                 marked_lines.add(lineno)
+                if lineno in method_of and (xg := BLOCK_BASE_RE.match(_squash(q[1]))) is not None \
+                        and (gw := bound_row_guard_problem(src, method_of[lineno], xg.group(1), lineno)) is not None:
+                    add(lineno, gw)
+            if shaped and acc is not None and acc[1] is not None and acc[1] in amounts_at(lineno) and acc[1] not in perm_formals(lineno):
+                # decision 0064 item 15 (Part D): the entry and back-edge rows of a heap array part at its snapshot amount: the amount is the
+                # snapshot of the row's OWN first slot and field (`amount_snapshots`), over the range from that slot's offset
+                x_own = _own_first_slot_range(q, amounts_at(lineno))
+                if x_own is None or amounts_at(lineno)[acc[1]] != (x_own, acc[0]):
+                    add(lineno, f"a marked range row at the amount `{acc[1]}`, a snapshot `perm(...)` of another place or another field than the first slot of the "
+                                f"row's own range (decision 0064 item 15): the amount of `{acc[0]}` over `{_squash(q[1])}` is the one `perm(X.{acc[0]})` of that range's base X")
             if not shaped:
                 add(lineno, f"a quantified `{kind}` that is not a marked range row of decision 0059 item 7: "
                             f"`{kind} forall k: Int :: {{ loc(block_of(X), k) }} lo <= k && k < hi ==> acc(loc(block_of(X), k).f)` "
                             "with one field (an `assert` row may carry an amount) and X a variable, B, lo, hi and the amount reading no heap")
             ok = True  # reported above
         elif q is not None and kind == "invariant":
-            c = _loop_conjunct(q, perm_formals(lineno))
+            c = _loop_conjunct(q, perm_formals(lineno), amounts_at(lineno), guard is not None)
             ok = c is not None and (guard is None or not GUARD_BAD_RE.search(guard))
             if not ok:
                 add(lineno, "a quantified loop `invariant` that is not one of decision 0059 item 8's four conjuncts "
@@ -5368,15 +7287,64 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                 old_labels = []
             else:
                 old_labels = c[1]
+        elif leaf_row and not (kind in ("requires", "ensures", "assert") and m is not None and lineno in method_of):
+            # a leaf row other than a marked row, a range `exhale` or a loop conjunct, outside a method's clauses and a method's pure rows
+            why = "a row over a leaf of an array of structures is a marked `assert`, a range `exhale` or a loop conjunct here"
         elif q is not None and kind in ("requires", "ensures", "assert") and m is not None and lineno in method_of:
-            # decision 0060 item 16: a range atom's quantifiers in a method's clauses and its pure rows
+            # decision 0060 item 16: a range atom's quantifiers in a method's clauses and its pure rows; decision 0064 items 7 and 17: the same rows per
+            # leaf path of the element (the receiver, a chain of member steps below the slot, is the trigger and the cell) and the length facts
             md0 = method_of[lineno]
             if md0.line not in bound_ctx:
                 bound_ctx[md0.line] = bound_locals(src, md0, decls, gb_names, array_counts, struct_counts)
             why = range_atom_row_problem(kind, guard, q, perm_formals(lineno), bound_ctx[md0.line].get) or ""
+            if not why and WEA_NAME_RE.search(guard or ""):
+                # decision 0064 item 15 (Part D): the ending row under a flag snapshot `wea_<...>`: the bound local's block and the count are the snapshot's own
+                xw = BLOCK_BASE_RE.match(_squash(q[1])).group(1)
+                nw = re.fullmatch(rf"offset_of\({re.escape(xw)}\)\+([0-9]+)", _sq(q[5]))
+                flag_w = re.fullmatch(rf"loc\({re.escape(_squash(q[1]))},{re.escape(q[0])}\)\.d_[\w$']+", _squash(q[3])) is not None
+                why = wea_tie_problem(guard, bound_block_of(src, md0, xw) or "", int(nw.group(1)) if nw else -1, flag_w, wea_info_at(lineno)[0]) or ""
+            if why and leaf_row:
+                why = "a row over a leaf of an array of structures: " + why
+            ok = not why
+        elif q is None and not starts_q and kind == "assert" and m is not None and (wsa := wf_store_assert_problem(m.group("rest"))) is not None:
+            # the check of a pointer value a body stores: its well-formedness row under the liveness guard (decision 0043 item 8, 0064 item 3)
+            why = wsa
+            ok = not why
+        elif q is None and not starts_q and kind in ("requires", "ensures", "assert") and m is not None and lineno in method_of \
+                and (swf := struct_wf_member_array_row(m.group("rest"))) is not None:
+            # decision 0064 items 3 and 17: the well-formedness row of a pointer to a structure with an array member of structures
+            why = swf
+            ok = not why
+        elif q is None and not starts_q and kind == "assert" and m is not None and lineno in method_of \
+                and (swp := struct_wf_prior_problem(m.group("rest"))) is not None:
+            # the same row as a conjunct of the prior of an `f__wf` method's obligation
+            why = swp
+            ok = not why
+        elif q is None and not starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
+                and (bcl := block_clause_problem(kind, m.group("rest"), gb_names, array_counts, *block_ctx_of(method_of[lineno]), perm_formals(lineno))) is not None:
+            # decision 0064 item 15: an `owns_block` site's whole block part as one conjunction, its array leaves' quantified conjuncts rows over a member block
+            why = bcl
+            ok = not why
+        elif q is None and starts_q and kind == "invariant" and m is not None and lineno in method_of \
+                and (cq := parse_block_row(body)) is not None:
+            # decision 0064 item 15 (Part D): a carrier's rows over `member(X, j)` in a loop's invariants (`carrier_row_problem`)
+            cmd = method_of[lineno]
+            roots_c, lens_c = carrier_ctx_of(cmd)
+            kept_w = written_part_kept(cq) if cq["b"].startswith("member(") else None
+            if kept_w is None:
+                why = carrier_row_problem(kind, guard, cq, gb_names, array_counts, roots_c, lens_c, wea_info_at(lineno)[0]) or ""
+            else:
+                # decision 0064 item 15, step B: the values of a written part kept (`F.v_t == old[L](F.v_t)`)
+                if cmd.line not in wp_ctx:
+                    wp_ctx[cmd.line] = (roots_c, lens_c, wea_info_at(lineno)[0],
+                                        written_part_partners(src, cmd, gb_names, array_counts, roots_c, lens_c, wea_info_at(lineno)[0]))
+                why = written_part_kept_problem(guard, cq, kept_w, gb_names, array_counts, roots_c, lens_c, wea_info_at(lineno)[0], wp_ctx[cmd.line][3]) or ""
+                if not why:
+                    old_labels = [kept_w[1]]
+                    kept_row = True
             ok = not why
         elif q is None and starts_q and kind in ("requires", "ensures") and m is not None and lineno in method_of \
-                and (bq := parse_block_row(body)) is not None:
+                and (bq := parse_block_row(body) or parse_block_leaf_row(body)) is not None:
             # decision 0063 item 15: a row over a block TERM in a line that has no Viper local (a method's contract)
             md = method_of[lineno]
             if md.line not in block_ctx:
@@ -5392,7 +7360,7 @@ def lint_quantified_rows(src: Source, decls: list[Decl], entries: list[MapEntry]
                             "their pure `assert` rows)" + (f": {why}" if why else ""))
         if has_old:
             found = re.findall(r"(?<![\w$'])old\s*\[\s*([^\]]*?)\s*\]", code)
-            if not (ok and q is not None and kind == "invariant" and old_labels and len(found) == len(old_labels)):
+            if not (ok and (q is not None or kept_row) and kind == "invariant" and old_labels and len(found) == len(old_labels)):
                 add(lineno, "`old[label]` outside item 8's loop conjuncts of decision 0059 (the flags kept, the values kept)")
             else:
                 for lab in found:
@@ -6281,6 +8249,9 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_allocations(src, decls, add)
     lint_array_allocations(src, decls, add)
     lint_array_copy_calls(src, decls, add)
+    lint_scope_exits(src, decls, add)
+    lint_range_length_facts(src, decls, add)
+    lint_block_length_facts(src, decls, add)
     has_globals, global_facts = lint_globals(src, decls, add)
     quantified = classify_quantified_lines(src, decls)
     lint_ghost_amounts(src, decls, add, quantified.wildcard_rows | frozenset(n for n, (why, wild) in pf_requires.items() if wild and why is None))
@@ -6288,22 +8259,24 @@ def lint_vpr(text: str, map_text: str | None, name: str = "<vpr>",
     lint_perm_locals(src, decls, add)
     lint_owner_loop_ghosts(src, decls, add)
     lint_loop_entry_ghosts(src, decls, add)
+    lint_abp_ghosts(src, decls, add)
     lint_carrier_clauses(src, decls, add)
     lint_owning_global_tags(src, decls, add)
     lint_ghost_refs(src, decls, add)
     loop_rows = frozenset(e.vpr_line for e in (parse_map(map_text, "")[0] if map_text is not None else [])
                           if e.message.startswith(LOOP_LEAK_ROW_MESSAGE))
     forperm_lines = lint_heap_token(src, decls, add, loop_rows)
-    lint_views(src, decls, add, has_globals, global_facts)
+    view_lines: set[int] = set()
+    lint_views(src, decls, add, has_globals, global_facts, view_lines)
     lint_marked_kept_rows(src, decls, add)
 
     if map_text is None:
-        lint_quantified_rows(src, decls, None, add, user=quantified)
+        lint_quantified_rows(src, decls, None, add, user=quantified, view_lines=view_lines)
         problems.append(f"{name}: no position map ({map_name or name + MAP_SUFFIX})")
         return problems
     entries, map_problems = parse_map(map_text, map_name or name + MAP_SUFFIX)
     problems += map_problems
-    lint_quantified_rows(src, decls, entries, add, map_name or name + MAP_SUFFIX, user=quantified)
+    lint_quantified_rows(src, decls, entries, add, map_name or name + MAP_SUFFIX, user=quantified, view_lines=view_lines)
     lint_not_invalidating_rows(src, decls, entries, add)
     by_line: dict[int, list[MapEntry]] = {}
     for e in entries:

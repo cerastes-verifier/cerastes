@@ -1,7 +1,7 @@
 // expect: rejected cerastes-unsupported_annotation @ L7
 // c-only: restrict does not exist in C++20 (EDG, clang++ and g++ refuse it, decision 0037 item 2)
 // twin: tests/memory/ptrptr_live_inner.c
-// Pins: 0045 item 13 (c1's audit-2 S1 alias shape): with live(*pp) writable the lifetime stop is gone, so the hazard is the only stop: rejected at the function head
+// Pins: 0045 item 13 (c1's audit-2 S1 alias shape): with live(*pp) writable the lifetime stop is gone, so the hazard is the only stop: rejected at the function head [0064 item 19, question 326: every restrict parameter is now rejected by that one rule, whatever the contract; this pin's row keeps its tag and line and its condition no longer matters]
 #include <cerastes.h>
 
 int f(int *restrict p, int **pp)  // <- here
