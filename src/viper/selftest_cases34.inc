@@ -33,11 +33,11 @@ void define_arrays_in_storage_rejections()
            // int g[0];
            k.prog.add_global("g", k.prog.array_of(k.i32, 0U), k.at(), nullptr);
        });
-    rc("arr_store_rej_global_array_of_arrays", "decision 0059 items 1 and 2",
+    rc("arr_store_rej_global_array_of_arrays", "depth 3, an array of arrays of arrays",
        [=](Kit& k)
        {
-           // int g[2][3]; (M4.5e1e2)
-           k.prog.add_global("g", k.prog.array_of(A3(k), 2U), k.at(), nullptr);
+           // int g[2][2][3]; (depth 3 is Part E's slice 4; the two-dimensional global is slice 3a's)
+           k.prog.add_global("g", k.prog.array_of(k.prog.array_of(A3(k), 2U), 2U), k.at(), nullptr);
        });
     rc("arr_store_rej_global_array_owning", "an array with `owning` or `ref_to_uninit`",
        [=](Kit& k)

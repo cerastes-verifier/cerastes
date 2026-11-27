@@ -18,12 +18,13 @@ void define_arrays_rejected_until_part_b()
         return k.prog.array_of(k.i32, 3U);
     };
     // ---- the node `ElemAddr`, in every position the accepted shapes do not cover (the pointer-based and array-based element places are lowering cases) ----
-    rc("arr_rej_elem_addr_over_struct_pointer", "an array member or an `owning`",
+    rc("arr_rej_elem_addr_over_struct_pointer", "or an `owning` or `ref_to_uninit` member",
        [=](Kit& k)
        {
            // sp[1] of a `struct S *sp` whose structure holds an array member (decision 0064 Part B: the element of a pointer to a structure is accepted, one with an array member is Part E's;
            // flipped from "structures: M4.5e1e")
-           StructType* S {k.strukt("S", {{"x", k.i32}, {"a", k.prog.array_of(k.i32, 2U)}})};
+           // (slice 3c-2 accepts an array member of scalars; a matrix member, depth 3, stays refused)
+           StructType* S {k.strukt("S", {{"x", k.i32}, {"a", k.prog.array_of(k.prog.array_of(k.i32, 2U), 2U)}})};
            Function* f {k.fn("f", k.vd, {{"sp", k.ptr(k.st(S))}})};
            f->body = k.blk({k.es(k.b.elem_addr(k.pv(f, 0), N(k, "1"), k.at()))});
            k.done(f);
@@ -79,10 +80,11 @@ void define_arrays_rejected_until_part_b()
            f->body = k.blk({k.decl(q, nullptr)});
            k.done(f);
        });
+    // (Part E, slice 2 lifts `int (*q)[3]` as a parameter, record 0064 item 13; the case now holds the parameter that stays refused until slice 4: a pointer to an array of arrays, `int (*q)[2][3]`)
     rc("arr_rej_pointer_to_array_parameter", "a pointer to int[3]",
        [=](Kit& k)
        {
-           Function* f {k.fn("f", k.vd, {{"q", k.ptr(A3(k))}})};
+           Function* f {k.fn("f", k.vd, {{"q", k.ptr(k.prog.array_of(A3(k), 2U))}})};
            f->body = k.blk({});
            k.done(f);
        });
@@ -180,9 +182,9 @@ void define_arrays_rejected_until_part_b()
     rc("arr_rej_array_of_arrays_local", "is an array",
        [=](Kit& k)
        {
-           // int a[2][3]: built as is, refused
+           // int a[2][3][4]: built as is, refused.  (M4.5e1e2 Part E slice 1 lifts `int a[2][3]` for an automatic local: that matrix is the case e1e2e_matrix_*; a depth-3 array of arrays is slice 4's.)
            Function* f {k.fn("f", k.vd)};
-           Var* a {k.cell(f, "a", k.prog.array_of(A3(k), 2U))};
+           Var* a {k.cell(f, "a", k.prog.array_of(k.prog.array_of(A3(k), 2U), 4U))};
            f->body = k.blkc({k.decl(a, nullptr)});
            k.done(f);
        });

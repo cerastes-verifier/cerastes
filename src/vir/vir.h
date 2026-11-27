@@ -299,6 +299,42 @@ struct LeafPath
 // The leaf paths of `t` in declaration order, depth first: a structure's (its members' in place), an array's (its element's, behind one index step), any other type's (one path, no steps).
 // `root_text` and `arrow` as struct_leaves.
 std::vector<LeafPath> object_leaf_paths(const Type& t, const std::string& root_text = "", bool arrow = false);
+// Decision 0064 item 12 (Part E, question 353): THE ONE ENUMERATION of the cells of a structure VALUE.  A value is the tuple of its CELLS (a bool, an integer or a pointer each), in this order and no
+// other: depth first, the members of a structure in declaration order, every array's elements in index order (a matrix row major).  `struct S { struct E v[2]; }` with `struct E { int a[2]; int n;
+// }` lists v[0].a[0], v[0].a[1], v[0].n, v[1].a[0], v[1].a[1], v[1].n.  The encoder reads a value, an aggregate and a copy through this list and the lowering's value view (param_vars,
+// result_vars, elem_value, leaf_span) reads the same list, so there is one definition of "the k-th cell of a value".  For a type of leaf-path depth 0 or 1, the types decision 0063 and Part C2
+// accepted by value, the list is struct_value_leaves' list, cell for cell (a self-check pins it); struct_value_leaves itself flags a type of depth 2 or more as one aggregate leaf, never expanded.
+struct ValueStep
+{
+    bool index {false}; // false: member `value` of a structure; true: element `value` of an array
+    unsigned long long value {0U};
+    bool operator==(const ValueStep& o) const
+    {
+        return index == o.index && value == o.value;
+    }
+};
+struct ValueCell
+{
+    std::vector<ValueStep> steps; // from the object to the cell
+    Type type;                    // the cell's type: a Bool, an Int or a Ptr
+    std::string text;             // `s.v[1].a[0]` (root_text, `.name` for a member, `[i]` for an element)
+    unsigned indexes {0U};        // the number of index steps in `steps`
+    bool aggregate_below {
+        false}; // some index step of `steps` is followed by another step (the cell is inside an array OF aggregates)
+};
+// The cells of `t` (a structure, an array or a scalar) in that order.  `root_text` and `arrow` as struct_leaves.  A type that stands for more than `max_cells` cells is cut there and `*complete`
+// (when given) is false: a caller that needs the whole list refuses such a type first (kMaxByValueArrayElements is far below the default).
+std::vector<ValueCell> value_cells(const Type& t, const std::string& root_text = "", bool arrow = false,
+                                   bool* complete = nullptr, size_t max_cells = 4096U);
+// The most index steps of any leaf path of `t` (0: no array below it; 1: arrays of scalars and arrays of structures without array members: decision 0063's and Part C2's; 2 or more: Part E's).
+unsigned type_index_depth(const Type& t);
+// The number of cells of a structure VALUE of type `t` that are reached through at least one index step (decision 0064 item 12, "What the limit counts, for a structure VALUE": every element of
+// an array member, a matrix's cells, each leaf of each element of a member array of structures): the number kMaxByValueArrayElements limits for a by-value parameter, result, literal or read.
+unsigned long long value_index_cells(const Type& t);
+// The number of cells that a WHOLE-STRUCTURE COPY writes one by one ("for a whole-structure copy between two objects"): the cells reached through an index step that is followed by another
+// step, i.e. the cells inside a member array of structures or arrays, at any depth below it.  An array member of scalars standing directly in the structure, or in a by-value structure member,
+// is copied by `copy_arr_<t>` and does not count.  More than kMaxByValueArrayElements is rejected (M4.5f3).
+unsigned long long copied_index_cells(const Type& t);
 // The most array elements a struct VALUE may hold when it is passed or returned by value (decision 0063 item 13, question 309): every element is a Viper formal or result and a write of the
 // entry copy, and Silicon's time grows steeply with the count (the worst shape, a structure in and out by value with a caller that fills and stores it: 6 elements 19 s, 7 elements 25 s, 8
 // elements 35 s, 12 elements 129 s, 16 elements past 120 s).  The one constant: check_program's backstop and the encoder's rejection both read it.  A copy between objects has no limit.
@@ -1331,6 +1367,35 @@ const IntType* promoted(Program& p, const IntType* t);
 const IntType* usual_arithmetic(Program& p, const IntType* a, const IntType* b);
 
 // ---- the builder -------------------------------------------------------------------------------------------------
+
+// Decision 0064 items 4 and 13 (Part E): whether the NODE `e` is the address of an array object, by its kind alone (the caller tests its type): the address of an array local (`AddrOf`), of a
+// global or `static` array (`GlobalAddr`), of an array member (`MemberAddr`) or of a row of an array of arrays (an `ElemAddr`).  An element of such an address is an element of the array.
+// Any other node typed pointer to an array, a row parameter `T (*a)[M]` (a `Local` or a `Formal`), is a pointer VALUE: element `i` of it is the row `i` (Builder::elem_addr types it so).
+bool array_object_address(const Expr& e);
+// Decision 0064 items 4 and 5 (Part E, slice 1): whether `a` is the address of a ROW of an automatic array local of arrays (`m[i]` of `m[i][j]`): an `ElemAddr` typed pointer to an array whose base is
+// the address of an array local (`AddrOf`) or another such row.  A row is the base of an element address and nothing else (its type, a pointer to an array, is no value's).  The rows of a global,
+// of a member, of a pointer and of a parameter are later slices'.
+bool named_local_row(const Expr* a);
+// Decision 0064 item 13 (Part E, slice 2): THE row-base predicate.  `a` is the address of a ROW: an `ElemAddr` typed pointer to an array, whose base chain of such `ElemAddr`s (`steps` of them, one index step
+// each, outermost first in `RowBase::indexes`) ends in the address of an automatic array local (`Named`: `m[i]`) or in a row PARAMETER's own copy or formal (`Param`: `a[i]` of `T (*a)[M]`, the row is a
+// slot of the pointer's block).  Slice 3 adds the global, `static` and member kinds.  The node `a` itself is the base of an element address and nothing else.
+struct RowBase
+{
+    enum class Kind
+    {
+        None,
+        Named,
+        Param,
+        Global,
+        Member
+    };
+    Kind kind {Kind::None};
+    // the root: the `AddrOf` of the array local (Named), the `Local` or `Formal` row pointer (Param), the `GlobalAddr` of a global or `static` local matrix (Global), the `MemberAddr` of a matrix member (Member, slice 3b)
+    const Expr* root {nullptr};
+    // the ElemAddr nodes from `a` down to the one over the root: one per index step (indexes[0] is `a` itself)
+    std::vector<const Expr*> indexes;
+};
+RowBase row_base(const Expr* a);
 
 // Builds nodes in a Program.  It computes each node's `type` from its operands without checking them (an
 // ill-typed tree is built as is, with the type of its first operand, and rejected by check_program).

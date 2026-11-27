@@ -1,0 +1,144 @@
+// gt.v[1] = gt.v[0] of a global structure, in main (which holds program_start's values): the cell n by a store, the array member by copy_arr_int; afterwards gt.v[1].a[2] is 3, gt.v[1].n is 7, gt.k is 5
+// expect: verified
+// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_gt__0(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract the copy of n elements of int between two distinct blocks (decision 0063 item 13): it takes and returns full permission to the destination's value and flag fields over n slots and the amount rd of the source's fields; each destination value is the source's old value at the same index, each destination flag is set, each source value is unchanged and each source flag stays set; it is the contract of the loop d[k] = s[k] over two disjoint ranges
+method copy_arr_int(d: Ref, s: Ref, n: Int, rd: Perm)
+  requires ((((1 <= n) && (d == loc(block_of(d), 0))) && (len(block_of(d)) == n)) && (s == loc(block_of(s), 0))) && (len(block_of(s)) == n)
+  requires block_of(d) != block_of(s)
+  requires (none < rd) && (rd <= write)
+  requires forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).v_int)
+  requires forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).d_int)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).v_int, rd)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).d_int, rd)
+  requires forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).d_int
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).v_int)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(d), k).d_int)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).v_int, rd)
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> acc(loc(block_of(s), k).d_int, rd)
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(d), k).v_int == old(loc(block_of(s), k).v_int))
+  ensures forall k: Int :: { loc(block_of(d), k) } ((0 <= k) && (k < n)) ==> loc(block_of(d), k).d_int
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> (loc(block_of(s), k).v_int == old(loc(block_of(s), k).v_int))
+  ensures forall k: Int :: { loc(block_of(s), k) } ((0 <= k) && (k < n)) ==> loc(block_of(s), k).d_int
+  decreases _
+
+// cerastes:trusted-contract allocation of a local of type struct P: a fresh one-slot block whose members are blocks, a cell member of length 1 and an array member of its length, every leaf and every element uninitialized with full permission (each array member's permissions as quantifiers of their own), and the block's liveness token (decisions 0043 item 4, 0063 item 6)
+method alloc_struct_0_P() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures (((len(member(r, 0)) == 1) && acc(loc(member(r, 0), 0).v_int)) && acc(loc(member(r, 0), 0).d_int)) && (!loc(member(r, 0), 0).d_int)
+  ensures len(member(r, 1)) == 3
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 3)) ==> acc(loc(member(r, 1), j).v_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 3)) ==> acc(loc(member(r, 1), j).d_int)
+  ensures forall j: Int :: { loc(member(r, 1), j) } ((0 <= j) && (j < 3)) ==> (!loc(member(r, 1), j).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract allocation of a local of type struct T: a fresh one-slot block whose members are blocks, a cell member of length 1 and an array member of its length, every leaf and every element uninitialized with full permission (each array member's permissions as quantifiers of their own), and the block's liveness token (decisions 0043 item 4, 0063 item 6)
+method alloc_struct_1_T() returns (r: Ref)
+  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)
+  ensures len(member(r, 0)) == 2
+  ensures forall k: Int :: { loc(member(r, 0), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(member(r, 0), k), 0)) == 1) && (len(member(loc(member(r, 0), k), 1)) == 3))
+  ensures forall k: Int :: { loc(member(loc(member(r, 0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(member(r, 0), k), 0), 0).v_int)
+  ensures forall k: Int :: { loc(member(loc(member(r, 0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(member(r, 0), k), 0), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(member(r, 0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> (!loc(member(loc(member(r, 0), k), 0), 0).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(member(r, 0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(member(r, 0), k), 1), j).v_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(member(r, 0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(member(r, 0), k), 1), j).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(member(r, 0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> (!loc(member(loc(member(r, 0), k), 1), j).d_int)
+  ensures (((len(member(r, 1)) == 1) && acc(loc(member(r, 1), 0).v_int)) && acc(loc(member(r, 1), 0).d_int)) && (!loc(member(r, 1), 0).d_int)
+  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)
+  decreases _
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures ((len(GB_gt__0()) == 1) && (lvloc(GB_gt__0()) == loc(GB_gt__0(), (-2)))) && ((len(member(loc(GB_gt__0(), 0), 0)) == 2) && (len(member(loc(GB_gt__0(), 0), 1)) == 1))
+  ensures forall k: Int :: { loc(member(loc(GB_gt__0(), 0), 0), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0)) == 1) && (len(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1)) == 3))
+  ensures (((acc(loc(member(loc(GB_gt__0(), 0), 1), 0).v_int) && acc(loc(member(loc(GB_gt__0(), 0), 1), 0).d_int)) && loc(member(loc(GB_gt__0(), 0), 1), 0).d_int) && (loc(member(loc(GB_gt__0(), 0), 1), 0).v_int == 5)) && acc(lvloc(GB_gt__0()).lv)
+  ensures forall k: Int :: { loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0), 0).v_int)
+  ensures forall k: Int :: { loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0), 0).d_int)
+  ensures forall k: Int :: { loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0), 0).d_int
+  ensures forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), j).v_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), j).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), j).d_int
+  ensures loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 0), 0).v_int == 7
+  ensures loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 1), 0).v_int == 1
+  ensures loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 1), 1).v_int == 2
+  ensures loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 1), 2).v_int == 3
+  ensures loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 9
+  ensures loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), 0).v_int == 4
+  ensures forall j: Int :: { loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), j) } ((1 <= j) && (j < 3)) ==> (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), j).v_int == 0)
+  decreases _
+
+// C/C++ function `main`
+method f_main__0() returns (res: Int)
+  ensures ((-2147483648) <= res) && (res <= 2147483647)
+  decreases
+{
+  var t__0: Ref
+  var t__1: Ref
+  var t__2: Ref
+  var t__3: Ref
+  var t__4: Perm
+  program_start()
+  assert !((1 < 0) || (len(member(loc(GB_gt__0(), 0), 0)) <= 1))
+  assert !((0 < 0) || (len(member(loc(GB_gt__0(), 0), 0)) <= 0))
+  assert perm(loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 0), 0).v_int) > none
+  assert loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 0), 0).d_int
+  t__0 := loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0)
+  assert !((perm(t__0.v_int) != write) || (perm(t__0.d_int) != write))
+  t__0.v_int := loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 0), 0).v_int
+  t__0.d_int := true
+  assert !((1 < 0) || (len(member(loc(GB_gt__0(), 0), 0)) <= 1))
+  assert !((0 < 0) || (len(member(loc(GB_gt__0(), 0), 0)) <= 0))
+  t__2 := loc(member(loc(GB_gt__0(), 0), 0), 1)
+  t__1 := loc(member(t__2, 1), 0)
+  t__3 := loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 1), 0)
+  t__4 := (perm(t__3.v_int) < perm(t__3.d_int)) ? perm(t__3.v_int) : perm(t__3.d_int)
+  assert none < t__4
+  assert forall k: Int :: { loc(block_of(t__3), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(t__3), k).v_int, t__4)
+  assert forall k: Int :: { loc(block_of(t__3), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(t__3), k).d_int, t__4)
+  assert forall k: Int :: { loc(block_of(t__3), k) } ((0 <= k) && (k < 3)) ==> loc(block_of(t__3), k).d_int
+  assert forall k: Int :: { loc(block_of(t__1), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(t__1), k).v_int)
+  assert forall k: Int :: { loc(block_of(t__1), k) } ((0 <= k) && (k < 3)) ==> acc(loc(block_of(t__1), k).d_int)
+  assert block_of(t__1) != block_of(t__3)
+  copy_arr_int(t__1, t__3, 3, t__4)
+  assert !((1 < 0) || (len(member(loc(GB_gt__0(), 0), 0)) <= 1))
+  assert perm(loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int) > none
+  assert loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).d_int
+  assert (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 7) ==> (!((1 < 0) || (len(member(loc(GB_gt__0(), 0), 0)) <= 1)))
+  assert (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 7) ==> (!((2 < 0) || (len(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1)) <= 2)))
+  assert (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 7) ==> (perm(loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), 2).v_int) > none)
+  assert (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 7) ==> loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), 2).d_int
+  assert ((loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 7) && (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), 2).v_int == 3)) ==> (perm(loc(member(loc(GB_gt__0(), 0), 1), 0).v_int) > none)
+  assert ((loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 7) && (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), 2).v_int == 3)) ==> loc(member(loc(GB_gt__0(), 0), 1), 0).d_int
+  assert ((loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 0), 0).v_int == 7) && (loc(member(loc(member(loc(GB_gt__0(), 0), 0), 1), 1), 2).v_int == 3)) && (loc(member(loc(GB_gt__0(), 0), 1), 0).v_int == 5)
+  res := 0
+  goto l_end
+  assert false
+  label l_end
+}

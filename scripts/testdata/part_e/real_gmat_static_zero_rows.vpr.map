@@ -1,0 +1,145 @@
+32	not.wellformed	internal	matrix_global.c	8	12	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+32	postcondition.violated	internal	matrix_global.c	8	12	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+33	not.wellformed	internal	matrix_global.c	8	12	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+33	postcondition.violated	internal	matrix_global.c	8	12	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+34	not.wellformed	internal	matrix_global.c	8	12	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+34	postcondition.violated	internal	matrix_global.c	8	12	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+35	not.wellformed	internal	matrix_global.c	8	12	internal check: well-formedness of the trusted contract of program_start for `g`
+35	postcondition.violated	internal	matrix_global.c	8	12	internal check: Silicon's own check of the trusted contract of program_start for `g`
+36	not.wellformed	internal	matrix_global.c	8	12	internal check: well-formedness of the trusted contract of program_start for `g`
+36	postcondition.violated	internal	matrix_global.c	8	12	internal check: Silicon's own check of the trusted contract of program_start for `g`
+37	not.wellformed	internal	matrix_global.c	8	12	internal check: well-formedness of the trusted contract of program_start for `g`
+37	postcondition.violated	internal	matrix_global.c	8	12	internal check: Silicon's own check of the trusted contract of program_start for `g`
+38	not.wellformed	internal	matrix_global.c	8	24	internal check: well-formedness of the trusted contract of program_start for `g`
+38	postcondition.violated	internal	matrix_global.c	8	24	internal check: Silicon's own check of the trusted contract of program_start for `g`
+39	not.wellformed	internal	matrix_global.c	8	27	internal check: well-formedness of the trusted contract of program_start for `g`
+39	postcondition.violated	internal	matrix_global.c	8	27	internal check: Silicon's own check of the trusted contract of program_start for `g`
+40	not.wellformed	internal	matrix_global.c	8	30	internal check: well-formedness of the trusted contract of program_start for `g`
+40	postcondition.violated	internal	matrix_global.c	8	30	internal check: Silicon's own check of the trusted contract of program_start for `g`
+41	not.wellformed	internal	matrix_global.c	8	35	internal check: well-formedness of the trusted contract of program_start for `g`
+41	postcondition.violated	internal	matrix_global.c	8	35	internal check: Silicon's own check of the trusted contract of program_start for `g`
+42	not.wellformed	internal	matrix_global.c	8	38	internal check: well-formedness of the trusted contract of program_start for `g`
+42	postcondition.violated	internal	matrix_global.c	8	38	internal check: Silicon's own check of the trusted contract of program_start for `g`
+43	not.wellformed	internal	matrix_global.c	8	41	internal check: well-formedness of the trusted contract of program_start for `g`
+43	postcondition.violated	internal	matrix_global.c	8	41	internal check: Silicon's own check of the trusted contract of program_start for `g`
+44	not.wellformed	internal	matrix_global.c	8	12	internal check: well-formedness of the trusted contract of program_start for `g`
+44	postcondition.violated	internal	matrix_global.c	8	12	internal check: Silicon's own check of the trusted contract of program_start for `g`
+45	not.wellformed	internal	matrix_global.c	14	14	internal check: well-formedness of the trusted contract of program_start for `c`
+45	postcondition.violated	internal	matrix_global.c	14	14	internal check: Silicon's own check of the trusted contract of program_start for `c`
+46	not.wellformed	internal	matrix_global.c	14	14	internal check: well-formedness of the trusted contract of program_start for `c`
+46	postcondition.violated	internal	matrix_global.c	14	14	internal check: Silicon's own check of the trusted contract of program_start for `c`
+47	not.wellformed	internal	matrix_global.c	14	14	internal check: well-formedness of the trusted contract of program_start for `c`
+47	postcondition.violated	internal	matrix_global.c	14	14	internal check: Silicon's own check of the trusted contract of program_start for `c`
+48	not.wellformed	internal	matrix_global.c	14	26	internal check: well-formedness of the trusted contract of program_start for `c`
+48	postcondition.violated	internal	matrix_global.c	14	26	internal check: Silicon's own check of the trusted contract of program_start for `c`
+49	not.wellformed	internal	matrix_global.c	14	14	internal check: well-formedness of the trusted contract of program_start for `c`
+49	postcondition.violated	internal	matrix_global.c	14	14	internal check: Silicon's own check of the trusted contract of program_start for `c`
+50	not.wellformed	internal	matrix_global.c	14	14	internal check: well-formedness of the trusted contract of program_start for `c`
+50	postcondition.violated	internal	matrix_global.c	14	14	internal check: Silicon's own check of the trusted contract of program_start for `c`
+51	not.wellformed	internal	matrix_global.c	14	14	internal check: well-formedness of the trusted contract of program_start for `c`
+51	postcondition.violated	internal	matrix_global.c	14	14	internal check: Silicon's own check of the trusted contract of program_start for `c`
+56	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+57	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+58	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+59	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+60	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+61	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+62	not.wellformed	internal	matrix_global.c	11	5	internal check: well-formedness of the contract of `next`
+63	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+64	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+65	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+66	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+67	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+68	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+69	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+69	postcondition.violated	internal	matrix_global.c	10	5	internal check: Silicon's own check of the postcondition of `next`
+70	not.wellformed	internal	matrix_global.c	12	5	internal check: well-formedness of the contract of `next`
+70	postcondition.violated	internal	matrix_global.c	12	5	internal check: Silicon's own check of the postcondition of `next`
+71	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+71	postcondition.violated	internal	matrix_global.c	10	5	internal check: Silicon's own check of the postcondition of `next`
+72	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+72	postcondition.violated	internal	matrix_global.c	10	5	internal check: Silicon's own check of the postcondition of `next`
+73	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+73	postcondition.violated	internal	matrix_global.c	10	5	internal check: Silicon's own check of the postcondition of `next`
+74	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+74	postcondition.violated	internal	matrix_global.c	10	5	internal check: Silicon's own check of the postcondition of `next`
+75	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+75	postcondition.violated	internal	matrix_global.c	10	5	internal check: Silicon's own check of the postcondition of `next`
+76	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next`
+76	postcondition.violated	internal	matrix_global.c	10	5	internal check: Silicon's own check of the postcondition of `next`
+89	assert.failed	out-of-bounds	matrix_global.c	15	15	reads `c[i][j]`, whose first index may be outside `c`
+90	assert.failed	out-of-bounds	matrix_global.c	15	15	reads `c[i][j]`, whose second index may be outside `c[i]`
+91	assert.failed	permission	matrix_global.c	15	15	reads `c[i][j]` without owning it: a callee may have kept its object
+92	assert.failed	uninitialized	matrix_global.c	15	15	`c[i][j]` may be read here before it is given a value
+97	assert.failed	out-of-bounds	matrix_global.c	19	11	writes `c[i][j]`, whose first index may be outside `c`
+98	assert.failed	out-of-bounds	matrix_global.c	19	11	writes `c[i][j]`, whose second index may be outside `c[i]`
+99	assert.failed	overflow	matrix_global.c	19	15	signed `int` addition may overflow
+101	assert.failed	permission	matrix_global.c	19	11	writes `c[i][j]` without owning it: a callee may have kept its object
+104	assert.failed	out-of-bounds	matrix_global.c	20	14	reads `c[i][j]`, whose first index may be outside `c`
+105	assert.failed	out-of-bounds	matrix_global.c	20	14	reads `c[i][j]`, whose second index may be outside `c[i]`
+106	assert.failed	permission	matrix_global.c	20	14	reads `c[i][j]` without owning it: a callee may have kept its object
+107	assert.failed	uninitialized	matrix_global.c	20	14	`c[i][j]` may be read here before it is given a value
+109	assert.failed[insufficient.permission]	permission	matrix_global.c	20	3	returns without owning `c`, which its contract promises	matrix_global.c:10:this is the postcondition
+110	assert.failed[insufficient.permission]	permission	matrix_global.c	20	3	returns without owning `c`, which its contract promises	matrix_global.c:10:this is the postcondition
+111	assert.failed	permission	matrix_global.c	20	3	returns without owning `c`, which its contract promises	matrix_global.c:10:this is the postcondition
+112	assert.failed	permission	matrix_global.c	20	3	returns without owning `c`, which its contract promises	matrix_global.c:10:this is the postcondition
+113	assert.failed	permission	matrix_global.c	20	3	returns without owning `c`, which its contract promises	matrix_global.c:10:this is the postcondition
+114	assert.failed	permission	matrix_global.c	20	3	returns without owning `c`, which its contract promises	matrix_global.c:10:this is the postcondition
+115	assert.failed	postcondition	matrix_global.c	20	3	the postcondition of `next` may not hold	matrix_global.c:12:this is the postcondition
+117	assert.failed	missing-return	matrix_global.c	21	1	control may reach the end of `next` without returning a value
+123	not.wellformed	internal	matrix_global.c	23	5	internal check: well-formedness of the contract of `main`
+123	postcondition.violated	internal	matrix_global.c	23	5	internal check: Silicon's own check of the postcondition of `main`
+135	call.precondition	internal	matrix_global.c	23	5	internal check: Silicon's own check of the call of program_start
+138	assert.failed	out-of-bounds	matrix_global.c	25	22	reads `g[0][0]`, whose first index may be outside `g`
+139	assert.failed	out-of-bounds	matrix_global.c	25	22	reads `g[0][0]`, whose second index may be outside `g[0]`
+140	assert.failed	permission	matrix_global.c	25	22	reads `g[0][0]` without owning it: a callee may have kept its object
+141	assert.failed	uninitialized	matrix_global.c	25	22	`g[0][0]` may be read here before it is given a value
+142	assert.failed	out-of-bounds	matrix_global.c	25	38	reads `g[1][2]`, whose first index may be outside `g`
+143	assert.failed	out-of-bounds	matrix_global.c	25	38	reads `g[1][2]`, whose second index may be outside `g[1]`
+144	assert.failed	permission	matrix_global.c	25	38	reads `g[1][2]` without owning it: a callee may have kept its object
+145	assert.failed	uninitialized	matrix_global.c	25	38	`g[1][2]` may be read here before it is given a value
+146	assert.failed	check	matrix_global.c	25	3	this `check` may not hold
+147	assert.failed	out-of-bounds	matrix_global.c	26	11	writes `g[1][1]`, whose first index may be outside `g`
+148	assert.failed	out-of-bounds	matrix_global.c	26	11	writes `g[1][1]`, whose second index may be outside `g[1]`
+150	assert.failed	permission	matrix_global.c	26	11	writes `g[1][1]` without owning it: a callee may have kept its object
+153	assert.failed	out-of-bounds	matrix_global.c	27	22	reads `g[1][1]`, whose first index may be outside `g`
+154	assert.failed	out-of-bounds	matrix_global.c	27	22	reads `g[1][1]`, whose second index may be outside `g[1]`
+155	assert.failed	permission	matrix_global.c	27	22	reads `g[1][1]` without owning it: a callee may have kept its object
+156	assert.failed	uninitialized	matrix_global.c	27	22	`g[1][1]` may be read here before it is given a value
+157	assert.failed	out-of-bounds	matrix_global.c	27	39	reads `g[1][0]`, whose first index may be outside `g`
+158	assert.failed	out-of-bounds	matrix_global.c	27	39	reads `g[1][0]`, whose second index may be outside `g[1]`
+159	assert.failed	permission	matrix_global.c	27	39	reads `g[1][0]` without owning it: a callee may have kept its object
+160	assert.failed	uninitialized	matrix_global.c	27	39	`g[1][0]` may be read here before it is given a value
+161	assert.failed	check	matrix_global.c	27	3	this `check` may not hold
+164	assert.failed	out-of-bounds	matrix_global.c	30	22	reads `g[i][j]`, whose first index may be outside `g`
+165	assert.failed	out-of-bounds	matrix_global.c	30	22	reads `g[i][j]`, whose second index may be outside `g[i]`
+166	assert.failed	permission	matrix_global.c	30	22	reads `g[i][j]` without owning it: a callee may have kept its object
+167	assert.failed	uninitialized	matrix_global.c	30	22	`g[i][j]` may be read here before it is given a value
+168	assert.failed	check	matrix_global.c	30	3	this `check` may not hold
+170	assert.failed	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it
+172	assert.failed	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it
+173	assert.failed	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it
+174	assert.failed	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it
+175	assert.failed[insufficient.permission]	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it (every cell of every row)
+176	assert.failed[insufficient.permission]	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it (every cell of every row)
+177	assert.failed	uninitialized	matrix_global.c	33	15	calls `next`, which needs the `static` local `c` of `next` to have a value; it may not have one here
+178	assert.failed	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it (every cell of every row)
+179	assert.failed	permission	matrix_global.c	33	15	calls `next`, which needs to own the `static` local `c` of `next`, without owning it
+180	assert.failed	precondition	matrix_global.c	33	15	the precondition of `next` may not hold	matrix_global.c:11:this is the requirement of `next`
+181	call.precondition	internal	matrix_global.c	33	15	internal check: Silicon's own check of the precondition of `next`
+183	assert.failed	check	matrix_global.c	34	3	this `check` may not hold
+184	assert.failed	out-of-bounds	matrix_global.c	35	14	reads `g[0][1]`, whose first index may be outside `g`
+185	assert.failed	out-of-bounds	matrix_global.c	35	14	reads `g[0][1]`, whose second index may be outside `g[0]`
+186	assert.failed	permission	matrix_global.c	35	14	reads `g[0][1]` without owning it: a callee may have kept its object
+187	assert.failed	uninitialized	matrix_global.c	35	14	`g[0][1]` may be read here before it is given a value
+188	assert.failed	overflow	matrix_global.c	35	18	signed `int` subtraction may overflow
+189	assert.failed	overflow	matrix_global.c	35	27	signed `int` subtraction may overflow
+190	assert.failed	overflow	matrix_global.c	35	22	signed `int` addition may overflow
+193	assert.failed	missing-return	matrix_global.c	36	1	control may reach the end of `main` without returning a value
+199	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next (well-formedness)`
+200	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next (well-formedness)`
+201	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next (well-formedness)`
+202	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next (well-formedness)`
+203	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next (well-formedness)`
+204	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next (well-formedness)`
+205	not.wellformed	internal	matrix_global.c	10	5	internal check: well-formedness of the contract of `next (well-formedness)`

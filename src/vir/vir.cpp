@@ -72,7 +72,10 @@ void collect_leaves(const StructType& s, std::vector<int>& path, const std::stri
         {
             // decision 0064 item 4: an array of structures or of arrays has no leaf in any of the three views (object_leaf_paths has them): one flagged leaf, of the array's type, that every
             // consumer reports (the object view keeps `array` and `element` so that a consumer that ignores the flag still sees an aggregate element, never a cell)
-            if (view == LeafView::Value && m.type.element->is_struct() && m.type.element->struct_type != nullptr)
+            // (decision 0064 item 12, Part E: the value view expands only an element whose own leaves are cells, the leaf paths of depth 1.  An element structure with an array leaf makes the
+            // member's leaf paths depth 2: such a member is the one flagged leaf here too, never two cells with one (path, elem) key; value_cells is the enumeration of such a value)
+            if (view == LeafView::Value && m.type.element->is_struct() && m.type.element->struct_type != nullptr &&
+                type_index_depth(*m.type.element) == 0U)
             {
                 // decision 0064 item 12 (Part C2): the value view of a member that is an array of structures: every leaf of every element is a leaf of its own, element by element, each
                 // element's leaves in declaration order (`path` through the array member to the leaf, `elem` the index, `index_after` where the index step stands)
@@ -265,6 +268,119 @@ std::vector<LeafPath> object_leaf_paths(const Type& t, const std::string& root_t
     std::vector<LeafStep> steps;
     collect_paths(t, steps, root_text, arrow, false, false, false, out, 0);
     return out;
+}
+
+namespace {
+// One walk for value_cells: `steps` and `text` are the way to `t`.  `after_index` is set once an index step has been taken, and `aggregate` once an index step is followed by another step.
+void collect_cells(const Type& t, std::vector<ValueStep>& steps, const std::string& text, bool first_arrow,
+                   unsigned indexes, bool aggregate, std::vector<ValueCell>& out, bool& complete, size_t max_cells,
+                   int depth)
+{
+    if (!complete)
+    {
+        return;
+    }
+    if (depth > 64)
+    {
+        complete = false; // a by-value cycle is a check_program error
+        return;
+    }
+    if (t.is_struct() && t.struct_type != nullptr)
+    {
+        const StructType& s {*t.struct_type};
+        for (size_t k {0U}; k < s.members.size() && complete; ++k)
+        {
+            const StructMember& m {s.members[k]};
+            const std::string name {m.name.empty() ? "<" + std::to_string(k) + ">" : m.name};
+            const std::string next {text.empty() ? name : text + (first_arrow ? "->" : ".") + name};
+            steps.push_back(ValueStep {false, k});
+            // a step after an index step makes the cells below it cells of an array OF aggregates
+            collect_cells(m.type, steps, next, false, indexes, aggregate || indexes > 0U, out, complete, max_cells,
+                          depth + 1);
+            steps.pop_back();
+        }
+        return;
+    }
+    if (t.is_array() && t.element != nullptr)
+    {
+        for (unsigned long long i {0U}; i < t.count && complete; ++i)
+        {
+            steps.push_back(ValueStep {true, i});
+            collect_cells(*t.element, steps, text + "[" + std::to_string(i) + "]", false, indexes + 1U,
+                          aggregate || indexes > 0U, out, complete, max_cells, depth + 1);
+            steps.pop_back();
+        }
+        return;
+    }
+    if (out.size() >= max_cells)
+    {
+        complete = false;
+        return;
+    }
+    ValueCell c;
+    c.steps = steps;
+    c.type = t;
+    c.text = text;
+    c.indexes = indexes;
+    c.aggregate_below = aggregate;
+    out.push_back(std::move(c));
+}
+} // namespace
+
+std::vector<ValueCell> value_cells(const Type& t, const std::string& root_text, bool arrow, bool* complete,
+                                   size_t max_cells)
+{
+    std::vector<ValueCell> out;
+    std::vector<ValueStep> steps;
+    bool whole {true};
+    collect_cells(t, steps, root_text, arrow, 0U, false, out, whole, max_cells, 0);
+    if (complete != nullptr)
+    {
+        *complete = whole;
+    }
+    return out;
+}
+
+unsigned type_index_depth(const Type& t)
+{
+    unsigned most {0U};
+    for (const LeafPath& p : object_leaf_paths(t))
+    {
+        most = std::max(most, static_cast<unsigned>(p.indexes()));
+    }
+    return most;
+}
+
+unsigned long long value_index_cells(const Type& t)
+{
+    unsigned long long n {0U};
+    for (const LeafPath& p : object_leaf_paths(t))
+    {
+        if (p.indexes() >= 1U)
+        {
+            n += p.cells();
+        }
+    }
+    return n;
+}
+
+unsigned long long copied_index_cells(const Type& t)
+{
+    unsigned long long n {0U};
+    for (const LeafPath& p : object_leaf_paths(t))
+    {
+        // an index step that is not the path's last step: the cells below it are in an array of aggregates
+        bool inside {false};
+        for (size_t k {0U}; k + 1U < p.steps.size(); ++k)
+        {
+            inside = inside || p.steps[k].kind == LeafStep::Kind::Index;
+        }
+        if (inside)
+        {
+            n += p.cells();
+        }
+    }
+    return n;
 }
 
 std::vector<std::vector<int>> struct_slots_of(const StructType& a, const StructType& b)
@@ -1067,13 +1183,82 @@ const Expr* Builder::member_addr(const Expr* a, int index, SrcLoc loc)
     return e;
 }
 
+RowBase row_base(const Expr* a)
+{
+    RowBase out;
+    int guard {0};
+    while (a != nullptr && a->kind == Expr::Kind::ElemAddr && a->type.is_ptr() && a->type.pointee != nullptr &&
+           a->type.pointee->is_array() && guard++ < 8)
+    {
+        out.indexes.push_back(a);
+        a = a->a;
+        if (a != nullptr && a->kind == Expr::Kind::AddrOf && a->var != nullptr && a->var->type.is_array())
+        {
+            out.kind = RowBase::Kind::Named;
+            out.root = a;
+            return out;
+        }
+        // decision 0064 items 9 and 13 (Part E, slice 3a): the address of a global or `static` local matrix
+        if (a != nullptr && a->kind == Expr::Kind::GlobalAddr && a->global != nullptr && a->global->type.is_array() &&
+            a->global->type.element != nullptr && a->global->type.element->is_array())
+        {
+            out.kind = RowBase::Kind::Global;
+            out.root = a;
+            return out;
+        }
+        // decision 0064 items 3 and 13 (Part E, slice 3b): the address of a matrix MEMBER (`u.m`, `p->m`): a `MemberAddr` typed pointer to an array of arrays
+        if (a != nullptr && a->kind == Expr::Kind::MemberAddr && a->type.is_ptr() && a->type.pointee != nullptr &&
+            a->type.pointee->is_array() && a->type.pointee->element != nullptr && a->type.pointee->element->is_array())
+        {
+            out.kind = RowBase::Kind::Member;
+            out.root = a;
+            return out;
+        }
+        if (a != nullptr &&
+            ((a->kind == Expr::Kind::Local && a->var != nullptr && a->var->is_param_copy) ||
+             a->kind == Expr::Kind::Formal) &&
+            a->type.is_ptr() && a->type.pointee != nullptr && a->type.pointee->is_array())
+        {
+            out.kind = RowBase::Kind::Param;
+            out.root = a;
+            return out;
+        }
+    }
+    out.indexes.clear();
+    return out;
+}
+
+bool named_local_row(const Expr* a)
+{
+    // (decision 0064 item 5, Part E slice 3a: the row of a global or `static` local matrix is as named as that of an automatic one: its block never ends / was entered and has not been left)
+    const RowBase::Kind k {row_base(a).kind};
+    return k == RowBase::Kind::Named || k == RowBase::Kind::Global || k == RowBase::Kind::Member;
+}
+
+bool array_object_address(const Expr& e)
+{
+    switch (e.kind)
+    {
+        case Expr::Kind::AddrOf:
+        case Expr::Kind::GlobalAddr:
+        case Expr::Kind::MemberAddr:
+        case Expr::Kind::ElemAddr:
+            return true;
+        default:
+            return false;
+    }
+}
+
 const Expr* Builder::elem_addr(const Expr* base, const Expr* index, SrcLoc loc)
 {
     // A pointer to an array (`AddrOf` of an array local) is the address of its first element: the element's pointer type.  Any other base keeps its own
     // type, ill-typed on purpose when `base` is no pointer or `index` no integer (check_program refuses it).
+    // Decision 0064 items 4 and 13 (Part E): that holds for the four nodes that ARE the address of an array object, a named array's place (`AddrOf` of a local, `GlobalAddr`, `MemberAddr` of an
+    // array member) and the address of a ROW (an `ElemAddr` that is itself typed pointer to an array): their element is the array's element.  A pointer VALUE of a pointer-to-row type, the
+    // parameter `T (*a)[M]` (a `Local` or a `Formal`), is no array object: element `i` of it is the ROW `i`, whose address has the pointer's own type.
     Type t {base->type};
     if (base->type.is_ptr() && base->type.pointee != nullptr && base->type.pointee->is_array() &&
-        base->type.pointee->element != nullptr)
+        base->type.pointee->element != nullptr && array_object_address(*base))
     {
         t = p_.pointer_to(*base->type.pointee->element);
     }

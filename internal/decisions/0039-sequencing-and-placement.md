@@ -269,3 +269,5 @@ matrix of unsequenced accesses and returned addresses) and S29 (Silicon), in `in
 *2026-11-11, amended by 0059 (M4.5e1a): item 3 — two unsequenced accesses to elements get the `unsequenced` row that their addresses differ, whatever the index; same-element shapes the compilers warn about are `unsequenced_modification` (0059 item 9).*
 
 *2026-11-12, amended by 0060 (M4.5e1b): item 4 — a call whose callee holds a range is a memory call on its field, checked against accesses and other calls with the range forms of separation (0060 item 10). Item 7 — partners by path apply to range atoms (0060 item 3).*
+
+*2026-11-27, amended by 0064 (M4.5e1e2, Part E): item 6 — `return m[i];`, `return &m[i][j];` and the member forms (`u.m[i]`, `&u.m[i][j]`, `v[i].a`, `&v[i].a[j]`) of an automatic object are `return_local_address`, as `return a;` is (0064 item 13). Item 3 — object keys carry every index step of a cell of a matrix (0064 item 11).*

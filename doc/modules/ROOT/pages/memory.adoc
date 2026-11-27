@@ -624,7 +624,7 @@ that a called function gave back with `+cerastes_owns(*r)+` reports
 allocated structure (`p->data[0]` in the invariant).
 
 None of this paragraph's forms is supported yet for a structure whose array
-member holds structures (`struct path` above): allocating it, an `owning` or
+member holds structures (`struct path` above) or arrays (`int m[2][3]`): allocating it, an `owning` or
 marked member beside that member, `owning`, `ref_to_uninit` or `must_init` on a
 pointer to it, a place of it reached through a pointer read from memory, an
 `ensures` atom without a `requires` partner, and an atom in a loop invariant on
@@ -768,16 +768,170 @@ one of them a write, are rejected or reported as
 xref:error-messages.adoc#_unsequenced[`unsequenced`] as for the elements of any
 array (<<expressions>>).
 
+[#element-array-members]
+An element structure may have array members of scalars (`+struct row { int n;
+int a[3]; } v[2];+`). `v[i].a[j]` has one check per index, the first against `v`
+and the second against the member
+(xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`]: the message reads
+`v[i]`, whose index may be outside `v`, for the first, and names `a[j]`, whose
+index may be outside `v[i].a`, for the second), then the cell's own. Such an array may be a local, a global or a
+`static` local (its initializer read element by element, with C's zero fill for
+what a list leaves out) or a member of a structure (`t.v[i].a[j]`,
+`+p->v[i].a[j]+` under an atom that holds the structure), and a pointer
+parameter may own or read a range of such structures (<<ranges-of-structures>>),
+with `p[i].a[j]` in the body and in the contract. An element is copied as a
+whole like any other (`v[i] = v[j];`, `t = v[i];`), the array member with it; the
+source needs a value in every cell. Two accesses to one cell of one element in
+one expression, one of them a write, are rejected as for any array (`v[0].a[1]`
+assigned and incremented in one expression). In a loop invariant `v[e].a[e2]` of a local or of
+a global array may be read; under a parameter's range only `p[e].x` may.
+
 Not supported yet, each rejected with a diagnostic: a structure value stored
 into an element (`v[i] = f();`, `v[i] = (struct point){1, 2};`: copy from a
-structure local instead); an element structure with
-an array member or with an owning or marked member; an array of structures
-declared through a `typedef` of the array type;
+structure local instead); an element structure with an owning or marked member,
+with an array member that holds structures or arrays, or with a nested
+structure that has an array member (`+struct outer { struct row r; int k; }
+v[2];+`); an element's array member read in a loop invariant through a
+parameter's range (`p[e].a[e2]`); `cerastes_old` of a cell of an element's array
+member in a global array (`cerastes_old(g[1].a[2])`); `cerastes_owns` or
+`cerastes_reads` of a global array of such structures, or of a structure whose
+member is one, after a condition and `||` or as an arm of `?:`;
 `cerastes::uninit`, `cerastes::owning` and `cerastes::ref_to_uninit` on an
 array of structures; `p[i].x` through a pointer in a loop invariant or measure
 of a function whose contract holds no range on `p` (<<ranges-of-structures>>);
 and a truth test or a comparison with `NULL` of `&v[i]`, `&v[i].x` or `&p[i]`
 (`array_address_null_test`: the address is never null, and GCC warns).
+
+[#arrays-of-arrays]
+=== Arrays of arrays
+
+The elements of a local array may be arrays: `int m[2][3];` is two rows of three
+`int` each. Every cell `m[i][j]` is an object, and each row `m[i]` is an array object
+of its own. The cells may be of any type a one-dimensional array's elements may have
+(integers, `bool`, enumerations, pointers).
+
+`m[i][j]` is read and written like `a[i]`, with one check per index, in order: the
+first index must be inside `m`
+(xref:error-messages.adoc#_out_of_bounds[`out-of-bounds`]: the message names
+`m[i][j]`, whose first index may be outside `m`), then the second inside the row
+(whose second index may be outside `m[i]`), then the cell's own checks (a read needs it to have a value,
+xref:error-messages.adoc#_uninitialized[`uninitialized`]). A second index that runs
+past its row is an error even where C's layout would put a cell of the next row
+there: `m[0][3]` is not `m[1][0]`.
+
+A braced initializer holds one braced list per row:
+`+int m[2][3] = {{1, 2, 3}, {4}};+`. Cells a row's list leaves out and rows the list does not reach are zero, and
+`{}` sets every cell to zero. A list without the inner braces (`{1, 2, 3, 4, 5, 6}`)
+is rejected, as the compilers warn about it;
+xref:verifying.adoc#_shapes_the_compilers_warn_about[Shapes the compilers warn
+about] has the exact rule for `+{0}+`. Without an initializer no cell has a value
+until it is written.
+
+A row used as a value is a pointer to its first cell: `int *r = m[1];`, or `m[1]`
+passed to a function that owns or reads a range of three `int`
+(`cerastes_owns_range(q, 3)`). The row index is checked, and the function gets the
+cells of that row and no others: a count of four is reported at the call
+(xref:error-messages.adoc#_permission[`permission`]). `&m[i][j]` is a pointer to one
+cell, and may point one past the end of its row but no further. As for any local, a
+function that returns a pointer into its own matrix (`return m[1];`, `return
+&m[1][2];`) is rejected (`cerastes-return_local_address`), and one that keeps a
+pointer it was lent is reported when the matrix's block ends
+(xref:error-messages.adoc#_lifetime[`lifetime`]).
+
+In a loop, the cells of a matrix are carried like the elements of an array
+(<<loops>>), and a loop invariant or measure may read `m[i][j]` with the checks code
+has. Two accesses to one cell in one expression, one of them a write, are rejected or
+reported as xref:error-messages.adoc#_unsequenced[`unsequenced`] as for the elements
+of any array (<<expressions>>).
+
+[#matrix-parameters]
+==== Parameters that take a matrix
+
+A parameter written `int a[][3]`, `int a[2][3]` or `int (*a)[3]` is a pointer to
+rows of three `int`. The three spellings mean the same, and so do the spellings
+through a `typedef` of the row (`typedef int row[3];` with `row *a`, `row a[]` or
+`row a[2]`). Its contract owns or reads `n` rows with a range atom:
+
+[source,c]
+----
+include::example$memory/matrix.c[tag=source]
+----
+
+`cerastes_owns_range(a, n)` holds every cell of rows `0` to `n - 1`, and
+`cerastes_reads_range(a, n)` lets the function read them. `a[i][j]` is read and
+written in the body and read in the contract (in `requires`, `ensures`, a measure and
+under `cerastes_old`), with the first index checked against the range and the second
+against the row:
+
+[source,c]
+----
+include::example$memory/matrix_index_error.c[tag=source]
+----
+
+[source,console]
+----
+matrix_index_error.c:11: error: out-of-bounds: reads `a[i][j]`, whose second index may be outside `a[i]`
+----
+
+A matrix is passed by its name (`put(m, 2, 1, 2, 9)`), a function may pass its own
+parameter on (`g(a, n)`), and a row of the parameter is a pointer to its first cell
+(`a[i]`), as a row of a matrix is. A loop may run over the rows and cells, with
+`a[i][j]` in its invariant. After a call to a function that owns the range, the caller
+knows of the cells only what that function's `ensures` states, as for any range.
+
+Ownership is of objects, whatever reaches them. A call that passes a matrix to a
+function that owns its rows and, beside it, a pointer to one of its cells, one of its
+rows, or the matrix again, to a parameter the function also owns, asks for the same
+cells twice and is reported at the call
+(xref:error-messages.adoc#_permission[`permission`]: "passes `m[0..2)` and `m[1][2]`
+to `f1`, which may be one object, once to own it"); passing rows that do not overlap
+(`f(m, 1, &m[1][2])`) verifies.
+
+Such a parameter can only be subscripted, named in a range atom, or passed whole.
+Comparing it, testing it for null, assigning to it and writing `+*a+` are rejected
+with a diagnostic, so a contract cannot say `a == NULL || ...`: write the range atom
+unguarded. The outer bound of `int a[2][3]` is checked as a constant and then ignored,
+as for `int a[4]`; the inner bound is part of the type. `sizeof(a)` is rejected for
+the array spellings, as the compilers warn (`cerastes-sizeof_array_argument`), and is
+the size of a pointer for `int (*a)[3]`; `sizeof(a[0])` is the size of a row, in code.
+
+[#matrix-storage]
+==== Global, `static` and member matrices
+
+An array of arrays may also be a global, a `static` local, or a member of a
+structure, and it may be named through a `typedef` (`typedef int grid[2][3];`).
+
+A global or `static` local one
+(`+static int table[2][3] = {{1, 2, 3}, {4}};+`)
+starts as a global array does (<<global-arrays>>): the listed cells have their
+values, the rest are zero, or every cell is unknown where a global's initial values
+are not known. `cerastes_owns(table)` and `cerastes_reads(table)` name every cell,
+a contract may then read `table[i][j]`, `main` and the loops of a function that holds
+it carry it, and it is passed by name to a function that takes rows
+(<<matrix-parameters>>). The atom is written unguarded: after a condition and `||`,
+or as an arm of `?:`, it is rejected for now.
+
+A member (`struct board { int n; int m[2][3]; };`) is read and written as
+`b.m[i][j]`, and `p->m[i][j]` through a pointer, with the two index checks. An atom
+on the structure (`+cerastes_owns(*p)+`) holds every cell of the member, and
+`cerastes_owns(p->m)` holds the member alone; a contract may then read
+`p->m[i][j]`. These atoms are written unguarded: an atom on such a structure after
+a condition and `||`, or as an arm of `?:`, is rejected for now. A structure with
+such a member cannot yet be passed, returned or copied as a whole value, and
+<<array-members>> lists what a structure whose array member holds arrays cannot do
+yet (the heap, owners, markers).
+
+Not supported yet, each rejected with a diagnostic: a matrix whose cells are
+structures (`struct point m[2][2];`); a pointer to an array anywhere but a parameter
+(`int (*p)[3] = m;`, `&m[i]`); a `const` matrix and a `const` row parameter; a row as
+the base of a range in a contract (`cerastes_owns_range(m[i], 3)`);
+`cerastes::owning`, `cerastes::ref_to_uninit` and `cerastes::must_init` on a row
+parameter, and `cerastes::uninit` on a matrix; `sizeof(a[0])` of a row parameter
+inside a contract; `cerastes_old` of a cell of a global structure's matrix member
+(`cerastes_old(g.m[1][1])`); in C, a pointer INITIALIZED with the address of a cell of
+a global structure's matrix member (`int *q = &g.m[1][0];`: assign it after the
+declaration instead); and a truth test or a comparison with `NULL` of a row
+or of `&m[i][j]` (`array_address_null_test`).
 
 [#ranges]
 === Ranges in contracts
@@ -919,8 +1073,15 @@ every element a value on return, and the message names the member a path
 leaves out ("returns without initializing the member `y` of every element of
 `p[0..n)`, which `cerastes::must_init` on `p` promises").
 
+The structure of a range may have array members of scalars
+(<<element-array-members>>): the range holds every cell of every element's
+array member, and the contract reads `p[e].a[e2]` with the first index checked
+against the range and the second against the member.
+
 Not supported yet, each rejected with a diagnostic unless said otherwise: a
-range of structures that have an array member or an owning or marked member; a
+range of structures that have an owning or marked member, or an array member
+that holds structures or arrays; `cerastes::ref_to_uninit` or
+`cerastes::must_init` on a range of structures that have an array member; a
 range on part of an array (`cerastes_owns_range(&v[1], n)`) and an atom on one
 element (`cerastes_owns(p[1])`, `cerastes_owns(p[1].x)`); `&p[i]` in a
 contract; a read through a pointer member of an element in a contract or a
@@ -948,8 +1109,9 @@ array parameters disagree on the bound, give a bound in one and none in the othe
 or write a bounded array in one and a pointer in the other (`int a[]` against `int *a` is
 accepted) (`cerastes-array_parameter_mismatch`;
 xref:verifying.adoc#warning-shapes[Shapes the compilers warn about]). A variable
-length (`int a[n]`, `+int a[*]+`) and `int a[static 4]` are not supported yet, nor an
-array of arrays (`int a[][3]`).
+length (`int a[n]`, `+int a[*]+`) and `int a[static 4]` are not supported yet. A
+parameter that takes an array of arrays (`int a[][3]`) is a pointer to rows:
+<<matrix-parameters>>.
 
 [#quantifiers]
 === Facts about every element
@@ -2181,11 +2343,13 @@ These are rejected with a diagnostic, never approximated
   loop);
 * globals defined in another file, `volatile`, `_Atomic`, `const` structure,
   `const` array and thread-local globals, and `static const` locals;
-* arrays of arrays (`int m[2][3]`, `sizeof(int[2][3])`), an array of structures
-  named through a `typedef` or as a type (`sizeof(struct point[3])`), and an element
-  structure with an array member or an owning or marked member
-  (<<arrays-of-structures>>); a structure whose array member holds structures
-  that is allocated with `malloc` or `calloc`, that also has an `owning` or marked
+* an array of three or more dimensions (`int c[2][3][4]`), an array of arrays whose
+  cells are structures (`struct point m[2][2]`), and an element structure with an
+  owning or marked member (<<arrays-of-structures>>, <<arrays-of-arrays>>); a
+  structure with an array of arrays as a member, or with a member array of
+  structures that have an array member, passed, returned or copied as a whole
+  value (<<arrays-of-arrays>>); a structure whose array member holds structures or
+  arrays that is allocated with `malloc` or `calloc`, that also has an `owning` or marked
   member, whose pointer is `owning` or marked `ref_to_uninit` or `must_init`,
   that is reached through a pointer read from memory, or that is named by an
   `ensures` atom with no `requires` partner or by an atom in a loop invariant

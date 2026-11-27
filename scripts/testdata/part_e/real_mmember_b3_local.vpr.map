@@ -1,0 +1,45 @@
+30	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+30	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+31	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+31	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+32	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+32	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+33	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+33	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+34	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+34	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+35	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+35	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+36	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+36	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+37	not.wellformed	internal	b3_local.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+37	postcondition.violated	internal	b3_local.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+42	not.wellformed	internal	b3_local.c	8	5	internal check: well-formedness of the contract of `local`
+43	not.wellformed	internal	b3_local.c	8	5	internal check: well-formedness of the contract of `local`
+44	not.wellformed	internal	b3_local.c	9	5	internal check: well-formedness of the contract of `local`
+45	not.wellformed	internal	b3_local.c	8	5	internal check: well-formedness of the contract of `local`
+45	postcondition.violated	internal	b3_local.c	8	5	internal check: Silicon's own check of the postcondition of `local`
+46	not.wellformed	internal	b3_local.c	10	5	internal check: well-formedness of the contract of `local`
+46	postcondition.violated	internal	b3_local.c	10	5	internal check: Silicon's own check of the postcondition of `local`
+58	call.precondition	internal	b3_local.c	12	12	internal check: Silicon's own check of the allocation of `u`
+60	assert.failed	permission	b3_local.c	13	7	writes `u.n` without owning it: the object it points to may have ended
+63	assert.failed	out-of-bounds	b3_local.c	14	13	writes `u.m[i][j]`, whose first index may be outside `u.m`
+64	assert.failed	out-of-bounds	b3_local.c	14	13	writes `u.m[i][j]`, whose second index may be outside `u.m[i]`
+66	assert.failed	permission	b3_local.c	14	13	writes `u.m[i][j]` without owning it: a callee may have kept its object
+69	assert.failed	out-of-bounds	b3_local.c	15	16	reads `u.m[i][j]`, whose first index may be outside `u.m`
+70	assert.failed	out-of-bounds	b3_local.c	15	16	reads `u.m[i][j]`, whose second index may be outside `u.m[i]`
+71	assert.failed	permission	b3_local.c	15	16	reads `u.m[i][j]` without owning it: a callee may have kept its object
+72	assert.failed	uninitialized	b3_local.c	15	16	`u.m[i][j]` may be read here before it is given a value
+74	assert.failed	lifetime	b3_local.c	15	3	the address of `u.n` may still be in use when its lifetime ends
+76	assert.failed[insufficient.permission]	lifetime	b3_local.c	15	3	the address of an element of `u.m` may still be in use when its lifetime ends
+77	assert.failed[insufficient.permission]	lifetime	b3_local.c	15	3	the address of an element of `u.m` may still be in use when its lifetime ends
+78	assert.failed	lifetime	b3_local.c	15	3	the address of `u` may still be in use when its lifetime ends
+83	assert.failed	postcondition	b3_local.c	15	3	the postcondition of `local` may not hold	b3_local.c:10:this is the postcondition
+85	assert.failed	lifetime	b3_local.c	16	1	the address of `u.n` may still be in use when its lifetime ends
+87	assert.failed[insufficient.permission]	lifetime	b3_local.c	16	1	the address of an element of `u.m` may still be in use when its lifetime ends
+88	assert.failed[insufficient.permission]	lifetime	b3_local.c	16	1	the address of an element of `u.m` may still be in use when its lifetime ends
+89	assert.failed	lifetime	b3_local.c	16	1	the address of `u` may still be in use when its lifetime ends
+94	assert.failed	missing-return	b3_local.c	16	1	control may reach the end of `local` without returning a value
+100	not.wellformed	internal	b3_local.c	8	5	internal check: well-formedness of the contract of `local (well-formedness)`
+101	not.wellformed	internal	b3_local.c	8	5	internal check: well-formedness of the contract of `local (well-formedness)`
+102	not.wellformed	internal	b3_local.c	8	5	internal check: well-formedness of the contract of `local (well-formedness)`

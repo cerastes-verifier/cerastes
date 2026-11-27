@@ -1,0 +1,117 @@
+32	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+32	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+33	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+33	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+34	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+34	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+35	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+35	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+36	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+36	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+37	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+37	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+38	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+38	postcondition.violated	internal	t.c	1	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+43	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+43	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+44	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+44	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+45	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+45	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+46	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+46	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+47	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+47	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+48	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+48	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+49	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+49	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+50	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+50	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+51	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+51	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+52	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+52	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+53	not.wellformed	internal	t.c	4	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+53	postcondition.violated	internal	t.c	4	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+80	call.precondition	internal	t.c	8	3	internal check: Silicon's own check of the allocation of `t`
+81	assert.failed	out-of-bounds	t.c	18	3	writes `t.v[0]`, whose index may be outside `t.v`
+83	assert.failed	permission	t.c	18	3	writes `t.v[0].n` without owning it: the object it points to may have ended
+86	assert.failed	out-of-bounds	t.c	27	3	reads `t.v[0]`, whose index may be outside `t.v`
+87	assert.failed	out-of-bounds	t.c	27	3	writes `t.v[0].a[0]`, whose index may be outside `t.v[0].a`
+89	assert.failed	permission	t.c	27	3	writes `t.v[0].a[0]` without owning it: the object it points to may have ended
+92	assert.failed	out-of-bounds	t.c	36	3	reads `t.v[0]`, whose index may be outside `t.v`
+93	assert.failed	out-of-bounds	t.c	36	3	writes `t.v[0].a[1]`, whose index may be outside `t.v[0].a`
+95	assert.failed	permission	t.c	36	3	writes `t.v[0].a[1]` without owning it: the object it points to may have ended
+98	assert.failed	out-of-bounds	t.c	45	3	reads `t.v[0]`, whose index may be outside `t.v`
+99	assert.failed	out-of-bounds	t.c	45	3	writes `t.v[0].a[2]`, whose index may be outside `t.v[0].a`
+101	assert.failed	permission	t.c	45	3	writes `t.v[0].a[2]` without owning it: the object it points to may have ended
+104	assert.failed	out-of-bounds	t.c	52	3	writes `t.v[1]`, whose index may be outside `t.v`
+106	assert.failed	permission	t.c	52	3	writes `t.v[1].n` without owning it: the object it points to may have ended
+109	assert.failed	out-of-bounds	t.c	61	3	reads `t.v[1]`, whose index may be outside `t.v`
+110	assert.failed	out-of-bounds	t.c	61	3	writes `t.v[1].a[0]`, whose index may be outside `t.v[1].a`
+112	assert.failed	permission	t.c	61	3	writes `t.v[1].a[0]` without owning it: the object it points to may have ended
+115	assert.failed	out-of-bounds	t.c	70	3	reads `t.v[1]`, whose index may be outside `t.v`
+116	assert.failed	out-of-bounds	t.c	70	3	writes `t.v[1].a[1]`, whose index may be outside `t.v[1].a`
+118	assert.failed	permission	t.c	70	3	writes `t.v[1].a[1]` without owning it: the object it points to may have ended
+121	assert.failed	out-of-bounds	t.c	79	3	reads `t.v[1]`, whose index may be outside `t.v`
+122	assert.failed	out-of-bounds	t.c	79	3	writes `t.v[1].a[2]`, whose index may be outside `t.v[1].a`
+124	assert.failed	permission	t.c	79	3	writes `t.v[1].a[2]` without owning it: the object it points to may have ended
+128	assert.failed	permission	t.c	83	3	writes `t.k` without owning it: the object it points to may have ended
+143	assert.failed[insufficient.permission]	permission	t.c	112	3	this loop begins without the permission to the member `n` of every element of `t.v`
+144	assert.failed[insufficient.permission]	permission	t.c	112	3	this loop begins without the permission to the member `n` of every element of `t.v`
+145	assert.failed[insufficient.permission]	permission	t.c	112	3	this loop begins without the permission to every cell of every row of `t.v`
+146	assert.failed[insufficient.permission]	permission	t.c	112	3	this loop begins without the permission to every cell of every row of `t.v`
+149	invariant.not.established	internal	t.c	112	3	internal check: automatic range invariant of `i`
+149	invariant.not.preserved	internal	t.c	112	3	internal check: automatic range invariant of `i`
+150	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+150	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+151	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+151	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+152	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+152	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+153	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+153	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+154	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+154	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+155	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+155	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+156	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+156	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+157	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+157	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+158	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+158	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+159	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+159	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+160	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+160	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+161	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+161	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+162	invariant.not.established	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+162	invariant.not.preserved	internal	t.c	112	3	internal check: an automatic permission invariant of this loop (decision 0038 item 3)
+163	invariant.not.established	invariant-entry	t.c	102	3	this loop invariant may not hold on entry
+163	invariant.not.preserved	invariant-preserved	t.c	102	3	this loop invariant may not be preserved by an iteration
+164	invariant.not.established	overflow	t.c	105	3	signed `int` subtraction may overflow
+164	invariant.not.preserved	overflow	t.c	105	3	signed `int` subtraction may overflow
+165	termination.failed	termination	t.c	106	3	the measure of this loop may not decrease, or may not be bounded below by zero
+167	assert.failed	out-of-bounds	t.c	108	3	reads `t.v[i]`, whose index may be outside `t.v`
+168	assert.failed	out-of-bounds	t.c	108	3	writes `t.v[i].a[1]`, whose index may be outside `t.v[i].a`
+170	assert.failed	permission	t.c	108	3	writes `t.v[i].a[1]` without owning it: the object it points to may have ended
+173	assert.failed	overflow	t.c	109	3	signed `int` addition may overflow
+175	assert.failed	permission	t.c	111	3	an iteration of this loop ends without the permission to `t.k` that it began with
+176	assert.failed[insufficient.permission]	permission	t.c	111	3	an iteration of this loop ends without the permission to the member `n` of every element of `t.v` that it began with
+177	assert.failed[insufficient.permission]	permission	t.c	111	3	an iteration of this loop ends without the permission to the member `n` of every element of `t.v` that it began with
+178	assert.failed[insufficient.permission]	permission	t.c	111	3	an iteration of this loop ends without the permission to every cell of every row of `t.v` that it began with
+179	assert.failed[insufficient.permission]	permission	t.c	111	3	an iteration of this loop ends without the permission to every cell of every row of `t.v` that it began with
+181	assert.failed	out-of-bounds	t.c	120	3	reads `t.v[0]`, whose index may be outside `t.v`
+182	assert.failed	out-of-bounds	t.c	120	3	reads `t.v[0].a[2]`, whose index may be outside `t.v[0].a`
+183	assert.failed	permission	t.c	120	3	reads `t.v[0].a[2]` without owning it: the object it points to may have ended
+184	assert.failed	uninitialized	t.c	120	3	`t.v[0].a[2]` may be read here before it is given a value
+186	assert.failed	check	t.c	125	3	this `check` may not hold
+187	assert.failed	lifetime	t.c	127	3	the address of `t.k` may still be in use when its lifetime ends
+189	assert.failed[insufficient.permission]	lifetime	t.c	127	3	the address of an element of `t.v` may still be in use when its lifetime ends
+190	assert.failed[insufficient.permission]	lifetime	t.c	127	3	the address of an element of `t.v` may still be in use when its lifetime ends
+191	assert.failed[insufficient.permission]	lifetime	t.c	127	3	the address of an element of `t.v` may still be in use when its lifetime ends
+192	assert.failed[insufficient.permission]	lifetime	t.c	127	3	the address of an element of `t.v` may still be in use when its lifetime ends
+193	assert.failed	lifetime	t.c	127	3	the address of `t` may still be in use when its lifetime ends

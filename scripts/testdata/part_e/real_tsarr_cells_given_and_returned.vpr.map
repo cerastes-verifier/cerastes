@@ -1,0 +1,120 @@
+32	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+32	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+33	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+33	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+34	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+34	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+35	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+35	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+36	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+36	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+37	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+37	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+38	not.wellformed	internal	t.c	14	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct P`
+38	postcondition.violated	internal	t.c	14	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct P`
+43	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+43	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+44	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+44	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+45	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+45	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+46	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+46	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+47	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+47	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+48	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+48	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+49	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+49	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+50	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+50	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+51	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+51	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+52	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+52	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+53	not.wellformed	internal	t.c	17	3	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+53	postcondition.violated	internal	t.c	17	3	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+58	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `hand`
+59	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `hand`
+60	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `hand`
+61	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+62	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+63	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+64	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+65	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+66	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+67	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+68	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+69	not.wellformed	internal	t.c	7	3	internal check: well-formedness of the contract of `hand`
+70	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+70	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+71	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+71	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+72	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+72	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+73	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+73	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+74	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+74	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+75	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+75	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+76	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+76	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+77	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+77	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+78	not.wellformed	internal	t.c	11	3	internal check: well-formedness of the contract of `hand`
+78	postcondition.violated	internal	t.c	11	3	internal check: Silicon's own check of the postcondition of `hand`
+85	assert.failed[insufficient.permission]	permission	t.c	13	3	returns without owning the range, which its contract promises	t.c:11:this is the postcondition
+86	assert.failed[insufficient.permission]	permission	t.c	13	3	returns without owning the range, which its contract promises	t.c:11:this is the postcondition
+87	assert.failed	permission	t.c	13	3	returns without owning the range, which its contract promises	t.c:11:this is the postcondition
+88	assert.failed	permission	t.c	13	3	returns without owning the range, which its contract promises	t.c:11:this is the postcondition
+89	assert.failed	permission	t.c	13	3	returns without owning the range, which its contract promises	t.c:11:this is the postcondition
+90	assert.failed	permission	t.c	13	3	returns without owning the range, which its contract promises	t.c:11:this is the postcondition
+113	call.precondition	internal	t.c	21	3	internal check: Silicon's own check of the allocation of `t`
+114	assert.failed	out-of-bounds	t.c	29	3	writes `t.v[0]`, whose index may be outside `t.v`
+116	assert.failed	permission	t.c	29	3	writes `t.v[0].n` without owning it: the object it points to may have ended
+119	assert.failed	out-of-bounds	t.c	38	3	reads `t.v[0]`, whose index may be outside `t.v`
+120	assert.failed	out-of-bounds	t.c	38	3	writes `t.v[0].a[0]`, whose index may be outside `t.v[0].a`
+122	assert.failed	permission	t.c	38	3	writes `t.v[0].a[0]` without owning it: the object it points to may have ended
+125	assert.failed	out-of-bounds	t.c	47	3	reads `t.v[0]`, whose index may be outside `t.v`
+126	assert.failed	out-of-bounds	t.c	47	3	writes `t.v[0].a[1]`, whose index may be outside `t.v[0].a`
+128	assert.failed	permission	t.c	47	3	writes `t.v[0].a[1]` without owning it: the object it points to may have ended
+131	assert.failed	out-of-bounds	t.c	56	3	reads `t.v[0]`, whose index may be outside `t.v`
+132	assert.failed	out-of-bounds	t.c	56	3	writes `t.v[0].a[2]`, whose index may be outside `t.v[0].a`
+134	assert.failed	permission	t.c	56	3	writes `t.v[0].a[2]` without owning it: the object it points to may have ended
+137	assert.failed	out-of-bounds	t.c	63	3	writes `t.v[1]`, whose index may be outside `t.v`
+139	assert.failed	permission	t.c	63	3	writes `t.v[1].n` without owning it: the object it points to may have ended
+142	assert.failed	out-of-bounds	t.c	72	3	reads `t.v[1]`, whose index may be outside `t.v`
+143	assert.failed	out-of-bounds	t.c	72	3	writes `t.v[1].a[0]`, whose index may be outside `t.v[1].a`
+145	assert.failed	permission	t.c	72	3	writes `t.v[1].a[0]` without owning it: the object it points to may have ended
+148	assert.failed	out-of-bounds	t.c	81	3	reads `t.v[1]`, whose index may be outside `t.v`
+149	assert.failed	out-of-bounds	t.c	81	3	writes `t.v[1].a[1]`, whose index may be outside `t.v[1].a`
+151	assert.failed	permission	t.c	81	3	writes `t.v[1].a[1]` without owning it: the object it points to may have ended
+154	assert.failed	out-of-bounds	t.c	90	3	reads `t.v[1]`, whose index may be outside `t.v`
+155	assert.failed	out-of-bounds	t.c	90	3	writes `t.v[1].a[2]`, whose index may be outside `t.v[1].a`
+157	assert.failed	permission	t.c	90	3	writes `t.v[1].a[2]` without owning it: the object it points to may have ended
+161	assert.failed	permission	t.c	94	3	writes `t.k` without owning it: the object it points to may have ended
+164	assert.failed	out-of-bounds	t.c	100	3	forms `&t.v[1]`, whose index may be outside `t.v`
+165	assert.failed	out-of-bounds	t.c	101	3	forms `&t.v[1].a[0]` beyond one past the end of `t.v[1].a`
+168	assert.failed	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+169	assert.failed	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+171	assert.failed	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+172	assert.failed	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+173	assert.failed[insufficient.permission]	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+174	assert.failed[insufficient.permission]	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+175	assert.failed	uninitialized	t.c	103	3	passes `&t.v[1].a[0]` to `hand`, whose parameter `p` needs every element of the range it points to to have a value; it may not have one here
+176	assert.failed	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+177	assert.failed	permission	t.c	103	3	calls `hand`, which needs to own the range the pointer points to, without owning it
+178	call.precondition	internal	t.c	103	3	internal check: Silicon's own check of the precondition of `hand`
+179	assert.failed	out-of-bounds	t.c	113	3	reads `t.v[1]`, whose index may be outside `t.v`
+180	assert.failed	out-of-bounds	t.c	113	3	writes `t.v[1].a[2]`, whose index may be outside `t.v[1].a`
+182	assert.failed	permission	t.c	113	3	writes `t.v[1].a[2]` without owning it: the object it points to may have ended
+185	assert.failed	lifetime	t.c	115	3	the address of `t.k` may still be in use when its lifetime ends
+187	assert.failed[insufficient.permission]	lifetime	t.c	115	3	the address of an element of `t.v` may still be in use when its lifetime ends
+188	assert.failed[insufficient.permission]	lifetime	t.c	115	3	the address of an element of `t.v` may still be in use when its lifetime ends
+189	assert.failed[insufficient.permission]	lifetime	t.c	115	3	the address of an element of `t.v` may still be in use when its lifetime ends
+190	assert.failed[insufficient.permission]	lifetime	t.c	115	3	the address of an element of `t.v` may still be in use when its lifetime ends
+191	assert.failed	lifetime	t.c	115	3	the address of `t` may still be in use when its lifetime ends
+203	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `hand (well-formedness)`
+204	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `hand (well-formedness)`
+205	not.wellformed	internal	t.c	1	3	internal check: well-formedness of the contract of `hand (well-formedness)`

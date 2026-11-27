@@ -1,0 +1,85 @@
+31	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+31	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+32	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+32	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+33	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+33	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+34	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+34	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+35	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+35	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+36	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+36	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+37	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+37	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+38	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+38	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+39	not.wellformed	internal	src/g05.c	2	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct U`
+39	postcondition.violated	internal	src/g05.c	2	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct U`
+44	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+44	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+45	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+45	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+46	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+46	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+47	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+47	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+48	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+48	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+49	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+49	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+50	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+50	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+51	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+51	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+52	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+52	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+53	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+53	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+54	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+54	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+55	not.wellformed	internal	src/g05.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct V`
+55	postcondition.violated	internal	src/g05.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct V`
+60	not.wellformed	internal	src/g05.c	4	17	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+60	postcondition.violated	internal	src/g05.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+61	not.wellformed	internal	src/g05.c	4	17	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+61	postcondition.violated	internal	src/g05.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+62	not.wellformed	internal	src/g05.c	4	17	internal check: well-formedness of the trusted contract of program_start for `gv`
+62	postcondition.violated	internal	src/g05.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `gv`
+63	not.wellformed	internal	src/g05.c	4	17	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+63	postcondition.violated	internal	src/g05.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+64	not.wellformed	internal	src/g05.c	4	17	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+64	postcondition.violated	internal	src/g05.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+65	not.wellformed	internal	src/g05.c	4	17	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+65	postcondition.violated	internal	src/g05.c	4	17	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+66	not.wellformed	internal	src/g05.c	4	29	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+66	postcondition.violated	internal	src/g05.c	4	29	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+67	not.wellformed	internal	src/g05.c	4	32	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+67	postcondition.violated	internal	src/g05.c	4	32	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+68	not.wellformed	internal	src/g05.c	4	35	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+68	postcondition.violated	internal	src/g05.c	4	35	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+69	not.wellformed	internal	src/g05.c	4	40	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+69	postcondition.violated	internal	src/g05.c	4	40	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+70	not.wellformed	internal	src/g05.c	4	43	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+70	postcondition.violated	internal	src/g05.c	4	43	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+71	not.wellformed	internal	src/g05.c	4	46	internal check: well-formedness of the trusted contract of program_start for `gv.u.m`
+71	postcondition.violated	internal	src/g05.c	4	46	internal check: Silicon's own check of the trusted contract of program_start for `gv.u.m`
+76	not.wellformed	internal	src/g05.c	5	5	internal check: well-formedness of the contract of `main`
+76	postcondition.violated	internal	src/g05.c	5	5	internal check: Silicon's own check of the postcondition of `main`
+79	call.precondition	internal	src/g05.c	5	5	internal check: Silicon's own check of the call of program_start
+80	assert.failed	permission	src/g05.c	7	22	reads `gv.u.n` without owning it: `main` needs `reads(gv.u.n)` or `owns(gv.u.n)` in its contract
+81	assert.failed	uninitialized	src/g05.c	7	22	`gv.u.n` may be read here before it is given a value
+82	assert.failed	out-of-bounds	src/g05.c	7	42	reads `gv.u.m[1][2]`, whose first index may be outside `gv.u.m`
+83	assert.failed	out-of-bounds	src/g05.c	7	42	reads `gv.u.m[1][2]`, whose second index may be outside `gv.u.m[1]`
+84	assert.failed	permission	src/g05.c	7	42	reads `gv.u.m[1][2]` without owning it: a callee may have kept its object
+85	assert.failed	uninitialized	src/g05.c	7	42	`gv.u.m[1][2]` may be read here before it is given a value
+86	assert.failed	out-of-bounds	src/g05.c	7	63	reads `gv.u.m[0][0]`, whose first index may be outside `gv.u.m`
+87	assert.failed	out-of-bounds	src/g05.c	7	63	reads `gv.u.m[0][0]`, whose second index may be outside `gv.u.m[0]`
+88	assert.failed	permission	src/g05.c	7	63	reads `gv.u.m[0][0]` without owning it: a callee may have kept its object
+89	assert.failed	uninitialized	src/g05.c	7	63	`gv.u.m[0][0]` may be read here before it is given a value
+90	assert.failed	permission	src/g05.c	7	79	reads `gv.u.k` without owning it: `main` needs `reads(gv.u.k)` or `owns(gv.u.k)` in its contract
+91	assert.failed	uninitialized	src/g05.c	7	79	`gv.u.k` may be read here before it is given a value
+92	assert.failed	permission	src/g05.c	7	92	reads `gv.z` without owning it: `main` needs `reads(gv.z)` or `owns(gv.z)` in its contract
+93	assert.failed	uninitialized	src/g05.c	7	92	`gv.z` may be read here before it is given a value
+94	assert.failed	check	src/g05.c	7	100	this `check` may not hold
+97	assert.failed	missing-return	src/g05.c	9	1	control may reach the end of `main` without returning a value

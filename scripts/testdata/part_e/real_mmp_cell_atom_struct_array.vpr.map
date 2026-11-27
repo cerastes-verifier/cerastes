@@ -1,0 +1,48 @@
+30	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+30	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+31	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+31	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+32	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+32	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+33	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+33	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+34	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+34	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+35	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+35	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+36	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+36	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+37	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+37	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+38	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+38	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+39	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+39	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+40	not.wellformed	internal	cnt1.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `struct T`
+40	postcondition.violated	internal	cnt1.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `struct T`
+45	not.wellformed	internal	cnt1.c	4	5	internal check: well-formedness of the contract of `f`
+46	not.wellformed	internal	cnt1.c	4	5	internal check: well-formedness of the contract of `f`
+47	not.wellformed	internal	cnt1.c	5	5	internal check: well-formedness of the contract of `f`
+48	not.wellformed	internal	cnt1.c	4	5	internal check: well-formedness of the contract of `f`
+48	postcondition.violated	internal	cnt1.c	4	5	internal check: Silicon's own check of the postcondition of `f`
+49	not.wellformed	internal	cnt1.c	6	5	internal check: well-formedness of the contract of `f`
+49	postcondition.violated	internal	cnt1.c	6	5	internal check: Silicon's own check of the postcondition of `f`
+54	assert.failed	null-dereference	cnt1.c	8	17	dereferences `p`, which may be null
+55	assert.failed	out-of-bounds	cnt1.c	8	17	reads `p->v[0]`, whose index may be outside `p->v`
+56	assert.failed	permission	cnt1.c	8	17	reads `p->v[0].x` without owning it: the object it points to may have ended
+57	assert.failed	uninitialized	cnt1.c	8	17	`p->v[0].x` may be read here before it is given a value
+59	assert.failed	permission	cnt1.c	8	3	returns without owning `p->n`, which its contract promises	cnt1.c:6:this is the postcondition
+60	assert.failed	internal	cnt1.c	8	3	internal check: WF of a pointer parameter
+61	assert.failed	internal	cnt1.c	8	3	internal check: a pointer parameter points into its block
+62	assert.failed	permission	cnt1.c	8	3	returns without owning `p->n`, which its contract promises	cnt1.c:6:this is the postcondition
+63	assert.failed	permission	cnt1.c	8	3	returns without owning `p->n`, which its contract promises	cnt1.c:6:this is the postcondition
+64	assert.failed	permission	cnt1.c	8	3	returns without owning `p->n`, which its contract promises	cnt1.c:6:this is the postcondition
+65	assert.failed	permission	cnt1.c	8	3	returns without owning `p->n`, which its contract promises	cnt1.c:6:this is the postcondition
+66	assert.failed	permission	cnt1.c	8	3	returns without owning `p->n`, which its contract promises	cnt1.c:6:this is the postcondition
+67	assert.failed	postcondition	cnt1.c	8	3	the postcondition of `f` may not hold	cnt1.c:6:this is the postcondition
+69	assert.failed	missing-return	cnt1.c	9	1	control may reach the end of `f` without returning a value
+75	not.wellformed	internal	cnt1.c	4	5	internal check: well-formedness of the contract of `f (well-formedness)`
+76	not.wellformed	internal	cnt1.c	4	5	internal check: well-formedness of the contract of `f (well-formedness)`
+77	not.wellformed	internal	cnt1.c	4	5	internal check: well-formedness of the contract of `f (well-formedness)`
+78	not.wellformed	internal	cnt1.c	4	5	internal check: well-formedness of the contract of `f (well-formedness)`
+81	assert.failed	permission	cnt1.c	6	60	the contract of `f` reads `p->v[0].x` without owning it

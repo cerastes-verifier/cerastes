@@ -1,0 +1,41 @@
+34	not.wellformed	internal	matrix_global_ptr.cpp	8	12	internal check: well-formedness of the trusted contract of program_start for the facts of the globals
+34	postcondition.violated	internal	matrix_global_ptr.cpp	8	12	internal check: Silicon's own check of the trusted contract of program_start for the facts of the globals
+35	not.wellformed	internal	matrix_global_ptr.cpp	8	12	internal check: well-formedness of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+35	postcondition.violated	internal	matrix_global_ptr.cpp	8	12	internal check: Silicon's own check of the trusted contract of program_start for the length facts of the arrays of structures of the globals
+36	not.wellformed	internal	matrix_global_ptr.cpp	8	12	internal check: well-formedness of the trusted contract of program_start for `h`
+36	postcondition.violated	internal	matrix_global_ptr.cpp	8	12	internal check: Silicon's own check of the trusted contract of program_start for `h`
+37	not.wellformed	internal	matrix_global_ptr.cpp	9	13	internal check: well-formedness of the trusted contract of program_start for `tab`
+37	postcondition.violated	internal	matrix_global_ptr.cpp	9	13	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+38	not.wellformed	internal	matrix_global_ptr.cpp	9	13	internal check: well-formedness of the trusted contract of program_start for `tab`
+38	postcondition.violated	internal	matrix_global_ptr.cpp	9	13	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+39	not.wellformed	internal	matrix_global_ptr.cpp	9	13	internal check: well-formedness of the trusted contract of program_start for `tab`
+39	postcondition.violated	internal	matrix_global_ptr.cpp	9	13	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+40	not.wellformed	internal	matrix_global_ptr.cpp	9	27	internal check: well-formedness of the trusted contract of program_start for `tab`
+40	postcondition.violated	internal	matrix_global_ptr.cpp	9	27	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+41	not.wellformed	internal	matrix_global_ptr.cpp	9	31	internal check: well-formedness of the trusted contract of program_start for `tab`
+41	postcondition.violated	internal	matrix_global_ptr.cpp	9	31	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+42	not.wellformed	internal	matrix_global_ptr.cpp	9	36	internal check: well-formedness of the trusted contract of program_start for `tab`
+42	postcondition.violated	internal	matrix_global_ptr.cpp	9	36	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+43	not.wellformed	internal	matrix_global_ptr.cpp	9	39	internal check: well-formedness of the trusted contract of program_start for `tab`
+43	postcondition.violated	internal	matrix_global_ptr.cpp	9	39	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+44	not.wellformed	internal	matrix_global_ptr.cpp	9	13	internal check: well-formedness of the trusted contract of program_start for `tab`
+44	postcondition.violated	internal	matrix_global_ptr.cpp	9	13	internal check: Silicon's own check of the trusted contract of program_start for `tab`
+49	not.wellformed	internal	matrix_global_ptr.cpp	11	5	internal check: well-formedness of the contract of `main`
+49	postcondition.violated	internal	matrix_global_ptr.cpp	11	5	internal check: Silicon's own check of the postcondition of `main`
+55	call.precondition	internal	matrix_global_ptr.cpp	11	5	internal check: Silicon's own check of the call of program_start
+57	assert.failed	null-dereference	matrix_global_ptr.cpp	13	18	dereferences `&h`, which may be null
+58	assert.failed	permission	matrix_global_ptr.cpp	13	18	reads `h` without owning it: `main` needs `reads(h)` or `owns(h)` in its contract
+59	assert.failed	uninitialized	matrix_global_ptr.cpp	13	18	`h` may be read here before it is given a value
+60	assert.failed	check	matrix_global_ptr.cpp	13	3	this `check` may not hold
+61	assert.failed	out-of-bounds	matrix_global_ptr.cpp	14	24	reads `tab[0][1]`, whose first index may be outside `tab`
+62	assert.failed	out-of-bounds	matrix_global_ptr.cpp	14	24	reads `tab[0][1]`, whose second index may be outside `tab[0]`
+63	assert.failed	permission	matrix_global_ptr.cpp	14	24	reads `tab[0][1]` without owning it: a callee may have kept its object
+64	assert.failed	uninitialized	matrix_global_ptr.cpp	14	24	`tab[0][1]` may be read here before it is given a value
+67	assert.failed	lifetime	matrix_global_ptr.cpp	14	24	uses `tab[0][1]` after the object it points to may have ended
+68	assert.failed	check	matrix_global_ptr.cpp	14	3	this `check` may not hold
+69	assert.failed	out-of-bounds	matrix_global_ptr.cpp	15	15	reads `tab[1][0]`, whose first index may be outside `tab`
+70	assert.failed	out-of-bounds	matrix_global_ptr.cpp	15	15	reads `tab[1][0]`, whose second index may be outside `tab[1]`
+71	assert.failed	permission	matrix_global_ptr.cpp	15	15	reads `tab[1][0]` without owning it: a callee may have kept its object
+72	assert.failed	uninitialized	matrix_global_ptr.cpp	15	15	`tab[1][0]` may be read here before it is given a value
+75	assert.failed	lifetime	matrix_global_ptr.cpp	15	15	uses `tab[1][0]` after the object it points to may have ended
+78	assert.failed	missing-return	matrix_global_ptr.cpp	17	1	control may reach the end of `main` without returning a value

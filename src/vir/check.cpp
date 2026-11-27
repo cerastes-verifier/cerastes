@@ -468,9 +468,12 @@ private:
             {
                 // decision 0063 items 2 and 3 (M4.5e1e1 part C): an array member is one dimension of at least one element of a scalar (the block `member(X, k)` of that length);
                 // decision 0064 items 1 and 2 (Part C2): or of verified structures with no array member and no `owning` or `ref_to_uninit` member (local_array_type's rule)
-                if (!local_array_type(m.type))
+                // decision 0064 items 3 and 13 (Part E, slice 3b): or a MATRIX of scalars (`int m[2][3]`: two dimensions, the cell a bool, an integer, an enumeration or an accepted pointer)
+                // (slice 3c-4: a member array of structures may have array members of scalars in its element)
+                if (!local_array_type(m.type, true) && !local_matrix_type(m.type))
                 {
-                    err(m.loc, "the member '" + m.name + "' of " + name + " is " + local_array_reason(m.type));
+                    err(m.loc,
+                        "the member '" + m.name + "' of " + name + " is " + automatic_array_reason(m.type, true));
                 }
                 else if (const StructType* inner {held_struct(m.type)};
                          inner != nullptr && (inner == &st || contains_by_value(*inner, &st, 0)))
@@ -539,6 +542,13 @@ private:
         {
             in = in->pointee;
         }
+        if (in->is_array())
+        {
+            // decision 0064 items 4 and 13 (Part E): `Ptr(Array)` is the type of a row PARAMETER (`T (*a)[M]`, Part E's slice 2 accepts it there) and of nothing else: not a local, a member, a
+            // result, a cell (a pointer to it), a cast's type or a temporary; the address of an array object is the base of an element address, in `array_addr_ok_`, and no other value
+            return "a pointer to " + in->str() +
+                   " (decision 0064 item 13: a pointer to an array is the type of a row parameter and of nothing else)";
+        }
         return "a pointer to " + (in->is_ptr() ? std::string("an unknown type") : in->str()) +
                " (decisions 0032 item 2, 0040 item 2, 0043 item 2)";
     }
@@ -553,6 +563,18 @@ private:
         }
         const Type& e {*t.element};
         return e.is_ptr() ? accepted_pointer(e) : scalar_type(e);
+    }
+    // Decision 0064 item 13 (Part E, slice 2): the type of a ROW PARAMETER, a pointer to a row of scalars (`T (*a)[M]`, `T a[][M]`, `T a[N][M]`): `Ptr(Array(scalar, M))`, M >= 1, the row's cell a bool,
+    // an integer, an enumeration or an accepted pointer (depth 2; a row of rows is slice 4's).  It is the type of a parameter and of that parameter's own copy, and of nothing else.
+    bool row_param_type(const Type& t) const
+    {
+        return t.is_ptr() && t.pointee != nullptr && t.pointee->is_array() && array_local_type(*t.pointee);
+    }
+    // The parameter's own copy of a row parameter, or its formal: the only two nodes whose value is a row pointer
+    static bool row_param_node(const Expr& e)
+    {
+        return (e.kind == Expr::Kind::Local && e.var != nullptr && e.var->is_param_copy) ||
+               e.kind == Expr::Kind::Formal;
     }
     std::string array_reason(const Type& t) const
     {
@@ -571,7 +593,7 @@ private:
     // Decision 0064 items 1 and 2 (Part B): the type of an AUTOMATIC array local, array_local_type's or one whose element is a verified structure.  (array_local_type itself
     // stays the one of members and globals: Part C.)  The element structure has no `owning` or `ref_to_uninit` member at any depth (M4.8) and no array member at any depth
     // (a depth-2 leaf path: Part E).
-    bool local_array_type(const Type& t) const
+    bool local_array_type(const Type& t, bool elem_arrays = false) const
     {
         if (array_local_type(t))
         {
@@ -582,9 +604,33 @@ private:
         {
             return false;
         }
-        return !struct_has_marked(*t.element->struct_type) && !struct_has_array(*t.element->struct_type);
+        // decision 0064 items 2, 3 and 13 (Part E, slice 3c-1): the element may have array members of SCALARS directly (`struct P { int n; int a[3]; }`, a leaf path with one member step and one index
+        // step: `v[i].a[j]`); an array member of structures or arrays, a matrix, and an array member of a nested structure stay refused
+        // (`elem_arrays`: an automatic local only, slice 3c-1; a global, a `static` local and a member keep the refusal until 3c-3 and 3c-4)
+        return !struct_has_marked(*t.element->struct_type) &&
+               (elem_arrays ? element_arrays_direct_scalars(*t.element->struct_type)
+                            : !struct_has_array(*t.element->struct_type));
     }
-    std::string local_array_reason(const Type& t) const
+    // Decision 0064 item 2 (Part E, slice 3c): whether every array member of `st` is an array of scalars standing directly in `st`, and no by-value nested structure has an array member at any depth
+    bool element_arrays_direct_scalars(const StructType& st) const
+    {
+        for (const StructMember& m : st.members)
+        {
+            if (m.type.is_array())
+            {
+                if (!array_local_type(m.type))
+                {
+                    return false;
+                }
+            }
+            else if (m.type.is_struct() && m.type.struct_type != nullptr && struct_has_array(*m.type.struct_type))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    std::string local_array_reason(const Type& t, bool elem_arrays = false) const
     {
         if (t.is_array() && t.element != nullptr && t.count != 0U && t.element->is_struct() &&
             t.element->struct_type != nullptr && structs_.count(t.element->struct_type) != 0U)
@@ -597,10 +643,40 @@ private:
             if (struct_has_array(*t.element->struct_type))
             {
                 return "an array of " + t.element->str() +
-                       ", whose elements hold an array member (decision 0064 item 2, depth 2: M4.5e1e2 part E)";
+                       (elem_arrays
+                            ? ", whose elements hold an array member that is not an array of scalars standing directly in the element (decision 0064 item 2, depth 3: M4.5e1e2 part E, slice 4)"
+                            : ", whose elements hold an array member (decision 0064 item 2, depth 2: M4.5e1e2 part E, slice 3c-3 and 3c-4)");
             }
         }
         return array_reason(t);
+    }
+
+    // Decision 0064 items 2, 5, 6 and 13 (Part E, slice 1): the type of an AUTOMATIC array of arrays of scalars (`int m[2][3]`): two dimensions of at least one element, the cell a bool, an
+    // integer, an enumeration or an accepted pointer.  Only an automatic local has it: a member, a global, a `static` local, a parameter and every array of arrays of structures, a matrix of
+    // three dimensions (slice 4) and of four (M8) keep array_reason's refusal.
+    bool local_matrix_type(const Type& t) const
+    {
+        return t.is_array() && t.element != nullptr && t.count != 0U && t.element->is_array() &&
+               array_local_type(*t.element);
+    }
+    // the type of an automatic array local: array_local_type's, a structure element's or an array of rows of scalars
+    bool automatic_array_type(const Type& t, bool elem_arrays = false) const
+    {
+        return local_array_type(t, elem_arrays) || local_matrix_type(t);
+    }
+    std::string automatic_array_reason(const Type& t, bool elem_arrays = false) const
+    {
+        if (t.is_array() && t.element != nullptr && t.count != 0U && t.element->is_array())
+        {
+            if (t.element->element != nullptr && t.element->element->is_array())
+            {
+                return "an array of " + t.element->str() +
+                       " (decision 0064 item 2: depth 3, an array of arrays of arrays, is Part E's slice 4, and depth 4 or more is M8)";
+            }
+            return "an array of " + t.element->str() +
+                   " (decision 0064 item 2: the cell of an array of arrays is a bool, an integer, an enumeration or a pointer to an object type)";
+        }
+        return local_array_reason(t, elem_arrays);
     }
 
     // `allow_ptr`: a pointer type counts (locals and expressions); parameters, results, named constants and the like pass false.
@@ -661,9 +737,11 @@ private:
         {
             // decision 0063 items 2 and 3 (M4.5e1e1 part B): a global or `static` array of scalars is the block `GB_g()` of N slots; `owning` is refused on it
             // decision 0064 items 1, 2 and 9 (Part C2): or an array of verified structures (local_array_type's rule)
-            if (!local_array_type(g.type))
+            // decision 0064 items 2 and 9 (Part E, slice 3a): or a matrix of scalars (`int gm[2][3]`: global_array's rows)
+            // (slice 3c-3: a global array of structures may have array members of scalars in its element)
+            if (!local_array_type(g.type, true) && !local_matrix_type(g.type))
             {
-                err(g.loc, name + " is " + local_array_reason(g.type));
+                err(g.loc, name + " is " + automatic_array_reason(g.type, true));
             }
             if (g.owning || g.ref_to_uninit)
             {
@@ -716,9 +794,9 @@ private:
                 // decision 0063 item 9 (part C): an array leaf of a struct global has the listed prefix `elems` (at most N entries, each a scalar initial value of the element type) and
                 // a `rest` that is zero or unknown; the leaf's own kind mirrors the rest (Unknown iff the rest is unknown)
                 const std::string ln {"the member '" + leaves[k].text + "' of the global '" + g.c_name + "'"};
-                if (!local_array_type(leaves[k].type))
+                if (!local_array_type(leaves[k].type, true) && !local_matrix_type(leaves[k].type))
                 {
-                    err(g.loc, ln + " is " + local_array_reason(leaves[k].type));
+                    err(g.loc, ln + " is " + automatic_array_reason(leaves[k].type, true));
                     continue;
                 }
                 if (l.elems.size() > static_cast<size_t>(leaves[k].count))
@@ -740,6 +818,12 @@ private:
                     {
                         // decision 0064 item 9 (Part C2): an element that is a structure has one initial value per leaf of the structure
                         struct_element_values(en, g.loc, leaves[k].element, el, l.rest);
+                        continue;
+                    }
+                    if (leaves[k].element.is_array())
+                    {
+                        // decision 0064 item 9 (Part E, slice 3b): the leaf is a MATRIX member: each listed element is a row with its listed cells and a rest that mirrors the matrix's
+                        matrix_row_values(en, g.loc, leaves[k].element, el, l.rest);
                         continue;
                     }
                     if (!el.elems.empty() || el.rest != ArrayRest::Zero || !el.leaves.empty())
@@ -804,6 +888,13 @@ private:
                 struct_element_values(en, g.loc, *g.type.element, l, g.rest);
                 continue;
             }
+            if (g.type.element->is_array())
+            {
+                // decision 0064 item 9 (Part E, slice 3a): the element is a ROW of a matrix of scalars: its listed cells `elems` (at most M, each a scalar value of the cell's type) and
+                // its own rest, which mirrors the matrix's (a zero rest has every listed cell known; an unknown rest has every cell unknown); no scalar value of its own
+                matrix_row_values(en, g.loc, *g.type.element, l, g.rest);
+                continue;
+            }
             if (!l.elems.empty() || l.rest != ArrayRest::Zero || !l.leaves.empty())
             {
                 err(g.loc, en + " carries array initial values (an array of arrays is M4.5e1e2's)");
@@ -817,6 +908,42 @@ private:
                              : " has an unknown initial value although the rest of the array is zero (decision 0063 item 9)"));
             }
             global_value(en, l.loc.known() ? l.loc : g.loc, *g.type.element, l.kind, l.init, l.value, l.target);
+        }
+    }
+
+    // The initial values of one ROW of a global matrix of scalars (decision 0064 item 9, Part E slice 3a): `row.elems` the listed prefix of its cells (at most M; each a scalar value of the
+    // cell's type with no array values of its own), `row.rest` what the cells past the prefix are (the matrix's rest), no scalar value of its own and no leaves; known cells against a zero
+    // rest and unknown cells against an unknown rest
+    void matrix_row_values(const std::string& en, const SrcLoc& loc, const Type& row, const GlobalLeaf& l,
+                           ArrayRest rest)
+    {
+        if (row.element == nullptr || l.init != nullptr || l.target != nullptr || !l.leaves.empty() || l.rest != rest ||
+            (l.kind == GlobalInit::Unknown) != (rest == ArrayRest::Unknown))
+        {
+            err(loc,
+                en +
+                    " is a row with values of its own or whose rest does not mirror the matrix's (decision 0064 item 9)");
+            return;
+        }
+        if (l.elems.size() > static_cast<size_t>(row.count))
+        {
+            err(loc, en + " lists " + std::to_string(l.elems.size()) + " initial values for its " +
+                         std::to_string(row.count) + " cells (decision 0064 item 9)");
+            return;
+        }
+        for (size_t j {0U}; j < l.elems.size(); ++j)
+        {
+            const GlobalLeaf& c {l.elems[j]};
+            const std::string cn {"the cell " + std::to_string(j) + " of " + en};
+            if (!c.elems.empty() || c.rest != ArrayRest::Zero || !c.leaves.empty())
+            {
+                err(loc, cn + " carries array initial values (decision 0064 item 9)");
+            }
+            if ((c.kind == GlobalInit::Unknown) != (rest == ArrayRest::Unknown))
+            {
+                err(loc, cn + " is known or unknown against the rest of its matrix (decision 0064 item 9)");
+            }
+            global_value(cn, c.loc.known() ? c.loc : loc, *row.element, c.kind, c.init, c.value, c.target);
         }
     }
 
@@ -846,6 +973,35 @@ private:
         {
             const GlobalLeaf& gl {el.leaves[i]};
             const std::string ln {"the leaf '" + leaves[i].text + "' of " + en};
+            if (leaves[i].array && !leaves[i].aggregate_element && local_array_type(leaves[i].type))
+            {
+                // decision 0064 items 3 and 9 (Part E, slice 3c-3): an array member of SCALARS of the element: its listed cells `elems` (at most N, each a scalar value of the cell's type) and a
+                // `rest` that mirrors the array's (an unknown rest has every cell unknown, a zero rest every listed cell known)
+                if (gl.elems.size() > static_cast<size_t>(leaves[i].count) || !gl.leaves.empty() ||
+                    gl.init != nullptr || gl.target != nullptr ||
+                    (gl.rest == ArrayRest::Unknown) != (rest == ArrayRest::Unknown) ||
+                    (gl.kind == GlobalInit::Unknown) != (rest == ArrayRest::Unknown))
+                {
+                    err(loc,
+                        ln +
+                            " is an array member whose initial values do not mirror the rest of the array (decision 0064 item 9)");
+                    continue;
+                }
+                for (size_t c {0U}; c < gl.elems.size(); ++c)
+                {
+                    const GlobalLeaf& cl {gl.elems[c]};
+                    const std::string cn {"the cell " + std::to_string(c) + " of " + ln};
+                    if (!cl.elems.empty() || cl.rest != ArrayRest::Zero || !cl.leaves.empty() ||
+                        (cl.kind == GlobalInit::Unknown) != (rest == ArrayRest::Unknown))
+                    {
+                        err(loc, cn + " carries array initial values or does not mirror the rest of the array");
+                        continue;
+                    }
+                    global_value(cn, cl.loc.known() ? cl.loc : loc, leaves[i].element, cl.kind, cl.init, cl.value,
+                                 cl.target);
+                }
+                continue;
+            }
             if (leaves[i].array || leaves[i].aggregate_element || !gl.elems.empty() || gl.rest != ArrayRest::Zero ||
                 !gl.leaves.empty())
             {
@@ -1027,6 +1183,13 @@ private:
             {
                 scopes_.back().insert(v->id);
             }
+            if (v->type.is_ptr() && v->type.pointee != nullptr && v->type.pointee->is_array() && v->is_param_copy &&
+                (!row_param_type(v->type) || v->ref_to_uninit || v->owning || v->address_taken))
+            {
+                // decision 0064 item 13 (Part E, slice 2): a pointer to an array is the type of a row parameter's own copy and of nothing else, and that copy is no cell, owner or marked pointer
+                err(v->loc, "'" + v->name + "' is " + pointer_reason(v->type) +
+                                " (a row parameter's copy is read only as the base of an element)");
+            }
             if (v->ref_to_uninit && pointee_has_aggregate_array(v->type))
             {
                 err(v->loc,
@@ -1070,6 +1233,10 @@ private:
             {
                 err(f.loc, "the return type of '" + f.c_name + "' is a struct that is not in the program");
             }
+            else if (deep_value_type(f.ret))
+            {
+                err(f.loc, "the return type of '" + f.c_name + "' is " + f.ret.str() + ", " + kDeepValue);
+            }
             else if (value_array_elems(*f.ret.struct_type) > kMaxByValueArrayElements)
             {
                 err(f.loc,
@@ -1086,7 +1253,17 @@ private:
         {
             if (f.params[k].type.is_ptr())
             {
-                if (!accepted_pointer(f.params[k].type))
+                if (row_param_type(f.params[k].type))
+                {
+                    // decision 0064 item 13 (Part E, slice 2): a row parameter carries no marker (an array of aggregates takes none: item 2)
+                    if (f.params[k].init != InitMarker::None || f.params[k].not_invalidating)
+                    {
+                        err(f.params[k].loc,
+                            "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
+                                "' is a pointer to a row of an array of arrays and carries `ref_to_uninit`, `must_init` or `not_invalidating` (decision 0064 items 2 and 13)");
+                    }
+                }
+                else if (!accepted_pointer(f.params[k].type))
                 {
                     err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name + "' is " +
                                              pointer_reason(f.params[k].type));
@@ -1099,6 +1276,11 @@ private:
                 {
                     err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name +
                                              "' is a struct that is not in the program");
+                }
+                else if (deep_value_type(f.params[k].type))
+                {
+                    err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of '" + f.c_name + "' is " +
+                                             f.params[k].type.str() + ", " + kDeepValue);
                 }
                 else if (value_array_elems(*f.params[k].type.struct_type) > kMaxByValueArrayElements)
                 {
@@ -1437,7 +1619,8 @@ private:
             for (const AtomSite& a : sites)
             {
                 if (shares || !is_range_atom(a.atom->atom) || a.atom->a == nullptr || !a.atom->a->type.is_ptr() ||
-                    a.atom->a->type.pointee == nullptr || !a.atom->a->type.pointee->is_struct())
+                    a.atom->a->type.pointee == nullptr ||
+                    !(a.atom->a->type.pointee->is_struct() || a.atom->a->type.pointee->is_array()))
                 {
                     continue;
                 }
@@ -1452,7 +1635,7 @@ private:
             if (shares)
             {
                 err(o.atom->loc,
-                    "an `owns_block` atom beside a range over structures in '" + f.c_name +
+                    "an `owns_block` atom beside a range over structures or rows in '" + f.c_name +
                         "' that holds a cell of one of the same leaf fields (decision 0064 item 7: a heap block beside such a range is M4.5e1e2 part D, not yet lifted)");
             }
         }
@@ -1765,6 +1948,12 @@ private:
             array_addr_ok_.insert(e.a);
             mark_contract_place(e.a);
         }
+        // decision 0064 items 7 and 13 (Part E, slice 2c): the base of a range atom may be a row parameter (the range of `n` rows, `owns_range(a, n)`), position (iv) of the node's uses
+        const bool row_atom {e.a->kind == Expr::Kind::Formal && row_param_type(e.a->type)};
+        if (row_atom)
+        {
+            array_addr_ok_.insert(e.a);
+        }
         expr(*e.a, ctx, false);
         expr(*e.b, ctx, false);
         if (array_atom)
@@ -1784,21 +1973,23 @@ private:
             }
             return;
         }
-        if (e.a->kind != Expr::Kind::Formal || !e.a->type.is_ptr() || !accepted_pointer(e.a->type) ||
+        if (e.a->kind != Expr::Kind::Formal || !e.a->type.is_ptr() || !(accepted_pointer(e.a->type) || row_atom) ||
             e.a->type.pointee == nullptr)
         {
             err(e.loc,
-                "a range permission atom of something other than a pointer parameter to a bool, an integer, an enumeration, a pointer or a structure (record 0060 item 3, decision 0064 item 7; other bases: M4.5e2)");
+                "a range permission atom of something other than a pointer parameter to a bool, an integer, an enumeration, a pointer, a structure or a row (record 0060 item 3, decision 0064 item 7; other bases: M4.5e2)");
         }
         else if (e.a->type.pointee->is_struct())
         {
             // decision 0064 item 7 (Part C1): a range over verified structures, per leaf path.  An element with an array member (arrays of arrays: Part E) or with an `owning` or
             // `ref_to_uninit` member (Part D) has no rows yet
-            if (e.a->type.pointee->struct_type == nullptr || struct_has_array(*e.a->type.pointee->struct_type) ||
+            // decision 0064 items 7 and 13 (Part E, slice 3c-2): an element with array members of SCALARS standing directly in it has a leaf of `count` cells
+            if (e.a->type.pointee->struct_type == nullptr ||
+                !element_arrays_direct_scalars(*e.a->type.pointee->struct_type) ||
                 struct_has_marked(*e.a->type.pointee->struct_type))
             {
                 err(e.loc,
-                    "a range permission atom over structures whose element holds an array member or an `owning` or `ref_to_uninit` member (decision 0064 item 7: M4.5e1e2 parts D and E)");
+                    "a range permission atom over structures whose element holds an array member that is not an array of scalars standing directly in it, or an `owning` or `ref_to_uninit` member (decision 0064 item 7: M4.5e1e2 parts D and E)");
             }
         }
         if (!e.b->type.is_int() || e.b->type.is_bool() || is_enum(e.b->type))
@@ -2918,9 +3109,14 @@ private:
         else if (v.type.is_array())
         {
             // Decision 0059 item 2: an automatic array local is a block of `count` slots of a scalar or accepted-pointer element, always a cell.
-            if (!local_array_type(v.type))
+            if (!automatic_array_type(v.type, true))
             {
-                err(loc, "variable '" + v.name + "' is " + local_array_reason(v.type));
+                err(loc, "variable '" + v.name + "' is " + automatic_array_reason(v.type, true));
+            }
+            if (v.compound_literal && v.type.element != nullptr && v.type.element->is_array())
+            {
+                err(loc, "the hidden object of an array compound literal of arrays '" + v.name +
+                             "' (decision 0064 item 13: an array compound literal of arrays is not built)");
             }
             if (!v.address_taken)
             {
@@ -3038,6 +3234,12 @@ private:
                 {
                     err(s.loc, "an assignment of a struct value to '" + s.var->name +
                                    "' (decision 0043: copies are leaf stores)");
+                }
+                if (s.var->type.is_ptr() && s.var->type.pointee != nullptr && s.var->type.pointee->is_array())
+                {
+                    err(s.loc,
+                        "an assignment to the row parameter '" + s.var->name +
+                            "' (decision 0064 item 13: a row parameter is read only as the base of an element, a range atom's base or a whole argument)");
                 }
                 expr(*s.expr, Ctx::Body, false);
                 if (s.var->type != s.expr->type)
@@ -3808,9 +4010,10 @@ private:
                             "the address of the array '" + e.var->name +
                                 "' outside an element address (decision 0059 item 10: the decay of an array is Part D)");
                     }
-                    else if (!local_array_type(e.var->type))
+                    else if (!automatic_array_type(e.var->type, true))
                     {
-                        err(e.loc, "the address of '" + e.var->name + "', which is " + local_array_reason(e.var->type));
+                        err(e.loc, "the address of '" + e.var->name + "', which is " +
+                                       automatic_array_reason(e.var->type, true));
                     }
                     else if (!e.type.is_ptr() || e.type.pointee == nullptr || *e.type.pointee != e.var->type)
                     {
@@ -3867,6 +4070,25 @@ private:
                     if (e.a != nullptr && e.a->kind == Expr::Kind::ElemAddr)
                     {
                         contract_elem_ok_.insert(e.a); // record 0060 item 5: `p[e]` read in a contract
+                        // decision 0064 item 7 (Part E, slice 3c-2): `p[e1].a[e2]`, an array member of scalars of an element of a pointer parameter's range (slice 3c-4: or of an array member of structures, `p->v[e1].a[e2]`): the element is read as a structure
+                        if (const Expr* mb {e.a->a != nullptr && e.a->a->kind == Expr::Kind::MemberAddr
+                                                ? member_chain_root(e.a->a)
+                                                : nullptr};
+                            mb != nullptr && mb->kind == Expr::Kind::ElemAddr && mb->a != nullptr &&
+                            (mb->a->kind == Expr::Kind::Formal || global_array_base(mb->a) || member_array_base(mb->a)))
+                        {
+                            contract_elem_ok_.insert(mb);
+                            contract_struct_elem_ok_.insert(mb);
+                        }
+                        // decision 0064 items 5 and 13 (Part E, slice 2b): `a[e][e2]` of a row parameter: the row `a[e]` is the base of the element read and nothing else
+                        // decision 0064 items 7 and 13 (Part E, slice 3b-4; question 362): the row of a matrix MEMBER (`p->m[e][e2]`, `gt.m[e][e2]`, `r->m[e][e2]`) is that base too
+                        if (const RowBase rb {row_base(e.a->a)};
+                            (rb.kind == RowBase::Kind::Param || rb.kind == RowBase::Kind::Global ||
+                             rb.kind == RowBase::Kind::Member) &&
+                            rb.indexes.size() == 1U)
+                        {
+                            contract_elem_ok_.insert(e.a->a);
+                        }
                     }
                     if (const Expr* el {contract_struct_element(e.a)}; el != nullptr)
                     {
@@ -3924,11 +4146,31 @@ private:
                     // In a contract the place is `*p`, `*result`, `g` or, decision 0043 item 9, a member of one of them (`p->x`, `r->t.y`) or, decision 0045 item 2,
                     // any of those reached through loads and pointer leaves (`**pp`, `*gp`, `p->q->x`, `*s.q`, `*r.q`): the root under MemberAddr, Deref and Field nodes.
                     // record 0060 item 5: the element `p[e]` of a pointer parameter (its ElemAddr is checked where it stands) is rooted at that parameter
-                    const Expr* root {e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr
-                                          ? (member_array_base(e.a->a) ? place_root(e.a->a) : e.a->a)
-                                      : contract_struct_element(e.a) != nullptr
-                                          ? contract_struct_root(contract_struct_element(e.a))
-                                          : place_root(e.a)};
+                    // decision 0064 item 13 (Part E, slice 2b): `a[e][e2]` of a row parameter is rooted at the parameter's formal under its row
+                    const Expr* root {
+                        e.a->kind == Expr::Kind::ElemAddr && e.a->a != nullptr
+                            ? (member_array_base(e.a->a)
+                                   ? (member_chain_root(e.a->a) != nullptr &&
+                                              member_chain_root(e.a->a)->kind == Expr::Kind::ElemAddr &&
+                                              member_chain_root(e.a->a)->a != nullptr &&
+                                              (member_chain_root(e.a->a)->a->kind == Expr::Kind::Formal ||
+                                               global_array_base(member_chain_root(e.a->a)->a))
+                                          ? member_chain_root(e.a->a)->a
+                                      // decision 0064 item 7 (Part E, slice 3c-4): `p->v[e1].a[e2]`: the root of the array member `v` of the structure that holds the element
+                                      : (member_chain_root(e.a->a) != nullptr &&
+                                         member_chain_root(e.a->a)->kind == Expr::Kind::ElemAddr &&
+                                         member_chain_root(e.a->a)->a != nullptr &&
+                                         member_array_base(member_chain_root(e.a->a)->a) &&
+                                         member_chain_root(member_chain_root(e.a->a)->a) != nullptr)
+                                          ? member_chain_root(member_chain_root(e.a->a)->a)
+                                          : place_root(e.a->a))
+                               : (row_base(e.a->a).kind == RowBase::Kind::Param ||
+                                  row_base(e.a->a).kind == RowBase::Kind::Global)
+                                   ? row_base(e.a->a).root
+                               : row_base(e.a->a).kind == RowBase::Kind::Member ? place_root(row_base(e.a->a).root)
+                                                                                : e.a->a)
+                        : contract_struct_element(e.a) != nullptr ? contract_struct_root(contract_struct_element(e.a))
+                                                                  : place_root(e.a)};
                     if ((ctx == Ctx::Requires || ctx == Ctx::Ensures) && root->kind != Expr::Kind::Formal &&
                         root->kind != Expr::Kind::GlobalAddr && root->kind != Expr::Kind::ForallArg &&
                         !(ctx == Ctx::Ensures && root->kind == Expr::Kind::Result))
@@ -4384,10 +4626,18 @@ private:
                     }
                     if (e.a == nullptr || e.b == nullptr ||
                         (e.a->kind != Expr::Kind::Formal && !global_array_base(e.a) && !member_base &&
+                         row_base(e.a).kind != RowBase::Kind::Param && row_base(e.a).kind != RowBase::Kind::Global &&
+                         row_base(e.a).kind != RowBase::Kind::Member &&
                          !(cur_forall_ != nullptr && e.a->kind == Expr::Kind::ForallArg)))
                     {
                         err(e.loc,
                             "an element read in a contract of anything but a pointer parameter or a global array (record 0060 item 5, decision 0063 item 7)");
+                        break;
+                    }
+                    if (row_base(e.a).kind == RowBase::Kind::Global && row_base(e.a).root->global->owner != nullptr)
+                    {
+                        err(e.loc, "a read of the `static` local '" + row_base(e.a).root->global->c_name +
+                                       "' in a contract (its name is not in scope there, decision 0041 item 12)");
                         break;
                     }
                     if (global_array_base(e.a) && e.a->global->owner != nullptr)
@@ -4403,7 +4653,23 @@ private:
                         const Expr* root {member_chain_root(e.a)};
                         if (root == nullptr ||
                             !(root->kind == Expr::Kind::Formal || root->kind == Expr::Kind::GlobalAddr ||
-                              (ctx == Ctx::Ensures && root->kind == Expr::Kind::Result)))
+                              (ctx == Ctx::Ensures && root->kind == Expr::Kind::Result) ||
+                              // decision 0064 item 7 (Part E, slice 3c-2): the member of an element of a pointer parameter's range (`p[e1].a`)
+                              (root->kind == Expr::Kind::ElemAddr && root->a != nullptr &&
+                               (root->a->kind == Expr::Kind::Formal ||
+                                (global_array_base(root->a) && root->a->global->owner == nullptr) ||
+                                // decision 0064 item 7 (Part E, slice 3c-4): or of an array MEMBER of structures (`p->v[e1].a`) whose structure is reached by pure members from a parameter, a
+                                // global or, in an `ensures`, the result
+                                (member_array_base(root->a) &&
+                                 [&]
+                                 {
+                                     const Expr* r2 {member_chain_root(root->a)};
+                                     return r2 != nullptr && (r2->kind == Expr::Kind::Formal ||
+                                                              (r2->kind == Expr::Kind::GlobalAddr &&
+                                                               r2->global != nullptr && r2->global->owner == nullptr) ||
+                                                              (ctx == Ctx::Ensures && r2->kind == Expr::Kind::Result));
+                                 }())) &&
+                               !member_array_is_aggregate(e.a))))
                         {
                             // decision 0064 item 15 (question 306 built for an array member of SCALARS): the structure is reached through loads; an array member of aggregates stays rejected
                             if (member_array_is_aggregate(e.a) || !heap_read_member_chain_ok(e.a, ctx))
@@ -4431,8 +4697,13 @@ private:
                 }
                 const bool array_base {(e.a != nullptr && e.a->kind == Expr::Kind::AddrOf && e.a->var != nullptr &&
                                         e.a->var->type.is_array()) ||
-                                       global_array_base(e.a) || member_base};
-                if (array_base)
+                                       global_array_base(e.a) || member_base ||
+                                       row_base(e.a).kind != RowBase::Kind::None};
+                // decision 0064 item 13 (Part E, slice 2), position (i): the row parameter (its own copy in code, its formal in a contract) is the base of an element address, whose type is the
+                // ROW's address; the element is a slot of the pointer's block, as `p[i]`'s is
+                const bool row_param_base {!array_base && e.a != nullptr && row_param_node(*e.a) &&
+                                           row_param_type(e.a->type)};
+                if (array_base || row_param_base)
                 {
                     array_addr_ok_.insert(e.a);
                 }
@@ -4440,6 +4711,19 @@ private:
                 const bool index_ok {sub(e.b)};
                 if (!base_ok || !index_ok)
                 {
+                    break;
+                }
+                if (row_param_base)
+                {
+                    if (!e.b->type.is_int() || is_enum(e.b->type))
+                    {
+                        err(e.b->loc,
+                            "an array index of type " + e.b->type.str() + ", not an integer (decision 0059 item 4)");
+                    }
+                    if (e.type != e.a->type)
+                    {
+                        err(e.loc, "the address of a row of a row parameter does not have the parameter's type");
+                    }
                     break;
                 }
                 if (!array_base)
@@ -4470,11 +4754,11 @@ private:
                             break;
                         }
                         if (e.a->type.pointee->struct_type == nullptr ||
-                            struct_has_array(*e.a->type.pointee->struct_type) ||
+                            !element_arrays_direct_scalars(*e.a->type.pointee->struct_type) ||
                             struct_has_marked(*e.a->type.pointee->struct_type))
                         {
                             err(e.loc,
-                                "the element of a pointer to a structure with an array member or an `owning` or `ref_to_uninit` member (decision 0064 item 2: M4.5e1e2 part E, M4.8)");
+                                "the element of a pointer to a structure with an array member that is not an array of scalars standing directly in it, or an `owning` or `ref_to_uninit` member (decision 0064 item 2: M4.5e1e2 part E, M4.8)");
                             break;
                         }
                     }
@@ -4525,6 +4809,11 @@ private:
         if (e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0U)
         {
             err(e.loc, "an expression of the struct type " + e.type.str() + ", which is not in the program");
+            return;
+        }
+        if (deep_value_type(e.type))
+        {
+            err(e.loc, "an expression of the struct type " + e.type.str() + ", " + kDeepValue);
             return;
         }
         if (value_array_elems(*e.type.struct_type) > kMaxByValueArrayElements)
@@ -4666,6 +4955,11 @@ private:
         if (!e.type.is_struct() || e.type.struct_type == nullptr || structs_.count(e.type.struct_type) == 0U)
         {
             err(e.loc, "an aggregate of the type " + e.type.str() + ", not a struct of the program");
+            return;
+        }
+        if (deep_value_type(e.type))
+        {
+            err(e.loc, "an aggregate of " + e.type.str() + ", " + kDeepValue);
             return;
         }
         if (value_array_elems(*e.type.struct_type) > kMaxByValueArrayElements)
@@ -4823,6 +5117,15 @@ private:
                a->type.pointee->element != nullptr &&
                (a->type.pointee->element->is_struct() || a->type.pointee->element->is_array());
     }
+    // Decision 0064 item 12 (Part E, question 353): a structure VALUE (a by-value parameter or result, an expression of structure type: a call, an aggregate, a load, a member, a store's
+    // value; a whole-structure copy is expanded by the encoder into stores) whose type has a leaf path of two or more index steps (a matrix member, an element structure with an array member
+    // in a member array of structures) is refused until the lowering's value view reads the one enumeration of cells (vir::value_cells); the value view flags such a type as one aggregate leaf
+    static bool deep_value_type(const Type& t)
+    {
+        return t.is_struct() && t.struct_type != nullptr && type_index_depth(t) >= 2U;
+    }
+    static constexpr const char* kDeepValue =
+        "decision 0064 item 12, question 353: a structure value whose type has a leaf path of two or more index steps is not accepted yet";
     static constexpr const char* kItem15 =
         "decision 0064 item 15, question 348: a structure whose array member holds structures or arrays is not accepted here";
     // Whether `t` is a pointer to a structure that has an array member anywhere in its nest (decision 0064 item 4)
@@ -4831,47 +5134,11 @@ private:
         return t.is_ptr() && t.pointee != nullptr && t.pointee->is_struct() && t.pointee->struct_type != nullptr &&
                struct_has_array(*t.pointee->struct_type);
     }
-    // The number of array elements a struct VALUE of this type holds (decision 0063 item 13: the width of the value view's tuple beyond its other leaves): the sum of the counts of
-    // the array members of its nest.  A value of more than kMaxByValueArrayElements (vir.h) is M4.5f3's (questions 295, 309).
-    static unsigned long long value_array_elems(const StructType& st, int depth = 0)
+    // The number of array elements a struct VALUE of this type holds (decision 0063 item 13: the width of the value view's tuple beyond its other leaves): the cells reached through an index
+    // step.  A value of more than kMaxByValueArrayElements (vir.h) is M4.5f3's (questions 295, 309).  Decision 0064 item 12 (Part E): one definition, vir::value_index_cells, over the leaf paths.
+    static unsigned long long value_array_elems(const StructType& st)
     {
-        unsigned long long n {0U};
-        for (const StructMember& m : st.members)
-        {
-            if (m.type.is_array())
-            {
-                // decision 0064 item 4 (trap 4): an array of structures or of arrays stands for `count` elements of the element's width (every leaf of every element is a leaf of
-                // the value); for an array of scalars it is the count, as before
-                n += m.type.count * (m.type.element != nullptr ? value_width(*m.type.element, depth + 1) : 1U);
-            }
-            else if (depth < 64 && m.type.is_struct() && m.type.struct_type != nullptr)
-            {
-                n += value_array_elems(*m.type.struct_type, depth + 1);
-            }
-        }
-        return n;
-    }
-    // The number of leaves of a struct VALUE of type `t` (decision 0064 item 4): 1 for a scalar, the product of the counts for an array, the sum over the members for a structure
-    static unsigned long long value_width(const Type& t, int depth)
-    {
-        if (depth > 64)
-        {
-            return 1U;
-        }
-        if (t.is_array())
-        {
-            return t.count * (t.element != nullptr ? value_width(*t.element, depth + 1) : 1U);
-        }
-        if (!t.is_struct() || t.struct_type == nullptr)
-        {
-            return 1U;
-        }
-        unsigned long long n {0U};
-        for (const StructMember& m : t.struct_type->members)
-        {
-            n += value_width(m.type, depth + 1);
-        }
-        return n;
+        return value_index_cells(Type::structure(&st));
     }
     // Whether a struct type has an `owning` or `ref_to_uninit` member anywhere in its nest (decision 0063 item 1, question 293: with an array member it is M4.5e1e2's)
     static bool struct_has_marked(const StructType& st, int depth = 0)
@@ -5399,6 +5666,35 @@ private:
         }
         return false;
     }
+    // Decision 0064 item 13: a node that may be the whole argument for a row parameter: the parameter's own copy of a row parameter, or the address of row 0 of an automatic array local of arrays
+    // (`ElemAddr(AddrOf m, 0)`, the decay of the matrix `m`)
+    bool row_whole_argument(const Expr& x) const
+    {
+        if (x.kind == Expr::Kind::Local && x.var != nullptr && x.var->is_param_copy && row_param_type(x.type))
+        {
+            return true;
+        }
+        if (x.kind != Expr::Kind::ElemAddr || x.a == nullptr || x.b == nullptr || x.b->kind != Expr::Kind::Const ||
+            !x.b->type.is_int() || x.b->value != "0")
+        {
+            return false;
+        }
+        // decision 0064 item 13 (Part E, slices 3a and 3b), position (iii): the row 0 address of a matrix that is an automatic local (`g(m)`), a global or `static` local (`g(gm)`) or a structure's
+        // MATRIX MEMBER (`g(u.m)`, `g(p->m)`)
+        if (x.a->kind == Expr::Kind::AddrOf)
+        {
+            return x.a->var != nullptr && x.a->var->type.is_array() && x.a->var->type.element != nullptr &&
+                   x.a->var->type.element->is_array();
+        }
+        if (x.a->kind == Expr::Kind::GlobalAddr)
+        {
+            return x.a->global != nullptr && x.a->global->type.is_array() && x.a->global->type.element != nullptr &&
+                   x.a->global->type.element->is_array();
+        }
+        return x.a->kind == Expr::Kind::MemberAddr && x.a->type.is_ptr() && x.a->type.pointee != nullptr &&
+               x.a->type.pointee->is_array() && x.a->type.pointee->element != nullptr &&
+               x.a->type.pointee->element->is_array();
+    }
     void call(const Expr& e, Ctx ctx)
     {
         if (!seen_effects_.insert(&e).second)
@@ -5441,6 +5737,13 @@ private:
             if (k < f.params.size() && f.params[k].type.is_struct() && e.args[k]->type.is_struct())
             {
                 struct_pos_.insert(e.args[k]); // decision 0044 item 5
+            }
+            // decision 0064 item 13 (Part E, slice 2), position (iii): the WHOLE argument of a call whose parameter is a pointer to a row of the same row type: a local matrix's row 0 address
+            // (`g(m)` passes `el(&m, 0)`) or a row parameter forwarded whole (`g(a)`, question 361).  Any other node typed pointer to an array stays refused.
+            if (k < f.params.size() && row_param_type(f.params[k].type) && e.args[k]->type == f.params[k].type &&
+                row_whole_argument(*e.args[k]))
+            {
+                array_addr_ok_.insert(e.args[k]);
             }
             expr(*e.args[k], ctx, false);
             if (k < f.params.size() && e.args[k]->type != f.params[k].type)
@@ -5709,6 +6012,11 @@ private:
             {
                 err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of the `pure` function '" + f.c_name +
                                          "' is marked, `restrict` or owning (record 0062 item 3: M4.5f1)");
+            }
+            if (row_param_type(f.params[k].type))
+            {
+                err(f.params[k].loc, "parameter " + std::to_string(k + 1U) + " of the `pure` function '" + f.c_name +
+                                         "' is a pointer to a row (decision 0064 item 14: Part F)");
             }
         }
     }
@@ -6118,8 +6426,11 @@ private:
         const bool global_base {b != nullptr && b->kind == Expr::Kind::GlobalAddr && b->global != nullptr};
         // decision 0063 item 11 (part C): the element of an array member is its own object, keyed by the member object (the structure's base object and the member path)
         const bool member_base {b != nullptr && b->kind == Expr::Kind::MemberAddr};
+        // decision 0064 item 11 (Part E, slice 1): the cell `m[i][j]` of a named array of arrays is keyed by the row's key and then its own index (EVERY index is in the key: two cells of one
+        // matrix with one index equal differ), so that `m[1][2]` and `m[1][3]` are two objects and `m[1][2]` named twice with a write is `unsequenced_modification`
+        const bool named_row {b != nullptr && b->kind == Expr::Kind::ElemAddr && named_local_row(b)};
         if (b == nullptr || index == nullptr ||
-            (!global_base && !member_base && (b->kind != Expr::Kind::AddrOf || b->var == nullptr)))
+            (!global_base && !member_base && !named_row && (b->kind != Expr::Kind::AddrOf || b->var == nullptr)))
         {
             return false;
         }
@@ -6137,12 +6448,40 @@ private:
         {
             return false;
         }
+        if (named_row)
+        {
+            int row_obj {0};
+            std::vector<int> row_path;
+            if (!elem_key(b, &row_obj, &row_path))
+            {
+                return false; // the row's own index has no key: the path-precise row of lowering decides
+            }
+            row_path.insert(row_path.end(), steps.begin(), steps.end());
+            *base = row_obj;
+            *path = std::move(row_path);
+            return true;
+        }
         if (member_base)
         {
             std::vector<int> mpath;
             const Expr* root {member_root(b, &mpath)};
             int obj {0};
-            if (mpath.empty() || !object_of_root(root, &obj))
+            if (mpath.empty())
+            {
+                return false;
+            }
+            if (root != nullptr && root->kind == Expr::Kind::ElemAddr)
+            {
+                // decision 0064 item 11 (Part E, slice 3e; question 378): the cell `v[i].a[j]` of an array member of an element of a named array (or `p->v[i].a[j]`): the element's key (the array's
+                // object and its index step), then the member path, then the cell's own index.  A non-constant, non-local index of the element has no key: lowering's row decides
+                std::vector<int> prefix;
+                if (!elem_key(root, &obj, &prefix))
+                {
+                    return false;
+                }
+                mpath.insert(mpath.begin(), prefix.begin(), prefix.end());
+            }
+            else if (!object_of_root(root, &obj))
             {
                 return false;
             }

@@ -52,14 +52,19 @@ void define_aggregate_element_guards()
        });
 
     // ---- trap 1: an element of a row is not a flat element of a pointer ----
-    ru("e1e2a_guard_elem_addr_of_a_row", "the address of a row of an array of arrays",
+    // (slice 3a lifted the guard for a global matrix: the element of its row is a named element; a function that holds nothing of `g` fails the permission row)
+    lc("e1e2a_guard_elem_addr_of_a_row",
+       "the address of a row of a global matrix: g[1][2] read by a function that holds nothing of g",
        [=](Kit& k)
        {
            // int g[2][3]; int f(void) { return g[1][2]; }
            Global* g {matrix(k)};
            Function* f {k.fn("f", k.i32)};
-           f->body = k.blk({k.ret(cell_of_matrix(k, g, "1", "2"))});
+           const Expr* rd {cell_of_matrix(k, g, "1", "2")};
+           f->body = k.blk({k.ret(rd)});
            k.done(f);
+           k.fail("permission", rd->loc);
+           k.rows("uninitialized", rd->loc, 1U);
        });
     ru("e1e2a_guard_elem_addr_of_a_row_parameter", "the address of a row of an array of arrays",
        [=](Kit& k)
@@ -70,7 +75,8 @@ void define_aggregate_element_guards()
            f->body = k.blk({k.ret(k.deref(k.b.elem_addr(row, N(k, "1"), k.at())))});
            k.done(f);
        });
-    ru("e1e2a_guard_inv_elem_of_a_row", "the address of a row of an array of arrays",
+    lc("e1e2a_guard_inv_elem_of_a_row",
+       "g[1][2] in the invariant of a loop of a function that holds nothing of g: unframed (permission at the read)",
        [=](Kit& k)
        {
            // int g[2][3]; void f(void) { int i = 0; while (i < 3) invariant(0 <= i && i <= 3 && g[1][2] >= 0) decreases(3 - i) { i = i + 1; } }
@@ -83,23 +89,11 @@ void define_aggregate_element_guards()
                                    {k.cl(k.sub(N(k, "3"), k.v(i)))}, k.blkc({k.asg(i, k.add(k.v(i), N(k, "1")))}))};
            f->body = k.blkc({k.decl(i, N(k, "0")), loop});
            k.done(f);
+           k.fail_only("permission", rd->loc, 2U, 0U, "this loop invariant reads");
        });
 
     // ---- trap 2: element keys of a base that holds an index of its own ----
-    ru("e1e2a_guard_elem_key_of_a_row", "(same_elem_base; decision 0064 item 4",
-       [=](Kit& k)
-       {
-           // void f(int (*p)[3]) requires(p[0][0] == p[1][0]) {}
-           Function* f {k.fn("f", k.vd, {{"p", k.ptr(k.prog.array_of(k.i32, 3U))}})};
-           auto at = [&](const char* i)
-           {
-               const Expr* row {k.b.elem_addr(k.F(f, 0), N(k, i), k.at())};
-               return k.deref(k.b.elem_addr(row, N(k, "0"), k.at()));
-           };
-           k.req(f, k.eq(at("0"), at("1")));
-           f->body = k.blk({});
-           k.done(f);
-       });
+    // (Part E slice 2b lifted trap 2 for a row parameter: the case that pinned its internal error is `e1e2e_rowparam_contract_reads_keys`, which checks that every index is in the key)
 
     // Part C1 (slice 2a) lifts this guard too: the call rows of a range over structures (item 8), the access of its callee per leaf path (flipped from `ru`)
     lc("e1e2a_guard_range_over_structures_in_a_call",

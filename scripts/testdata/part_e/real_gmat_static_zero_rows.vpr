@@ -1,0 +1,209 @@
+// cerastes: Viper emitted from VIR (internal/encoding.md); do not edit
+
+// the memory model (decision 0032 item 5, decision 0028 item 2): one value field and one flag field per cell type, the liveness cell
+field v_int: Int
+field d_int: Bool
+field lv: Bool
+
+// cerastes:domain-ok 0028
+domain Block {
+  function loc(b: Block, i: Int): Ref
+  function len(b: Block): Int
+  function block_of(r: Ref): Block
+  function offset_of(r: Ref): Int
+  function member(r: Ref, k: Int): Block
+  function parent_of(b: Block): Ref
+  function index_of(b: Block): Int
+  function lvloc(b: Block): Ref
+  unique function GB_g__0(): Block
+  unique function GB_next__c__1(): Block
+  // cerastes:axiom-ok 0033
+  axiom loc_inv { forall b: Block, i: Int :: { loc(b, i) } block_of(loc(b, i)) == b && offset_of(loc(b, i)) == i }
+  // cerastes:axiom-ok 0034
+  axiom loc_nonnull { forall b: Block, i: Int :: { loc(b, i) } loc(b, i) != null }
+  // cerastes:axiom-ok 0035
+  axiom member_inv { forall r: Ref, k: Int :: { member(r, k) } parent_of(member(r, k)) == r && index_of(member(r, k)) == k }
+  // cerastes:axiom-ok 0036
+  axiom member_lv { forall r: Ref, k: Int :: { lvloc(member(r, k)) } lvloc(member(r, k)) == lvloc(block_of(r)) }
+}
+
+// cerastes:trusted-contract program start: every global and static local holds its initial value with full permission, and its liveness cell (decision 0041 item 4); the pure facts first
+method program_start()
+  ensures ((len(GB_g__0()) == 2) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))) && ((len(GB_next__c__1()) == 2) && (lvloc(GB_next__c__1()) == loc(GB_next__c__1(), (-2))))
+  ensures forall k: Int :: { loc(GB_g__0(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_g__0(), k), 0)) == 3)
+  ensures forall k: Int :: { loc(GB_next__c__1(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_next__c__1(), k), 0)) == 3)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_g__0(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_g__0(), k), 0), j).v_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_g__0(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_g__0(), k), 0), j).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_g__0(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> loc(member(loc(GB_g__0(), k), 0), j).d_int
+  ensures loc(member(loc(GB_g__0(), 0), 0), 0).v_int == 1
+  ensures loc(member(loc(GB_g__0(), 0), 0), 1).v_int == 2
+  ensures loc(member(loc(GB_g__0(), 0), 0), 2).v_int == 3
+  ensures loc(member(loc(GB_g__0(), 1), 0), 0).v_int == 4
+  ensures loc(member(loc(GB_g__0(), 1), 0), 1).v_int == 5
+  ensures loc(member(loc(GB_g__0(), 1), 0), 2).v_int == 6
+  ensures acc(lvloc(GB_g__0()).lv)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_next__c__1(), k), 0), j).v_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_next__c__1(), k), 0), j).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> loc(member(loc(GB_next__c__1(), k), 0), j).d_int
+  ensures loc(member(loc(GB_next__c__1(), 0), 0), 0).v_int == 0
+  ensures forall j: Int :: { loc(member(loc(GB_next__c__1(), 0), 0), j) } ((1 <= j) && (j < 3)) ==> (loc(member(loc(GB_next__c__1(), 0), 0), j).v_int == 0)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((1 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> (loc(member(loc(GB_next__c__1(), k), 0), j).v_int == 0)
+  ensures acc(lvloc(GB_next__c__1()).lv)
+  decreases _
+
+// C/C++ function `next`
+method f_next__0(p_i__0: Int, p_j__1: Int, amt_0: Perm) returns (res: Int)
+  requires ((len(GB_g__0()) == 2) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))) && ((len(GB_next__c__1()) == 2) && (lvloc(GB_next__c__1()) == loc(GB_next__c__1(), (-2))))
+  requires forall k: Int :: { loc(GB_g__0(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_g__0(), k), 0)) == 3)
+  requires forall k: Int :: { loc(GB_next__c__1(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_next__c__1(), k), 0)) == 3)
+  requires ((-2147483648) <= p_i__0) && (p_i__0 <= 2147483647)
+  requires ((-2147483648) <= p_j__1) && (p_j__1 <= 2147483647)
+  requires (none < amt_0) && (amt_0 < write)
+  requires (((0 <= p_i__0) && (p_i__0 < 2)) && (0 <= p_j__1)) && (p_j__1 < 3)
+  requires forall k: Int :: { loc(GB_next__c__1(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_next__c__1(), k), 0)) == 3)
+  requires forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_next__c__1(), k), 0), j).v_int)
+  requires forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_next__c__1(), k), 0), j).d_int)
+  requires forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> loc(member(loc(GB_next__c__1(), k), 0), j).d_int
+  requires forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> (((-2147483648) <= loc(member(loc(GB_next__c__1(), k), 0), j).v_int) && (loc(member(loc(GB_next__c__1(), k), 0), j).v_int <= 2147483647))
+  requires acc(lvloc(GB_next__c__1()).lv, amt_0)
+  ensures ((-2147483648) <= res) && (res <= 2147483647)
+  ensures (1 <= res) && (res <= 100)
+  ensures forall k: Int :: { loc(GB_next__c__1(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_next__c__1(), k), 0)) == 3)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_next__c__1(), k), 0), j).v_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(GB_next__c__1(), k), 0), j).d_int)
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> loc(member(loc(GB_next__c__1(), k), 0), j).d_int
+  ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> (((-2147483648) <= loc(member(loc(GB_next__c__1(), k), 0), j).v_int) && (loc(member(loc(GB_next__c__1(), k), 0), j).v_int <= 2147483647))
+  ensures acc(lvloc(GB_next__c__1()).lv, amt_0)
+  decreases
+{
+  var v_i__0: Int
+  var v_j__1: Int
+  var v_v__2: Int
+  var ga_g__0: Ref
+  var ga_next__c__1: Ref
+  var t__0: Ref
+  ga_g__0 := loc(GB_g__0(), 0)
+  ga_next__c__1 := loc(GB_next__c__1(), 0)
+  v_i__0 := p_i__0
+  v_j__1 := p_j__1
+  assert !(((offset_of(ga_next__c__1) + v_i__0) < 0) || (len(block_of(ga_next__c__1)) <= (offset_of(ga_next__c__1) + v_i__0)))
+  assert !((v_j__1 < 0) || (len(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0)) <= v_j__1))
+  assert perm(loc(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0), v_j__1).v_int) > none
+  assert loc(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0), v_j__1).d_int
+  v_v__2 := loc(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0), v_j__1).v_int
+  if ((v_v__2 < 0) || (v_v__2 > 99)) {
+    v_v__2 := 0
+  }
+  assert !(((offset_of(ga_next__c__1) + v_i__0) < 0) || (len(block_of(ga_next__c__1)) <= (offset_of(ga_next__c__1) + v_i__0)))
+  assert !((v_j__1 < 0) || (len(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0)) <= v_j__1))
+  assert !(((v_v__2 + 1) < (-2147483648)) || (2147483647 < (v_v__2 + 1)))
+  t__0 := loc(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0), v_j__1)
+  assert !((perm(t__0.v_int) != write) || (perm(t__0.d_int) != write))
+  t__0.v_int := v_v__2 + 1
+  t__0.d_int := true
+  assert !(((offset_of(ga_next__c__1) + v_i__0) < 0) || (len(block_of(ga_next__c__1)) <= (offset_of(ga_next__c__1) + v_i__0)))
+  assert !((v_j__1 < 0) || (len(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0)) <= v_j__1))
+  assert perm(loc(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0), v_j__1).v_int) > none
+  assert loc(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0), v_j__1).d_int
+  res := loc(member(loc(block_of(ga_next__c__1), offset_of(ga_next__c__1) + v_i__0), 0), v_j__1).v_int
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(ga_next__c__1), k), 0), j) } (((offset_of(ga_next__c__1) <= k) && (k < (offset_of(ga_next__c__1) + 2))) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(ga_next__c__1), k), 0), j).v_int)
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(ga_next__c__1), k), 0), j) } (((offset_of(ga_next__c__1) <= k) && (k < (offset_of(ga_next__c__1) + 2))) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(ga_next__c__1), k), 0), j).d_int)
+  assert forall k: Int :: { loc(block_of(ga_next__c__1), k) } ((offset_of(ga_next__c__1) <= k) && (k < (offset_of(ga_next__c__1) + 2))) ==> (len(member(loc(block_of(ga_next__c__1), k), 0)) == 3)
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(ga_next__c__1), k), 0), j) } (((offset_of(ga_next__c__1) <= k) && (k < (offset_of(ga_next__c__1) + 2))) && ((0 <= j) && (j < 3))) ==> loc(member(loc(block_of(ga_next__c__1), k), 0), j).d_int
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(ga_next__c__1), k), 0), j) } (((offset_of(ga_next__c__1) <= k) && (k < (offset_of(ga_next__c__1) + 2))) && ((0 <= j) && (j < 3))) ==> (((-2147483648) <= loc(member(loc(block_of(ga_next__c__1), k), 0), j).v_int) && (loc(member(loc(block_of(ga_next__c__1), k), 0), j).v_int <= 2147483647))
+  assert perm(lvloc(block_of(ga_next__c__1)).lv) >= amt_0
+  assert (1 <= res) && (res <= 100)
+  goto l_end
+  assert false
+  label l_end
+}
+
+// C/C++ function `main`
+method f_main__1() returns (res: Int)
+  ensures ((-2147483648) <= res) && (res <= 2147483647)
+  decreases
+{
+  var v_i__0: Int
+  var v_j__1: Int
+  var v_a__2: Int
+  var ga_g__0: Ref
+  var ga_next__c__1: Ref
+  var t__0: Ref
+  var t__1: Ref
+  var t__2: Perm
+  var t__3: Int
+  program_start()
+  ga_g__0 := loc(GB_g__0(), 0)
+  ga_next__c__1 := loc(GB_next__c__1(), 0)
+  assert !(((offset_of(ga_g__0) + 0) < 0) || (len(block_of(ga_g__0)) <= (offset_of(ga_g__0) + 0)))
+  assert !((0 < 0) || (len(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0)) <= 0))
+  assert perm(loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 0).v_int) > none
+  assert loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 0).d_int
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 0).v_int == 1) ==> (!(((offset_of(ga_g__0) + 1) < 0) || (len(block_of(ga_g__0)) <= (offset_of(ga_g__0) + 1))))
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 0).v_int == 1) ==> (!((2 < 0) || (len(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0)) <= 2)))
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 0).v_int == 1) ==> (perm(loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 2).v_int) > none)
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 0).v_int == 1) ==> loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 2).d_int
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 0).v_int == 1) && (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 2).v_int == 6)
+  assert !(((offset_of(ga_g__0) + 1) < 0) || (len(block_of(ga_g__0)) <= (offset_of(ga_g__0) + 1)))
+  assert !((1 < 0) || (len(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0)) <= 1))
+  t__0 := loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1)
+  assert !((perm(t__0.v_int) != write) || (perm(t__0.d_int) != write))
+  t__0.v_int := 50
+  t__0.d_int := true
+  assert !(((offset_of(ga_g__0) + 1) < 0) || (len(block_of(ga_g__0)) <= (offset_of(ga_g__0) + 1)))
+  assert !((1 < 0) || (len(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0)) <= 1))
+  assert perm(loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1).v_int) > none
+  assert loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1).d_int
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1).v_int == 50) ==> (!(((offset_of(ga_g__0) + 1) < 0) || (len(block_of(ga_g__0)) <= (offset_of(ga_g__0) + 1))))
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1).v_int == 50) ==> (!((0 < 0) || (len(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0)) <= 0)))
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1).v_int == 50) ==> (perm(loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 0).v_int) > none)
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1).v_int == 50) ==> loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 0).d_int
+  assert (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 1).v_int == 50) && (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 1), 0), 0).v_int == 4)
+  v_i__0 := 1
+  v_j__1 := 2
+  assert !(((offset_of(ga_g__0) + v_i__0) < 0) || (len(block_of(ga_g__0)) <= (offset_of(ga_g__0) + v_i__0)))
+  assert !((v_j__1 < 0) || (len(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + v_i__0), 0)) <= v_j__1))
+  assert perm(loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + v_i__0), 0), v_j__1).v_int) > none
+  assert loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + v_i__0), 0), v_j__1).d_int
+  assert loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + v_i__0), 0), v_j__1).v_int == 6
+  t__1 := loc(GB_next__c__1(), 0)
+  assert perm(lvloc(block_of(t__1)).lv) > none
+  t__2 := perm(lvloc(block_of(t__1)).lv) / 2
+  assert none < t__2
+  assert t__2 < write
+  assert forall k: Int :: { loc(block_of(t__1), k) } ((offset_of(t__1) <= k) && (k < (offset_of(t__1) + 2))) ==> (len(member(loc(block_of(t__1), k), 0)) == 3)
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(t__1), k), 0), j) } (((offset_of(t__1) <= k) && (k < (offset_of(t__1) + 2))) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(t__1), k), 0), j).v_int)
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(t__1), k), 0), j) } (((offset_of(t__1) <= k) && (k < (offset_of(t__1) + 2))) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(t__1), k), 0), j).d_int)
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(t__1), k), 0), j) } (((offset_of(t__1) <= k) && (k < (offset_of(t__1) + 2))) && ((0 <= j) && (j < 3))) ==> loc(member(loc(block_of(t__1), k), 0), j).d_int
+  assert forall k: Int, j: Int :: { loc(member(loc(block_of(t__1), k), 0), j) } (((offset_of(t__1) <= k) && (k < (offset_of(t__1) + 2))) && ((0 <= j) && (j < 3))) ==> (loc(member(loc(block_of(t__1), k), 0), j).d_int ==> (((-2147483648) <= loc(member(loc(block_of(t__1), k), 0), j).v_int) && (loc(member(loc(block_of(t__1), k), 0), j).v_int <= 2147483647)))
+  assert perm(lvloc(block_of(t__1)).lv) >= t__2
+  assert (((0 <= 0) && (0 < 2)) && (0 <= 1)) && (1 < 3)
+  t__3 := f_next__0(0, 1, t__2)
+  v_a__2 := t__3
+  assert (1 <= v_a__2) && (v_a__2 <= 100)
+  assert !(((offset_of(ga_g__0) + 0) < 0) || (len(block_of(ga_g__0)) <= (offset_of(ga_g__0) + 0)))
+  assert !((1 < 0) || (len(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0)) <= 1))
+  assert perm(loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 1).v_int) > none
+  assert loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 1).d_int
+  assert !(((loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 1).v_int - 2) < (-2147483648)) || (2147483647 < (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 1).v_int - 2)))
+  assert !(((v_a__2 - v_a__2) < (-2147483648)) || (2147483647 < (v_a__2 - v_a__2)))
+  assert !((((loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 1).v_int - 2) + (v_a__2 - v_a__2)) < (-2147483648)) || (2147483647 < ((loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 1).v_int - 2) + (v_a__2 - v_a__2))))
+  res := (loc(member(loc(block_of(ga_g__0), offset_of(ga_g__0) + 0), 0), 1).v_int - 2) + (v_a__2 - v_a__2)
+  goto l_end
+  assert false
+  label l_end
+}
+
+// well-formedness of the contract of C/C++ function `next`
+method f_next__0__wf(p_i__0: Int, p_j__1: Int, amt_0: Perm, res: Int)
+  requires ((len(GB_g__0()) == 2) && (lvloc(GB_g__0()) == loc(GB_g__0(), (-2)))) && ((len(GB_next__c__1()) == 2) && (lvloc(GB_next__c__1()) == loc(GB_next__c__1(), (-2))))
+  requires forall k: Int :: { loc(GB_g__0(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_g__0(), k), 0)) == 3)
+  requires forall k: Int :: { loc(GB_next__c__1(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_next__c__1(), k), 0)) == 3)
+  requires (none < amt_0) && (amt_0 < write)
+  requires ((-2147483648) <= p_i__0) && (p_i__0 <= 2147483647)
+  requires ((-2147483648) <= p_j__1) && (p_j__1 <= 2147483647)
+  requires ((-2147483648) <= res) && (res <= 2147483647)
+  decreases
+{
+  // the contract has nothing that can be undefined
+}

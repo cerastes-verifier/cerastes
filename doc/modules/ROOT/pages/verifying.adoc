@@ -1282,8 +1282,9 @@ The constructs that are rejected in this version are:
   defined in another file (`extern` with no definition here), arrays other than
   those xref:memory.adoc#arrays[Arrays] describes (arrays of scalars as locals,
   parameters, globals, `static` locals, structure members and compound literals in
-  C, and arrays of structures as locals, globals, `static` locals and structure
-  members: arrays of arrays are not supported yet), a global
+  C, and arrays of structures and arrays of arrays as locals, globals, `static`
+  locals and structure members: an array of three or more dimensions and an array
+  of arrays of structures are not supported yet), a global
   array declared without a bound (`int a[];`), designators in
   array initializers (`{[2] = 5}`), an unused array typedef in a function (both
   compilers warn about it), classes
@@ -1322,9 +1323,11 @@ The constructs that are rejected in this version are:
   `sizeof(char[65536u * 65536u + 1])` (which a compiler makes 1) is reported as
   xref:error-messages.adoc#_overflow[`overflow`] at the bound. An array type
   reached through a typedef of a system header (`jmp_buf`) is rejected, since its
-  bound is not checked here; so are arrays of arrays and of structures in a type
-  (`sizeof(struct point[3])`, a typedef; `sizeof(v)` of a local array of
-  structures is accepted),
+  bound is not checked here. An array of structures or of arrays in a type
+  (`sizeof(struct point[3])`, `sizeof(int[2][3])`, `typedef int grid[2][3];`) is
+  accepted where an object of that type is, with every bound checked as written;
+  a type of three or more dimensions and an array of arrays of structures are
+  rejected, as their objects are. Also rejected:
   `_BitInt`, vector types and class templates with a constant argument
   (`std::array<char, 4>`), as the operand of `sizeof`, `_Alignof`, `typeof` or
   `decltype` too, and `sizeof("abc")`.

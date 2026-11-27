@@ -1,0 +1,155 @@
+30	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+30	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+31	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+31	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+32	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+32	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+33	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+33	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+34	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+34	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+35	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+35	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+36	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+36	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+37	not.wellformed	internal	q60_348.c	3	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `U`
+37	postcondition.violated	internal	q60_348.c	3	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `U`
+42	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+42	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+43	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+43	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+44	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+44	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+45	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+45	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+46	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+46	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+47	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+47	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+48	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+48	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+49	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+49	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+50	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+50	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+51	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+51	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+52	not.wellformed	internal	q60_348.c	4	8	internal check: well-formedness of the trusted contract of the allocation of a variable of type `V`
+52	postcondition.violated	internal	q60_348.c	4	8	internal check: Silicon's own check of the trusted contract of the allocation of a variable of type `V`
+57	not.wellformed	internal	q60_348.c	6	5	internal check: well-formedness of the contract of `f`
+58	not.wellformed	internal	q60_348.c	6	5	internal check: well-formedness of the contract of `f`
+59	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+60	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+61	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+62	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+63	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+64	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+65	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+66	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+67	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+68	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+69	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+70	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+71	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+72	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+73	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+74	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+75	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+76	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+77	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+78	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+79	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+80	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+81	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+82	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+83	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+84	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+85	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+86	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+87	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+88	not.wellformed	internal	q60_348.c	6	20	internal check: well-formedness of the contract of `f`
+89	not.wellformed	internal	q60_348.c	6	5	internal check: well-formedness of the contract of `f`
+89	postcondition.violated	internal	q60_348.c	6	5	internal check: Silicon's own check of the postcondition of `f`
+90	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+90	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+91	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+91	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+92	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+92	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+93	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+93	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+94	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+94	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+95	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+95	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+96	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+96	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+97	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+97	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+98	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+98	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+99	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+99	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+100	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+100	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+101	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+101	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+102	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+102	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+103	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+103	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+104	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+104	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+105	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+105	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+106	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+106	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+107	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+107	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+108	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+108	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+109	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+109	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+110	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+110	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+111	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+111	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+112	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+112	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+113	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+113	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+114	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+114	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+115	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+115	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+116	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+116	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+117	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+117	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+118	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+118	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+119	not.wellformed	internal	q60_348.c	6	57	internal check: well-formedness of the contract of `f`
+119	postcondition.violated	internal	q60_348.c	6	57	internal check: Silicon's own check of the postcondition of `f`
+125	assert.failed	null-dereference	q60_348.c	6	106	dereferences `p`, which may be null
+126	assert.failed	permission	q60_348.c	6	106	reads `p->k` without owning it: the object it points to may have ended
+127	assert.failed	uninitialized	q60_348.c	6	106	`p->k` may be read here before it is given a value
+129	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+130	assert.failed	internal	q60_348.c	6	98	internal check: WF of a pointer parameter
+131	assert.failed	internal	q60_348.c	6	98	internal check: a pointer parameter points into its block
+132	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+133	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+134	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+135	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+136	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+137	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+138	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+139	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+140	assert.failed	permission	q60_348.c	6	98	returns without owning `*p`, which its contract promises	q60_348.c:6:this is the postcondition
+142	assert.failed[insufficient.permission]	permission	q60_348.c	6	98	returns without owning `p->u.m`, which its contract promises	q60_348.c:6:this is the postcondition
+143	assert.failed[insufficient.permission]	permission	q60_348.c	6	98	returns without owning `p->u.m`, which its contract promises	q60_348.c:6:this is the postcondition
+144	assert.failed	permission	q60_348.c	6	98	returns without owning `p->u.m`, which its contract promises	q60_348.c:6:this is the postcondition
+145	assert.failed	permission	q60_348.c	6	98	returns without owning `p->u.m`, which its contract promises	q60_348.c:6:this is the postcondition
+147	assert.failed	missing-return	q60_348.c	6	111	control may reach the end of `f` without returning a value
+153	not.wellformed	internal	q60_348.c	6	5	internal check: well-formedness of the contract of `f (well-formedness)`
+154	not.wellformed	internal	q60_348.c	6	5	internal check: well-formedness of the contract of `f (well-formedness)`
+155	not.wellformed	internal	q60_348.c	6	5	internal check: well-formedness of the contract of `f (well-formedness)`

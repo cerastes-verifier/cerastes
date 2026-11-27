@@ -13097,5 +13097,3549 @@ class PartDWrittenPartTests(unittest.TestCase):
         self.assertTrue(self.refused(self.problems("\n".join(other), mp), "which is not the one snapshot"))
 
 
+class PartEMatrixTests(unittest.TestCase):
+    """Decision 0064 items 3, 6, 13 and 17 (Part E, the first slice: a local matrix and an array-of-rows parameter).  `scripts/testdata/part_e/rows_zero.vpr` and `row_callee.vpr` are REAL
+    output of the joined build j1 (`cerastes verify --keep-vpr`; the sources are in `build/m4.5e1e2d/tm2/real/` of the session that wrote them: `rows_zero` is `int m[2][3] = {{1}, {4}}` with two
+    `CERASTES_CHECK`s, with `alloc_arr_row_int_3`, `zero_arr_row_int_3`, the rows of the scope exit; `row_callee` is tests/memory/matrix_row_pass.c); `real_rows_param.vpr` is real output too (tests/memory/array_rows_param.c, second joined proof, lane work); `rows_param.vpr` and `cube_loops.vpr` are still HAND-WRITTEN stand-ins
+    (S48's fixtures with the allocation written from the pinned clause set; they are regenerated from real output at the joined proof of the slice that emits them, slice 2): `rows_param` (`f(int a[][3], int n)` with `owns_range(a, n)` and its call) and `cube_loops` (int c[2][3][4] filled
+    by three nested loops).  The pins of the trusted allocation and its zero fill are generated from the NAME and compared, so each mutant breaks one thing and is refused with its own reason;
+    the rows over a leaf with a bound variable per index step are judged where `lint_quantified_rows` meets them, and every one of them is tied to what its allocation or its length facts state."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def refused(self, probs, reason):
+        return any(reason in p for p in probs)
+
+    @staticmethod
+    def edit(text, old, new, count=1):
+        assert old in text, old
+        return text.replace(old, new, count)
+
+    @staticmethod
+    def lines_with(text, fragment):
+        return [i for i, l in enumerate(text.split("\n"), start=1) if fragment in l]
+
+    @staticmethod
+    def drop(text, map_text, line):
+        """`text` without its line `line` (1-based) and the map renumbered (the entry of the dropped line is dropped)."""
+        lines = text.split("\n")
+        del lines[line - 1]
+        out = []
+        for raw in map_text.split("\n"):
+            if not raw.strip():
+                continue
+            f = raw.split("\t")
+            n = int(f[0])
+            if n == line:
+                continue
+            f[0] = str(n - 1 if n > line else n)
+            out.append("\t".join(f))
+        return "\n".join(lines), "\n".join(out) + "\n"
+
+    def alloc_method(self, name="alloc_arr_row_int_3", fields=(("int", "Int"),), kind="alloc", mutate=None, binders=("i", "j", "l"), spelled=None):
+        """The pinned allocation (or zero fill) as the fixtures write it, with `mutate(clauses)` applied to the generated (keyword, text) list;
+        `spelled` = (cell suffix, bounds) when the name itself spells none (the generated clauses are those of that spelling)."""
+        spelling = spelled or lv.row_array_spelling(name, {f"{p}_{t}": ty for t, ty in fields for p in "vd"})
+        t, bounds = spelling
+        zero = lv.ZERO_LITERAL.get(dict(fields)[t], "?")
+        clauses = lv.row_array_clauses(kind == "alloc", t, bounds, zero)
+        if mutate is not None:
+            clauses = mutate(clauses)
+        head = f"method {name}(n: Int) returns (r: Ref)" if kind == "alloc" else f"method {name}(r: Ref, n: Int)"
+        body = []
+        for kw, text in clauses:
+            for k, name_k in enumerate(binders):
+                text = text.replace(f"#{k}", name_k)
+            body.append(Check(f"  {kw} {text}", WF if kw == "requires" else P, "internal"))
+        decls = [x for t_, ty in fields for x in (f"field v_{t_}: {ty}", f"field d_{t_}: Bool")] + ["field lv: Bool"]
+        return [*decls, "// cerastes:trusted-contract array allocation", head, *body, "  decreases _"]
+
+    def pin_problems(self, lines):
+        return [p for p in lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map") if "decision 0064 items 3 and 6" in p]
+
+    def clean(self, lines):
+        self.assertEqual(lv.lint_vpr(*build(lines), "t.vpr", "t.vpr.map"), [])
+
+    # ---- the trusted allocation and its zero fill, pinned by the name ----
+
+    def test_the_allocation_and_the_zero_fill_are_clean_for_every_spelling(self):
+        for name, fields, depth in (("alloc_arr_row_int_3", (("int", "Int"),), 1), ("alloc_arr_row_int_3_4", (("int", "Int"),), 2), ("alloc_arr_row_bool_2", (("bool", "Bool"),), 1),
+                                    ("alloc_arr_row_ptr_int_3", (("ptr_int", "Ref"),), 1)):
+            self.clean(self.alloc_method(name, fields))
+            self.clean(self.alloc_method(name.replace("alloc_", "zero_"), fields, kind="zero"))
+        self.clean(self.alloc_method("alloc_arr_row_int_3", binders=("a", "b", "c")))  # the names of the bound variables do not matter
+
+    def test_the_emitted_looking_fixtures_are_clean(self):
+        for name in ("rows_zero", "rows_param", "cube_loops", "row_callee"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_every_clause_of_the_allocation_and_the_zero_fill_is_needed(self):
+        for name, kind in (("alloc_arr_row_int_3_4", "alloc"), ("zero_arr_row_int_3_4", "zero")):
+            n = len(lv.row_array_clauses(kind == "alloc", "int", [3, 4], "0"))
+            for i in range(n):
+                with self.subTest(method=name, dropped=i):
+                    probs = self.pin_problems(self.alloc_method(name, kind=kind, mutate=lambda c, i=i: c[:i] + c[i + 1:]))
+                    self.assertTrue(self.refused(probs, "missing"), probs)
+
+    def test_a_clause_given_twice_is_refused(self):
+        for name, kind in (("alloc_arr_row_int_3", "alloc"), ("zero_arr_row_int_3", "zero")):
+            n = len(lv.row_array_clauses(kind == "alloc", "int", [3], "0"))
+            for i in range(n):
+                with self.subTest(method=name, doubled=i):
+                    probs = self.pin_problems(self.alloc_method(name, kind=kind, mutate=lambda c, i=i: c + [c[i]]))
+                    self.assertTrue(self.refused(probs, "twice"), probs)
+
+    def test_the_counts_and_the_ranges_are_the_names_bounds(self):
+        # the row's length fact states a count other than the name's, the permission rows range over another count, the first range is not `n`
+        for label, fix, reason in (
+                ("the length fact says 4", lambda t: t.replace("== 3", "== 4"), "unexpected"),
+                ("the leaf rows range to 4", lambda t: t.replace("(#1 < 3)", "(#1 < 4)"), "unexpected"),
+                ("the first range is not n", lambda t: t.replace("(#0 < n)", "(#0 < 2)"), "unexpected")):
+            with self.subTest(mutant=label):
+                probs = self.pin_problems(self.alloc_method(mutate=lambda c, fix=fix: [(kw, fix(t)) for kw, t in c]))
+                self.assertTrue(self.refused(probs, reason), probs)
+
+    def test_the_receiver_is_the_canonical_chain(self):
+        for label, fix in (("the member step is 1", lambda t: t.replace("member(loc(block_of(r), #0), 0), #1)", "member(loc(block_of(r), #0), 1), #1)")),
+                           ("the bound variables are swapped in the receiver", lambda t: t.replace("loc(member(loc(block_of(r), #0), 0), #1)", "loc(member(loc(block_of(r), #1), 0), #0)")),
+                           ("the trigger is the slot, not the receiver", lambda t: t.replace("{ loc(member(loc(block_of(r), #0), 0), #1) }", "{ loc(block_of(r), #0) }"))):
+            with self.subTest(mutant=label):
+                probs = self.pin_problems(self.alloc_method(mutate=lambda c, fix=fix: [(kw, fix(t)) for kw, t in c]))
+                self.assertTrue(self.refused(probs, "unexpected") or self.refused(probs, "missing"), probs)
+
+    def test_the_bound_variables_are_distinct_and_no_formal(self):
+        for binders, reason in ((("i", "i", "l"), "not distinct"), (("n", "j", "l"), "named like a formal"), (("r", "j", "l"), "named like a formal")):
+            with self.subTest(binders=binders):
+                probs = self.pin_problems(self.alloc_method(binders=binders))
+                self.assertTrue(self.refused(probs, reason), probs)
+
+    def test_the_name_spells_the_bounds_and_a_declared_cell(self):
+        for name, fields, reason in (("alloc_arr_row_int", (("int", "Int"),), "spells no bound"), ("alloc_arr_row_long_3", (("int", "Int"),), "spells no declared cell"),
+                                     ("alloc_arr_row_int_3_4_5", (("int", "Int"),), "depth 4 or more")):
+            with self.subTest(name=name):
+                lines = self.alloc_method("alloc_arr_row_int_3", fields)  # the clauses of `int[3]`; the name differs
+                lines = [l if not isinstance(l, str) else l.replace("alloc_arr_row_int_3", name) for l in lines]
+                lines = [Check(l.text.replace("alloc_arr_row_int_3", name), l.error_id, l.category) if isinstance(l, Check) else l for l in lines]
+                probs = self.pin_problems(lines)
+                self.assertTrue(self.refused(probs, reason), probs)
+
+    def test_an_ambiguous_split_of_the_name_is_refused(self):
+        # `v_int_3`/`d_int_3` and `v_int`/`d_int` are both declared: `alloc_arr_row_int_3_4` splits two ways
+        self.assertIsInstance(lv.row_array_spelling("alloc_arr_row_int_3_4", {"v_int": "Int", "d_int": "Bool", "v_int_3": "Int", "d_int_3": "Bool"}), str)
+        lines = self.alloc_method("alloc_arr_row_int_3_4", (("int", "Int"), ("int_3", "Int")), spelled=("int", [3, 4]))
+        probs = self.pin_problems(lines)
+        self.assertTrue(self.refused(probs, "ambiguous"), probs)
+
+    def test_the_header_the_body_and_the_end_are_the_pinned_ones(self):
+        good = self.alloc_method()
+        head = next(i for i, l in enumerate(good) if isinstance(l, str) and l.startswith("method alloc_arr_row_int_3"))
+        for label, mutant, reason in (
+                ("a body", good[:-1] + ["{", "}"], "has a body"),
+                ("no decreases _", good[:-1], "decreases _"),
+                ("another header", good[:head] + ["method alloc_arr_row_int_3(n: Int, m: Int) returns (r: Ref)"] + good[head + 1:], "header")):
+            with self.subTest(mutant=label):
+                self.assertTrue(self.refused(self.pin_problems(mutant), reason), self.pin_problems(mutant))
+
+    def test_a_zero_fill_never_conjures_a_permission_or_a_wrong_zero(self):
+        name = "zero_arr_row_int_3"
+        n = len(lv.row_array_clauses(False, "int", [3], "0"))
+        base = lv.row_array_clauses(False, "int", [3], "0")
+        for i, (kw, text) in enumerate(base):
+            if kw == "requires" and "acc(" in text:
+                with self.subTest(dropped_requires=i):
+                    self.assertTrue(self.refused(self.pin_problems(self.alloc_method(name, kind="zero", mutate=lambda c, i=i: c[:i] + c[i + 1:])), "missing"))
+        with self.subTest(mutant="the zero is 1"):
+            self.assertTrue(self.refused(self.pin_problems(self.alloc_method(name, kind="zero", mutate=lambda c: [(kw, t.replace("== 0", "== 1")) for kw, t in c])), "unexpected"))
+        with self.subTest(mutant="the zero fill states a length fact"):
+            extra = lv.row_array_clauses(True, "int", [3], "0")[2]
+            self.assertTrue(self.refused(self.pin_problems(self.alloc_method(name, kind="zero", mutate=lambda c: c + [extra])), "unexpected"))
+
+    def test_the_names_of_the_aggregate_rules_never_take_a_row_allocation(self):
+        # the one-binder clause set of an array of structures under the name of an array of rows is refused with the rows' own reason, not read as a structure's
+        lines = self.alloc_method()
+        agg = ["  requires 1 <= n", "  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == n)",
+               "  ensures forall k: Int :: { loc(block_of(r), k) } ((0 <= k) && (k < n)) ==> (len(member(loc(block_of(r), k), 0)) == 1)",
+               "  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } ((0 <= k) && (k < n)) ==> acc(loc(member(loc(block_of(r), k), 0), 0).v_int)",
+               "  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } ((0 <= k) && (k < n)) ==> acc(loc(member(loc(block_of(r), k), 0), 0).d_int)",
+               "  ensures forall k: Int :: { loc(member(loc(block_of(r), k), 0), 0) } ((0 <= k) && (k < n)) ==> (!loc(member(loc(block_of(r), k), 0), 0).d_int)",
+               "  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)"]
+        head = next(i for i, l in enumerate(lines) if isinstance(l, str) and l.startswith("method alloc_arr_row_int_3"))
+        mutant = lines[:head + 1] + [Check(c, WF if c.startswith("  requires") else P, "internal") for c in agg] + ["  decreases _"]
+        probs = self.pin_problems(mutant)
+        self.assertTrue(self.refused(probs, "an array of rows"), probs)
+        self.assertTrue(self.refused(probs, "missing"), probs)
+
+    # ---- the rows of a local matrix: scope exits, marked rows, loops ----
+
+    def test_the_scope_exit_rows_are_the_allocations_rows(self):
+        text, mp = self.pair("rows_zero")
+        exhales = self.lines_with(text, "exhale forall")
+        self.assertEqual(len(exhales), 2)
+        for line in exhales:
+            with self.subTest(dropped=line):
+                t, m = self.drop(text, mp, line)
+                self.assertTrue(self.refused(self.problems(t, m), "are not the rows of its allocation"), self.problems(t, m))
+        with self.subTest(mutant="the exhale runs over one row less"):
+            e = exhales[0]
+            lines = text.split("\n")
+            lines[e - 1] = lines[e - 1].replace("(k < 2)", "(k < 1)")
+            self.assertTrue(self.refused(self.problems("\n".join(lines), mp), "not the allocation's"), self.problems("\n".join(lines), mp))
+        with self.subTest(mutant="the exhale over an inner range of 4"):
+            lines = text.split("\n")
+            lines[exhales[0] - 1] = lines[exhales[0] - 1].replace("(j < 3)", "(j < 4)")
+            self.assertTrue(self.refused(self.problems("\n".join(lines), mp), "is not its leaf with the counts [3]"), self.problems("\n".join(lines), mp))
+        with self.subTest(mutant="the exhale row is over the field of another cell"):
+            lines = text.split("\n")
+            lines[exhales[0] - 1] = lines[exhales[0] - 1].replace(".v_int", ".v_bool")
+            self.assertTrue(self.refused(self.problems("\n".join(lines), mp), "is not of its cell `int`"), self.problems("\n".join(lines), mp))
+
+    def test_a_marked_assert_row_over_two_bound_variables_has_the_marked_reason_and_no_extras(self):
+        text, mp = self.pair("rows_zero")
+        line = self.lines_with(text, "  assert forall")[0]
+        with self.subTest(mutant="no expected reason in the map"):
+            bad_map = "\n".join(l.replace("assert.failed[insufficient.permission]", "assert.failed") if l.startswith(f"{line}\t") else l for l in mp.split("\n"))
+            self.assertTrue(self.refused(self.problems(text, bad_map), "no expected reason"), self.problems(text, bad_map))
+        lines = text.split("\n")
+        for label, edit, reason in (
+                ("an antecedent beyond the ranges", lambda l: l.replace("(j < 3))) ==>", "(j < 3))) && (i > 5) ==>"), "the consequent is not `acc(R.f)`"),
+                ("an inner range that is not a literal", lambda l: l.replace("(j < 3)", "(j < n)"), "the range of `j` is not"),
+                ("a guard on the marked row", lambda l: l.replace("assert forall", "assert (v_ci__0 > 0) ==> forall"), "unguarded with no wrapping"),
+                ("a heap-reading amount", lambda l: l.replace(".v_int)", ".v_int, perm(v_m__2.v_int))"), "reads no heap"),
+                ("the first range is not over the array's count", lambda l: l.replace("(k < 2)", "(k < n)"), "not over a literal count")):
+            with self.subTest(mutant=label):
+                bad = list(lines)
+                bad[line - 1] = edit(bad[line - 1])
+                self.assertNotEqual(bad[line - 1], lines[line - 1], label)
+                self.assertTrue(self.refused(self.problems("\n".join(bad), mp), reason), (label, self.problems("\n".join(bad), mp)))
+
+    def test_four_bound_variables_are_refused(self):
+        text, mp = self.pair("cube_loops")
+        line = self.lines_with(text, "exhale forall")[0]
+        lines = text.split("\n")
+        row = lines[line - 1].replace("forall i: Int, j: Int, l: Int", "forall i: Int, j: Int, l: Int, q: Int").replace(
+            "{ loc(member(loc(member(loc(block_of(vm), i), 0), j), 0), l) }", "{ loc(member(loc(member(loc(member(loc(block_of(vm), i), 0), j), 0), l), 0), q) }")
+        row = row.replace("((0 <= l) && (l < 4)))", "((0 <= l) && (l < 4)) && ((0 <= q) && (q < 2)))").replace(".v_int)", ".v_int)")
+        row = row.replace("loc(member(loc(member(loc(block_of(vm), i), 0), j), 0), l).v_int", "loc(member(loc(member(loc(member(loc(block_of(vm), i), 0), j), 0), l), 0), q).v_int")
+        lines[line - 1] = row
+        probs = self.problems("\n".join(lines), mp)
+        self.assertTrue(self.refused(probs, "depth 4 or more"), probs)
+
+    def test_the_loop_conjuncts_over_a_matrix_are_the_four_of_item_8(self):
+        text, mp = self.pair("cube_loops")
+        lines = text.split("\n")
+        inv = [i for i, l in enumerate(lines, start=1) if l.strip().startswith("invariant forall")]
+        self.assertEqual(len(inv), 12)
+        kept = next(i for i in inv if "old[lh_0]" in lines[i - 1] and ".d_int)" in lines[i - 1])
+        for label, line, edit, reason in (
+                ("the kept flag without its label", kept, lambda l: l.replace("old[lh_0](", "old("), "reads a labelled `old[L]`"),
+                ("a kept flag of another cell", kept, lambda l: l.replace("==> loc(member(loc(member(loc(block_of(vm), i), 0), j), 0), l).d_int",
+                                                                        "==> loc(member(loc(member(loc(block_of(vm), j), 0), i), 0), l).d_int"), "the consequent is not `acc(R.f)`"),
+                ("a type range of another field", inv[3], lambda l: l.replace(".v_int", ".v_bool"), "the consequent is not `acc(R.f)`"),
+                ("an amount that is no Perm formal", inv[0], lambda l: l.replace(".v_int)", ".v_int, kl_0)", 1), "`Perm` formal"),
+                ("a permission row over fewer elements", inv[0], lambda l: l.replace("(i < 2)", "(i < 1)"), "the allocation's"),
+                ("a permission row over a shorter row", inv[1], lambda l: l.replace("(j < 3)", "(j < 2)"), "is not its leaf with the counts")):
+            with self.subTest(mutant=label):
+                bad = list(lines)
+                bad[line - 1] = edit(bad[line - 1])
+                self.assertNotEqual(bad[line - 1], lines[line - 1], label)
+                self.assertTrue(self.refused(self.problems("\n".join(bad), mp), reason), (label, self.problems("\n".join(bad), mp)))
+
+    def test_a_row_over_an_unallocated_variable_stands_in_no_exhale_or_invariant(self):
+        text, mp = self.pair("rows_param")
+        lines = text.split("\n")
+        ex = self.lines_with(text, "exhale forall")[0]
+        with self.subTest(mutant="an exhale over the pointer parameter"):
+            bad = list(lines)
+            bad[ex - 1] = bad[ex - 1].replace("block_of(vm)", "block_of(a)")
+            self.assertTrue(self.refused(self.problems("\n".join(bad), mp), "no local matrix"), self.problems("\n".join(bad), mp))
+
+    # ---- the rows of an array-of-rows parameter's range atom ----
+
+    def test_each_inner_bound_variable_ranges_over_the_count_its_blocks_length_fact_states(self):
+        text, mp = self.pair("rows_param")
+        head = self.lines_with(text, "method f_rows")[0]
+        lens = [i for i in self.lines_with(text, "len(member(loc(block_of(a), i), 0)) == 3")]
+        self.assertEqual(len(lens), 2)  # the `requires` and the `ensures`
+        with self.subTest(mutant="the requires' length fact is dropped"):
+            t, m = self.drop(text, mp, lens[0])
+            self.assertTrue(self.refused(self.problems(t, m), "no length fact of this `requires`"), self.problems(t, m))
+        with self.subTest(mutant="the length fact says 4 and the rows range to 3"):
+            lines = text.split("\n")
+            lines[lens[0] - 1] = lines[lens[0] - 1].replace("== 3", "== 4")
+            self.assertTrue(self.refused(self.problems("\n".join(lines), mp), "no length fact of this `requires`"), self.problems("\n".join(lines), mp))
+        with self.subTest(mutant="the rows range to 4 and the length fact says 3"):
+            lines = text.split("\n")
+            rows = [i for i in range(lens[0] + 1, lens[0] + 5)]
+            for i in rows:
+                lines[i - 1] = lines[i - 1].replace("(j < 3)", "(j < 4)")
+            self.assertTrue(self.refused(self.problems("\n".join(lines), mp), "no length fact of this `requires`"), self.problems("\n".join(lines), mp))
+
+    def test_a_length_fact_with_a_count_other_than_one_stays_refused_without_rows_over_a_second_bound_variable(self):
+        # the old one-binder rule: a count of 3 in a method whose clause kind has no row of two bound variables is a structure rule's refusal (`range_lens_members`)
+        text, mp = self.pair("rows_param")
+        lines = text.split("\n")
+        lens_line = next(i for i, l in enumerate(lines, start=1) if l.strip().startswith("requires forall i: Int ::") and "== 3" in l)
+        keep = [i for i, l in enumerate(lines, start=1) if l.strip().startswith("requires forall i: Int, j: Int")]
+        self.assertEqual(len(keep), 4)
+        t, m = text, mp
+        for line in sorted(keep, reverse=True):
+            t, m = self.drop(t, m, line)
+        new_line = lens_line  # the rows after it were dropped, it keeps its number
+        self.assertIn("== 3", t.split("\n")[new_line - 1])
+        probs = [p for p in self.problems(t, m) if p.startswith(f"t.vpr:{new_line}:")]
+        self.assertTrue(any("outside the shapes of decision 0059" in p for p in probs), probs)
+        with self.subTest(what="with its rows it is admitted"):
+            self.assertEqual([p for p in self.problems(text, mp) if p.startswith(f"t.vpr:{lens_line}:")], [])
+
+    def test_a_row_whose_receiver_swaps_the_bound_variables_is_not_a_row(self):
+        text, mp = self.pair("rows_zero")
+        lines = text.split("\n")
+        line = self.lines_with(text, "  assert forall")[0]
+        bad = list(lines)
+        bad[line - 1] = bad[line - 1].replace("loc(member(loc(block_of(v_m__2), k), 0), j)", "loc(member(loc(block_of(v_m__2), j), 0), k)")
+        self.assertNotEqual(bad[line - 1], lines[line - 1])
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue([p for p in probs if p.startswith(f"t.vpr:{line}:")], probs)
+        self.assertTrue(self.refused(probs, "not a marked range row"), probs)
+
+    def test_a_literal_first_range_belongs_to_an_allocation_or_a_marked_permission_row(self):
+        # the one-binder rule (`range_atom_row_problem`) refuses `0 <= k < N` over a variable that is no bound local with a stated count: a row of a `requires`, `ensures`
+        # or pure `assert` over a pointer parameter with a literal first range is refused here too (an `ensures` of a bodiless method is an assumption)
+        text, mp = self.pair("rows_param")
+        lines = text.split("\n")
+        for kw in ("requires", "ensures"):
+            line = next(i for i, l in enumerate(lines, start=1) if l.strip().startswith(f"{kw} forall i: Int, j: Int") and "block_of(a)" in l and "== 3" not in l and ".d_int" in l and "==>" in l)
+            with self.subTest(clause=kw):
+                bad = list(lines)
+                bad[line - 1] = bad[line - 1].replace("(offset_of(a) <= i) && (i < (offset_of(a) + n))", "(0 <= i) && (i < 2)")
+                self.assertNotEqual(bad[line - 1], lines[line - 1])
+                probs = self.problems("\n".join(bad), mp)
+                self.assertTrue(self.refused(probs, "a literal first range is the allocation's"), probs)
+        # the shapes it keeps: a marked permission row over any variable, and a loop row over a pointer parameter's range (as the one-binder rows are)
+        def judge(kind, text_row, alloc=None, formals=frozenset()):
+            ir = lv.parse_index_row(text_row)
+            self.assertIsNotNone(ir, text_row)
+            return lv.index_row_problem(kind, None, True, ir, formals, alloc)[0]
+        cell = "loc(member(loc(block_of(t), i), 0), j)"
+        marked = f"forall i: Int, j: Int :: {{ {cell} }} (((0 <= i) && (i < 2)) && ((0 <= j) && (j < 3))) ==> acc({cell}.v_int)"
+        self.assertIsNone(judge("assert", marked))
+        self.assertIsNotNone(judge("assert", marked.replace("acc(" + cell + ".v_int)", cell + ".d_int")))
+        loop = (f"forall i: Int, j: Int :: {{ {cell} }} (((offset_of(t) <= i) && (i < (offset_of(t) + n))) && ((0 <= j) && (j < 3))) ==> acc({cell}.v_int, amt_0)")
+        self.assertIsNone(judge("invariant", loop, formals=frozenset({"amt_0"})))
+        self.assertIsNotNone(judge("invariant", loop.replace("amt_0", "kl_0"), formals=frozenset({"amt_0"})))
+
+    def test_a_bodiless_method_with_another_name_gets_no_permission_from_literal_range_rows(self):
+        # the trusted allocation is pinned by its name; the same clauses under any other name (a bodiless method with the trusted tag) are not an allocation, and their rows over `0 <= i < N`
+        # that give permission or state values are refused, in each keyword they could stand in
+        text, mp = self.pair("rows_zero")
+        for old, new in (("alloc_arr_row_int_3", "make_rows"), ("zero_arr_row_int_3", "fill_rows")):
+            text = text.replace(old, new)
+        head = self.lines_with(text, "method make_rows")[0]
+        lines = text.split("\n")
+        end = next(i for i in range(head, len(lines)) if lines[i].strip() == "decreases _")
+        rows = [i for i in range(head, end) if "forall k: Int, j: Int" in lines[i]]
+        self.assertGreaterEqual(len(rows), 3)
+        probs = self.problems(text, mp)
+        for i in rows:
+            with self.subTest(line=i + 1):
+                self.assertTrue(any(p.startswith(f"t.vpr:{i + 1}:") for p in probs), (lines[i], probs))
+        # also a row that gives permission through an `offset_of` range with no length fact stated in the clause group
+        bare = ("method give(a: Ref, n: Int)\n  ensures forall i: Int, j: Int :: { loc(member(loc(block_of(a), i), 0), j) } (((offset_of(a) <= i) && (i < (offset_of(a) + n))) && "
+                "((0 <= j) && (j < 3))) ==> acc(loc(member(loc(block_of(a), i), 0), j).v_int)\n  decreases _\n")
+        probs = self.problems("field v_int: Int\nfield d_int: Bool\nfield lv: Bool\n// cerastes:trusted-contract t\n" + bare, "5\tpostcondition.violated\tinternal\tt.c\t1\t1\tm\n")
+        self.assertTrue(self.refused(probs, "no length fact of this `ensures`"), probs)
+
+    def test_the_type_range_alone_is_a_row_of_a_range_over_rows_and_nothing_wider(self):
+        # decision 0064 item 7: per leaf path the permissions, the flags and the type range, each its own quantifier; the emitted range row of a range over rows states the type's range
+        # of the cell's value with no antecedent beyond the ranges (as 0060 item 16's one-binder rows do); the shape is the standard range of the cell's own field and nothing else
+        cell = "loc(member(loc(block_of(a), i), 0), j)"
+        rng = "((offset_of(a) <= i) && (i < (offset_of(a) + n))) && ((0 <= j) && (j < 3))"
+
+        def row(cons):
+            return f"forall i: Int, j: Int :: {{ {cell} }} ({rng}) ==> {cons}"
+
+        def judge(kind, cons):
+            ir = lv.parse_index_row(row(cons))
+            self.assertIsNotNone(ir, cons)
+            return lv.index_row_problem(kind, None, True, ir, frozenset({"amt_0"}), None)[0]
+
+        good = f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))"
+        for kind in ("requires", "ensures", "assert"):
+            with self.subTest(kind=kind):
+                self.assertIsNone(judge(kind, good))
+        for kind in ("exhale", "invariant"):
+            with self.subTest(what=f"no {kind} holds the bare type range (the invariant's form waits for an emitted text)"):
+                self.assertIn("stands in no", judge(kind, good))
+        for label, cons, reason in (
+                ("a bound that is not the type's", f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483646))", "the type's range"),
+                ("only one side", f"((-2147483648) <= {cell}.v_int)", "the type's range"),
+                ("the range of another type's field", f"((0 <= {cell}.v_int) && ({cell}.v_int <= 255))", "the type's range"),
+                ("the range of a value of another cell", f"(((-2147483648) <= loc(member(loc(block_of(a), i), 0), 0).v_int) && (loc(member(loc(block_of(a), i), 0), 0).v_int <= 2147483647))", "the type's range")):
+            with self.subTest(mutant=label):
+                why = judge("requires", cons)
+                self.assertIsNotNone(why)
+        with self.subTest(mutant="an antecedent beyond the ranges"):
+            ir = lv.parse_index_row(f"forall i: Int, j: Int :: {{ {cell} }} ({rng}) && (j > 0) ==> {good}")
+            self.assertIsNotNone(ir)
+            self.assertIsNotNone(lv.index_row_problem("requires", None, True, ir, frozenset(), None)[0])
+
+    def test_the_real_output_of_a_row_parameters_range_atom_and_the_weakenings_of_its_rows(self):
+        # `real_rows_param` is the real output of tests/memory/array_rows_param.c (c23, lane work, the second joined proof): `put`, `get` and `use` with `owns_range(a, n)` and
+        # `reads_range(a, n)` over rows, the call with its marked rows; each weakening below is refused with its own reason
+        text, mp = self.pair("real_rows_param")
+        self.assertEqual(self.problems(text, mp), [])
+        lines = text.split("\n")
+        put = self.lines_with(text, "method f_put__0")[0]
+
+        def first(prefix, frag, after=put):
+            return next(i for i in range(after, len(lines) + 1) if lines[i - 1].strip().startswith(prefix) and frag in lines[i - 1])
+
+        lens = first("requires forall k: Int ::", "len(member(loc(block_of(p_a__0), k), 0)) == 3")
+        acc = first("requires forall k: Int, j: Int", ".v_int)")
+        rng = first("requires forall k: Int, j: Int", "(-2147483648) <=")
+        out = first("ensures forall k: Int, j: Int", "(-2147483648) <=")
+
+        def refused_with(edit_line, edit, reason, label):
+            bad = list(lines)
+            bad[edit_line - 1] = edit(bad[edit_line - 1])
+            self.assertNotEqual(bad[edit_line - 1], lines[edit_line - 1], label)
+            probs = self.problems("\n".join(bad), mp)
+            self.assertTrue(self.refused(probs, reason), (label, probs))
+
+        with self.subTest(mutant="the length fact is dropped"):
+            t, m = self.drop(text, mp, lens)
+            self.assertTrue(self.refused(self.problems(t, m), "no length fact of this `requires`"), self.problems(t, m))
+        refused_with(lens, lambda l: l.replace("== 3", "== 4"), "no length fact of this `requires`", "the length fact says 4 and the rows range to 3")
+        refused_with(acc, lambda l: l.replace("(j < 3)", "(j < 4)"), "no length fact of this `requires`", "the permission row ranges to 4")
+        refused_with(out, lambda l: l.replace("(offset_of(p_a__0) <= k) && (k < (offset_of(p_a__0) + p_n__1))", "(0 <= k) && (k < 2)"), "a literal first range is the allocation's", "a literal first range in an ensures")
+        refused_with(rng, lambda l: l.replace("<= 2147483647", "<= 2147483646"), "the consequent is not `acc(R.f)`, the flag, the type's range", "the type's range is not the type's")
+        refused_with(acc, lambda l: l.replace("loc(member(loc(block_of(p_a__0), k), 0), j)", "loc(member(loc(block_of(p_a__0), j), 0), k)"), "`forall`", "the receiver swaps the bound variables")
+
+    # ---- the loop rows of a matrix place and of a row parameter's range place (decision 0064 items 10 and 17), from real self-test output of the loops step ----
+
+    def loop_lines(self, text, kw):
+        return [i for i, l in enumerate(text.split("\n"), start=1) if l.strip().startswith(f"{kw} forall k: Int, j: Int")]
+
+    def test_the_real_loop_output_over_a_local_matrix_and_a_row_ranges_loop_is_clean(self):
+        # `real_loop_matrix_nested_reads` (two nested loops reading a local matrix) and `real_loop_rowrange_fill` (a row parameter's range filled by two nested loops) are the VIR
+        # self-test's output (cases e1e2e_loop_matrix_nested_reads and e1e2e_loop_rowrange_fill, the loops step's proved snapshot): per loop the entry rows, the liveness conjunct, per
+        # leaf path the permission, flag, kept-flag, range-under-flag and kept-value conjuncts over two bound variables and the back-edge rows
+        for name in ("real_loop_matrix_nested_reads", "real_loop_rowrange_fill"):
+            with self.subTest(name=name):
+                text, mp = self.pair(name)
+                self.assertEqual(self.problems(text, mp), [])
+                self.assertGreaterEqual(len(self.loop_lines(text, "invariant")), 5 * 2 - 4)
+
+    def test_the_conjuncts_of_a_loop_over_a_matrix_place_are_judged_row_by_row(self):
+        text, mp = self.pair("real_loop_matrix_nested_reads")
+        lines = text.split("\n")
+        inv = self.loop_lines(text, "invariant")
+        first = inv[:5]  # the first loop's: acc v, acc d, kept flag, range under the flag, kept value
+        acc_v, acc_d, kept_flag, rng, kept_value = first
+        self.assertIn(".v_int)", lines[acc_v - 1])
+        self.assertIn("old[lh_0](", lines[kept_flag - 1])
+        self.assertIn("==> (((-2147483648)", lines[rng - 1].replace("  ", " "))
+        self.assertIn("== old[lh_0]", lines[kept_value - 1])
+
+        def refused_with(line, edit, reason, label):
+            bad = list(lines)
+            bad[line - 1] = edit(bad[line - 1])
+            self.assertNotEqual(bad[line - 1], lines[line - 1], label)
+            probs = self.problems("\n".join(bad), mp)
+            self.assertTrue(self.refused(probs, reason), (label, probs))
+
+        refused_with(acc_v, lambda l: l.replace("(k < 2)", "(k < 1)"), "the allocation's", "the permission conjunct runs over one row less")
+        refused_with(acc_d, lambda l: l.replace("(j < 3)", "(j < 4)"), "is not its leaf with the counts", "the flag permission conjunct runs to 4 cells")
+        refused_with(acc_v, lambda l: l.replace(".v_int)", ".v_int, kl_v_m__0__0)"), "the amount of an `acc` is a `Perm` formal", "an amount that is a local on a conjunct")
+        refused_with(kept_flag, lambda l: l.replace("old[lh_0](", "old("), "labelled", "the kept flag reads an unlabelled old")
+        refused_with(kept_value, lambda l: l.replace("old[lh_0](", "old(").replace(")))", "))"), "", "the kept value reads an unlabelled old")
+        refused_with(rng, lambda l: l.replace("<= 2147483647", "<= 2147483646"), "the consequent is not", "the range under the flag is not the type's")
+        refused_with(acc_v, lambda l: l.replace("loc(member(loc(block_of(v_m__0), k), 0), j)", "loc(member(loc(block_of(v_m__0), j), 0), k)"), "", "the receiver swaps the bound variables")
+        refused_with(kept_flag, lambda l: l.replace("old[lh_0](loc(member(loc(block_of(v_m__0), k), 0), j).d_int)", "old[lh_0](loc(member(loc(block_of(v_m__0), k), 0), j).v_int)"), "", "the kept flag names a value")
+        with self.subTest(mutant="a kept flag in an ensures-only position is not a loop's"):
+            bad = list(lines)
+            bad[kept_flag - 1] = bad[kept_flag - 1].replace("invariant forall", "ensures forall")
+            self.assertTrue(self.problems("\n".join(bad), mp))
+
+    def test_the_conjuncts_of_a_loop_over_a_row_parameters_range_are_judged_row_by_row(self):
+        text, mp = self.pair("real_loop_rowrange_fill")
+        lines = text.split("\n")
+        inv = self.loop_lines(text, "invariant")
+        acc_v, acc_d, kept_flag, rng = inv[:4]
+
+        def refused_with(line, edit, reason, label):
+            bad = list(lines)
+            bad[line - 1] = edit(bad[line - 1])
+            self.assertNotEqual(bad[line - 1], lines[line - 1], label)
+            probs = self.problems("\n".join(bad), mp)
+            self.assertTrue(self.refused(probs, reason), (label, probs))
+
+        refused_with(acc_v, lambda l: l.replace("(offset_of(p_a__0) <= k) && (k < (offset_of(p_a__0) + p_n__1))", "(0 <= k) && (k < 2)"), "a literal first range is the allocation's", "a literal first range over the pointer parameter")
+        refused_with(acc_d, lambda l: l.replace("(offset_of(p_a__0) + p_n__1)", "(offset_of(p_a__0) + k)"), "the first range is neither", "the range ends at a count that names the bound variable")
+        refused_with(acc_v, lambda l: l.replace(".v_int)", ".v_int, kl_p_a__0__0)"), "the amount of an `acc` is a `Perm` formal", "an amount that is a local")
+        refused_with(kept_flag, lambda l: l.replace("old[lh_0](", "old("), "labelled", "the kept flag reads an unlabelled old")
+        refused_with(rng, lambda l: l.replace("<= 2147483647", "<= 2147483646"), "the consequent is not", "the range under the flag is not the type's")
+
+    def test_each_kind_of_clause_takes_only_its_own_shapes(self):
+        text, mp = self.pair("rows_param")
+        lines = text.split("\n")
+        ex = self.lines_with(text, "exhale forall")[0]
+        with self.subTest(mutant="the exhale of a flag row"):
+            bad = list(lines)
+            bad[ex - 1] = bad[ex - 1].replace("acc(loc(member(loc(block_of(vm), i), 0), j).v_int)", "loc(member(loc(block_of(vm), i), 0), j).d_int")
+            self.assertTrue(self.refused(self.problems("\n".join(bad), mp), "stands in no `exhale`"), self.problems("\n".join(bad), mp))
+        req = next(i for i in self.lines_with(text, "requires forall i: Int, j: Int") if ".d_int ==> " in lines[i - 1])
+        with self.subTest(mutant="a kept flag in a requires"):
+            bad = list(lines)
+            cell = "loc(member(loc(block_of(a), i), 0), j)"
+            bad[req - 1] = f"  requires forall i: Int, j: Int :: {{ {cell} }} (((offset_of(a) <= i) && (i < (offset_of(a) + n))) && ((0 <= j) && (j < 3)) && old({cell}.d_int)) ==> {cell}.d_int"
+            self.assertTrue(self.refused(self.problems("\n".join(bad), mp), "a `kept_flag` row stands in no `requires`"), self.problems("\n".join(bad), mp))
+
+
+class PartEGlobalMatrixTests(unittest.TestCase):
+    """Decision 0064 items 9 and 17 (Part E, slice 3a: a global or `static` local MATRIX).  `scripts/testdata/part_e/real_gmat_*.vpr` are REAL output of the VIR self-test on the encoder
+    snapshot edg24 (il73): `real_gmat_main_read_write` (`int gm[2][3] = {{1, 2, 3}, {4}}`: the listed cells, the cells row 1's list leaves out, a main that writes and reads), `real_gmat_zero_rows`
+    (`{{1, 2, 3}}`: the rows no list reaches), `real_gmat_unknown_value` (C++ external linkage: the type's range per cell), `real_gmat_owns_callee` (a callee under `owns(gm)`: the rows of the
+    contract over the global's block term, the places `ga = loc(GB_gm(), 0)` in its body and in main), `real_gmat_loop_main_reads`, `real_gmat_loop_owns_fill` (loops over the place) and
+    `real_gmat_static_local`.  The rows of `program_start` are read row by row (`matrix_global_group`: the length facts of the rows, the two-binder permissions and flags, the values row by
+    row, the zero rests, the liveness cell), a contract's rows are tied to the group's counts (`gb_matrix_row_problem`) and a loop's or a body's rows over the place of the global to its
+    rows and columns (`index_row_problem`, `global_matrix_places`); each mutant breaks one thing and is refused with its own reason."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def refused(self, probs, reason):
+        return any(reason in p for p in probs)
+
+    @staticmethod
+    def lines_with(text, fragment):
+        return [i for i, l in enumerate(text.split("\n"), start=1) if fragment in l]
+
+    def start_lines(self, text):
+        """The 1-based lines of `program_start`'s clauses (its `ensures` rows), in order."""
+        lines = text.split("\n")
+        at = next(i for i, l in enumerate(lines) if l.startswith("method program_start()"))
+        out = []
+        for i in range(at + 1, len(lines)):
+            if lines[i].strip().startswith("ensures"):
+                out.append(i + 1)
+            elif lines[i].strip().startswith("decreases"):
+                break
+        return out
+
+    def mutate_line(self, name, line, edit, reason, label):
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        bad = list(lines)
+        bad[line - 1] = edit(bad[line - 1])
+        self.assertNotEqual(bad[line - 1], lines[line - 1], label)
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue(self.refused(probs, reason), (label, probs))
+
+    def drop_line(self, name, line, reason, label):
+        text, mp = self.pair(name)
+        bad, bad_map = PartEMatrixTests.drop(text, mp, line)
+        probs = self.problems(bad, bad_map)
+        self.assertTrue(self.refused(probs, reason), (label, probs))
+
+    def insert_line(self, text, mp, after, new_line):
+        """`text` with `new_line` as a new line after line `after` (1-based), the map renumbered (the new line takes the entry of the line it follows)."""
+        lines = text.split("\n")
+        lines.insert(after, new_line)
+        out = []
+        for raw in mp.split("\n"):
+            if not raw.strip():
+                continue
+            f = raw.split("\t")
+            n = int(f[0])
+            out.append("\t".join([str(n + 1 if n > after else n), *f[1:]]))
+            if n == after:
+                out.append("\t".join([str(after + 1), *f[1:]]))
+        return "\n".join(lines), "\n".join(out) + "\n"
+
+    NAMES = ("real_gmat_main_read_write", "real_gmat_zero_rows", "real_gmat_unknown_value", "real_gmat_owns_callee", "real_gmat_loop_main_reads", "real_gmat_loop_owns_fill",
+             "real_gmat_static_local")
+
+    def test_the_real_output_over_a_global_matrix_is_clean(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    # ---- `program_start`: the group of a global matrix ----
+
+    GROUP = "the row group of a matrix global in `program_start`"
+
+    def test_every_row_of_the_group_is_needed(self):
+        text, _mp = self.pair("real_gmat_main_read_write")
+        rows = self.start_lines(text)
+        # rows: facts, lens, v-perm, d-perm, flags, c(0,0), c(0,1), c(0,2), c(1,0), left-out quantifier of row 1, liveness
+        self.assertEqual(len(rows), 11)
+        why = {
+            1: "row group of an array global", 2: "is not `acc(<cell>.v_t)`", 3: "is not the flag permission", 4: "is not the flags", 5: "is not the listed value",
+            6: "is not the listed value", 7: "is not the listed value", 8: "to the end of the row", 9: "row 1 has 1 of its 3 cells listed",
+        }
+        for idx, reason in why.items():
+            with self.subTest(dropped=idx):
+                self.drop_line("real_gmat_main_read_write", rows[idx], reason, f"drop clause {idx}")
+        with self.subTest(dropped="the liveness cell"):
+            self.drop_line("real_gmat_main_read_write", rows[10], "no final", "drop liveness")
+
+    def test_the_global_facts_state_the_rows_count(self):
+        text, mp = self.pair("real_gmat_main_read_write")
+        rows = self.start_lines(text)
+        self.mutate_line("real_gmat_main_read_write", rows[0], lambda l: l.replace("len(GB_gm__0()) == 2", "len(GB_gm__0()) == 3"), "must be the global facts", "the facts say 3 rows")
+        put = self.pair("real_gmat_owns_callee")[0]
+        first_req = self.lines_with(put, "requires (len(GB_gm__0()) == 2)")[0]
+        self.mutate_line("real_gmat_owns_callee", first_req, lambda l: l.replace("== 2)", "== 3)"), "must take the global facts", "a callee's facts say 3 rows")
+
+    def test_the_length_facts_and_the_permissions_agree_on_the_counts(self):
+        name = "real_gmat_main_read_write"
+        text, _mp = self.pair(name)
+        rows = self.start_lines(text)
+        self.mutate_line(name, rows[1], lambda l: l.replace("== 3)", "== 4)"), "is not the value permission", "the length facts state 4 columns, the rows 3")
+        self.mutate_line(name, rows[1], lambda l: l.replace("(k < 2)", "(k < 3)"), "is not the value permission", "the length facts run to 3 rows, the rows 2")
+        self.mutate_line(name, rows[1], lambda l: l.replace("== 3)", "== 0)"), "length facts", "the length facts state 0 columns")
+        for i, what in ((2, "the value permission"), (3, "the flag permission"), (4, "the flags")):
+            self.mutate_line(name, rows[i], lambda l: l.replace("(k < 2)", "(k < 1)"), "is not " + what, f"{what} over one row less")
+            self.mutate_line(name, rows[i], lambda l: l.replace("(j < 3)", "(j < 4)"), "is not " + what, f"{what} over one column more")
+            self.mutate_line(name, rows[i], lambda l: l.replace("(0 <= j)", "(1 <= j)"), "is not " + what, f"{what} from column 1")
+            self.mutate_line(name, rows[i], lambda l: l.replace("(0 <= k)", "(1 <= k)"), "is not " + what, f"{what} from row 1")
+
+    def test_the_trigger_and_the_field_of_a_permission_row_are_the_cell(self):
+        name = "real_gmat_main_read_write"
+        text, _mp = self.pair(name)
+        rows = self.start_lines(text)
+        self.mutate_line(name, rows[2], lambda l: l.replace("{ loc(member(loc(GB_gm__0(), k), 0), j) }", "{ loc(member(loc(GB_gm__0(), j), 0), k) }"), "is not the value permission", "the trigger swaps the binders")
+        self.mutate_line(name, rows[2], lambda l: l.replace("acc(loc(member(loc(GB_gm__0(), k), 0), j).v_int)", "acc(loc(member(loc(GB_gm__0(), k), 0), j).d_int)"), "is not `acc(<cell>.v_t)`", "the first row is a flag permission")
+        self.mutate_line(name, rows[3], lambda l: l.replace(".d_int)", ".v_int)"), "is not the flag permission", "the second row is a value permission again")
+        self.mutate_line(name, rows[4], lambda l: l.replace("==> loc(member(loc(GB_gm__0(), k), 0), j).d_int", "==> loc(member(loc(GB_gm__0(), k), 0), j).v_int"), "is not the flags", "the flags row names a value")
+        self.mutate_line(name, rows[2], lambda l: l.replace("(((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3)))", "(((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3)) && (k != 1))"), "is not the value permission", "an extra antecedent")
+
+    def test_the_listed_cells_are_row_by_row_in_order_once_each_and_literals(self):
+        name = "real_gmat_main_read_write"
+        text, _mp = self.pair(name)
+        rows = self.start_lines(text)
+        reason = "is not the listed value"
+        self.mutate_line(name, rows[5], lambda l: l.replace("loc(GB_gm__0(), 0), 0), 0)", "loc(GB_gm__0(), 0), 0), 1)"), reason, "cell 0 of row 0 is listed as cell 1")
+        self.mutate_line(name, rows[6], lambda l: l.replace("loc(GB_gm__0(), 0), 0), 1)", "loc(GB_gm__0(), 0), 0), 0)"), reason, "cell 0 listed twice")
+        self.mutate_line(name, rows[8], lambda l: l.replace("loc(GB_gm__0(), 1), 0), 0)", "loc(GB_gm__0(), 0), 0), 0)"), reason, "row 1's cell listed in row 0")
+        self.mutate_line(name, rows[8], lambda l: l.replace("loc(GB_gm__0(), 1), 0), 0)", "loc(GB_gm__0(), 1), 0), 1)"), reason, "row 1 starts at cell 1")
+        self.mutate_line(name, rows[8], lambda l: l.replace(".v_int == 4", ".v_int == x"), "is not a literal of its type", "a listed value that is not a literal")
+        self.mutate_line(name, rows[8], lambda l: l.replace(".v_int == 4", ".v_int == 4 || 5"), "is not a literal of its type", "a listed value that is a disjunction")
+        self.mutate_line(name, rows[8], lambda l: l.replace(".v_int == 4", ".d_int == 4"), reason, "a listed value of the flag")
+        extra = self.start_lines(text)[9]
+        self.mutate_line(name, extra, lambda l: l.replace("loc(member(loc(GB_gm__0(), 1), 0), j).v_int == 0", "loc(member(loc(GB_gm__0(), 1), 0), j).v_int == 1"), "states", "the left-out cells are not zero")
+
+    def test_the_cells_a_rows_list_leaves_out_are_one_quantifier_from_where_the_list_ends(self):
+        name = "real_gmat_main_read_write"
+        text, _mp = self.pair(name)
+        quant = self.start_lines(text)[9]
+        self.mutate_line(name, quant, lambda l: l.replace("(1 <= j)", "(2 <= j)"), "to the end of the row", "the rest starts one cell late")
+        self.mutate_line(name, quant, lambda l: l.replace("(1 <= j)", "(0 <= j)"), "to the end of the row", "the rest starts one cell early")
+        self.mutate_line(name, quant, lambda l: l.replace("loc(GB_gm__0(), 1)", "loc(GB_gm__0(), 0)"), "to the end of the row", "the rest is over another row")
+        self.mutate_line(name, quant, lambda l: l.replace("(j < 3)", "(j < 2)"), "past the 3 columns", "the rest ends one cell early")
+        # a row with cells listed and no quantifier for the rest, and a quantifier after the zero rest of the rows
+        self.drop_line(name, quant, "row 1 has 1 of its 3 cells listed", "the quantifier of the left-out cells is dropped")
+
+    def test_the_rows_no_list_reaches_are_one_two_binder_quantifier_from_where_the_list_ends(self):
+        name = "real_gmat_zero_rows"
+        text, _mp = self.pair(name)
+        rows = self.start_lines(text)
+        zero = rows[8]
+        self.assertIn("(1 <= k)", text.split("\n")[zero - 1])
+        self.mutate_line(name, zero, lambda l: l.replace("(1 <= k)", "(0 <= k)"), "starts at the row", "the rest starts at the row the list reaches")
+        self.mutate_line(name, zero, lambda l: l.replace("(1 <= k)", "(2 <= k)"), "starts at the row", "the rest starts past the last row")
+        self.mutate_line(name, zero, lambda l: l.replace("(j < 3)", "(j < 2)"), "past the 3 columns", "the rest covers two columns")
+        self.mutate_line(name, zero, lambda l: l.replace("(k < 2)", "(k < 3)"), "runs up to", "the rest runs past the rows")
+        self.mutate_line(name, zero, lambda l: l.replace("== 0)", "== 1)"), "neither the zero rest", "the rest is not zero")
+        self.mutate_line(name, zero, lambda l: l.replace("(0 <= j)", "(1 <= j)"), "runs up to", "the rest skips column 0")
+        self.drop_line(name, zero, "no zero rest", "the rest is dropped")
+        # a second quantifier after the rest, and one before the cells of a row are all listed
+        text2, mp2 = self.pair(name)
+        lines = text2.split("\n")
+        lines.insert(zero, lines[zero - 1])
+        mp_lines = [m for m in mp2.split("\n") if m.strip()]
+        shifted = []
+        for raw in mp_lines:
+            f = raw.split("\t")
+            n = int(f[0])
+            shifted.append("\t".join([str(n + 1 if n > zero else n), *f[1:]]))
+            if n == zero:
+                shifted.append("\t".join([str(zero + 1), *f[1:]]))
+        probs = self.problems("\n".join(lines), "\n".join(shifted) + "\n")
+        self.assertTrue(self.refused(probs, "a row after the quantifier"), probs)
+
+    def test_a_cell_at_or_past_the_count_and_a_row_half_listed_are_refused(self):
+        name = "real_gmat_main_read_write"
+        text, mp = self.pair(name)
+        rows = self.start_lines(text)
+        lines = text.split("\n")
+        # a conjunct for a cell of row 2 (the global has 2 rows) after the left-out quantifier of row 1
+        extra = lines[rows[8] - 1].replace("loc(GB_gm__0(), 1), 0), 0)", "loc(GB_gm__0(), 2), 0), 0)")
+        bad = list(lines)
+        bad.insert(rows[9], extra)
+        mp_lines = [m for m in mp.split("\n") if m.strip()]
+        shifted = []
+        for raw in mp_lines:
+            f = raw.split("\t")
+            n = int(f[0])
+            shifted.append("\t".join([str(n + 1 if n > rows[9] else n), *f[1:]]))
+            if n == rows[9]:
+                shifted.append("\t".join([str(rows[9] + 1), *f[1:]]))
+        probs = self.problems("\n".join(bad), "\n".join(shifted) + "\n")
+        self.assertTrue(self.refused(probs, "at or past the count"), probs)
+
+    def test_an_unknown_value_is_the_cell_types_range_alone_over_both_binders(self):
+        name = "real_gmat_unknown_value"
+        text, _mp = self.pair(name)
+        rows = self.start_lines(text)
+        rng = rows[5]
+        self.assertIn("2147483647", text.split("\n")[rng - 1])
+        self.mutate_line(name, rng, lambda l: l.replace("<= 2147483647)", "<= 2147483646)"), "neither the zero rest", "the range is not the type's")
+        self.mutate_line(name, rng, lambda l: l.replace("(0 <= k)", "(1 <= k)"), "stands alone", "the range skips row 0")
+        self.mutate_line(name, rng, lambda l: l.replace("(k < 2)", "(k < 1)"), "runs up to", "the range covers one row")
+        self.mutate_line(name, rng, lambda l: l.replace("(j < 3)", "(j < 2)"), "past the 3 columns", "the range covers two columns")
+        self.drop_line(name, rng, "no zero rest and no range of an unknown value", "the range is dropped")
+
+    def test_a_zero_rest_after_every_row_is_reached_and_a_two_binder_rest_inside_a_row_are_refused(self):
+        name = "real_gmat_main_read_write"
+        text, mp = self.pair(name)
+        rows = self.start_lines(text)
+        lines = text.split("\n")
+        rest = lines[rows[9] - 1]
+        # the rows the list does not reach, stated when the list reaches every row: row 1's quantifier closed it, a rest from row 2 over 2 rows is a rest of nothing
+        two = ("  ensures forall k: Int, j: Int :: { loc(member(loc(GB_gm__0(), k), 0), j) } (((2 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) "
+               "==> (loc(member(loc(GB_gm__0(), k), 0), j).v_int == 0)")
+        bad, bad_map = self.insert_line(text, mp, rows[9], two)
+        probs = self.problems(bad, bad_map)
+        self.assertTrue(self.refused(probs, "a zero rest although every row is reached"), probs)
+        # the two-binder rest where row 1 has one of its cells listed and no quantifier for the others
+        inside = two.replace("(2 <= k)", "(1 <= k)").replace("(k < 2)", "(k < 2)")
+        bad = list(lines)
+        bad[rows[9] - 1] = inside
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue(self.refused(probs, "a two-binder quantifier of the values while row 1 has 1 of its 3 cells listed"), probs)
+
+    def test_the_length_facts_of_the_rows_run_from_row_zero_and_the_shape_follows_the_group(self):
+        name = "real_gmat_main_read_write"
+        text, _mp = self.pair(name)
+        rows = self.start_lines(text)
+        self.mutate_line(name, rows[1], lambda l: l.replace("(0 <= k)", "(1 <= k)"), "the length facts are", "the length facts run from row 1")
+        # `matrix_global_shapes` records a shape only when the group's first permission has the length facts' counts: a group that does not leaves the contract's rows
+        # over a global that is no matrix of the unit
+        callee = "real_gmat_owns_callee"
+        ctext, _cmp = self.pair(callee)
+        crows = self.start_lines(ctext)
+        self.mutate_line(callee, crows[2], lambda l: l.replace("(k < 2)", "(k < 3)"), "is no global matrix of `program_start`", "the group's permission runs over 3 rows, the length facts over 2")
+
+    def test_an_exhale_row_over_the_place_of_a_global_matrix_is_refused(self):
+        name = "real_gmat_loop_main_reads"
+        text, _mp = self.pair(name)
+        lines = text.split("\n")
+        entry = [i for i in self.lines_with(text, "assert forall k: Int, j: Int") if "block_of(ga_gm__0)" in lines[i - 1] and ".v_int)" in lines[i - 1] and "acc(" in lines[i - 1]]
+        self.assertTrue(entry)
+        self.mutate_line(name, entry[0], lambda l: l.replace("assert forall", "exhale forall"), "exhale", "a global is never exited: no `exhale` row over its place")
+
+    def test_a_place_variable_assigned_twice_is_no_place_of_a_global_matrix(self):
+        name = "real_gmat_loop_main_reads"
+        text, mp = self.pair(name)
+        assign = self.lines_with(text, "ga_gm__0 := loc(GB_gm__0(), 0)")
+        self.assertEqual(len(assign), 1)
+        bad, bad_map = self.insert_line(text, mp, assign[0], "  ga_gm__0 := loc(GB_gm__0(), 1)")
+        probs = self.problems(bad, bad_map)
+        self.assertTrue(self.refused(probs, "no local matrix of this method"), probs)
+
+    # The cell types and rests that the int fixtures above do not have are REAL output too (the self-test output of the encoder snapshot edg24, copied by edg-backend into
+    # build/m4.5e1e2d/e21-vir/): `real_gmat_ptr_listed` (tests/memory/matrix_global_ptr.cpp: a static `int *tab[2][2] = {{&h, 0}, {0, 0}}`), `real_gmat_ptr_escape` (its escape twin:
+    # external linkage, the pointer type's well-formedness per cell), `real_gmat_static_zero_rows` (tests/memory/matrix_global.c in C++ 20: `int g[2][3] = {{1, 2, 3}, {4, 5, 6}}` and a
+    # `static int c[2][3] = {{0}}`: a row's rest and the rows' rest together) and `real_gmat_static_zero_rows_c` (the same program in C23).
+
+    def test_a_matrix_of_pointers_is_a_matrix_of_its_cell_type(self):
+        for name in ("real_gmat_ptr_listed", "real_gmat_ptr_escape", "real_gmat_static_zero_rows", "real_gmat_static_zero_rows_c"):
+            with self.subTest(name=name):
+                text, mp = self.pair(name)
+                self.assertEqual(self.problems(text, mp), [])
+
+    def test_a_matrix_of_pointers_states_addresses_of_declared_globals_and_the_pointer_types_own_range(self):
+        name = "real_gmat_ptr_listed"
+        text, _mp = self.pair(name)
+        row = self.lines_with(text, "ensures loc(member(loc(GB_tab__1(), 0), 0), 0).v_ptr_int == loc(GB_h__0(), 0)")
+        self.assertEqual(len(row), 1)
+        self.mutate_line(name, row[0], lambda l: l.replace("GB_h__0()", "GB_zz__9()"), "not a declared global with a row", "the address is of an undeclared global")
+        name = "real_gmat_ptr_escape"
+        text, _mp = self.pair(name)
+        rng = self.lines_with(text, "== loc(block_of(loc(member(loc(GB_tab__1(), k), 0), j).v_ptr_int), offset_of(")
+        self.assertEqual(len(rng), 1)
+        self.mutate_line(name, rng[0], lambda l: l.replace("(offset_of(loc(member(loc(GB_tab__1(), k), 0), j).v_ptr_int) <= len(block_of(loc(member(loc(GB_tab__1(), k), 0), j).v_ptr_int)))", "true"),
+                         "neither the zero rest", "the pointer type's upper bound is dropped")
+        self.mutate_line(name, rng[0], lambda l: l.replace("(0 <= offset_of(loc(member(loc(GB_tab__1(), k), 0), j).v_ptr_int))", "true"),
+                         "neither the zero rest", "the pointer type's lower bound is dropped")
+        self.mutate_line(name, rng[0], lambda l: l.replace("(loc(member(loc(GB_tab__1(), k), 0), j).v_ptr_int == null) ||", "false ||"),
+                         "neither the zero rest", "the null alternative is dropped")
+
+    def test_a_row_rest_and_a_rows_rest_stand_together_for_a_lone_zero(self):
+        # `static int c[2][3] = {{0}}` (matrix_global.c's static local): row 0 lists one cell, its other cells are ONE one-binder quantifier, row 1 is no list's: ONE two-binder
+        # quantifier (real output, `GB_next__c__1`).
+        name = "real_gmat_static_zero_rows"
+        text, mp = self.pair(name)
+        self.assertEqual(self.problems(text, mp), [])
+        row_rest = self.lines_with(text, "ensures forall j: Int :: { loc(member(loc(GB_next__c__1(), 0), 0), j) } ((1 <= j) && (j < 3))")
+        rows_rest = self.lines_with(text, "ensures forall k: Int, j: Int :: { loc(member(loc(GB_next__c__1(), k), 0), j) } (((1 <= k) && (k < 2))")
+        self.assertEqual((len(row_rest), len(rows_rest)), (1, 1))
+        self.assertEqual(rows_rest[0], row_rest[0] + 1)
+        # the two rests in the other order (the lines swapped in place: the map keeps its lines), and the row rest over the wrong row, from the wrong cell or of another value
+        lines = text.split("\n")
+        swapped = list(lines)
+        swapped[row_rest[0] - 1], swapped[rows_rest[0] - 1] = lines[rows_rest[0] - 1], lines[row_rest[0] - 1]
+        self.assertTrue(self.refused(self.problems("\n".join(swapped), mp), "a two-binder quantifier of the values while row 0 has 1 of its 3 cells listed"), self.problems("\n".join(swapped), mp))
+        self.mutate_line(name, row_rest[0], lambda l: l.replace("loc(GB_next__c__1(), 0)", "loc(GB_next__c__1(), 1)"), "over row 0", "the row rest is over row 1")
+        self.mutate_line(name, row_rest[0], lambda l: l.replace("(1 <= j)", "(2 <= j)"), "from the cell 1", "the row rest starts one cell late")
+        self.mutate_line(name, row_rest[0], lambda l: l.replace("== 0)", "== 1)"), "states", "the row rest is not zero")
+        self.mutate_line(name, rows_rest[0], lambda l: l.replace("(1 <= k)", "(0 <= k)"), "the zero rest starts at the row", "the rows' rest starts at row 0")
+
+    def test_the_static_local_group_is_read_like_a_global(self):
+        name = "real_gmat_static_local"
+        text, _mp = self.pair(name)
+        rows = self.start_lines(text)
+        self.mutate_line(name, rows[5], lambda l: l.replace("== 0)", "== 1)"), "neither the zero rest", "the static local's zero rest is not zero")
+        self.drop_line(name, rows[2], self.GROUP, "the static local's value permission is dropped")
+
+    # ---- a contract over a global matrix ----
+
+    def put_rows(self, text):
+        """(the lines of `f_put__0`'s `requires`, of its `ensures`)."""
+        lines = text.split("\n")
+        at = next(i for i, l in enumerate(lines) if l.startswith("method f_put__0("))
+        req, ens = [], []
+        for i in range(at + 1, len(lines)):
+            s = lines[i].strip()
+            if s.startswith("requires"):
+                req.append(i + 1)
+            elif s.startswith("ensures"):
+                ens.append(i + 1)
+            elif s.startswith("{"):
+                break
+        return req, ens
+
+    def test_the_rows_of_a_contract_over_a_global_matrix_are_the_groups(self):
+        name = "real_gmat_owns_callee"
+        text, _mp = self.pair(name)
+        req, ens = self.put_rows(text)
+        self.assertEqual((len(req), len(ens)), (9, 6))
+        body = "outside the shapes of decision 0059"
+        self.mutate_line(name, req[4], lambda l: l.replace("(k < 2)", "(k < 3)"), "run over `0 <= k < 2`", "the value permission runs over 3 rows")
+        self.mutate_line(name, req[4], lambda l: l.replace("(j < 3)", "(j < 4)"), "run over `0 <= k < 2`", "the value permission runs over 4 columns")
+        self.mutate_line(name, req[4], lambda l: l.replace("(0 <= k)", "(1 <= k)"), "run over `0 <= k < 2`", "the value permission skips row 0")
+        self.mutate_line(name, req[4], lambda l: l.replace("(0 <= j)", "(1 <= j)"), "run over `0 <= k < 2`", "the value permission skips column 0")
+        self.mutate_line(name, req[4], lambda l: l.replace(".v_int)", ".v_bool)"), "is not of the cell", "the value permission is of another field")
+        self.mutate_line(name, req[4], lambda l: l.replace(".v_int)", ".v_int, 1 / 2)"), "a `Perm` formal", "the amount is an expression")
+        self.mutate_line(name, req[4], lambda l: l.replace(".v_int)", ".v_int, write)"), "a `Perm` formal", "the amount is `write`")
+        self.mutate_line(name, req[4], lambda l: l.replace(".v_int)", ".v_int, t__0)"), "a `Perm` formal", "the amount is not a formal of the method")
+        self.mutate_line(name, req[4], lambda l: l.replace("GB_gm__0()", "GB_zz__9()"), "no global matrix", "the block is no global matrix")
+        self.mutate_line(name, req[4], lambda l: l.replace("(((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3)))", "(((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3)) && (k != 1))"), body, "an extra antecedent")
+        self.mutate_line(name, req[4], lambda l: l.replace("{ loc(member(loc(GB_gm__0(), k), 0), j) }", "{ loc(member(loc(GB_gm__0(), j), 0), k) }"), body, "the trigger swaps the binders")
+        self.mutate_line(name, req[6], lambda l: l.replace("==> loc(member(loc(GB_gm__0(), k), 0), j).d_int", "==> loc(member(loc(GB_gm__0(), k), 0), j).d_bool"), "is not `acc(F.f)`", "a flag row of another field")
+        self.mutate_line(name, req[7], lambda l: l.replace("<= 2147483647)", "<= 2147483646)"), "is not `acc(F.f)`", "the range is not the type's")
+        self.mutate_line(name, req[3], lambda l: l.replace("== 3)", "== 4)"), "state 3 columns", "the contract's length facts say 4 columns")
+        self.mutate_line(name, req[3], lambda l: l.replace("(k < 2)", "(k < 3)"), "run over `0 <= k < 2`", "the contract's length facts run over 3 rows")
+        self.mutate_line(name, req[3], lambda l: "  requires acc(lvloc(GB_gm__0()).lv) ==> " + l.strip()[len("requires "):], "a guard", "a guard on the length facts")
+        self.mutate_line(name, req[1], lambda l: l.replace("== 3)", "== 2)"), "state 3 columns", "the global facts' length facts say 2 columns")
+
+    def test_a_kept_flag_is_an_ensures_row_only(self):
+        name = "real_gmat_owns_callee"
+        text, _mp = self.pair(name)
+        req, ens = self.put_rows(text)
+        cell = "loc(member(loc(GB_gm__0(), k), 0), j)"
+        kept = lambda kw: f"  {kw} forall k: Int, j: Int :: {{ {cell} }} (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> (old({cell}.d_int) ==> {cell}.d_int)"
+        lines = text.split("\n")
+        ok = list(lines)
+        ok[ens[3] - 1] = kept("ensures")
+        self.assertEqual([p for p in self.problems("\n".join(ok), self.pair(name)[1]) if "is not `acc(F.f)`" in p or "old" in p], [])
+        bad = list(lines)
+        bad[req[5] - 1] = kept("requires")
+        self.assertTrue(self.refused(self.problems("\n".join(bad), self.pair(name)[1]), "`old` in a `requires`"))
+
+    def test_a_guard_of_a_global_matrix_row_holds_no_permission(self):
+        name = "real_gmat_owns_callee"
+        text, _mp = self.pair(name)
+        req, _ens = self.put_rows(text)
+        self.mutate_line(name, req[4], lambda l: l.replace("requires forall", "requires acc(lvloc(GB_gm__0()).lv) ==> forall"), "the guard holds a permission", "a guard that holds a permission")
+
+    # ---- a body or a loop over the place of a global matrix ----
+
+    def test_the_rows_over_the_place_of_a_global_matrix_run_over_the_groups_rows_and_columns(self):
+        name = "real_gmat_loop_main_reads"
+        text, _mp = self.pair(name)
+        inv = [i for i in self.lines_with(text, "invariant forall k: Int, j: Int") if "block_of(ga_gm__0)" in text.split("\n")[i - 1]]
+        self.assertEqual(len(inv), 5)
+        acc_v, acc_d, kept_flag, rng, kept_value = inv
+        self.mutate_line(name, acc_v, lambda l: l.replace("(k < 2)", "(k < 1)"), "the rows over the global matrix place", "the permission runs over one row less")
+        self.mutate_line(name, acc_v, lambda l: l.replace("(k < 2)", "(k < 3)"), "the rows over the global matrix place", "the permission runs over one row more")
+        self.mutate_line(name, acc_d, lambda l: l.replace("(j < 3)", "(j < 4)"), "is not its leaf with the counts", "the flag permission runs over one column more")
+        self.mutate_line(name, acc_v, lambda l: l.replace(".v_int)", ".v_bool)"), "is not of its cell", "the permission is of another field")
+        self.mutate_line(name, acc_v, lambda l: l.replace(".v_int)", ".v_int, kl_ga_gm__0__0)"), "the amount of an `acc`", "an amount that is a local")
+        self.mutate_line(name, kept_flag, lambda l: l.replace("old[lh_0](", "old("), "labelled", "an unlabelled old in the kept flag")
+        self.mutate_line(name, rng, lambda l: l.replace("<= 2147483647", "<= 2147483646"), "the consequent is not", "the range under the flag is not the type's")
+        self.mutate_line(name, acc_v, lambda l: l.replace("loc(member(loc(block_of(ga_gm__0), k), 0), j)", "loc(member(loc(block_of(ga_gm__0), j), 0), k)"), "", "the receiver swaps the binders")
+
+    def test_a_row_over_a_local_that_is_not_the_places_variable_is_no_row_of_a_global_matrix(self):
+        name = "real_gmat_loop_main_reads"
+        text, _mp = self.pair(name)
+        assign = self.lines_with(text, "ga_gm__0 := loc(GB_gm__0(), 0)")
+        self.assertEqual(len(assign), 1)
+        self.mutate_line(name, assign[0], lambda l: l.replace("loc(GB_gm__0(), 0)", "loc(GB_gm__0(), 1)"), "no local matrix of this method", "the place is bound to row 1")
+        lines = text.split("\n")
+        bad = [l.replace("block_of(ga_gm__0)", "block_of(t__0)") if "invariant forall k: Int, j: Int" in l else l for l in lines]
+        probs = self.problems("\n".join(bad), self.pair(name)[1])
+        self.assertTrue(self.refused(probs, "no local matrix of this method") or self.refused(probs, "outside the shapes"), probs)
+
+    def test_a_kept_flag_and_a_kept_value_row_over_a_place_that_is_not_a_global_matrixs_first_slot_are_refused(self):
+        # the second lifted refusal of the 3a rules (the orchestrator's ruling, provisional): the loop's kept-flag and kept-value conjuncts (the `old[lh_0]` rows) are admitted over
+        # `ga_gm__0` only because it is bound exactly once to `loc(GB_gm__0(), 0)`; over a place bound to another slot, bound twice, or a local that is no place of the matrix, EACH of the
+        # two rows is refused on its own line (not only some row of the loop)
+        name = "real_gmat_loop_main_reads"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        inv = [i for i in self.lines_with(text, "invariant forall k: Int, j: Int") if "block_of(ga_gm__0)" in lines[i - 1]]
+        _acc_v, _acc_d, kept_flag, _rng, kept_value = inv
+        assert "old[lh_0](" in lines[kept_flag - 1] and "old[lh_0](" in lines[kept_value - 1]
+        assign = self.lines_with(text, "ga_gm__0 := loc(GB_gm__0(), 0)")[0]
+        self.assertEqual(self.problems(text, mp), [])
+
+        def lines_refused(probs, ln):
+            return any(p.startswith(f"t.vpr:{ln}:") for p in probs)
+
+        row1 = list(lines)
+        row1[assign - 1] = row1[assign - 1].replace("loc(GB_gm__0(), 0)", "loc(GB_gm__0(), 1)")
+        probs = self.problems("\n".join(row1), mp)
+        self.assertTrue(lines_refused(probs, kept_flag) and lines_refused(probs, kept_value), ("bound to row 1", probs))
+        twice, twice_map = self.insert_line(text, mp, assign, "  ga_gm__0 := loc(GB_gm__0(), 1)")
+        probs = self.problems(twice, twice_map)
+        self.assertTrue(lines_refused(probs, kept_flag + 1) and lines_refused(probs, kept_value + 1), ("bound twice", probs))
+        other = [l.replace("block_of(ga_gm__0)", "block_of(t__0)") if l.lstrip().startswith("invariant forall k: Int, j: Int") else l for l in lines]
+        probs = self.problems("\n".join(other), mp)
+        self.assertTrue(lines_refused(probs, kept_flag) and lines_refused(probs, kept_value), ("another local", probs))
+        unbound = [l for l in lines]
+        unbound[assign - 1] = unbound[assign - 1].replace("ga_gm__0 :=", "t__0 :=")
+        probs = self.problems("\n".join(unbound), mp)
+        self.assertTrue(lines_refused(probs, kept_flag) and lines_refused(probs, kept_value), ("the place variable is never bound", probs))
+
+    def test_a_row_in_a_function_that_owns_the_global_keeps_the_pointer_form(self):
+        name = "real_gmat_owns_callee"
+        text, _mp = self.pair(name)
+        rows = [i for i in self.lines_with(text, "assert forall k: Int, j: Int") if "block_of(ga_gm__0)" in text.split("\n")[i - 1]]
+        self.assertGreaterEqual(len(rows), 2)
+        self.mutate_line(name, rows[0], lambda l: l.replace("(offset_of(ga_gm__0) + 2)", "(offset_of(ga_gm__0) + k)"), "the first range is neither", "the count names the bound variable")
+        self.mutate_line(name, rows[0], lambda l: l.replace(".v_int)", ".v_bool)"), "is not of its cell", "the field is not the cell's")
+        self.mutate_line(name, rows[1], lambda l: l.replace("(j < 3)", "(j < 4)"), "is not its leaf with the counts", "the row has 4 columns")
+
+    def test_the_loop_over_the_place_with_a_callee_that_owns_the_global_is_clean(self):
+        for name in ("real_gmat_loop_owns_fill", "real_gmat_static_local"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+class PartEMatrixMemberTests(unittest.TestCase):
+    """Decision 0064 items 3, 9 and 17 (Part E, slice 3b): a structure with a MATRIX member, the trusted allocation `alloc_struct_<n>_<tag>`.  `scripts/testdata/part_e/matrix_member_alloc.vpr`
+    is ASSEMBLED from the verbatim text of the method that the self-test emits for `struct U { int n; int m[2][3]; }` (case e1e2e_mmember_local_rw on il85, as written into
+    build/m4.5e1e2d/il-emitted-slice3.txt) with the prelude of a real file and the trusted-contract comment of a real Part D output (build/m4.5e1e2d/prev/audit-D2/.../q02_348_sibling.c.vpr) with the structure's name changed, and a position map written for it; it is replaced by the real file
+    when a joined build writes one.  The rule (`matrix_member_rows`): the member's own count N (`len(member(r, 1)) == N`), the length facts of its rows over exactly `0 <= k < N` with a
+    literal M, and the three rows over the cell `loc(member(loc(member(r, 1), k), 0), j)` with two bound variables over exactly `[0, N) x [0, M)`, each once, one declared field suffix.
+    Each mutant breaks one thing and is refused with its own reason."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    NAME = "matrix_member_alloc"
+    REASON = "is not the trusted struct allocation of decision 0043 items 4 and 13"
+
+    def pair(self):
+        return (self.DATA / f"{self.NAME}.vpr").read_text(), (self.DATA / f"{self.NAME}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map")]
+
+    def row(self, fragment):
+        text, _mp = self.pair()
+        hits = [i for i, l in enumerate(text.split("\n"), start=1) if l.strip().startswith("ensures") and fragment in l]
+        self.assertEqual(len(hits), 1, (fragment, hits))
+        return hits[0]
+
+    def refused(self, probs, why):
+        return any(self.REASON in p and why in p for p in probs)
+
+    def mutate(self, line, edit, why, label):
+        text, mp = self.pair()
+        lines = text.split("\n")
+        bad = list(lines)
+        bad[line - 1] = edit(bad[line - 1])
+        self.assertNotEqual(bad[line - 1], lines[line - 1], label)
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue(self.refused(probs, why), (label, probs))
+
+    def test_the_emitted_allocation_is_clean(self):
+        self.assertEqual(self.problems(*self.pair()), [])
+
+    def test_the_length_facts_of_the_rows_are_over_the_members_own_count(self):
+        lens = self.row("len(member(loc(member(r, 1), k), 0)) == 3")
+        self.mutate(lens, lambda l: l.replace("(k < 2)", "(k < 3)"), "are not over `0 <= k && k < 2`", "the length facts run over 3 rows")
+        self.mutate(lens, lambda l: l.replace("(0 <= k)", "(1 <= k)"), "are not over `0 <= k && k < 2`", "the length facts skip row 0")
+        self.mutate(lens, lambda l: l.replace("member(r, 1)", "member(r, 2)"), "over another block", "the length facts are over another member")
+        self.mutate(lens, lambda l: l.replace("== 3", "== 0"), "the length facts of its elements", "the row length is 0 (no matrix, and no structure element either)")
+
+    def test_the_rows_state_the_cells_of_the_length_facts_columns(self):
+        lens = self.row("len(member(loc(member(r, 1), k), 0)) == 3")
+        self.mutate(lens, lambda l: l.replace("== 3", "== 4"), "value permission of its cells is not", "the length facts say 4 columns, the rows have 3")
+        self.mutate(lens, lambda l: l.replace("== 3", "== 2"), "value permission of its cells is not", "the length facts say 2 columns, the rows have 3")
+        val = self.row("acc(loc(member(loc(member(r, 1), k), 0), j).v_int)")
+        self.mutate(val, lambda l: l.replace("(k < 2)", "(k < 3)"), "value permission of its cells is not", "the value permission runs over 3 rows")
+        self.mutate(val, lambda l: l.replace("(j < 3)", "(j < 4)"), "value permission of its cells is not", "the value permission runs over 4 columns")
+        self.mutate(val, lambda l: l.replace("(0 <= k)", "(1 <= k)"), "value permission of its cells is not", "the value permission skips row 0")
+        self.mutate(val, lambda l: l.replace("(0 <= j)", "(1 <= j)"), "value permission of its cells is not", "the value permission skips column 0")
+        flag = self.row("acc(loc(member(loc(member(r, 1), k), 0), j).d_int)")
+        self.mutate(flag, lambda l: l.replace("(j < 3)", "(j < 2)"), "flag permission of its cells is not", "the flag permission runs over 2 columns")
+        self.mutate(flag, lambda l: l.replace("(k < 2)", "(k < 1)"), "flag permission of its cells is not", "the flag permission runs over 1 row")
+        neg = self.row("(!loc(member(loc(member(r, 1), k), 0), j).d_int)")
+        self.mutate(neg, lambda l: l.replace("(j < 3)", "(j < 4)"), "`!flag` of its cells is not", "the `!flag` row runs over 4 columns")
+        self.mutate(neg, lambda l: l.replace("(!loc", "(loc"), "`!flag` of its cells is not", "the `!flag` row is the flag itself")
+
+    def test_a_matrix_of_one_column_is_a_matrix_not_a_structure_element(self):
+        # M = 1 reads like a structure element's lone member `len(member(slot, 0)) == 1`: the two bound variables of the row after the length facts tell them apart
+        text, mp = self.pair()
+        one = text.replace("== 3)", "== 1)").replace("(j < 3)", "(j < 1)")
+        self.assertNotEqual(one, text)
+        self.assertEqual(self.problems(one, mp), [])
+        lens = self.row("len(member(loc(member(r, 1), k), 0)) == 3")
+        self.mutate(lens, lambda l: l.replace("== 3", "== 1"), "value permission of its cells is not", "the length facts say 1 column, the rows have 3")
+
+    def test_each_row_is_the_cell_of_its_own_member_with_its_own_field_and_no_more(self):
+        val = self.row("acc(loc(member(loc(member(r, 1), k), 0), j).v_int)")
+        self.mutate(val, lambda l: l.replace(".v_int)", ".v_bool)"), "not declared", "the value permission is of an undeclared field")
+        self.mutate(val, lambda l: l.replace(".v_int)", ".v_int, 1 / 2)"), "first row is not", "the value permission is a half")
+        self.mutate(val, lambda l: l.replace("(((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3)))", "(((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3)) && (k != 1))"),
+                    "value permission of its cells is not", "an extra antecedent")
+        self.mutate(val, lambda l: l.replace("{ loc(member(loc(member(r, 1), k), 0), j) }", "{ loc(member(loc(member(r, 1), j), 0), k) }"),
+                    "first row is not", "the trigger swaps the binders")
+        self.mutate(val, lambda l: l.replace("member(r, 1)", "member(r, 2)"), "first row is not", "the rows are over another member")
+        flag = self.row("acc(loc(member(loc(member(r, 1), k), 0), j).d_int)")
+        self.mutate(flag, lambda l: l.replace(".d_int)", ".d_bool)"), "flag permission of its cells is not", "the flag permission is of another field")
+        self.mutate(flag, lambda l: l.replace("forall k: Int, j: Int", "forall k: Int, j: Int, l: Int"), "flag permission of its cells is not", "a third binder")
+        self.mutate(val, lambda l: l.replace("forall k: Int, j: Int", "forall r: Int, j: Int").replace("(k <", "(r <").replace("(0 <= k)", "(0 <= r)").replace("loc(member(r, 1), k)", "loc(member(r, 1), r)"),
+                    "named like a formal", "a bound variable is named like the formal r")
+
+    def test_a_row_dropped_or_stated_twice_or_out_of_order_is_refused(self):
+        text, mp = self.pair()
+        val = self.row("acc(loc(member(loc(member(r, 1), k), 0), j).v_int)")
+        flag = self.row("acc(loc(member(loc(member(r, 1), k), 0), j).d_int)")
+        neg = self.row("(!loc(member(loc(member(r, 1), k), 0), j).d_int)")
+        for line, label in ((val, "the value permission"), (flag, "the flag permission"), (neg, "the `!flag` row")):
+            with self.subTest(dropped=label):
+                bad, bad_map = PartEMatrixTests.drop(text, mp, line)
+                self.assertTrue(any(self.REASON in p for p in self.problems(bad, bad_map)), self.problems(bad, bad_map))
+        lines = text.split("\n")
+        swapped = list(lines)
+        swapped[flag - 1], swapped[neg - 1] = lines[neg - 1], lines[flag - 1]
+        self.assertTrue(any(self.REASON in p for p in self.problems("\n".join(swapped), mp)))
+        twice = list(lines)
+        twice.insert(neg, lines[neg - 1])
+        mp2 = "\n".join(l if int(l.split("\t")[0]) <= neg else "\t".join([str(int(l.split("\t")[0]) + 1)] + l.split("\t")[1:]) for l in mp.split("\n") if l.strip()) + "\n" \
+            + "\t".join([str(neg + 1)] + mp.split("\n")[0].split("\t")[1:]) + "\n"
+        self.assertTrue(any(self.REASON in p for p in self.problems("\n".join(twice), mp2)))
+
+class PartEMatrixMemberPlaceTests(unittest.TestCase):
+    """Decision 0064 items 6, 10 and 17 (Part E, slice 3b): the PLACE of a local structure's matrix member, `t := loc(member(V, k), 0)` with V assigned once `V := alloc_struct_<n>_<tag>()` of a
+    pinned allocation whose member k is a matrix (`member_matrix_places`).  The fixtures are REAL output (the self-test of the encoder snapshot edg25, il85, copied by edg-backend into
+    build/m4.5e1e2d/e3b-vir/): `real_mmember_local_rw` (`struct U { int n; int m[2][3]; }` with a write and a read: the lifetime rows and the scope exit's `exhale` rows over the place),
+    `real_mmember_loop_nested_body_vacuity` (nested loops over the member: the loop's permission, kept-flag, range and kept-value conjuncts over the place, two places `t__2`, `t__3`),
+    `real_mmember_zero_fill` and `real_mmember_b3_local` (an end-to-end probe).  A row over the place runs over the member's own rows and columns, its receiver is the member's leaf and its
+    field the member's cell; a place bound to another slot or another member, assigned twice, rooted at another local or at a structure assigned twice is no place, and EACH of its rows is refused
+    on its own line (the kept-flag and kept-value rows included)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def rows_over(text, place):
+        """The 1-based lines of the quantified `exhale` and `invariant` rows over `block_of(<place>)` (a marked `assert` permission row over any variable is the older rule's and stays admitted)."""
+        return [i for i, l in enumerate(text.split("\n"), start=1) if l.lstrip().startswith(("exhale forall", "invariant forall")) and f"block_of({place})" in l]
+
+    def refused_at(self, probs, lines, label):
+        for ln in lines:
+            self.assertTrue(any(p.startswith(f"t.vpr:{ln}:") for p in probs), (label, ln, probs))
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in ("real_mmember_local_rw", "real_mmember_loop_nested_body_vacuity", "real_mmember_zero_fill", "real_mmember_b3_local"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_scope_exit_rows_run_over_the_members_own_counts_cell_and_leaf(self):
+        name = "real_mmember_local_rw"
+        text, mp = self.pair(name)
+        rows = self.rows_over(text, "t__1")
+        ex = [i for i in rows if text.split("\n")[i - 1].lstrip().startswith("exhale")]
+        self.assertEqual(len(ex), 2)
+        lines = text.split("\n")
+        for label, edit, why in (("3 rows", lambda l: l.replace("(k < 2)", "(k < 3)"), "the member's"), ("4 columns", lambda l: l.replace("(j < 3)", "(j < 4)"), "is not its leaf with the counts"),
+                                 ("another field", lambda l: l.replace(".v_int)", ".v_bool)").replace(".d_int)", ".d_bool)"), "is not of its cell"),
+                                 ("swapped binders", lambda l: l.replace("loc(member(loc(block_of(t__1), k), 0), j)", "loc(member(loc(block_of(t__1), j), 0), k)"), ""),
+                                 ("an amount", lambda l: l.replace(".v_int)", ".v_int, 1 / 2)"), "")):
+            bad = list(lines)
+            bad[ex[0] - 1] = edit(bad[ex[0] - 1])
+            self.assertNotEqual(bad[ex[0] - 1], lines[ex[0] - 1], label)
+            probs = self.problems("\n".join(bad), mp)
+            self.refused_at(probs, [ex[0]], label)
+            if why:
+                self.assertTrue(any(why in p for p in probs), (label, probs))
+
+    def test_the_place_of_a_nested_matrix_member_of_a_local_structure_runs_over_the_members_own_counts(self):
+        """Decision 0064 items 5, 6 and 17 (the C-level nested pair, tests/memory/matrix_member_nested.c): `struct V { struct U u; int k; }` with `struct U { int n; int m[2][3]; }`, a local V from
+        `alloc_struct_1_V()` and the place `t := loc(member(loc(member(V, 0), 0), 1), 0)` of its nested matrix member: the scope exit's `exhale` rows over the place run over the member's own
+        counts, receiver and cell as a one-step member's do (`matrix_member_shapes` keys a member by its chain).  REAL output (build/m4.5e1e2d/e3b-vir/e2e/scalar-cell/, copied by edg-backend)."""
+        name = "real_mmember_nested_local"
+        text, mp = self.pair(name)
+        self.assertEqual(self.problems(text, mp), [])
+        lines = text.split("\n")
+        place = next(i for i, l in enumerate(lines, start=1) if l.strip().startswith("t__17 := loc(member(loc(member(v_v__0, 0), 0), 1), 0)"))
+        rows = self.rows_over(text, "t__17")
+        self.assertEqual(len(rows), 2)
+        for label, edit in (("another N", lambda l: l.replace("(k < 2)", "(k < 3)")), ("another M", lambda l: l.replace("(j < 3)", "(j < 4)")),
+                            ("another field", lambda l: l.replace(".v_int)", ".v_bool)").replace(".d_int)", ".d_bool)")),
+                            ("an amount", lambda l: l.replace(".v_int)", ".v_int, 1 / 2)")),
+                            ("swapped binders", lambda l: l.replace("loc(member(loc(block_of(t__17), k), 0), j)", "loc(member(loc(block_of(t__17), j), 0), k)"))):
+            with self.subTest(label=label):
+                bad = list(lines)
+                bad[rows[0] - 1] = edit(bad[rows[0] - 1])
+                self.assertNotEqual(bad[rows[0] - 1], lines[rows[0] - 1], label)
+                self.refused_at(self.problems("\n".join(bad), mp), [rows[0]], label)
+        # a ONE-binder row over the place reads the matrix flat (`matrix_place_names` knows the nested place): refused as for a one-step member's place
+        with self.subTest(label="a one-binder row over the nested place"):
+            bad = list(lines)
+            bad[rows[0] - 1] = "  exhale forall k: Int :: { loc(block_of(t__17), k) } ((0 <= k) && (k < 2)) ==> acc(loc(block_of(t__17), k).v_int)"
+            self.refused_at(self.problems("\n".join(bad), mp), [rows[0]], "a one-binder row over the nested place")
+        # the place bound to anything but the nested matrix member: the scalar cell n of the nested structure, the scalar cell k of V, a chain through another first step
+        for label, new in (("the scalar cell of the nested structure", "loc(member(loc(member(v_v__0, 0), 0), 0), 0)"), ("the scalar cell of the outer structure", "loc(member(v_v__0, 1), 0)"),
+                           ("another first step", "loc(member(loc(member(v_v__0, 1), 0), 1), 0)"), ("a chain one step too short", "loc(member(v_v__0, 0), 0)")):
+            with self.subTest(label=label):
+                bad = list(lines)
+                bad[place - 1] = bad[place - 1].replace("loc(member(loc(member(v_v__0, 0), 0), 1), 0)", new)
+                self.assertNotEqual(bad[place - 1], lines[place - 1], label)
+                self.refused_at(self.problems("\n".join(bad), mp), rows, label)
+
+    def test_a_place_that_is_not_a_matrix_members_first_slot_has_no_row_refused_or_not(self):
+        # for each way a place can fail to be a matrix member's, EVERY row over it (the scope exit's exhales, the lifetime asserts, and the loop's conjuncts including the kept-flag and kept-value
+        # rows) is refused on its own line
+        for name, place in (("real_mmember_local_rw", "t__1"), ("real_mmember_loop_nested_body_vacuity", "t__2")):
+            text, mp = self.pair(name)
+            lines = text.split("\n")
+            assign = next(i for i, l in enumerate(lines, start=1) if l.strip() == f"{place} := loc(member(v_u__0, 1), 0)")
+            rows = self.rows_over(text, place)
+            self.assertGreaterEqual(len(rows), 2, name)
+            ones = {"another slot": "loc(member(v_u__0, 1), 1)", "the scalar member": "loc(member(v_u__0, 0), 0)", "another local": "loc(member(t__0, 1), 0)",
+                    "a member that does not exist": "loc(member(v_u__0, 2), 0)"}
+            for label, rhs in ones.items():
+                bad = list(lines)
+                bad[assign - 1] = f"  {place} := {rhs}"
+                probs = self.problems("\n".join(bad), mp)
+                self.refused_at(probs, rows, f"{name}: {label}")
+            bad = list(lines)
+            bad.insert(assign, f"  {place} := loc(member(v_u__0, 1), 1)")
+            bad_map = "\n".join("\t".join([str(int(l.split("\t")[0]) + (1 if int(l.split("\t")[0]) > assign else 0))] + l.split("\t")[1:]) for l in mp.split("\n") if l.strip()) + "\n"
+            probs = self.problems("\n".join(bad), bad_map)
+            self.refused_at(probs, [r + 1 for r in rows if r > assign], f"{name}: the place assigned twice")
+            alloc = next(i for i, l in enumerate(lines, start=1) if l.strip() == "v_u__0 := alloc_struct_0_U()")
+            bad = list(lines)
+            bad.insert(alloc, "  v_u__0 := alloc_struct_0_U()")
+            bad_map = "\n".join("\t".join([str(int(l.split("\t")[0]) + (1 if int(l.split("\t")[0]) > alloc else 0))] + l.split("\t")[1:]) for l in mp.split("\n") if l.strip()) + "\n"
+            probs = self.problems("\n".join(bad), bad_map)
+            self.refused_at(probs, [r + 1 for r in rows if r > alloc], f"{name}: the structure assigned twice")
+
+    def test_the_pointer_form_of_a_row_over_the_place_keeps_the_members_leaf_and_cell(self):
+        # a row whose first range is `offset_of(X) <= k < offset_of(X) + 2` is the pointer form (no allocation's count to tie it to): it is admitted over the member's place with the
+        # member's own column count and cell, and refused with another count or field
+        name = "real_mmember_loop_nested_body_vacuity"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        acc = self.rows_over(text, "t__2")[0]
+        off = lambda l: l.replace("((0 <= k) && (k < 2))", "((offset_of(t__2) <= k) && (k < (offset_of(t__2) + 2)))")
+        for label, edit, ok in (("the pointer form", off, True), ("4 columns", lambda l: off(l).replace("(j < 3)", "(j < 4)"), False),
+                                ("another field", lambda l: off(l).replace(".v_int)", ".v_bool)"), False)):
+            bad = list(lines)
+            bad[acc - 1] = edit(bad[acc - 1])
+            probs = self.problems("\n".join(bad), mp)
+            if ok:
+                self.assertEqual(probs, [], label)
+            else:
+                self.refused_at(probs, [acc], label)
+
+    def test_a_place_of_a_structure_whose_allocation_is_not_pinned_is_no_place(self):
+        name = "real_mmember_local_rw"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        rows = self.rows_over(text, "t__1")
+        alloc_rows = [i for i, l in enumerate(lines, start=1) if l.strip().startswith("ensures forall k: Int, j: Int") and "(!loc(member(loc(member(r, 1), k), 0), j).d_int)" in l]
+        self.assertEqual(len(alloc_rows), 1)
+        bad = list(lines)
+        bad[alloc_rows[0] - 1] = bad[alloc_rows[0] - 1].replace("(j < 3)", "(j < 4)")
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue(any("is not the trusted struct allocation" in p for p in probs), probs)
+        self.refused_at(probs, rows, "the allocation of the structure is not the pinned one")
+
+    def test_the_kept_flag_and_kept_value_rows_are_refused_over_another_variable_and_judged_over_the_member(self):
+        name = "real_mmember_loop_nested_body_vacuity"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        rows = self.rows_over(text, "t__2")
+        kept = [i for i in rows if "old[lh_0](" in lines[i - 1]]
+        self.assertEqual(len(kept), 2)
+        for ln, label, edit in ((kept[0], "the kept flag over 3 columns", lambda l: l.replace("(j < 3)", "(j < 4)")), (kept[1], "the kept value over 3 rows", lambda l: l.replace("(k < 2)", "(k < 3)")),
+                                (kept[0], "the kept flag of another field", lambda l: l.replace(".d_int", ".d_bool")), (kept[1], "the kept value of another field", lambda l: l.replace(".v_int", ".v_bool"))):
+            bad = list(lines)
+            bad[ln - 1] = edit(bad[ln - 1])
+            self.assertNotEqual(bad[ln - 1], lines[ln - 1], label)
+            probs = self.problems("\n".join(bad), mp)
+            self.refused_at(probs, [ln], label)
+        other = [l.replace("block_of(t__2)", "block_of(t__1)") if i in kept else l for i, l in enumerate(lines, start=1)]
+        probs = self.problems("\n".join(other), mp)
+        self.refused_at(probs, kept, "the kept rows over the place of the scalar member")
+
+
+class PartEFlatRowTests(unittest.TestCase):
+    """Audit round E2a, finding 5 (a TIGHTENING of the lint; nothing is loosened).  A row with ONE bound variable over the slots of a matrix reads it flat, a row's slot as a cell.  Over a
+    matrix's block term (`GB_g()` of a global or `static` matrix: `gb_matrix_row_problem`) the only one-binder row is the row-length fact, and over the place of a matrix (a local matrix's
+    allocation, `X := loc(GB_g(), 0)`, `X := loc(member(V, k), 0)` of a matrix member: `matrix_place_names`, every assignment counted) no `invariant`, marked `assert` or `exhale` row has
+    one bound variable.  The mutants are the auditor's F1 to F9 and H1 (build/m4.5e1e2d/audit-E2a/lint/) written on the real fixtures of the other Part E classes, and their analogues over a
+    local matrix's and a matrix member's place; each is refused on its own line with the flat-row reason, and the real fixtures stay clean."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    FLAT = "reads the matrix flat"
+    REAL = ("real_gmat_owns_callee", "real_gmat_loop_main_reads", "real_gmat_loop_owns_fill", "real_gmat_main_read_write", "real_gmat_static_local", "real_loop_matrix_nested_reads",
+            "real_mmember_local_rw", "real_mmember_loop_nested_body_vacuity", "real_mmember_zero_fill")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def find(lines, fragment, nth=0, after="method f_put__0"):
+        """The 1-based line of the `nth` line with `fragment` after the line that starts with `after` (a method of the fixture, not `program_start`)."""
+        start = next(i for i, l in enumerate(lines) if l.startswith(after))
+        hits = [i for i, l in enumerate(lines, start=1) if i > start and fragment in l]
+        return hits[nth]
+
+    def flat_refused(self, name, line, new_text, label):
+        """Line `line` of fixture `name` replaced by `new_text` (the map unchanged: a one-for-one replacement): the problems at that line name the flat-row reason."""
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        self.assertNotEqual(lines[line - 1], new_text, label)
+        lines[line - 1] = new_text
+        probs = self.problems("\n".join(lines), mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{line}:") and self.FLAT in p for p in probs), (label, probs))
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in self.REAL:
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_a_one_binder_row_over_a_global_matrixs_block_in_a_contract_is_refused(self):
+        name = "real_gmat_owns_callee"
+        lines = self.pair(name)[0].split("\n")
+        flat = "forall k: Int :: { loc(GB_gm__0(), k) } ((0 <= k) && (k < 2)) ==> "
+        req_v = self.find(lines, "requires forall k: Int, j: Int :: { loc(member(loc(GB_gm__0(), k), 0), j) }", 0)
+        req_d, req_flag = req_v + 1, req_v + 2
+        ens_v = self.find(lines, "ensures forall k: Int, j: Int :: { loc(member(loc(GB_gm__0(), k), 0), j) }", 0)
+        ens_flag = ens_v + 2
+        for label, line, kw, cons in (("F1 the value permission in a requires", req_v, "requires", "acc(loc(GB_gm__0(), k).v_int)"),
+                                      ("F2 the flag permission in a requires", req_d, "requires", "acc(loc(GB_gm__0(), k).d_int)"),
+                                      ("F3 the flag in a requires", req_flag, "requires", "loc(GB_gm__0(), k).d_int"),
+                                      ("F4 the value permission in an ensures", ens_v, "ensures", "acc(loc(GB_gm__0(), k).v_int)"),
+                                      ("F6 another field", req_v, "requires", "acc(loc(GB_gm__0(), k).v_bool)"),
+                                      ("F7 an amount", req_v, "requires", "acc(loc(GB_gm__0(), k).v_int, amt_0)"),
+                                      ("F8 a value fact in an ensures", ens_flag, "ensures", "(loc(GB_gm__0(), k).v_int == 0)"),
+                                      ("F9 a kept flag in an ensures", ens_flag, "ensures", "(old(loc(GB_gm__0(), k).d_int) ==> loc(GB_gm__0(), k).d_int)"),
+                                      ("F5 the count of the rows", req_v, "requires", "acc(loc(GB_gm__0(), k).v_int)")):
+            head = flat if not label.startswith("F5") else flat.replace("k < 2", "k < 3")
+            with self.subTest(label=label):
+                self.flat_refused(name, line, f"  {kw} {head}{cons}", label)
+
+    def test_three_binders_and_a_one_binder_leaf_row_over_a_global_matrixs_block_are_refused(self):
+        name = "real_gmat_owns_callee"
+        lines = self.pair(name)[0].split("\n")
+        req_v = self.find(lines, "requires forall k: Int, j: Int :: { loc(member(loc(GB_gm__0(), k), 0), j) }", 0)
+        three = ("  requires forall k: Int, j: Int, l: Int :: { loc(member(loc(member(loc(GB_gm__0(), k), 0), j), 0), l) } ((((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) && "
+                 "((0 <= l) && (l < 2))) ==> acc(loc(member(loc(member(loc(GB_gm__0(), k), 0), j), 0), l).v_int)")
+        self.flat_refused(name, req_v, three, "A14 three binders")
+        leaf = "  requires forall k: Int :: { loc(member(loc(GB_gm__0(), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(GB_gm__0(), k), 0), 0).v_int)"
+        self.flat_refused(name, req_v, leaf, "a one-binder row over each row's first cell")
+
+    def test_a_one_binder_row_in_a_loop_over_a_global_matrixs_place_is_refused(self):
+        name = "real_gmat_loop_main_reads"
+        text = self.pair(name)[0]
+        lines = text.split("\n")
+        first = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(ga_gm__0), k), 0), j) }", 0, "method f_main__0")
+        place = "ga_gm__0"
+        flat = f"    invariant forall k: Int :: {{ loc(block_of({place}), k) }} ((0 <= k) && (k < 2)) ==> "
+        for label, line, cons in (("H1 the value permission", first, f"acc(loc(block_of({place}), k).v_int)"), ("the flag permission", first + 1, f"acc(loc(block_of({place}), k).d_int)"),
+                                  ("the kept flag", first + 2, f"(old[lh_0](loc(block_of({place}), k).d_int) ==> loc(block_of({place}), k).d_int)"),
+                                  ("the type's range", first + 3, f"(loc(block_of({place}), k).d_int ==> (((-2147483648) <= loc(block_of({place}), k).v_int) && (loc(block_of({place}), k).v_int <= 2147483647)))"),
+                                  ("the kept value", first + 4, f"(loc(block_of({place}), k).v_int == old[lh_0](loc(block_of({place}), k).v_int))")):
+            with self.subTest(label=label):
+                self.flat_refused(name, line, flat + cons, label)
+
+    def test_a_place_bound_twice_is_no_place_for_a_flat_row_either(self):
+        name = "real_gmat_loop_main_reads"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        first = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(ga_gm__0), k), 0), j) }", 0, "method f_main__0")
+        at = self.find(lines, "ga_gm__0 := loc(GB_gm__0(), 0)", 0, "method f_main__0")
+        # another assignment BEFORE the matrix place (the variable is bound twice, and its first binding is no matrix's): every assignment counts
+        lines[at - 1] = "  ga_gm__0 := loc(GB_gm__0(), 1)\n" + lines[at - 1]
+        # the inserted line shifts the rows from `at` on by one: the map's lines move too
+        out = []
+        for raw in mp.split("\n"):
+            if not raw.strip():
+                continue
+            f = raw.split("\t")
+            n = int(f[0])
+            out.append("\t".join([str(n + 1 if n >= at else n), *f[1:]]))
+        bad = "\n".join(lines).split("\n")
+        line = first + 1
+        bad[line - 1] = f"    invariant forall k: Int :: {{ loc(block_of(ga_gm__0), k) }} ((0 <= k) && (k < 2)) ==> acc(loc(block_of(ga_gm__0), k).v_int)"
+        probs = self.problems("\n".join(bad), "\n".join(out) + "\n")
+        self.assertTrue(any(p.startswith(f"t.vpr:{line}:") and self.FLAT in p for p in probs), probs)
+
+    def test_a_one_binder_row_over_a_local_matrixs_place_is_refused_in_a_loop_a_marked_assert_and_an_exhale(self):
+        name = "real_loop_matrix_nested_reads"
+        lines = self.pair(name)[0].split("\n")
+        place = "v_m__0"
+        for kw, anchor, label in (("invariant", "invariant forall k: Int, j: Int", "a loop invariant"), ("assert", "  assert forall k: Int, j: Int", "a marked assert"),
+                                  ("exhale", "exhale forall k: Int, j: Int", "an exhale")):
+            line = self.find(lines, anchor, 0, "method f_f__0")
+            indent = lines[line - 1][: len(lines[line - 1]) - len(lines[line - 1].lstrip())]
+            new = f"{indent}{kw} forall k: Int :: {{ loc(block_of({place}), k) }} ((0 <= k) && (k < 2)) ==> acc(loc(block_of({place}), k).v_int)"
+            with self.subTest(label=label):
+                self.flat_refused(name, line, new, label)
+
+    def test_a_one_binder_row_over_a_matrix_members_place_is_refused(self):
+        name = "real_mmember_loop_nested_body_vacuity"
+        lines = self.pair(name)[0].split("\n")
+        inv = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(t__2), k), 0), j) }", 0, "method f_f__0")
+        ex = self.find(lines, "exhale forall k: Int, j: Int :: { loc(member(loc(block_of(t__4), k), 0), j) }", 0, "method f_f__0")
+        asr = self.find(lines, "assert forall k: Int, j: Int :: { loc(member(loc(block_of(t__4), k), 0), j) }", 0, "method f_f__0")
+        for label, line, kw, place, indent in (("the loop's permission", inv, "invariant", "t__2", "    "), ("the scope exit's exhale", ex, "exhale", "t__4", "  "),
+                                               ("a marked assert", asr, "assert", "t__4", "  ")):
+            new = f"{indent}{kw} forall k: Int :: {{ loc(block_of({place}), k) }} ((0 <= k) && (k < 2)) ==> acc(loc(block_of({place}), k).v_int)"
+            with self.subTest(label=label):
+                self.flat_refused(name, line, new, label)
+
+    def test_a_flat_row_whose_consequent_merely_contains_a_length_fact_is_still_refused(self):
+        """The length-fact exemption is the consequent `len(member(..)) == N` ALONE, not any consequent that contains that text."""
+        name = "real_gmat_loop_main_reads"
+        lines = self.pair(name)[0].split("\n")
+        first = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(ga_gm__0), k), 0), j) }", 0, "method f_main__0")
+        flat = "    invariant forall k: Int :: { loc(block_of(ga_gm__0), k) } ((0 <= k) && (k < 2)) ==> "
+        self.flat_refused(name, first, flat + "(acc(loc(block_of(ga_gm__0), k).v_int) && (len(member(ga_gm__0, 0)) == 1))", "an acc with a length fact beside it")
+        self.flat_refused(name, first, flat + "(loc(block_of(ga_gm__0), k).v_int == len(member(ga_gm__0, 0)))", "a value fact that names a length")
+
+    def test_a_loop_row_over_the_global_matrixs_block_term_itself_is_refused(self):
+        """Audit round E2a, the measurement of the block term: an `invariant` (or marked `assert`, `exhale`) one-binder row over `GB_g()` itself, not its place."""
+        name = "real_gmat_loop_main_reads"
+        lines = self.pair(name)[0].split("\n")
+        first = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(ga_gm__0), k), 0), j) }", 0, "method f_main__0")
+        self.flat_refused_term(name, first, "    invariant forall k: Int :: { loc(GB_gm__0(), k) } ((0 <= k) && (k < 2)) ==> acc(loc(GB_gm__0(), k).v_int)", "an invariant over the block term")
+        self.flat_refused_term(name, first, "    assert forall k: Int :: { loc(GB_gm__0(), k) } ((0 <= k) && (k < 2)) ==> acc(loc(GB_gm__0(), k).v_int)", "an assert over the block term")
+        self.flat_refused_term(name, first, "    exhale forall k: Int :: { loc(GB_gm__0(), k) } ((0 <= k) && (k < 2)) ==> acc(loc(GB_gm__0(), k).v_int)", "an exhale over the block term")
+
+    def flat_refused_term(self, name, line, new_text, label):
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        lines[line - 1] = new_text
+        probs = self.problems("\n".join(lines), mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{line}:") and "over the block term of the global matrix" in p for p in probs), (label, probs))
+
+    def test_a_one_binder_row_over_the_place_of_a_scalar_member_is_not_this_rules(self):
+        """`t__1 := loc(member(v_u__0, 0), 0)` is the place of the scalar member `n`: the rule names matrix places only (no flat-row reason for a row over it)."""
+        name = "real_mmember_loop_nested_body_vacuity"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        self.assertIn("t__1 := loc(member(v_u__0, 0), 0)", text)
+        inv = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(t__2), k), 0), j) }", 0, "method f_f__0")
+        lines[inv - 1] = "    invariant forall k: Int :: { loc(block_of(t__1), k) } ((0 <= k) && (k < 1)) ==> acc(loc(block_of(t__1), k).v_int)"
+        probs = self.problems("\n".join(lines), mp)
+        self.assertFalse(any(self.FLAT in p for p in probs), probs)
+
+
+class PartEMatrixMemberContractTests(unittest.TestCase):
+    """Audit round E2a / decision 0064 items 3, 9 and 17 (Part E slices 3b-2 and 3b-3): the rows of a MATRIX MEMBER of a pointed-to structure (`member_matrix_row_problem`, the element length facts of
+    `range_lens_members` with the unit's matrix pairs `_MATRIX_PAIRS`) and of a STRUCTURE GLOBAL (`matrix_member_global_group` in `program_start`, the place `t := loc(member(loc(GB_g(), 0), k), 0)`
+    of a loop).  The fixtures are REAL output of the VIR self-test (build/m4.5e1e2d/e3b-vir/, il115 and il120): `real_mmp_owns_member_call` (a callee under `owns(p->m)`: the well-formedness row, the
+    guarded and unguarded row-length facts, the four rows of the `requires` and of the `ensures`), `real_mmp_reads_write` (the rows with the method's `Perm` formal `amt_0`), `real_gu_call_owns_member`
+    (the same over a structure global), `real_gu_main_read` (the group in `program_start` with listed values and the rows' rest), `real_gu_unknown_cells` (the type's own range of an unknown cell),
+    `real_gu_loop_main_reads` (a loop over the member's place).  Each tie has its refusing twin: another N, M, member index, field, a root that is no formal, a missing length fact, a guard dropped
+    from the well-formedness row, an amount other than the method's `Perm` formal; the context of matrix pairs is reset for every unit."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    PAIRS = "no matrix member of a pinned `alloc_struct_...` of this unit"
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def find(lines, fragment, after="method f_", nth=0):
+        start = next(i for i, l in enumerate(lines) if l.startswith(after))
+        return [i for i, l in enumerate(lines, start=1) if i > start and fragment in l][nth]
+
+    def refused_at(self, name, edits, why, label, lines_at=None):
+        """`edits`: [(1-based line, old, new)] applied to the fixture (one line each, so the map stays); one problem on an edited line (or `lines_at`) carries `why`."""
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        for ln, old, new in edits:
+            self.assertIn(old, lines[ln - 1], (label, ln, old))
+            lines[ln - 1] = lines[ln - 1].replace(old, new)
+        probs = self.problems("\n".join(lines), mp)
+        at = list(lines_at) if lines_at is not None else [ln for ln, _o, _n in edits]
+        self.assertTrue(any(why in p for p in probs if any(p.startswith(f"t.vpr:{n}:") for n in at)), (label, why, probs[:4]))
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in ("real_mmp_owns_member_call", "real_mmp_reads_write", "real_gu_call_owns_member", "real_gu_contract_global", "real_gu_main_read", "real_gu_unknown_cells", "real_gu_loop_main_reads",
+                     "real_mmp_nested_owns_star", "real_mmp_nested_owns_u", "real_mmp_nested_reads", "real_mmp_cell_atom_read"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_rows_over_a_pointers_matrix_member_are_tied_to_an_allocations_own_counts(self):
+        name = "real_mmp_owns_member_call"
+        lines = self.pair(name)[0].split("\n")
+        row = self.find(lines, "requires forall k: Int, j: Int :: { loc(member(loc(member(p_p__0, 1), k), 0), j) }")
+        for label, old, new in (("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 3)", "(j < 4)"), ("another field", ".v_int)", ".v_bool)"),
+                                ("another member index", "member(p_p__0, 1)", "member(p_p__0, 2)")):
+            with self.subTest(label=label):
+                self.refused_at(name, [(row, old, new)], self.PAIRS, label)
+
+    def test_a_root_that_is_no_formal_and_a_global_that_is_not_declared_are_refused(self):
+        name = "real_mmp_owns_member_call"
+        lines = self.pair(name)[0].split("\n")
+        row = self.find(lines, "requires forall k: Int, j: Int :: { loc(member(loc(member(p_p__0, 1), k), 0), j) }")
+        self.refused_at(name, [(row, "member(p_p__0, 1)", "member(q_other, 1)")], "no formal, no result", "a root that is no formal")
+        gname = "real_gu_contract_global"
+        glines = self.pair(gname)[0].split("\n")
+        grow = self.find(glines, "requires forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j) }")
+        self.refused_at(gname, [(grow, "GB_gu__0()", "GB_nope__0()")], "no formal, no result", "an undeclared global")
+
+    def test_the_rows_need_the_length_facts_the_clause_set_states(self):
+        name = "real_mmp_owns_member_call"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        row = self.find(lines, "requires forall k: Int, j: Int :: { loc(member(loc(member(p_p__0, 1), k), 0), j) }")
+        method_end = next(i for i, l in enumerate(lines, start=1) if i > row and l.startswith("method "))
+        for label, old, new, why in (("the row-length fact says 4 columns", "len(member(loc(member(p_p__0, 1), k), 0)) == 3", "len(member(loc(member(p_p__0, 1), k), 0)) == 4", "states no row-length fact"),
+                                     ("the member length says 5 rows", "len(member(p_p__0, 1)) == 2", "len(member(p_p__0, 1)) == 5", "states no `len(member(p_p__0,1)) == 2`")):
+            with self.subTest(label=label):
+                bad = [l.replace(old, new) if row - 12 < i < method_end else l for i, l in enumerate(lines, start=1)]
+                self.assertNotEqual(bad, lines)
+                probs = self.problems("\n".join(bad), mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{row}:") and why in p for p in probs), (label, probs[:4]))
+
+    def test_a_guard_dropped_from_the_well_formedness_row_is_refused(self):
+        name = "real_mmp_owns_member_call"
+        lines = self.pair(name)[0].split("\n")
+        wf = self.find(lines, "requires ((p_p__0 == null) ||")
+        guard = "((p_p__0 != null) && (offset_of(p_p__0) < len(block_of(p_p__0)))) ==> "
+        self.refused_at(name, [(wf, guard, "")], "", "no guard on the length facts")
+
+    def test_the_amount_is_the_methods_own_perm_formal_and_an_old_flag_stands_in_an_ensures_only(self):
+        name = "real_mmp_reads_write"
+        lines = self.pair(name)[0].split("\n")
+        row = self.find(lines, "requires forall k: Int, j: Int :: { loc(member(loc(member(p_p__0, 1), k), 0), j) }")
+        self.refused_at(name, [(row, ".v_int, amt_0)", ".v_int, write / 2)")], "the amount of an `acc` is a `Perm` formal", "another amount")
+        self.refused_at(name, [(row, ".v_int, amt_0)", ".v_int, amt_9)")], "the amount of an `acc` is a `Perm` formal", "a formal that is not the method's")
+        flag = row + 2
+        c = "loc(member(loc(member(p_p__0, 1), k), 0), j)"
+        self.refused_at(name, [(flag, f"==> {c}.d_int", f"==> (old({c}.d_int) ==> {c}.d_int)")], "`old` in a `requires`", "an old flag in a requires")
+
+    def test_the_rows_over_a_structure_globals_matrix_member_are_tied_the_same_way(self):
+        name = "real_gu_contract_global"
+        lines = self.pair(name)[0].split("\n")
+        row = self.find(lines, "requires forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j) }")
+        for label, old, new in (("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 3)", "(j < 4)"), ("another field", ".v_int)", ".v_bool)"), ("another member index", "), 1), k)", "), 2), k)")):
+            with self.subTest(label=label):
+                self.refused_at(name, [(row, old, new)], self.PAIRS, label)
+
+    def test_the_group_of_a_structure_globals_matrix_member_in_program_start_is_judged_as_a_global_matrixs(self):
+        name = "real_gu_main_read"
+        lines = self.pair(name)[0].split("\n")
+        vp = self.find(lines, "ensures forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j) }", "method program_start")
+        listed = self.find(lines, "ensures loc(member(loc(member(loc(GB_gu__0(), 0), 1), 0), 0), 0).v_int == 1", "method program_start")
+        rest = self.find(lines, "ensures forall j: Int :: { loc(member(loc(member(loc(GB_gu__0(), 0), 1), 1), 0), j) }", "method program_start")
+        group = "the row group of a matrix global in `program_start`"
+        for label, ln, old, new in (("another M in the value permission", vp, "(j < 3)", "(j < 4)"), ("another N in the value permission", vp, "(k < 2)", "(k < 3)"),
+                                    ("a listed value on another cell", listed, "), 0), 0).v_int == 1", "), 0), 1).v_int == 1"), ("the rows' rest starting one cell late", rest, "(1 <= j)", "(2 <= j)"),
+                                    ("the rows' rest not zero", rest, "== 0)", "== 7)")):
+            with self.subTest(label=label):
+                self.refused_at(name, [(ln, old, new)], group, label, lines_at=range(vp - 1, rest + 2))
+        text, mp = self.pair(name)
+        ls = text.split("\n")
+        for i in range(vp - 2, rest + 1):
+            ls[i] = ls[i].replace("loc(GB_gu__0(), 0), 1)", "loc(GB_gu__0(), 0), 2)")
+        self.assertTrue(self.problems("\n".join(ls), mp), "another member index for the whole group")
+
+    def test_the_type_range_of_an_unknown_cell_in_a_structure_globals_group_is_the_types_own(self):
+        name = "real_gu_unknown_cells"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        rng = self.find(lines, "(((-2147483648) <= loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j).v_int)", "method program_start")
+        for label, old, new in (("a narrower upper bound", "2147483647", "5"), ("a narrower lower bound", "(-2147483648)", "(-5)")):
+            ls = list(lines)
+            ls[rng - 1] = ls[rng - 1].replace(old, new)
+            self.assertNotEqual(ls[rng - 1], lines[rng - 1])
+            probs = self.problems("\n".join(ls), mp)
+            self.assertTrue(any(p.startswith(f"t.vpr:{rng}:") for p in probs), (label, probs[:3]))
+
+    def test_a_loop_row_over_a_structure_globals_matrix_member_place_is_tied_to_the_members_counts(self):
+        name = "real_gu_loop_main_reads"
+        lines = self.pair(name)[0].split("\n")
+        first = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(t__0), k), 0), j) }", "method f_main")
+        for label, old, new in (("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 4)".replace("4", "3"), "(j < 4)"), ("another field", ".v_int)", ".v_bool)")):
+            with self.subTest(label=label):
+                self.refused_at(name, [(first, old, new)], "", label)
+        at = self.find(lines, "t__0 := loc(member(loc(GB_gu__0(), 0), 1), 0)", "method f_main")
+        text, mp = self.pair(name)
+        for label, old2, new2 in (("a place bound to slot 1", "1), 0)", "1), 1)"), ("the place of the scalar member 0", "1), 0)", "0), 0)")):
+            ls = text.split("\n")
+            ls[at - 1] = ls[at - 1].replace(old2, new2)
+            probs = self.problems("\n".join(ls), mp)
+            self.assertTrue(any(p.startswith(f"t.vpr:{first}:") for p in probs), (label, probs[:3]))
+        self.refused_at(name, [(first, lines[first - 1].strip(), "invariant forall k: Int :: { loc(block_of(t__0), k) } ((0 <= k) && (k < 2)) ==> acc(loc(block_of(t__0), k).v_int)")],
+                        "reads the matrix flat", "a flat row over the member's place")
+
+    def test_the_row_length_fact_and_the_order_of_a_structure_globals_group_are_tied(self):
+        name = "real_mmp_owns_member_call"
+        lines = self.pair(name)[0].split("\n")
+        lens = self.find(lines, "requires ((p_p__0 != null) && (offset_of(p_p__0) < len(block_of(p_p__0)))) ==> (forall k: Int :: { loc(member(p_p__0, 1), k) }")
+        self.refused_at(name, [(lens, "== 3", "== 4")], "is not `len(member(<chain>, <literal>)) == 1`", "a row-length fact of another column count")
+        self.refused_at(name, [(lens, "(k < 2)", "(k < 3)")], "", "a row-length fact over another row count")
+        gname = "real_gu_main_read"
+        glines = self.pair(gname)[0].split("\n")
+        lens_g = self.find(glines, "ensures forall k: Int :: { loc(member(loc(GB_gu__0(), 0), 1), k) }", "method program_start")
+        cell = lens_g + 1
+        text, mp = self.pair(gname)
+        ls = text.split("\n")
+        ls[lens_g], ls[cell] = ls[cell], ls[lens_g]  # the structure's cell row before the length facts: the group stands before its cell row
+        self.assertTrue(self.problems("\n".join(ls), mp), "length facts after the cell row")
+        # the group before the structure's cell row (the cell row moved to the end of the clauses)
+        ls = text.split("\n")
+        moved = ls.pop(cell - 1)
+        at_end = next(i for i, l in enumerate(ls) if i >= cell - 1 and l.strip() == "decreases _")
+        ls.insert(at_end, moved)
+        probs = self.problems("\n".join(ls), mp)
+        self.assertTrue(any("before the structure's cell row" in p for p in probs), probs[:3])
+        # a row-length fact over another element member index (key (1,), not (0,)) and over another member of the structure
+        self.refused_at(name, [(lens, "member(loc(member(p_p__0, 1), k), 0)", "member(loc(member(p_p__0, 1), k), 1)")], "is not `len(member(<chain>, <literal>)) == 1`", "the element's member 1, not the cells block")
+        rname = "real_mmp_reads_write"
+        rlines = self.pair(rname)[0].split("\n")
+        unguarded = self.find(rlines, "requires forall k: Int :: { loc(member(p_p__0, 1), k) }")
+        self.refused_at(rname, [(unguarded, "member(p_p__0, 1)", "member(p_p__0, 2)")], "", "an unguarded row-length fact of another member index")
+        # a self-consistent group no allocation's matrix member has (4 columns in the length facts and every row): the pair check, not the group's own ties
+        uname = "real_gu_unknown_cells"
+        utext, ump = self.pair(uname)
+        ul = utext.split("\n")
+        first = self.find(ul, "ensures forall k: Int :: { loc(member(loc(GB_gu__0(), 0), 1), k) }", "method program_start")
+        last = self.find(ul, "decreases _", "method program_start")
+        for i in range(first - 1, last - 1):
+            ul[i] = ul[i].replace("(j < 3)", "(j < 4)").replace("== 3)", "== 4)")
+        probs = self.problems("\n".join(ul), ump)
+        self.assertTrue(any(self.PAIRS in p for p in probs), probs[:3])
+
+    def test_a_matrix_member_reached_through_a_nested_structure_member_is_tied_step_by_step(self):
+        """`struct V { struct U u; int k; }` with `U`'s matrix member 1: the chain `member(loc(member(p, 0), 0), 1)`: the last step is an allocation's matrix member, the earlier step a by-value structure
+        member whose own `len(member(p, 0)) == 1` the clause set states (the auditor's q60, q61 and q62 of audit round E2a, finding 1)."""
+        name = "real_mmp_nested_owns_star"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        chain = "member(loc(member(p_p__0, 0), 0), 1)"
+        row = self.find(lines, f"requires forall k: Int, j: Int :: {{ loc(member(loc({chain}, k), 0), j) }}")
+        for label, old, new in (("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 3)", "(j < 4)"), ("another field", ".v_int)", ".v_bool)"), ("another last step", chain, "member(loc(member(p_p__0, 0), 0), 2)")):
+            with self.subTest(label=label):
+                self.refused_at(name, [(row, old, new)], self.PAIRS, label)
+        longer = "member(loc(member(loc(member(p_p__0, 0), 0), 1), 0), 1)"
+        self.refused_at(name, [(row, chain, longer)], "no `len(", "a chain one step longer than the structure has")
+        method_end = next(i for i, l in enumerate(lines, start=1) if i > row and l.startswith("method "))
+        method_start = max(i for i, l in enumerate(lines, start=1) if i < row and l.startswith("method "))
+        bad = [l.replace("len(member(p_p__0, 0)) == 1", "len(member(p_p__0, 0)) == 5") if method_start < i < method_end else l for i, l in enumerate(lines, start=1)]
+        self.assertNotEqual(bad, lines)
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{row}:") and "states no `len(member(p_p__0,0)) == 1`" in p for p in probs), ("an inner step without its length fact", probs[:3]))
+        wf = self.find(lines, "requires ((p_p__0 == null) ||")
+        lens0 = self.find(lines, "requires ((p_p__0 != null) && (offset_of(p_p__0) < len(block_of(p_p__0)))) ==> (forall k: Int :: { loc(member(loc(member(p_p__0, 0), 0), 1), k) }")
+        for at, label in ((wf, "the well-formedness row"), (lens0, "the standalone row-length fact")):
+            self.assertTrue(any(p.startswith(f"t.vpr:{at}:") for p in probs), (label, "without the inner step's length fact", probs[:3]))
+        # the element length fact of the nested member: another column count is refused
+        lens = self.find(lines, f"requires ((p_p__0 != null) && (offset_of(p_p__0) < len(block_of(p_p__0)))) ==> (forall k: Int :: {{ loc({chain}, k) }}")
+        self.refused_at(name, [(lens, "== 3", "== 4")], "is not `len(member(<chain>, <literal>)) == 1`", "the nested member's row-length fact of another column count")
+
+    def test_a_one_binder_row_over_a_matrix_members_block_is_refused_whatever_the_root(self):
+        """Audit round E2a (advisor): a one-binder `acc` row over `member(p, 1)` of a pointer, over `member(loc(GB_g(), 0), 1)` of a structure global and over a nested chain read the matrix flat once
+        the clause set states the matrix's row-length fact and an allocation has the pair; a one-dimensional member (no row-length fact over its block) is not this rule's."""
+        for name, blk, anchor in (("real_mmp_owns_member_call", "member(p_p__0, 1)", "{ loc(member(loc(member(p_p__0, 1), k), 0), j) }"),
+                                  ("real_gu_contract_global", "member(loc(GB_gu__0(), 0), 1)", "{ loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j) }"),
+                                  ("real_mmp_nested_owns_star", "member(loc(member(p_p__0, 0), 0), 1)", "{ loc(member(loc(member(loc(member(p_p__0, 0), 0), 1), k), 0), j) }")):
+            lines = self.pair(name)[0].split("\n")
+            row = self.find(lines, f"requires forall k: Int, j: Int :: {anchor}")
+            for form in (f"acc(loc({blk}, k).v_int)", f"loc({blk}, k).d_int"):
+                with self.subTest(name=name, form=form):
+                    self.refused_at(name, [(row, lines[row - 1].strip(), f"requires forall k: Int :: {{ loc({blk}, k) }} ((0 <= k) && (k < 2)) ==> {form}")], "reads the matrix flat", "a flat row")
+        # the same row over a one-dimensional array member: no row-length fact over its block, so the rule leaves it to the older ones
+        self.assertIsNone(lv.matrix_member_block_flat_problem("forall k: Int :: { loc(member(p_p__0, 2), k) } ((0 <= k) && (k < 2)) ==> acc(loc(member(p_p__0, 2), k).v_int)",
+                                                              ["requires len(member(p_p__0,2))==2"], lambda k, n, m: True))
+        # the matrix's row-length fact without a pair of an allocation: not this rule's
+        self.assertIsNone(lv.matrix_member_block_flat_problem("forall k: Int :: { loc(member(p_p__0, 1), k) } ((0 <= k) && (k < 2)) ==> acc(loc(member(p_p__0, 1), k).v_int)",
+                                                              [lv.norm_viper("requires forall k: Int :: { loc(member(p_p__0, 1), k) } ((0 <= k) && (k < 2)) ==> len(member(loc(member(p_p__0, 1), k), 0)) == 3")], lambda k, n, m: False))
+        self.assertIsNotNone(lv.matrix_member_block_flat_problem("forall k: Int :: { loc(member(p_p__0, 1), k) } ((0 <= k) && (k < 2)) ==> acc(loc(member(p_p__0, 1), k).v_int)",
+                                                                 [lv.norm_viper("requires forall k: Int :: { loc(member(p_p__0, 1), k) } ((0 <= k) && (k < 2)) ==> len(member(loc(member(p_p__0, 1), k), 0)) == 3")],
+                                                                 lambda k, n, m: (k, n, m) == (1, 2, 3)))
+
+    def test_the_group_of_a_structure_globals_matrix_member_refuses_what_would_make_main_vacuous(self):
+        """The auditor's B1, B8, B13, B14 and B9 of the global matrix's group, on the structure global's: a doubled value permission (two full permissions make `main` vacuous), a doubled listed
+        cell, an extra rows' rest, a negated flag row, no length facts."""
+        name = "real_gu_main_read"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        vp = self.find(lines, "ensures forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j) }", "method program_start")
+        listed = self.find(lines, "ensures loc(member(loc(member(loc(GB_gu__0(), 0), 1), 0), 0), 0).v_int == 1", "method program_start")
+        rest = self.find(lines, "ensures forall j: Int :: { loc(member(loc(member(loc(GB_gu__0(), 0), 1), 1), 0), j) }", "method program_start")
+        flags = vp + 2
+        lens = self.find(lines, "ensures forall k: Int :: { loc(member(loc(GB_gu__0(), 0), 1), k) }", "method program_start")
+        helper = PartEGlobalMatrixTests.insert_line
+        first_group, last_group = lens, rest
+
+        def refused(bad, bad_map, label):
+            probs = self.problems(bad, bad_map)
+            self.assertTrue(any(first_group <= int(p.split(":")[1]) <= last_group + 3 for p in probs if p.startswith("t.vpr:")), (label, probs[:3]))
+
+        for label, after, new in (("a doubled value permission", vp, lines[vp - 1]), ("a doubled listed cell", listed, lines[listed - 1]),
+                                  ("an extra rows' rest", rest, "  ensures forall k: Int, j: Int :: { loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j) } (((1 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> "
+                                                                "(loc(member(loc(member(loc(GB_gu__0(), 0), 1), k), 0), j).v_int == 0)")):
+            with self.subTest(label=label):
+                bad, bad_map = helper(None, text, mp, after, new)
+                refused(bad, bad_map, label)
+        with self.subTest(label="a negated flag row"):
+            ls = list(lines)
+            self.assertIn("==> loc(", ls[flags - 1])
+            ls[flags - 1] = ls[flags - 1].replace("==> loc(", "==> !loc(", 1)
+            refused("\n".join(ls), mp, "a negated flag row")
+        with self.subTest(label="no length facts"):
+            ls = list(lines)
+            ls[lens - 1] = "  ensures true"
+            refused("\n".join(ls), mp, "no length facts")
+
+    def test_the_well_formedness_conjunct_inside_a_cell_atoms_clause_is_tied_to_an_allocations_pair(self):
+        """`owns(p->n)` of a scalar member of a structure with a matrix member, with a contract read of another member's cell (il146, 3b-4): the clause is a conjunction holding the structure's guarded
+        well-formedness conjunct, whose row-length fact has the matrix's column count."""
+        name = "real_mmp_cell_atom_read"
+        lines = self.pair(name)[0].split("\n")
+        req = self.find(lines, "requires ((((((((p_p__0 != null)")
+        ens = self.find(lines, "ensures ((((((((p_p__0 != null)")
+        for at in (req, ens):
+            self.refused_at(name, [(at, "len(member(loc(member(p_p__0, 1), k), 0)) == 3", "len(member(loc(member(p_p__0, 1), k), 0)) == 4")], "", "another column count")
+            self.refused_at(name, [(at, "len(member(p_p__0, 1)) == 2", "len(member(p_p__0, 1)) == 3")], "", "another row count")
+            self.refused_at(name, [(at, "len(member(p_p__0, 0)) == 1)", "len(member(p_p__0, 0)) == 7)")], "", "the structure's own length fact changed")
+
+    def test_a_loop_invariant_with_one_binder_over_a_pointers_matrix_member_block_is_refused(self):
+        name = "real_mmp_held_loop_write"
+        lines = self.pair(name)[0].split("\n")
+        inv = self.find(lines, "invariant forall k: Int, j: Int :: { loc(member(loc(block_of(t__0), k), 0), j) }")
+        self.refused_at(name, [(inv, lines[inv - 1].strip(), "invariant forall k: Int :: { loc(member(p_p__0, 1), k) } ((0 <= k) && (k < 2)) ==> acc(loc(member(p_p__0, 1), k).v_int)")],
+                        "reads the matrix flat", "a one-binder invariant over member(p, 1)")
+
+    def test_the_count_gate_of_the_cell_atoms_well_formedness_conjunct(self):
+        """The conjunct is accepted only with a column count other than 1 (a count of 1 stays with the older rules, which refuse the conjunct inside a cell atom's clause)."""
+        name = "real_mmp_cell_atom_read"
+        lines = self.pair(name)[0].split("\n")
+        req = self.find(lines, "requires ((((((((p_p__0 != null)")
+        self.refused_at(name, [(req, "len(member(loc(member(p_p__0, 1), k), 0)) == 3", "len(member(loc(member(p_p__0, 1), k), 0)) == 1")],
+                        "a conjunct of an `owns_block` clause holds a quantifier that is neither a row nor the block clause", "a column count of 1")
+
+    GUARD = "((p_p__0 != null) && (offset_of(p_p__0) < len(block_of(p_p__0))))"
+
+    def wf_conjunct_span(self, line):
+        """(start, end) of the structure's guarded well-formedness conjunct `(GUARD ==> <facts>)` in `line` (balanced parentheses)."""
+        start = line.index(self.GUARD + " ==> ") - 1
+        depth = 0
+        for j in range(start, len(line)):
+            if line[j] == "(":
+                depth += 1
+            elif line[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    return start, j + 1
+        raise AssertionError("unbalanced")
+
+    def test_the_guard_of_the_cell_atoms_well_formedness_conjunct_is_tied_to_the_clauses_own_pointer(self):
+        """Question 374, condition 2: the branch that accepts the structure's guarded well-formedness conjunct inside a cell atom's clause (`_is_struct_wf_guarded_lens`) is a GUARD-shaped lift, so
+        each way the guard can fail to be the canonical test of the clause's own pointer has its refusing twin, in the `requires` and in the `ensures` of the real fixture."""
+        name = "real_mmp_cell_atom_read"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        g = self.GUARD
+        variants = (
+            ("the guard names another root than the facts it guards", lambda c: c.replace(g, g.replace("p_p__0", "q_q__0"), 1)),
+            ("the guard and the facts name another root than the clause's pointer", lambda c: c.replace("p_p__0", "q_q__0")),
+            ("the guard names the clause's pointer and the facts another root", lambda c: c.replace("p_p__0, ", "q_q__0, ")),
+            ("`p != null` alone", lambda c: c.replace(g, "(p_p__0 != null)", 1)),
+            ("`offset_of(p) < len(block_of(p))` alone", lambda c: c.replace(g, "(offset_of(p_p__0) < len(block_of(p_p__0)))", 1)),
+            ("`true`", lambda c: c.replace(g, "true", 1)),
+            ("an unrelated boolean", lambda c: c.replace(g, "(amt_0 < write)", 1)),
+            ("`<=` for `<` in the offset test", lambda c: c.replace("(offset_of(p_p__0) < len(block_of(p_p__0)))", "(offset_of(p_p__0) <= len(block_of(p_p__0)))", 1)),
+            ("`||` for `&&` in the guard", lambda c: c.replace(g, g.replace("&&", "||", 1), 1)),
+        )
+        for at in (self.find(lines, "requires ((((((((p_p__0 != null)"), self.find(lines, "ensures ((((((((p_p__0 != null)")):
+            start, end = self.wf_conjunct_span(lines[at - 1])
+            conj = lines[at - 1][start:end]
+            for label, edit in variants:
+                with self.subTest(line=at, label=label):
+                    new = edit(conj)
+                    self.assertNotEqual(new, conj, label)
+                    bad = list(lines)
+                    bad[at - 1] = lines[at - 1][:start] + new + lines[at - 1][end:]
+                    probs = self.problems("\n".join(bad), mp)
+                    self.assertTrue(any(p.startswith(f"t.vpr:{at}:") for p in probs), (label, probs[:3]))
+
+    def test_the_cell_atoms_well_formedness_conjunct_stands_in_no_other_place(self):
+        """Question 374, condition 2: the conjunct as a clause of its own (a `requires`, an `ensures`), as an `assert` of a body, and inside the clauses of a trusted internal allocation method
+        (`alloc_struct_...`, pinned by its name) is refused; the same conjunct inside a declared function's trusted contract (the result's cell atom, `real_mmp_cell_atom_result`) is clean."""
+        name = "real_mmp_cell_atom_read"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        at = self.find(lines, "ensures ((((((((p_p__0 != null)")
+        start, end = self.wf_conjunct_span(lines[at - 1])
+        conj = lines[at - 1][start:end]
+        full = lines[at - 1].strip()
+        # the clause with the allocation's own result `r` and a full permission, as an extra ensures of the trusted allocation
+        clause = full.replace("p_p__0", "r").replace("amt_0", "write")
+        clause = clause[:clause.rindex(" && (res ==")] + ")"
+        res_ens = self.find(lines, "ensures ((-2147483648) <= res)")
+        for label, line_at, new in (
+                ("the conjunct alone as an `ensures`", res_ens, "  ensures " + conj),
+                ("the conjunct alone as a `requires`", self.find(lines, "requires (none < amt_0)"), "  requires " + conj),
+                ("the conjunct alone as an `assert` of a body", self.find(lines, "assert p_p__0 != null"), "  assert " + conj),
+                ("the whole cell clause as an `ensures` of the trusted allocation", self.find(lines, "ensures (((len(member(r, 0)) == 1)", "method alloc_struct_0_U"), "  " + clause)):
+            with self.subTest(label=label):
+                bad = list(lines)
+                bad[line_at - 1] = new
+                method_line = next(i for i, l in enumerate(lines, start=1) if l.startswith("method alloc_struct_0_U")) if "allocation" in label else line_at
+                probs = self.problems("\n".join(bad), mp)
+                self.assertTrue(any(p.startswith((f"t.vpr:{line_at}:", f"t.vpr:{method_line}:")) for p in probs), (label, probs[:3]))
+        with self.subTest(label="the declared function's trusted contract is clean"):
+            self.assertEqual(self.problems(*self.pair("real_mmp_cell_atom_result")), [])
+        # the same tie holds inside the declared function's trusted contract (`mk`'s result): a guard and facts about a root that is not the result's are refused there too
+        name2 = "real_mmp_cell_atom_result"
+        text2, mp2 = self.pair(name2)
+        lines2 = text2.split("\n")
+        at2 = next(i for i, l in enumerate(lines2, start=1) if l.lstrip().startswith("ensures ((((res != null)"))
+        g2 = "((res != null) && (offset_of(res) < len(block_of(res))))"
+        s2 = lines2[at2 - 1].index(g2 + " ==> ") - 1
+        e2 = s2
+        depth = 0
+        for j in range(s2, len(lines2[at2 - 1])):
+            depth += {"(": 1, ")": -1}.get(lines2[at2 - 1][j], 0)
+            if depth == 0:
+                e2 = j + 1
+                break
+        conj2 = lines2[at2 - 1][s2:e2]
+        for label, new_conj in (("another root in a trusted contract", conj2.replace("res", "q_q__0")), ("the guard names another root in a trusted contract", conj2.replace(g2, g2.replace("res", "q_q__0"), 1))):
+            with self.subTest(label=label):
+                bad = list(lines2)
+                bad[at2 - 1] = lines2[at2 - 1][:s2] + new_conj + lines2[at2 - 1][e2:]
+                self.assertNotEqual(bad[at2 - 1], lines2[at2 - 1], label)
+                self.assertTrue(any(p.startswith(f"t.vpr:{at2}:") for p in self.problems("\n".join(bad), mp2)), label)
+
+    def test_the_conjunct_in_a_declared_functions_trusted_contract_has_the_types_own_counts(self):
+        """Question 374 (ruling, part 2): in the declared method `mk` (the result's cell atom, `real_mmp_cell_atom_result`) the conjunct on the result `res` is accepted only with the type's own
+        counts, 2 rows and 3 columns (and the structure's own `len(member(res, 0)) == 1`): another N, another M or another own length is refused on that line."""
+        name = "real_mmp_cell_atom_result"
+        text, mp = self.pair(name)
+        self.assertEqual(self.problems(text, mp), [])
+        lines = text.split("\n")
+        at = next(i for i, l in enumerate(lines, start=1) if l.lstrip().startswith("ensures ((((res != null)"))
+        for label, old, new in (("another N", "len(member(res, 1)) == 2", "len(member(res, 1)) == 3"), ("another M", "len(member(loc(member(res, 1), k), 0)) == 3", "len(member(loc(member(res, 1), k), 0)) == 4"),
+                                ("the structure's own length", "len(member(res, 0)) == 1)", "len(member(res, 0)) == 7)"), ("another range of the rows", "(k < 2)", "(k < 3)")):
+            with self.subTest(label=label):
+                bad = list(lines)
+                self.assertIn(old, bad[at - 1], label)
+                # only the conjunct after the cell clause's own well-formedness row: the second occurrence of the guarded facts in the line
+                head, sep, tail = bad[at - 1].rpartition(old)
+                bad[at - 1] = head + new + tail
+                self.assertNotEqual(bad[at - 1], lines[at - 1])
+                self.assertTrue(any(p.startswith(f"t.vpr:{at}:") for p in self.problems("\n".join(bad), mp)), label)
+
+    def test_the_cell_atoms_conjunct_of_a_structure_whose_member_array_holds_structures_is_refused(self):
+        """Question 374 (ruling, part ii), what is measurable before 3c-4 emits real text: a cell atom `owns(p->n)` on `struct T { struct P v[2]; int n; }` (a member array of STRUCTURES, count 1 in
+        the elements' own facts) is refused, as by every older lint (`real_mmp_cell_atom_struct_array` is REAL output of the j3b build); the same text with the element's array leaf given a column
+        count other than 1 (SYNTHETIC: `len(member(elem, 0)) == 4`, what `struct W { int a[4]; int n; } v[2]` would state) passes the count gate and is refused by the pair tie, since the unit holds
+        no pinned allocation with a matrix member of those counts.  A coincident pair (a matrix member at index 0 with 2 rows and 4 columns in the same unit) would admit it by NUMBER, not by type:
+        the listed weakness of the pair tie."""
+        name = "real_mmp_cell_atom_struct_array"
+        text, mp = self.pair(name)
+        probs = self.problems(text, mp)
+        self.assertTrue(probs and all("owns_block" in p for p in probs), probs)
+        old = "len(member(loc(member(p_p__0, 0), k), 0)) == 1"
+        self.assertIn(old, text)
+        bad = self.problems(text.replace(old, "len(member(loc(member(p_p__0, 0), k), 0)) == 4"), mp)
+        self.assertTrue(any("is not `len(member(<chain>, <literal>)) == 1`" in p for p in bad), bad[:3])
+
+    def test_the_matrix_pairs_are_reset_for_every_unit(self):
+        text, mp = self.pair("real_mmp_owns_member_call")
+        self.assertEqual(self.problems(text, mp), [])
+        self.assertTrue(lv._MATRIX_PAIRS)
+        lines = text.split("\n")
+        start = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_0_U"))
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("method "))
+        # the same unit without the allocation of the structure (its lines blanked): the rows are judged WITHOUT the previous unit's pairs
+        stripped = ["" if start - 1 <= i < end - 1 else l for i, l in enumerate(lines)]
+        probs = self.problems("\n".join(stripped), mp)
+        self.assertTrue(any(self.PAIRS in p or "is not `len(member(<chain>, <literal>)) == 1`" in p for p in probs), probs[:3])
+        self.assertFalse(lv._MATRIX_PAIRS)
+        self.assertEqual(self.problems(text, mp), [])
+
+
+class PartESarrTests(unittest.TestCase):
+    """Decision 0064 items 3, 6 and 17 (Part E slice 3c-1, question 375): a local array of structures whose element has an ARRAY LEAF (`struct W v[2]` with `struct W { int n; int a[3]; }`).  The
+    trusted allocation `alloc_arr_<E>` and its zero fill state the array leaf's rows with a second bound variable over `0 <= j < M` and the length fact `len(member(slot, a)) == M`
+    (`aggregate_array_problem`); a row over the array's block with a bound variable per index step is tied to the allocation's own N, member steps, counts and field (`agg_place_problem`) and
+    then judged by `index_row_problem`'s unedited rules.  The fixtures are REAL output (build/m4.5e1e2d/e3b-vir/, il154): `real_sarr_local_rw` (the allocation, the lifetime rows and the scope
+    exit), `real_sarr_loop_reads` (a loop's permission, kept-flag, range and kept-value conjuncts over the leaf), `real_sarr_zero_fill` (the zero fill)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    ROW = "loc(member(loc(block_of(v_v__0), k), 1), j)"
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def lines_with(lines, *fragments, after=None):
+        start = next(i for i, l in enumerate(lines) if after is not None and l.startswith(after)) if after else 0
+        return [i for i, l in enumerate(lines, start=1) if i > start and all(f in l for f in fragments)]
+
+    def refused_at(self, name, edits, label, lines_at=None):
+        """`edits`: [(1-based line, old, new)]; a problem must stand on an edited line (or on `lines_at`)."""
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        for ln, old, new in edits:
+            self.assertIn(old, lines[ln - 1], (label, ln, old))
+            lines[ln - 1] = lines[ln - 1].replace(old, new)
+        probs = self.problems("\n".join(lines), mp)
+        at = list(lines_at) if lines_at is not None else [ln for ln, _o, _n in edits]
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs for n in at), (label, probs[:3]))
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in ("real_sarr_local_rw", "real_sarr_loop_reads", "real_sarr_zero_fill"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_trusted_allocation_states_the_array_leafs_rows_over_its_own_count(self):
+        name = "real_sarr_local_rw"
+        lines = self.pair(name)[0].split("\n")
+        method = next(i for i, l in enumerate(lines, start=1) if l.startswith("method alloc_arr_struct_0_P"))
+        rows = [i for i in self.lines_with(lines, "ensures forall k: Int, j: Int", after="method alloc_arr_struct_0_P")][:3]
+        lens = self.lines_with(lines, "len(member(loc(block_of(r), k), 1)) == 3", after="method alloc_arr_struct_0_P")[0]
+        self.assertEqual(len(rows), 3)
+        for label, edits in (("another M in the value row", [(rows[0], "(j < 3)", "(j < 4)")]), ("another M in the flag row", [(rows[1], "(j < 3)", "(j < 5)")]),
+                             ("another M in the `!flag` row", [(rows[2], "(j < 3)", "(j < 2)")]),
+                             ("another count in the length facts", [(lens, "len(member(loc(block_of(r), k), 1)) == 3", "len(member(loc(block_of(r), k), 1)) == 4")]),
+                             ("a row for another member", [(rows[0], "), 1), j)", "), 0), j)")]),
+                             ("the flag row doubled", [(rows[1], ".d_int)", ".v_int)")]),
+                             ("the first range over another bound", [(rows[0], "(k < n)", "(k < 1)")]),
+                             ("an amount", [(rows[0], ".v_int)", ".v_int, 1 / 2)")])):
+            with self.subTest(label=label):
+                bad = [(ln, o, n) for ln, o, n in edits]
+                self.refused_at(name, bad, label, lines_at=[method])
+
+    def test_the_zero_fill_takes_and_gives_the_leaves_its_allocation_gives(self):
+        name = "real_sarr_zero_fill"
+        lines = self.pair(name)[0].split("\n")
+        method = next(i for i, l in enumerate(lines, start=1) if l.startswith("method zero_arr_struct_0_P"))
+        rows = self.lines_with(lines, "forall k: Int, j: Int", after="method zero_arr_struct_0_P")[:6]
+        self.assertEqual(len(rows), 6)
+        for label, edits in (("another M in one row", [(rows[0], "(j < 3)", "(j < 4)")]),
+                             ("another M in every row (leaves other than the allocation's)", [(r, "(j < 3)", "(j < 4)") for r in rows]),
+                             ("the zero of the array leaf another value", [(rows[4], "== 0)", "== 1)")]),
+                             ("a row for another member", [(rows[0], "), 1), j)", "), 0), j)")])):
+            with self.subTest(label=label):
+                self.refused_at(name, edits, label, lines_at=[method])
+
+    def test_a_row_over_the_array_of_structures_is_tied_to_its_allocations_own_leaves(self):
+        name = "real_sarr_local_rw"
+        lines = self.pair(name)[0].split("\n")
+        ex = [i for i in self.lines_with(lines, "exhale forall k: Int, j: Int :: { " + self.ROW)]
+        mk = [i for i in self.lines_with(lines, "assert forall k: Int, j: Int :: { " + self.ROW)]
+        self.assertEqual((len(ex), len(mk)), (2, 2))
+        run = list(range(ex[0] - 2, ex[-1] + 1))
+        for kind, at in (("exhale", ex[0]), ("marked assert", mk[0])):
+            for label, old, new in (("another member step", self.ROW, "loc(member(loc(block_of(v_v__0), k), 0), j)"), ("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 3)", "(j < 4)"),
+                                    ("another field", ".v_int)", ".v_bool)"), ("an amount", ".v_int)", ".v_int, 1 / 2)"), ("a deeper member step", self.ROW, "loc(member(loc(member(loc(block_of(v_v__0), k), 1), 0), 0), j)")):
+                with self.subTest(kind=kind, label=label):
+                    self.refused_at(name, [(at, old, new)], f"{kind}: {label}", lines_at=run + [at])
+
+    def test_the_kept_rows_over_the_array_leaf_are_tied_the_same_way(self):
+        name = "real_sarr_loop_reads"
+        lines = self.pair(name)[0].split("\n")
+        flag = self.lines_with(lines, "invariant forall k: Int, j: Int", "old[lh_0](" + self.ROW + ".d_int)")[0]
+        value = self.lines_with(lines, "invariant forall k: Int, j: Int", "== old[lh_0](" + self.ROW + ".v_int)")[0]
+        acc = self.lines_with(lines, "invariant forall k: Int, j: Int", "==> acc(" + self.ROW + ".v_int)")[0]
+        rng = self.lines_with(lines, "invariant forall k: Int, j: Int", "<= 2147483647")[0]
+        for kind, at in (("kept flag", flag), ("kept value", value), ("permission", acc), ("range", rng)):
+            for label, old, new in (("another member step", "), 1), j)", "), 0), j)"), ("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 3)", "(j < 4)"), ("another field", "_int", "_bool")):
+                with self.subTest(kind=kind, label=label):
+                    self.refused_at(name, [(at, old, new)], f"{kind}: {label}")
+        with self.subTest(label="an amount on a kept flag"):
+            self.refused_at(name, [(flag, "d_int)) ==>", "d_int), 1 / 2) ==>")], "an amount on a kept flag")
+
+    def test_a_variable_assigned_twice_is_no_array_of_structures_place(self):
+        name = "real_sarr_local_rw"
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        alloc = self.lines_with(lines, "v_v__0 := alloc_arr_struct_0_P(2)")[0]
+        ex = self.lines_with(lines, "exhale forall k: Int, j: Int :: { " + self.ROW)[0]
+        # a second allocation of the same variable: its rows are the older rules' (the array leaf's rows have no place), so the exhale is refused
+        bad = list(lines)
+        bad[alloc] = "  v_v__0 := alloc_arr_struct_0_P(2)"
+        probs = self.problems("\n".join(bad), mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{ex}:") for p in probs), probs[:3])
+
+
+
+class PartESrangeTests(unittest.TestCase):
+    """Decision 0064 items 3, 7 and 17 (Part E slice 3c-2, question 375): a RANGE over structures whose element has an array member of scalars (`reads_range(p, n)` over `struct P { int n; int a[3]; }`).
+    Its length facts state `len(member(slot, 1)) == 3`, a count other than 1, which `range_lens_members` accepts only when the unit's own pinned `alloc_struct_<n>_<tag>` states the same N for
+    the same array member of scalars (`scalar_array_members`); the rows over its cells have a second bound variable over `0 <= j < 3` and `lint_index_length_facts` ties that range to the length
+    fact of the same clause kind and range, and the row's field to the allocation's.  The fixtures are REAL output (build/m4.5e1e2d/e3b-vir/, il164): `real_srange_code_rw` (a function over the
+    range: contract rows, the body's marked rows), `real_srange_call_forward` (a call that forwards the range), `real_srange_loop_keeps_the_range` (a loop under the range).  The old rules
+    that refused these lines (their messages): the length-facts clause `... is not len(member(<chain>, <literal>)) == 1 with a chain rooted at the slot` (`range_lens_members`), `the rows over
+    the leaves of the elements of ... have no length-facts row over the same range` (`lint_range_length_facts`) and `the row ranges j over ... which no length fact of this ... states for the
+    block` (`lint_index_length_facts`): none is edited; the first two read the unit's table, the last reads the range's length facts when they are one conjunction."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    ROWS = "forall k: Int, j: Int :: { loc(member(loc(block_of(p_p__0), k), 1), j) }"
+    LENS = "len(member(loc(block_of(p_p__0), k), 1)) == 3"
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def lines_with(lines, *fragments, after=None, before=None):
+        lo = next(i for i, l in enumerate(lines, start=1) if after is not None and l.startswith(after)) if after else 0
+        hi = next(i for i, l in enumerate(lines, start=1) if before is not None and l.startswith(before) and i > lo) if before else len(lines) + 1
+        return [i for i, l in enumerate(lines, start=1) if lo < i < hi and all(f in l for f in fragments)]
+
+    def refused_at(self, name, edits, label, lines_at=None):
+        """`edits`: [(1-based line, old, new)] (every `old` must be on its line); some problem must stand on an edited line (or on `lines_at`)."""
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        for ln, old, new in edits:
+            self.assertIn(old, lines[ln - 1], (label, ln, old))
+            lines[ln - 1] = lines[ln - 1].replace(old, new)
+        probs = self.problems("\n".join(lines), mp)
+        at = list(lines_at) if lines_at is not None else [ln for ln, _o, _n in edits]
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs for n in at), (label, probs[:3]))
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in ("real_srange_code_rw", "real_srange_call_forward", "real_srange_loop_keeps_the_range"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_count_and_the_member_of_the_length_facts_are_the_allocations_own(self):
+        for name in ("real_srange_code_rw", "real_srange_call_forward", "real_srange_loop_keeps_the_range"):
+            lines = self.pair(name)[0].split("\n")
+            for kw in ("requires", "ensures"):
+                lens = self.lines_with(lines, f"  {kw} forall k: Int ::", self.LENS)
+                rows = self.lines_with(lines, f"  {kw} {self.ROWS}")
+                self.assertTrue(lens and len(rows) >= 4, (name, kw))
+                lens, rows = lens[0], [r for r in rows if r > lens[0]][:4]
+                for label, lens_edit, row_edit in (("another count in the facts and the rows", ("== 3", "== 4"), ("(j < 3)", "(j < 4)")),
+                                                   ("another member in the facts and the rows", ("), 1))", "), 2))"), ("), 1), j)", "), 2), j)"))):
+                    with self.subTest(name=name, kw=kw, label=label):
+                        edits = [(lens, *lens_edit)] + [(r, *row_edit) for r in rows]
+                        self.refused_at(name, edits, label, lines_at=[lens])
+
+    def test_the_rows_range_is_the_length_facts_count_and_the_row_is_of_the_allocations_field(self):
+        name = "real_srange_code_rw"
+        lines = self.pair(name)[0].split("\n")
+        for kw in ("requires", "ensures"):
+            lens = self.lines_with(lines, f"  {kw} forall k: Int ::", self.LENS)[0]
+            rows = [r for r in self.lines_with(lines, f"  {kw} {self.ROWS}") if r > lens][:4]
+            for label, edits in (("the facts alone state another count", [(lens, "== 3", "== 4")]),
+                                 ("a row over fewer cells than the facts", [(rows[0], "(j < 3)", "(j < 2)")]),
+                                 ("the flag row over more cells", [(rows[1], "(j < 3)", "(j < 4)")]),
+                                 ("the flags row over another member", [(rows[2], "), 1), j)", "), 0), j)")]),
+                                 ("the value row of another field", [(rows[0], ".v_int)", ".v_bool)")]),
+                                 ("the flag row of another field", [(rows[1], ".d_int)", ".d_bool)")]),
+                                 ("the type's range row of another field", [(rows[3], "v_int", "v_bool")])):
+                with self.subTest(kw=kw, label=label):
+                    at = [lens, *rows] if label.startswith("the facts alone") else [e[0] for e in edits]
+                    self.refused_at(name, edits, f"{kw}: {label}", lines_at=at)
+
+    def test_the_facts_without_the_array_members_count_leave_its_rows_untied(self):
+        name = "real_srange_code_rw"
+        lines = self.pair(name)[0].split("\n")
+        for kw in ("requires", "ensures"):
+            lens = self.lines_with(lines, f"  {kw} forall k: Int ::", self.LENS)[0]
+            rows = [r for r in self.lines_with(lines, f"  {kw} {self.ROWS}") if r > lens][:4]
+            with self.subTest(kw=kw):
+                self.refused_at(name, [(lens, " && (" + self.LENS + ")", "")], f"{kw}: the array member's count dropped from the facts", lines_at=[lens, *rows])
+
+    def test_the_allocations_own_count_and_member_are_what_the_facts_are_tied_to(self):
+        name = "real_srange_code_rw"
+        lines = self.pair(name)[0].split("\n")
+        alloc = next(i for i, l in enumerate(lines, start=1) if l.startswith("method alloc_struct_0_P"))
+        lens_in_alloc = self.lines_with(lines, "len(member(r, 1)) == 3", after="method alloc_struct_0_P")[0]
+        rows_in_alloc = self.lines_with(lines, "(j < 3)", after="method alloc_struct_0_P", before="// C/C++ function")
+        contract = [self.lines_with(lines, f"  {kw} forall k: Int ::", self.LENS)[0] for kw in ("requires", "ensures")]
+        for label, edits in (("the allocation states another count", [(lens_in_alloc, "== 3", "== 4")] + [(r, "(j < 3)", "(j < 4)") for r in rows_in_alloc]),
+                             ("the allocation's array member is another member", [(lens_in_alloc, "member(r, 1)", "member(r, 2)")] + [(r, "member(r, 1)", "member(r, 2)") for r in rows_in_alloc]),
+                             ("the allocation's array member is of another field", [(r, "_int)", "_bool)") for r in rows_in_alloc])):
+            with self.subTest(label=label):
+                rows = self.lines_with(lines, f"  requires {self.ROWS}")
+                self.refused_at(name, edits, label, lines_at=rows if "field" in label else contract)
+
+    def test_the_marked_rows_of_the_bodys_exit_are_tied_the_same_way(self):
+        name = "real_srange_code_rw"
+        lines = self.pair(name)[0].split("\n")
+        marked = self.lines_with(lines, "  assert forall k: Int ::", self.LENS)
+        self.assertTrue(marked)
+        for label, old, new in (("another count", "== 3", "== 4"), ("another member", "), 1))", "), 2))")):
+            with self.subTest(label=label):
+                self.refused_at(name, [(marked[0], old, new)], f"the exit's facts: {label}")
+
+    def with_second_allocation(self, count, suffix, key=1, name="real_srange_code_rw"):
+        """The fixture `name` with a second pinned allocation `alloc_struct_1_Q` appended (the first one's comment, text and map lines, its array member `key` of `count` cells of `suffix`)."""
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        m0 = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_0_"))
+        end = next(i for i in range(m0, len(lines)) if lines[i] == "")
+        extra = []
+        for l in lines[m0 - 1:end]:
+            l = re.sub(r"alloc_struct_0_\w+", "alloc_struct_1_Q", l).replace("struct P", "struct Q")
+            if "member(r, 1)" in l and "len(" not in l:
+                l = l.replace("member(r, 1)", f"member(r, {key})").replace("(j < 3)", f"(j < {count})").replace(".v_int)", f".v_{suffix})").replace(".d_int)", f".d_{suffix})")
+            elif "len(member(r, 1))" in l:
+                l = l.replace("member(r, 1)", f"member(r, {key})").replace("== 3", f"== {count}")
+            extra.append(l)
+        fields = [f"field v_{suffix}: {'Int' if suffix == 'int' else 'Bool'}", f"field d_{suffix}: Bool"] if suffix != "int" else []
+        extra = fields + extra
+        first = len(lines) + 2 + len(fields) + 1
+        maplines = mp.rstrip("\n").split("\n")
+        added = []
+        for ml in maplines:
+            fields_of_line = ml.split("\t")
+            if m0 + 1 < int(fields_of_line[0]) <= end:
+                fields_of_line[0] = str(int(fields_of_line[0]) - (m0 + 1) + first)
+                added.append("\t".join(fields_of_line))
+        return "\n".join(lines + [""] + extra), "\n".join(maplines + added) + "\n"
+
+    def test_two_allocations_that_state_one_member_with_two_pairs_refuse_every_range_over_either_and_nothing_wider(self):
+        """Instance 7's finding (report 15b, question 3 (a)): `scalar_array_members` leaves out a member key that two structure types state with two different (N, field) pairs, and the lint cannot
+        know a pointer's type, so EVERY length fact and every row over that member is refused, for a range over either type: a refusal of accepted Viper, fail closed, listed for the lint step with
+        questions 369, 373, 379 and 380.  This pins exactly that: the refusal stands on the range's length-facts and row lines (and the marked rows of the exit) and nowhere else, the allocations'
+        own lines stay clean, and a second allocation with the SAME pair, or at ANOTHER member key, collides with nothing."""
+        for label, args in (("another count", (4, "int")), ("another field", (3, "bool"))):
+            text, mp = self.with_second_allocation(*args)
+            lines = text.split("\n")
+            probs = self.problems(text, mp)
+            at = sorted({int(p.split(":")[1]) for p in probs})
+            with self.subTest(label=label):
+                self.assertTrue(probs, label)
+                lens = self.lines_with(lines, "forall k: Int ::", self.LENS)
+                # the length facts (a contract's and the exit's marked row), the first cell row after those of a contract (reported with the group), and the contracts' rows over the member's cells
+                expected = set(lens) | {ln + 1 for ln in lens if lines[ln - 1].startswith(("  requires", "  ensures"))} | {ln for ln in self.lines_with(lines, self.ROWS) if lines[ln - 1].startswith(("  requires", "  ensures"))}
+                self.assertTrue(expected)
+                self.assertTrue(set(at) <= expected, (label, sorted(set(at) - expected)))
+                # every length-facts line and every row line of a range over the member is refused, in requires, ensures and the exit's marked rows
+                self.assertEqual(set(at), expected, label)
+                self.assertTrue(all(ln < next(i for i, l in enumerate(lines, start=1) if l.startswith("method alloc_struct_1_Q")) for ln in at), label)
+        for label, args in (("the same pair", (3, "int")), ("another member key", (4, "int", 2))):
+            with self.subTest(label=label):
+                self.assertEqual(self.problems(*self.with_second_allocation(*args)), [])
+        # the global half: the program_start group of a global array of structures with an array member (real_gsarr_main_read, `struct P g[...]`) is refused at its length facts and its first row,
+        # nothing else of the unit; the same pair and another member key leave it clean
+        name = "real_gsarr_main_read"
+        lines = self.pair(name)[0].split("\n")
+        group = [i for i, l in enumerate(lines, start=1) if l.startswith("  ensures forall") and "GB_" in l][:1]
+        text, mp = self.with_second_allocation(4, "int", name=name)
+        probs = self.problems(text, mp)
+        self.assertEqual(sorted(int(p.split(":")[1]) for p in probs), [group[0], group[0] + 1], probs)
+        self.assertTrue(all("array global" in p or "array of structures" in p for p in probs), probs)
+        for label, args in (("the same pair", (3, "int")), ("another member key", (4, "int", 2))):
+            with self.subTest(label=f"global: {label}"):
+                self.assertEqual(self.problems(*self.with_second_allocation(*args, name=name)), [])
+        self.assertEqual(self.table(self.with_second_allocation(3, "int")[0]), {(1,): (3, "int")})
+        self.assertEqual(self.table(self.with_second_allocation(4, "int")[0]), {})
+        self.assertEqual(self.table(self.with_second_allocation(4, "int", 2)[0]), {(1,): (3, "int"), (2,): (4, "int")})
+
+    def table(self, text):
+        src = lv.split_source(text)
+        return lv.scalar_array_members(src, lv.declarations(src))
+
+    def test_the_unit_table_holds_exactly_the_allocations_arrays_of_scalars(self):
+        text = self.pair("real_srange_code_rw")[0]
+        self.assertEqual(self.table(text), {(1,): (3, "int")})
+        lines = text.split("\n")
+        alloc = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_0_P"))
+        rows = [i for i, l in enumerate(lines) if i > alloc and "(j < 3)" in l and l.lstrip().startswith("ensures forall j") and i < alloc + 12]
+        self.assertEqual(len(rows), 3)
+        # a row count that is not the facts' count is no array member of scalars of the table
+        bad = list(lines)
+        for i in rows:
+            bad[i] = bad[i].replace("(j < 3)", "(j < 4)")
+        self.assertEqual(self.table("\n".join(bad)), {})
+        # a matrix member's count is followed by a length quantifier, not a permission row: not in the table
+        matrix = self.pair("real_mmember_local_rw")[0]
+        self.assertNotIn(0, [k[0] for k in self.table(matrix)])
+        self.assertEqual(self.table(matrix), {})
+        # two allocations stating one member with two counts leave it out; with the same count they keep it
+        end = next(i for i, l in enumerate(lines) if i > alloc and l.startswith("// C/C++ function"))
+        twin = [l.replace("alloc_struct_0_P", "alloc_struct_1_Q") for l in lines[alloc:end]]
+        self.assertEqual(self.table("\n".join(lines[:end] + twin + lines[end:])), {(1,): (3, "int")})
+        twin = [l.replace("== 3", "== 4").replace("(j < 3)", "(j < 4)") for l in twin]
+        self.assertEqual(self.table("\n".join(lines[:end] + twin + lines[end:])), {})
+
+    def test_an_array_member_of_scalars_beside_a_nested_structure_keeps_its_count(self):
+        slot = "loc(block_of(p),k)"
+        cons = (f"len(member({slot},0))==1&&len(member(loc(member({slot},0),0),0))==1&&len(member({slot},1))==3&&{slot}!=loc(member({slot},0),0)")
+        saved = lv._SCALAR_ARRAY_COUNTS
+        try:
+            for table, ok in (({(1,): 3}, True), ({(1,): 4}, False), ({}, False), ({(2,): 3}, False)):
+                with self.subTest(table=table):
+                    lv._SCALAR_ARRAY_COUNTS = dict(table)
+                    self.assertEqual(lv.range_lens_members(cons, slot, scalar_arrays=True)[1] is None, ok)
+        finally:
+            lv._SCALAR_ARRAY_COUNTS = saved
+
+    def test_only_the_range_atoms_sites_read_the_unit_table(self):
+        """The table of a unit's arrays of scalars (`scalar_array_members`) is read by the range atom over a pointer and by `range_lens_counts` ONLY (`scalar_arrays=True`); the older sites of
+        `range_lens_members` (the `program_start` groups, the block rows of a global or a member, the cell atom's guarded conjunct of question 374) stay closed for a count other than 1."""
+        slot = "loc(block_of(p),k)"
+        cons = f"len(member({slot},0))==1&&len(member({slot},1))==3"
+        saved = lv._SCALAR_ARRAY_COUNTS
+        try:
+            lv._SCALAR_ARRAY_COUNTS = {(1,): 3}
+            self.assertIsNone(lv.range_lens_members(cons, slot, scalar_arrays=True)[1])
+            self.assertIsNotNone(lv.range_lens_members(cons, slot)[1])
+            self.assertIsNotNone(lv.range_lens_problem(cons, slot))
+            self.assertIsNone(lv.range_lens_problem(cons, slot, scalar_arrays=True))
+            # question 374's site: the guarded conjunct of a cell atom's clause (`struct_lens_conjuncts_problem`) states an array member's count by `len(member(v, j)) == N` and a quantifier
+            # over its ELEMENTS; a count of the table that is no element-structure fact does not open it
+            self.assertIsNotNone(lv.struct_lens_conjuncts_problem(["len(member(p, 0)) == 1", "len(member(p, 1)) == 3"], "p"))
+            # the block rows' site (a global or member array of structures): the facts' elements' counts
+            self.assertIsNotNone(lv.range_lens_members("len(member(loc(member(p,0),j),1))==3", "loc(member(p,0),j)")[1])
+        finally:
+            lv._SCALAR_ARRAY_COUNTS = saved
+
+
+class PartESarrGlobalTests(unittest.TestCase):
+    """Decision 0064 items 3, 9 and 17 (Part E slice 3c-3): a GLOBAL or `static` local array of structures whose element has an array member of scalars (`struct P g[2] = {{7, {1, 2, 3}}, {9, {4}}}`).
+    `program_start`'s group per LEAF path (`sarr_global_group`): the three permission rows of a cell leaf over `0 <= k < N` and of the array leaf over `0 <= k < N` and `0 <= j < M` with the cell as the
+    trigger, the listed values (the array leaf's cells from 0, then ONE one-binder zero quantifier for the cells the list leaves out), per leaf the quantifier of the elements the list does not reach, or for an
+    unknown value the TYPE'S OWN range per leaf (never `leaf_value`'s any-literal-range: question 373's rule 4); the contract rows over the array leaf (`gb_sarr_row_problem`) and the rows of a loop over the place
+    `X := loc(GB_g(), 0)` (`sarr_global_places` + `agg_place_problem`, then `index_row_problem`'s unedited rules).  M, the member and the field are those of the unit's own allocation.  The fixtures are REAL
+    output (build/m4.5e1e2d/e3b-vir/, il176): real_gsarr_main_read (listed values), _unknown_cells_fail (unknown linkage), _loop_reads (a loop's rows over the place), _call_owns (the contract rows), _static_local,
+    _contract_reads_keys (a structure of two array leaves beside a global of the first kind)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def lines_with(lines, *fragments, after=None, before=None):
+        lo = next(i for i, l in enumerate(lines, start=1) if after is not None and l.startswith(after)) if after else 0
+        hi = next((i for i, l in enumerate(lines, start=1) if before is not None and i > lo and l.startswith(before)), len(lines) + 1)
+        return [i for i, l in enumerate(lines, start=1) if lo < i < hi and all(f in l for f in fragments)]
+
+    def refused_at(self, name, edits, label, lines_at=None):
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        for ln, old, new in edits:
+            self.assertIn(old, lines[ln - 1], (label, ln, old))
+            lines[ln - 1] = lines[ln - 1].replace(old, new)
+        probs = self.problems("\n".join(lines), mp)
+        at = list(lines_at) if lines_at is not None else [ln for ln, _o, _n in edits]
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs for n in at), (label, probs[:3]))
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in ("real_gsarr_main_read", "real_gsarr_unknown_cells_fail", "real_gsarr_loop_reads", "real_gsarr_call_owns", "real_gsarr_static_local", "real_gsarr_contract_reads_keys"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def start_lines(self, name):
+        lines = self.pair(name)[0].split("\n")
+        ps = "method program_start"
+        lens = self.lines_with(lines, "ensures forall k: Int :: { loc(GB_g__0(), k) }", "len(member(", after=ps)[0]
+        return lines, lens
+
+    def test_the_groups_counts_member_and_field_are_the_allocations_own(self):
+        name = "real_gsarr_main_read"
+        lines, lens = self.start_lines(name)
+        rows = self.lines_with(lines, "ensures forall k: Int, j: Int :: { loc(member(loc(GB_g__0(), k), 1), j) }", after="method program_start", before="// C/C++ function")
+        self.assertEqual(len(rows), 3)
+        cellrows = self.lines_with(lines, "ensures forall k: Int :: { loc(member(loc(GB_g__0(), k), 0), 0) }", after="method program_start", before="// C/C++ function")
+        for label, edits in (("another count in the length facts", [(lens, "== 3)", "== 4)")]),
+                             ("another member in the length facts", [(lens, "member(loc(GB_g__0(), k), 1)) == 3", "member(loc(GB_g__0(), k), 2)) == 3")]),
+                             ("the value row over fewer cells", [(rows[0], "(j < 3)", "(j < 2)")]),
+                             ("the flag row over more cells", [(rows[1], "(j < 3)", "(j < 4)")]),
+                             ("the flags row over another N", [(rows[2], "(k < 2)", "(k < 3)")]),
+                             ("the value row of another field", [(rows[0], ".v_int)", ".v_bool)")]),
+                             ("a cell row over another N", [(cellrows[0], "(k < 2)", "(k < 3)")]),
+                             ("the flag row of the cell leaf of another field", [(cellrows[1], ".d_int)", ".d_bool)")])):
+            with self.subTest(label=label):
+                self.refused_at(name, edits, label, lines_at=[lens, *rows, *cellrows])
+
+    def test_the_listed_values_and_the_rest_are_read_leaf_by_leaf(self):
+        name = "real_gsarr_main_read"
+        lines, lens = self.start_lines(name)
+        vals = self.lines_with(lines, "ensures loc(member(loc(GB_g__0(), ", ".v_int ==", after="method program_start", before="// C/C++ function")
+        rest = self.lines_with(lines, "ensures forall j: Int :: { loc(member(loc(GB_g__0(), 1), 1), j) }", after="method program_start", before="// C/C++ function")
+        self.assertEqual((len(vals), len(rest)), (6, 1))
+        text, mp = self.pair(name)
+        for label, mutate in (("two listed cells swapped", lambda ls: (ls.__setitem__(vals[1] - 1, ls[vals[2] - 1]), ls.__setitem__(vals[2] - 1, lines[vals[1] - 1]))),
+                              ("the rest dropped", lambda ls: ls.__setitem__(rest[0] - 1, "")),
+                              ("the rest starts at another cell", lambda ls: ls.__setitem__(rest[0] - 1, ls[rest[0] - 1].replace("(1 <= j)", "(2 <= j)"))),
+                              ("the rest states another value", lambda ls: ls.__setitem__(rest[0] - 1, ls[rest[0] - 1].replace("v_int == 0", "v_int == 1"))),
+                              ("a listed cell of another leaf order", lambda ls: (ls.__setitem__(vals[0] - 1, ls[vals[1] - 1]), ls.__setitem__(vals[1] - 1, lines[vals[0] - 1]))),
+                              ("a listed value that is no literal", lambda ls: ls.__setitem__(vals[0] - 1, ls[vals[0] - 1].replace("== 7", "== 7 || true"))),
+                              ("the liveness row dropped", lambda ls: ls.__setitem__(next(i for i, l in enumerate(ls) if l.strip() == "ensures acc(lvloc(GB_g__0()).lv)"), ""))):
+            with self.subTest(label=label):
+                ls = list(lines)
+                mutate(ls)
+                probs = self.problems("\n".join(ls), mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs for n in range(lens, rest[0] + 2)), (label, probs[:3]))
+
+    def test_an_unknown_cell_has_the_types_own_range_in_every_leaf(self):
+        name = "real_gsarr_unknown_cells_fail"
+        lines, lens = self.start_lines(name)
+        ranges = self.lines_with(lines, "(-2147483648) <=", after="method program_start", before="// C/C++ function")
+        self.assertEqual(len(ranges), 2)
+        for label, which, old, new in (("the cell leaf narrowed below", 0, "(-2147483648) <=", "(-5) <="), ("the cell leaf narrowed above", 0, "<= 2147483647", "<= 5"),
+                                       ("the array leaf narrowed below", 1, "(-2147483648) <=", "(-5) <="), ("the array leaf narrowed above", 1, "<= 2147483647", "<= 5")):
+            with self.subTest(label=label):
+                self.refused_at(name, [(ranges[which], old, new)], label)
+        with self.subTest(label="a listed value where the range stands"):
+            self.refused_at(name, [(ranges[1], "<= 2147483647)", "<= 2147483647) && true")], "an extra conjunct in the range")
+
+    def test_the_contract_rows_over_the_array_leaf_are_the_groups_and_the_allocations(self):
+        name = "real_gsarr_call_owns"
+        lines = self.pair(name)[0].split("\n")
+        for kw in ("requires", "ensures"):
+            lens = self.lines_with(lines, f"  {kw} forall k: Int :: {{ loc(GB_g__0(), k) }}", "len(member(", after="method f_")[0]
+            rows = [r for r in self.lines_with(lines, f"  {kw} forall k: Int, j: Int :: {{ loc(member(loc(GB_g__0(), k), 1), j) }}", after="method f_") if r > lens][:4]
+            self.assertEqual(len(rows), 4)
+            for label, edits in (("another count in the facts", [(lens, "== 3)", "== 4)")]),
+                                 ("another member in the facts", [(lens, "member(loc(GB_g__0(), k), 1)) == 3", "member(loc(GB_g__0(), k), 2)) == 3")]),
+                                 ("a row over fewer cells", [(rows[0], "(j < 3)", "(j < 2)")]),
+                                 ("a row over another N", [(rows[1], "(k < 2)", "(k < 3)")]),
+                                 ("a row of another field", [(rows[0], ".v_int)", ".v_bool)")]),
+                                 ("an amount that is no formal", [(rows[0], ".v_int)", ".v_int, 1 / 2)")]),
+                                 ("a row over another member", [(rows[2], "), 1), j)", "), 0), j)")])):
+                with self.subTest(kw=kw, label=label):
+                    self.refused_at(name, edits, f"{kw}: {label}", lines_at=[lens, *rows])
+
+    def test_the_rows_of_a_loop_over_the_global_place_are_tied_the_same_way(self):
+        name = "real_gsarr_loop_reads"
+        lines = self.pair(name)[0].split("\n")
+        cell = "loc(member(loc(block_of(ga_g__0), k), 1), j)"
+        acc = self.lines_with(lines, "invariant forall k: Int, j: Int", "==> acc(" + cell + ".v_int)")[0]
+        flag = self.lines_with(lines, "invariant forall k: Int, j: Int", "old[lh_0](" + cell + ".d_int)")[0]
+        rng = self.lines_with(lines, "invariant forall k: Int, j: Int", "<= 2147483647")[0]
+        value = self.lines_with(lines, "invariant forall k: Int, j: Int", "== old[lh_0](" + cell + ".v_int)")[0]
+        for kind, at in (("permission", acc), ("kept flag", flag), ("range", rng), ("kept value", value)):
+            for label, old, new in (("another member step", "), 1), j)", "), 0), j)"), ("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 3)", "(j < 4)"), ("another field", "_int", "_bool")):
+                with self.subTest(kind=kind, label=label):
+                    self.refused_at(name, [(at, old, new)], f"{kind}: {label}")
+        with self.subTest(label="an amount on the permission row"):
+            self.refused_at(name, [(acc, ".v_int)", ".v_int, 1 / 2)")], "an amount")
+        with self.subTest(label="the place assigned twice is no place"):
+            text, mp = self.pair(name)
+            ls = text.split("\n")
+            at = self.lines_with(ls, "ga_g__0 := loc(GB_g__0(), 0)")[0]
+            ls.insert(at, "  ga_g__0 := loc(GB_g__0(), 0)")
+            probs = self.problems("\n".join(ls), mp)
+            self.assertTrue(any(p.startswith(f"t.vpr:{acc + 1}:") for p in probs), probs[:3])
+
+    def test_an_exhale_of_the_global_places_rows_is_refused_and_a_local_arrays_is_not_confused_with_it(self):
+        name = "real_gsarr_loop_reads"
+        lines = self.pair(name)[0].split("\n")
+        cell = "loc(member(loc(block_of(ga_g__0), k), 1), j)"
+        acc = self.lines_with(lines, "invariant forall k: Int, j: Int", "==> acc(" + cell + ".v_int)")[0]
+        text, mp = self.pair(name)
+        ls = text.split("\n")
+        ls[acc - 1] = ls[acc - 1].replace("invariant forall", "exhale forall")
+        probs = self.problems("\n".join(ls), mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{acc}:") for p in probs), probs[:3])
+
+    def test_the_array_leafs_three_rows_of_another_declared_field_are_refused_by_the_allocations_field(self):
+        """The three rows of the array leaf consistently of ANOTHER DECLARED field (`v_long`, `d_long`, added to the text: the position map is by line, so only the group's own problems are judged)."""
+        name = "real_gsarr_main_read"
+        lines, lens = self.start_lines(name)
+        text, mp = self.pair(name)
+        rows = self.lines_with(lines, "ensures forall k: Int, j: Int :: { loc(member(loc(GB_g__0(), k), 1), j) }", after="method program_start", before="// C/C++ function")
+        ls = list(lines)
+        ls[rows[0] - 1] = ls[rows[0] - 1].replace(".v_int)", ".v_long)")
+        ls[rows[1] - 1] = ls[rows[1] - 1].replace(".d_int)", ".d_long)")
+        ls[rows[2] - 1] = ls[rows[2] - 1].replace(".d_int", ".d_long")
+        decl = next(i for i, l in enumerate(ls) if l.startswith("field lv"))
+        ls[decl:decl] = ["field v_long: Int", "field d_long: Bool"]
+        probs = [p for p in self.problems("\n".join(ls), mp) if "position map" not in p and "t.vpr.map" not in p]
+        self.assertTrue(any("not that of the allocation's own array member `int`" in p for p in probs), probs[:3])
+
+    def test_a_guard_on_a_contract_row_over_the_array_leaf_is_judged(self):
+        name = "real_gsarr_call_owns"
+        lines = self.pair(name)[0].split("\n")
+        lens = self.lines_with(lines, "  requires forall k: Int :: { loc(GB_g__0(), k) }", "len(member(", after="method f_")[0]
+        row = [r for r in self.lines_with(lines, "  requires forall k: Int, j: Int :: { loc(member(loc(GB_g__0(), k), 1), j) }", after="method f_") if r > lens][0]
+        self.refused_at(name, [(row, "requires forall", "requires (perm(loc(GB_g__0(), 0).v_int) > none) ==> forall")], "a guard that reads a permission")
+
+    def test_the_contract_length_facts_of_a_global_are_the_groups_own_and_no_other_number_of_the_table(self):
+        saved = (lv._SCALAR_ARRAY_COUNTS, lv._SCALAR_ARRAY_FIELDS)
+        try:
+            lv._SCALAR_ARRAY_COUNTS, lv._SCALAR_ARRAY_FIELDS = {(1,): 3}, {(1,): "int"}
+            member = lv.parse_block_row("forall k: Int :: { loc(member(p, 0), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(member(p, 0), k), 1)) == 3)")
+            glob = lv.parse_block_row("forall k: Int :: { loc(GB_g(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_g(), k), 1)) == 3)")
+            # the older contract rule (`block_row_problem`) never reads the table: a member block and a global that is no sarr global of `program_start` are refused
+            self.assertIsNotNone(lv.block_row_problem("requires", None, member, {"GB_g"}, {}, {"p"}, {"member(p,0)": {2}}, frozenset()))
+            self.assertIsNotNone(lv.block_row_problem("requires", None, glob, {"GB_g"}, {"GB_g": 2}, {"p"}, {}, frozenset()))
+            # a sarr global's length facts are the group's own N and counts (`gb_sarr_row_problem`); no other number of the table
+            shapes = {"GB_g": (2, {1: (3, "int")})}
+            self.assertEqual(lv.gb_sarr_row_problem("requires", None, "forall k: Int :: { loc(GB_g(), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(GB_g(), k), 0)) == 1) && (len(member(loc(GB_g(), k), 1)) == 3))", shapes, frozenset()), "")
+            for label, text in (("another N", "forall k: Int :: { loc(GB_g(), k) } ((0 <= k) && (k < 3)) ==> ((len(member(loc(GB_g(), k), 0)) == 1) && (len(member(loc(GB_g(), k), 1)) == 3))"),
+                                ("another count", "forall k: Int :: { loc(GB_g(), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(GB_g(), k), 0)) == 1) && (len(member(loc(GB_g(), k), 1)) == 4))"),
+                                ("an extra array member", "forall k: Int :: { loc(GB_g(), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(GB_g(), k), 0)) == 3) && (len(member(loc(GB_g(), k), 1)) == 3))"),
+                                ("no array member", "forall k: Int :: { loc(GB_g(), k) } ((0 <= k) && (k < 2)) ==> ((len(member(loc(GB_g(), k), 0)) == 1) && (len(member(loc(GB_g(), k), 1)) == 1))")):
+                with self.subTest(label=label):
+                    self.assertNotEqual(lv.gb_sarr_row_problem("requires", None, text, shapes, frozenset()), "")
+            self.assertIsNone(lv.gb_sarr_row_problem("requires", None, "forall k: Int :: { loc(GB_h(), k) } ((0 <= k) && (k < 2)) ==> (len(member(loc(GB_h(), k), 1)) == 3)", shapes, frozenset()))
+        finally:
+            lv._SCALAR_ARRAY_COUNTS, lv._SCALAR_ARRAY_FIELDS = saved
+
+    def test_a_global_matrix_stays_on_the_matrix_route_beside_a_table_entry_of_its_own_number(self):
+        """The row length of a global MATRIX is the single fact `len(member(slot, 0)) == M`; a unit that also holds a structure allocation whose member 0 is an array of M scalars of ANOTHER field
+        (a table entry `(0,): (M, long)`) must still read the matrix as a matrix (the array-of-structures route is for facts of more than that one conjunct)."""
+        alloc = (
+            "// cerastes:trusted-contract allocation of a local of type struct Q: a fresh one-slot block whose members are blocks, a cell member of length 1 and an array member of its length, every leaf and every element "
+            "uninitialized with full permission (each array member's permissions as quantifiers of their own), and the block's liveness token (decisions 0043 item 4, 0063 item 6)\n"
+            "method alloc_struct_0_Q() returns (r: Ref)\n"
+            "  ensures ((r != null) && (r == loc(block_of(r), 0))) && (len(block_of(r)) == 1)\n"
+            "  ensures len(member(r, 0)) == 3\n"
+            "  ensures forall j: Int :: { loc(member(r, 0), j) } ((0 <= j) && (j < 3)) ==> acc(loc(member(r, 0), j).v_long)\n"
+            "  ensures forall j: Int :: { loc(member(r, 0), j) } ((0 <= j) && (j < 3)) ==> acc(loc(member(r, 0), j).d_long)\n"
+            "  ensures forall j: Int :: { loc(member(r, 0), j) } ((0 <= j) && (j < 3)) ==> (!loc(member(r, 0), j).d_long)\n"
+            "  ensures (lvloc(block_of(r)) == loc(block_of(r), (-2))) && acc(lvloc(block_of(r)).lv)\n"
+            "  decreases _\n\n")
+        for name in ("real_gmat_main_read_write", "real_gmat_owns_callee", "real_gmat_loop_main_reads", "real_gmat_static_zero_rows", "real_gmat_ptr_listed", "real_gmat_ptr_escape"):
+            with self.subTest(name=name):
+                text, mp = self.pair(name)
+                text = text.replace("field lv: Bool", "field lv: Bool\nfield v_long: Int\nfield d_long: Bool", 1)
+                at = text.index("// cerastes:trusted-contract program start")
+                probs = [p for p in self.problems(text[:at] + alloc + text[at:], mp) if "position map" not in p and "t.vpr.map" not in p and "call of `program_start`" not in p]
+                self.assertEqual(probs, [])
+
+    def test_the_rest_of_the_elements_the_list_does_not_reach_SYNTHETIC(self):
+        """No emitted text of the quantifiers after the listed elements exists yet (il176's cases list every element): the text below is `real_gsarr_main_read` with element 1's values replaced by the rests
+        the lowering's code describes (per leaf in declaration order: the cell leaf's `m <= k < N`, the array leaf's with `0 <= j < M`).  Accepted as written, refused with another start."""
+        name = "real_gsarr_main_read"
+        lines, lens = self.start_lines(name)
+        text, mp = self.pair(name)
+        vals = self.lines_with(lines, "ensures loc(member(loc(GB_g__0(), 1), ", after="method program_start", before="// C/C++ function")
+        rest = self.lines_with(lines, "ensures forall j: Int :: { loc(member(loc(GB_g__0(), 1), 1), j) }", after="method program_start", before="// C/C++ function")
+        drop = set(vals) | set(rest)
+        cell = "loc(member(loc(GB_g__0(), k), 0), 0)"
+        arr = "loc(member(loc(GB_g__0(), k), 1), j)"
+
+        def build(lo):
+            out = []
+            for i, l in enumerate(lines, start=1):
+                if i in drop:
+                    # the same number of lines (the position map is by line): the two rests, then an empty line
+                    order = sorted(drop)
+                    out.append([f"  ensures forall k: Int :: {{ {cell} }} (({lo} <= k) && (k < 2)) ==> ({cell}.v_int == 0)",
+                                f"  ensures forall k: Int, j: Int :: {{ {arr} }} ((({lo} <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> ({arr}.v_int == 0)", ""][order.index(i)])
+                    continue
+                out.append(l)
+            return "\n".join(out)
+
+        def group_problems(t):
+            # the position map is by line and the synthetic text moves lines: only the group's own problems are judged
+            return [p for p in self.problems(t, mp) if "position map" not in p and "t.vpr.map" not in p and "call of `program_start`" not in p]
+
+        self.assertEqual(group_problems(build(1)), [])
+        probs = group_problems(build(2))
+        self.assertTrue(probs and any("zero rest" in p for p in probs), probs[:3])
+
+
+class PartECopyLeafTests(unittest.TestCase):
+    """Decision 0064 items 3, 12 and 17 (Part E, the audit round E3a, finding 2 (a)): the ELEMENT COPY `v[i] = v[j]`, `p[i] = p[j]`, `*p = v[1]` of an element with an array member of scalars.  The source's
+    flags row `assert forall k :: { loc(block_of(t), k) } 0 <= k && k < 3 ==> loc(block_of(t), k).d_int` is over `t := loc(member(s, 1), 0)` where `s := loc(block_of(Y), offset_of(Y) + <a
+    literal or a Viper variable>)` is an ELEMENT SLOT local.  The old rule refused it (`bound_locals`: "whose block is neither `GB_g()` ... nor `member(<chain>, k)` over the canonical chain rooted at
+    a Viper variable"); the lifted refusal is that one message, at one line per copy.  New: an element slot local assigned once, with `Y` a root, is a root for chains; the row's count is then the
+    member's own (`member_counts`), its field the flag.  The fixtures are REAL output (build/m4.5e1e2d/tm8/il-new, lane il's self-test output at il195, NOT a proved snapshot: the latest proved is il194; compare these four files with the proved snapshot's `e1e2e_sarr_copy_*` cases before they are committed).  The twins edit the slot, the place,
+    the count and the field, and a row over the slot itself.  Nothing here is an amount, a guard or a kept-flag rule (the row is a pure flags assertion; the amounts of the copy's other rows are
+    `array_copy_call_problem`'s)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    NAMES = ("real_scopy_two_arrays", "real_scopy_symbolic", "real_scopy_pointer_place", "real_scopy_range")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text(), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, text, map_text):
+        return [p for p in lv.lint_vpr(text, map_text, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def edited(self, name, edits):
+        """`edits`: [(regex over the line, replacement)] applied to the unique line each matches; returns (the problems, the line numbers of the edited lines)."""
+        text, mp = self.pair(name)
+        lines = text.split("\n")
+        at = []
+        for pat, rep in edits:
+            idx = [i for i, l in enumerate(lines) if re.search(pat, l)]
+            self.assertEqual(len(idx), 1, (name, pat, idx))
+            lines[idx[0]] = re.sub(pat, rep, lines[idx[0]])
+            at.append(idx[0] + 1)
+        return self.problems("\n".join(lines), mp), at
+
+    FLAGS = r"k < 3\)\) ==> loc\(block_of\(t__%d\), k\)\.d_int"
+
+    def test_the_real_fixtures_are_clean(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_row_is_tied_to_the_members_own_count_place_and_field(self):
+        n = "real_scopy_two_arrays"
+        flags = self.FLAGS % 7
+        for label, edits in (("another count in the row", [(r"k < 3\)\) ==> loc\(block_of\(t__7\)", "k < 4)) ==> loc(block_of(t__7)")]),
+                             ("the place is another member", [(r"t__7 := loc\(member\(t__8, 1\), 0\)", "t__7 := loc(member(t__8, 2), 0)")]),
+                             ("the flag of another field", [(flags, "k < 3)) ==> loc(block_of(t__7), k).v_int")]),
+                             ("the row is over the slot itself", [(flags, "k < 3)) ==> loc(block_of(t__8), k).d_int")])):
+            with self.subTest(label=label):
+                probs, at = self.edited(n, edits)
+                self.assertTrue(any(p.startswith(f"t.vpr:{ln}:") for p in probs for ln in range(min(at), 200)), (label, probs[:2]))
+
+    def test_the_slot_local_is_a_root_only_by_its_own_form(self):
+        n = "real_scopy_two_arrays"
+        slot = r"t__8 := loc\(block_of\(v_w__1\), offset_of\(v_w__1\) \+ 0\)"
+        for label, rep in (("the slot of a block that is no root", "t__8 := loc(block_of(v_zz__9), offset_of(v_zz__9) + 0)"),
+                           ("the slot's offset is another variable's", "t__8 := loc(block_of(v_w__1), offset_of(v_v__0) + 0)"),
+                           ("the slot is a bare number", "t__8 := loc(block_of(v_w__1), 5)"),
+                           ("the slot is a sum of two variables", "t__8 := loc(block_of(v_w__1), offset_of(v_w__1) + (v_v__0 + 1))"),
+                           ("the slot local is assigned twice", "t__8 := loc(block_of(v_w__1), offset_of(v_w__1) + 0)\n  t__8 := loc(block_of(v_w__1), offset_of(v_w__1) + 1)")):
+            with self.subTest(label=label):
+                probs, _at = self.edited(n, [(slot, rep)])
+                self.assertTrue(any("`t__7`" in p for p in probs), (label, probs[:2]))
+
+    def test_the_symbolic_pointer_and_range_forms_are_tied_the_same_way(self):
+        # (fixture, the destination-free flags row's local, the slot local's line pattern, its replacement by a slot of a block that is no root)
+        for name, flagged, slot in (("real_scopy_symbolic", 4, r"t__5 := loc\(block_of\(v_v__2\), offset_of\(v_v__2\) \+ v_j__1\)"),
+                                    ("real_scopy_pointer_place", 3, r"t__4 := loc\(block_of\(v_v__1\), offset_of\(v_v__1\) \+ 1\)"),
+                                    ("real_scopy_range", 3, r"t__4 := loc\(block_of\(v_p__0\), offset_of\(v_p__0\) \+ 0\)")):
+            with self.subTest(name=name, label="another count"):
+                probs, _at = self.edited(name, [(self.FLAGS % flagged, f"k < 4)) ==> loc(block_of(t__{flagged}), k).d_int")])
+                self.assertTrue(probs, name)
+            with self.subTest(name=name, label="a slot of a block that is no root"):
+                probs, _at = self.edited(name, [(slot, re.sub(r"\\", "", slot).split(" := ")[0] + " := loc(block_of(v_zz__9), offset_of(v_zz__9) + 0)")])
+                self.assertTrue(any(f"`t__{flagged}`" in p for p in probs), (name, probs[:2]))
+
+
+class PartECellConjunctTieTests(unittest.TestCase):
+    """Question 374, tightened by audit round E3a (finding 6, question 385): the structure's well-formedness conjunct inside a CELL ATOM's clause (`(p != null && offset_of(p) < len(block_of(p))) ==>
+    <its length facts and the quantifier of its member array's elements>`, `_is_struct_wf_guarded_lens`) is accepted only when it is TEXTUALLY the guarded conjunct of the SAME method's own
+    well-formedness row for the same root (`wf_guarded_rows`), in the same clause kind (an `ensures` of a formal parameter also by the `requires` row), and only in a clause that holds a cell atom of
+    the pointer.  The twins are the audit's mutants: P1/P2 (a second pinned allocation with other counts: the cell clause states 4 where the method's own row states 3, in a `requires` and an
+    `ensures`), R1 (the same in a declared function's trusted `ensures`), C2b/C3b/C4b (a clause that is `p != null` and the conjunct, with `false` or with a permission beside it, no cell atom),
+    and the missing own row.  The fixtures are real (build/m4.5e1e2d/e3b-vir, il186 and earlier); the second allocation is assembled from the unit's own (not real output).  The tie by NUMBER of
+    the well-formedness row itself (P3, R2: both rows state 4 beside the second allocation) is the listed weakness and is not pinned as refused."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def with_second(self, name):
+        lines, mp = self.pair(name)
+        while lines and lines[-1] == "":
+            lines.pop()
+        a0 = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_0_U"))
+        a1 = next(i for i in range(a0, len(lines)) if lines[i].strip() == "decreases _")
+        second = [l.replace("alloc_struct_0_U", "alloc_struct_9_X").replace("struct U", "struct X").replace("== 3)", "== 4)").replace("(j < 3)", "(j < 4)") for l in lines[a0 - 1:a1 + 1]]
+        added = []
+        for ml in mp.rstrip("\n").split("\n"):
+            f = ml.split("\t")
+            if a0 + 1 <= int(f[0]) <= a1 + 1:
+                f[0] = str(int(f[0]) - (a0 + 1) + len(lines) + 3)
+                added.append("\t".join(f))
+        return lines + [""] + second + [""], mp.rstrip("\n") + "\n" + "\n".join(added) + "\n"
+
+    @staticmethod
+    def line_with(lines, kw, *fragments, nth=0):
+        hits = [i for i, l in enumerate(lines, start=1) if l.startswith(f"  {kw} ") and all(f in l for f in fragments)]
+        return hits[nth]
+
+    def edit(self, lines, n, old, new):
+        self.assertIn(old, lines[n - 1])
+        lines = lines[:]
+        lines[n - 1] = lines[n - 1].replace(old, new, 1)
+        return lines
+
+    CELL = "acc(loc(member(p_p__0, 0), 0).v_int)"
+
+    def test_the_real_fixtures_and_their_two_allocation_units_are_clean(self):
+        for name in ("real_mmp_cell_atom_read", "real_mmp_cell_atom_result"):
+            with self.subTest(name=name):
+                lines, mp = self.pair(name)
+                self.assertEqual(self.problems(lines, mp), [])
+                self.assertEqual(self.problems(*self.with_second(name)), [])
+
+    def test_a_cell_clause_that_states_other_counts_than_the_methods_own_row_is_refused(self):
+        lines, mp = self.with_second("real_mmp_cell_atom_read")
+        req_cell = self.line_with(lines, "requires", self.CELL)
+        ens_cell = self.line_with(lines, "ensures", self.CELL)
+        for label, n in (("a requires (P1)", req_cell), ("an ensures (P2)", ens_cell)):
+            with self.subTest(label=label):
+                probs = self.problems(self.edit(lines, n, "== 3)", "== 4)"), mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (label, probs[:2]))
+        # nothing wider: the same edit on the one-allocation unit is refused too (the older rule), and the unedited second-allocation unit is clean (above)
+        lines1, mp1 = self.pair("real_mmp_cell_atom_read")
+        n1 = self.line_with(lines1, "requires", self.CELL)
+        self.assertTrue(self.problems(self.edit(lines1, n1, "== 3)", "== 4)"), mp1))
+
+    def test_a_declared_functions_trusted_ensures_is_tied_to_its_own_row_too(self):
+        lines, mp = self.with_second("real_mmp_cell_atom_result")
+        n = self.line_with(lines, "ensures", "acc(loc(member(res, 0), 0).v_int)")
+        probs = self.problems(self.edit(lines, n, "== 3)", "== 4)"), mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), probs[:2])
+
+    def test_a_clause_that_is_the_pointer_not_null_and_the_conjunct_holds_no_cell_atom_and_is_refused(self):
+        lines, mp = self.pair("real_mmp_cell_atom_read")
+        wf = self.line_with(lines, "requires", "(p_p__0 == null) ||")
+        conj = lines[wf - 1].split(" && (((p_p__0 != null)", 1)
+        self.assertEqual(len(conj), 2)
+        guarded = "(((p_p__0 != null)" + conj[1]
+        other_cell = "acc(loc(member(loc(member(p_p__0, 1), 0), 0), 0).v_int)"
+        for label, head in (("C2b: p != null alone", "(p_p__0 != null)"), ("C3b: with false", "((p_p__0 != null) && false)"), ("C4b: with a permission to another pointer's cell", f"((p_p__0 != null) && {other_cell})")):
+            with self.subTest(label=label):
+                edited = lines[:]
+                edited[wf - 1] = f"  requires {head} && {guarded}"
+                probs = self.problems(edited, mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{wf}:") for p in probs), (label, probs[:2]))
+
+    def test_a_cell_clause_of_a_root_with_no_well_formedness_row_of_its_own_is_refused(self):
+        lines, mp = self.pair("real_mmp_cell_atom_result")
+        row = self.line_with(lines, "ensures", "(res == null) ||")
+        cell = self.line_with(lines, "ensures", "acc(loc(member(res, 0), 0).v_int)")
+        self.assertLess(row, cell)
+        edited = lines[:]
+        edited[row - 1] = "  ensures true"
+        probs = self.problems(edited, mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{cell}:") for p in probs), probs[:2])
+
+
+class PartETsarrAllocationTests(unittest.TestCase):
+    """Decision 0064 items 3, 6 and 17 (Part E, slice 3c-4; question 357's boundary is respected: nothing here is an amount, a guard or a kept-flag rule): the trusted allocation `alloc_struct_<n>_T` of a
+    structure with a MEMBER ARRAY OF STRUCTURES whose elements have an ARRAY LEAF of scalars (`struct T { struct P v[2]; int k; }`, `struct P { int n; int a[3]; }`).  The length facts of the elements state
+    `len(member(slot, 1)) == 3` beside `len(member(slot, 0)) == 1`; the allocation's three rows of the array leaf have TWO bound variables over the element's own count (2) and the leaf's own count (3), after
+    the three one-binder rows of the cell leaf, in declaration order.  The count is tied to the allocation ITSELF (not to another allocation's by number): the lifted refusal is `struct_allocation_problem`'s
+    "`len(member(loc(member(r,0),k),1))==3` is not `len(member(<chain>, <literal>)) == 1` with a chain rooted at the slot", at one line (the `alloc_struct_1_T` header) per file, 87 files of il200's self-test
+    output.  The fixture is REAL output (build/m4.5e1e2d/tm9/il200-vir, lane il's self-test output of the build of 08:24 UTC on the 27th: il200, NOT a proved snapshot: the proved one is il197, whose
+    pre-slice-4 cases are byte-identical where compared).  Only the allocation's own lines are judged here (the scope exit of the same file is item 4's)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    NAME = "real_tsarr_local_rw"
+
+    def lines(self):
+        return (self.DATA / f"{self.NAME}.vpr").read_text().split("\n"), (self.DATA / f"{self.NAME}.vpr.map").read_text()
+
+    def span(self, lines, name="alloc_struct_1_T"):
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith(f"method {name}("))
+        b = next(i for i in range(a, len(lines) + 1) if lines[i - 1].strip() == "decreases _")
+        return a, b
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def alloc_problems(self, lines, mp, name="alloc_struct_1_T"):
+        a, b = self.span(lines, name)
+        out = []
+        for p in self.problems(lines, mp):
+            m = re.match(r"t\.vpr:(\d+):", p)
+            if m and a <= int(m.group(1)) <= b:
+                out.append(p)
+        return out
+
+    def edited(self, edits):
+        """`edits`: [(a fragment of exactly one line of the allocation, its replacement)]; returns (lines, the problems at the allocation's lines)."""
+        lines, mp = self.lines()
+        a, b = self.span(lines)
+        for old, new in edits:
+            idx = [i for i in range(a, b + 1) if old in lines[i - 1]]
+            self.assertEqual(len(idx), 1, (old, idx))
+            lines[idx[0] - 1] = lines[idx[0] - 1].replace(old, new)
+        return self.alloc_problems(lines, mp)
+
+    LEN = "len(member(loc(member(r, 0), k), 1)) == 3"
+    ROW_V = "forall k: Int, j: Int :: { loc(member(loc(member(r, 0), k), 1), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 3))) ==> acc(loc(member(loc(member(r, 0), k), 1), j).v_int)"
+
+    def test_the_real_allocation_is_clean_and_so_is_its_other_alloc(self):
+        lines, mp = self.lines()
+        self.assertEqual(self.alloc_problems(lines, mp), [])
+        self.assertEqual(self.alloc_problems(lines, mp, "alloc_struct_0_P"), [])
+
+    def row_edit(self, which, old, new):
+        """Edits `old` -> `new` in the `which`-th (0 value, 1 flag, 2 not-flag) two-binder row of the allocation; returns the problems at the allocation's lines."""
+        lines, mp = self.lines()
+        a, b = self.span(lines)
+        rows = [i for i in range(a, b + 1) if "forall k: Int, j: Int" in lines[i - 1]]
+        self.assertEqual(len(rows), 3)
+        self.assertIn(old, lines[rows[which] - 1])
+        lines[rows[which] - 1] = lines[rows[which] - 1].replace(old, new)
+        return self.alloc_problems(lines, mp)
+
+    def test_the_leafs_count_is_the_allocations_own_in_the_length_facts_and_in_the_rows(self):
+        self.assertTrue(self.edited([(self.LEN, "len(member(loc(member(r, 0), k), 1)) == 4")]), "M changed in the length fact only")
+        for which, label in ((0, "value"), (1, "flag"), (2, "not-flag")):
+            with self.subTest(label=f"M changed in the {label} row only"):
+                self.assertTrue(self.row_edit(which, "(j < 3)", "(j < 4)"))
+        # the three rows and the length fact at one other count are a consistent 4 (another allocation's text): clean, the rule ties the count to the allocation itself
+        lines, mp = self.lines()
+        a, b = self.span(lines)
+        for i in range(a, b + 1):
+            if "forall k: Int, j: Int" in lines[i - 1]:
+                lines[i - 1] = lines[i - 1].replace("(j < 3)", "(j < 4)")
+            lines[i - 1] = lines[i - 1].replace(self.LEN, "len(member(loc(member(r, 0), k), 1)) == 4")
+        self.assertEqual(self.alloc_problems(lines, mp), [])
+
+    def test_the_elements_own_count_n_is_the_same_in_every_row(self):
+        for which, label, old, new in ((0, "value row", "(k < 2)", "(k < 3)"), (1, "flag row", "(k < 2)", "(k < 1)"), (2, "not-flag row", "(0 <= j)", "(1 <= j)"),
+                                       (2, "not-flag row's k lower bound", "(0 <= k)", "(1 <= k)")):
+            with self.subTest(label=label):
+                self.assertTrue(self.row_edit(which, old, new))
+
+    def test_a_row_with_the_wrong_number_of_binders_is_refused(self):
+        one = "forall j: Int :: { loc(member(loc(member(r, 0), 0), 1), j) } ((0 <= j) && (j < 3)) ==> acc(loc(member(loc(member(r, 0), 0), 1), j).v_int)"
+        cell_two = "forall k: Int, j: Int :: { loc(member(loc(member(r, 0), k), 0), j) } (((0 <= k) && (k < 2)) && ((0 <= j) && (j < 1))) ==> acc(loc(member(loc(member(r, 0), k), 0), j).v_int)"
+        for label, edits in (("a one-binder row for the array leaf", [(self.ROW_V, one)]),
+                             ("a two-binder row for the cell leaf", [("forall k: Int :: { loc(member(loc(member(r, 0), k), 0), 0) } ((0 <= k) && (k < 2)) ==> acc(loc(member(loc(member(r, 0), k), 0), 0).v_int)", cell_two)])):
+            with self.subTest(label=label):
+                self.assertTrue(self.edited(edits), label)
+
+    def test_a_missing_row_a_swapped_leaf_and_two_fields_are_refused(self):
+        lines, mp = self.lines()
+        a, b = self.span(lines)
+        notd = next(i for i in range(a, b + 1) if "(!loc(member(loc(member(r, 0), k), 1), j).d_int)" in lines[i - 1])
+        valr = next(i for i in range(a, b + 1) if "j).v_int)" in lines[i - 1] and "forall k: Int, j: Int" in lines[i - 1])
+        celr = next(i for i in range(a, b + 1) if "loc(member(r, 0), k), 0), 0).v_int)" in lines[i - 1])
+        for label, make in (("the not-flag row of the array leaf is missing", lambda L: L[:notd - 1] + L[notd:]),
+                            ("the array leaf's rows come before the cell leaf's", lambda L: L[:celr - 1] + L[valr - 1:valr + 2] + L[celr - 1:celr + 2] + L[valr + 2:]),
+                            ("the value and flag rows are of two fields", lambda L: [l.replace("loc(member(loc(member(r, 0), k), 1), j).d_int", "loc(member(loc(member(r, 0), k), 1), j).d_bool") if i + 1 in (valr + 1, valr + 2) else l for i, l in enumerate(L)] + ["field v_bool: Int", "field d_bool: Bool"])):
+            with self.subTest(label=label):
+                edited = make(lines[:])
+                self.assertTrue(self.alloc_problems(edited, mp), label)
+
+    def test_an_array_leaf_with_a_member_block_inside_it_is_refused(self):
+        # a count other than 1 only at a member block no other member block extends
+        self.assertTrue(self.edited([(self.LEN, self.LEN + " && (len(member(loc(member(loc(member(r, 0), k), 1), 0), 0)) == 1)")]))
+
+
+class PartETsarrContractTests(unittest.TestCase):
+    """Decision 0064 items 3, 9 and 17 (Part E, slice 3c-4; question 357's boundary is respected: the consequent, the guard and the amount of a row are `_matrix_cons_problem`'s and
+    `member_matrix_row_problem`'s own, unedited): the CONTRACT rows of a pointer to (or a global of) a structure with a member array of structures whose elements have an array leaf of scalars
+    (`struct T { struct P v[2]; int k; }`): the length fact `len(member(loc(member(p, 0), k), 1)) == 3` (accepted by `range_lens_members` when the unit's own allocation states that leaf: the table
+    `_ELEM_ARRAYS` of `(member key, leaf key) -> (N, M, field)`, reset per unit, a key stated twice left out) and the rows over the leaf with TWO bound variables (`member_sarr_row_problem`).  The lifted refusals:
+    352 lines of il200's self-test output, two messages: the `forall` fallthrough at a two-binder row in a `requires` or `ensures` (180 + 172 lines, no tail) and the count refusal "`len(member(loc(member(p,0),k),1))==3`
+    is not `len(member(<chain>, <literal>)) == 1` with a chain rooted at the slot" (the rest).  The fixtures are REAL output (build/m4.5e1e2d/tm9/il200-vir, lane il, il200, NOT a proved snapshot); a global
+    root is read in `real_gtsarr_call_owns`, whose `program_start` group is item 3's and is not judged here (only the lines of the method `f_put__0`)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def span(lines, header):
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith(header))
+        b = next(i for i in range(a, len(lines) + 1) if lines[i - 1].strip() == "decreases")
+        return a, b
+
+    def in_method(self, lines, mp, header):
+        a, b = self.span(lines, header)
+        out = []
+        for p in self.problems(lines, mp):
+            m = re.match(r"t\.vpr:(\d+):", p)
+            if m and a <= int(m.group(1)) <= b:
+                out.append(p)
+        return out
+
+    def row(self, lines, header, kw, which, kind="v"):
+        """The line number of the `which`-th (0-based) two-binder clause of keyword `kw` in the method; `kind`: v (value), d (flag permission), f (flag), r (range)."""
+        a, b = self.span(lines, header)
+        rows = [i for i in range(a, b + 1) if lines[i - 1].startswith(f"  {kw} forall k: Int, j: Int")]
+        order = {"v": 0, "d": 1, "f": 2, "r": 3}[kind]
+        self.assertEqual(len(rows), 4, rows)
+        return rows[order]
+
+    def edit(self, lines, n, old, new):
+        self.assertIn(old, lines[n - 1])
+        lines = lines[:]
+        lines[n - 1] = lines[n - 1].replace(old, new, 1)
+        return lines
+
+    PEEK = "method f_peek__0("
+    PUT = "method f_put__0("
+
+    def test_the_real_contracts_are_clean_at_every_row_of_the_method(self):
+        for name, header in (("real_tsarr_reads_write_fail", self.PEEK), ("real_gtsarr_call_owns", self.PUT), ("real_tsarr_contract_read_result", "method f_f__0(")):
+            with self.subTest(name=name):
+                lines, mp = self.pair(name)
+                self.assertEqual(self.in_method(lines, mp, header), [])
+
+    def test_a_row_over_other_bounds_or_cells_than_the_allocations_is_refused(self):
+        for name, header, kw in (("real_tsarr_reads_write_fail", self.PEEK, "requires"), ("real_tsarr_reads_write_fail", self.PEEK, "ensures"), ("real_gtsarr_call_owns", self.PUT, "requires")):
+            lines, mp = self.pair(name)
+            n = self.row(lines, header, kw, 0, "v")
+            for label, old, new in (("N", "(k < 2)", "(k < 3)"), ("M", "(j < 3)", "(j < 2)"), ("M larger", "(j < 3)", "(j < 4)"), ("the lower bound of j", "(0 <= j)", "(1 <= j)"),
+                                    ("the lower bound of k", "(0 <= k)", "(1 <= k)")):
+                with self.subTest(name=name, kw=kw, label=label):
+                    probs = self.problems(self.edit(lines, n, old, new), mp)
+                    self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (label, probs[:2]))
+
+    def test_a_row_of_another_leaf_another_field_or_another_root_is_refused(self):
+        lines, mp = self.pair("real_tsarr_reads_write_fail")
+        n = self.row(lines, self.PEEK, "requires", 0, "v")
+        lines = lines + ["field v_bool: Int", "field d_bool: Bool"]
+        for label, old, new in (("the cell leaf as an array leaf", "loc(member(loc(member(p_p__0, 0), k), 1), j)", "loc(member(loc(member(p_p__0, 0), k), 0), j)"),
+                                ("another field", "j).v_int, amt_0)", "j).v_bool, amt_0)"),
+                                ("a root that is no formal", "loc(member(loc(member(p_p__0, 0), k), 1), j)", "loc(member(loc(member(q_zz__9, 0), k), 1), j)")):
+            with self.subTest(label=label):
+                probs = self.problems(self.edit(lines, n, old, new) if label != "a root that is no formal" else self.edit(self.edit(lines, n, old, new), n, "j).v_int, amt_0)", "j).v_int, amt_0)"), mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (label, probs[:2]))
+
+    def test_the_amount_and_the_guard_are_the_existing_rules_unedited(self):
+        lines, mp = self.pair("real_tsarr_reads_write_fail")
+        n = self.row(lines, self.PEEK, "requires", 0, "v")
+        for label, edited in (("a literal amount", self.edit(lines, n, ", amt_0)", ", write)")), ("a fraction", self.edit(lines, n, ", amt_0)", ", 1 / 2)")),
+                              ("a guard that reads a permission", self.edit(lines, n, "requires forall", "requires (perm(loc(member(p_p__0, 1), 0).v_int) > none) ==> forall"))):
+            with self.subTest(label=label):
+                probs = self.problems(edited, mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (label, probs[:2]))
+
+    def test_the_length_fact_that_states_another_count_than_the_allocations_is_refused_at_its_own_line(self):
+        # (the allocation states 3 cells): the clause `forall k :: ... len(member(loc(member(p, 0), k), 1)) == 3` of a `requires` and of an `ensures`, edited alone
+        for name, header in (("real_tsarr_reads_write_fail", self.PEEK),):
+            lines, mp = self.pair(name)
+            a, b = self.span(lines, header)
+            for kw in ("requires", "ensures"):
+                hits = [i for i in range(a, b + 1) if lines[i - 1].startswith(f"  {kw} forall k: Int :: {{ loc(member(p_p__0, 0), k) }}") and "== 3)" in lines[i - 1]]
+                self.assertEqual(len(hits), 1, (kw, hits)) if kw == "requires" else None
+                for n in hits:
+                    with self.subTest(kw=kw):
+                        probs = self.problems(self.edit(lines, n, "== 3)", "== 4)"), mp)
+                        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (kw, probs[:2]))
+
+    def test_the_rows_rely_on_the_methods_own_length_facts(self):
+        lines, mp = self.pair("real_tsarr_reads_write_fail")
+        a, b = self.span(lines, self.PEEK)
+        n = self.row(lines, self.PEEK, "requires", 0, "v")
+        for label, old, new, want in (("no length fact of the elements' array leaf", "len(member(loc(member(p_p__0, 0), k), 1)) == 3", "len(member(loc(member(p_p__0, 0), k), 1)) == 1", "no length fact"),
+                                      ("no count of the member's elements", "len(member(p_p__0, 0)) == 2", "len(member(p_p__0, 0)) == 1", "len(member(p_p__0,0))")):
+            with self.subTest(label=label):
+                edited = [l.replace(old, new) if a <= i <= b and l.startswith(("  requires", "  ensures")) else l for i, l in enumerate(lines, start=1)]
+                self.assertNotEqual(edited, lines)
+                probs = self.problems(edited, mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{n}:") and want in p for p in probs), (label, [p[:240] for p in probs if p.startswith(f"t.vpr:{n}:")]))
+
+    def second_allocation(self, lines, mp, cols):
+        """The unit with a second pinned allocation `alloc_struct_9_X` assembled from `alloc_struct_1_T`'s own text with `cols` cells in the array leaf (not real output)."""
+        lines = lines[:]
+        while lines and lines[-1] == "":
+            lines.pop()
+        a = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_1_T"))
+        b = next(i for i in range(a, len(lines)) if lines[i].strip() == "decreases _")
+        second = [l.replace("alloc_struct_1_T", "alloc_struct_9_X").replace("struct T", "struct X").replace("== 3)", f"== {cols})").replace("(j < 3)", f"(j < {cols})") for l in lines[a - 1:b + 1]]
+        added = []
+        for ml in mp.rstrip("\n").split("\n"):
+            f = ml.split("\t")
+            if a + 1 <= int(f[0]) <= b + 1:
+                f[0] = str(int(f[0]) - (a + 1) + len(lines) + 3)
+                added.append("\t".join(f))
+        return lines + [""] + second + [""], mp.rstrip("\n") + "\n" + "\n".join(added) + "\n"
+
+    def test_two_allocations_that_state_one_leaf_with_two_triples_refuse_every_row_over_it_and_nothing_wider(self):
+        lines, mp = self.pair("real_tsarr_reads_write_fail")
+        same_l, same_mp = self.second_allocation(lines, mp, 3)
+        self.assertEqual(self.in_method(same_l, same_mp, self.PEEK), [])  # the same triple twice: clean
+        diff_l, diff_mp = self.second_allocation(lines, mp, 4)
+        probs = self.in_method(diff_l, diff_mp, self.PEEK)
+        a, b = self.span(diff_l, self.PEEK)
+        rows = [self.row(diff_l, self.PEEK, kw, which, kind) for kw in ("requires", "ensures") for which in (0,) for kind in ("v", "d", "f", "r")]
+        for n in rows:
+            self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (n, probs[:2]))
+        # nothing wider: the liveness token's amounts, the result's row and the null tests stay clean (the length facts that state the leaf's count are refused with the rows, and the one-binder rows of the
+        # cell leaf after them, which have no accepted length-facts row to stand on: fail closed)
+        other = [i for i in range(a, b + 1) if diff_l[i - 1].startswith(("  ensures res ==", "  requires acc(lvloc", "  ensures acc(lvloc", "  requires p_p__0 != null", "  ensures p_p__0 != null"))]
+        self.assertTrue(other)
+        for n in other:
+            self.assertFalse(any(p.startswith(f"t.vpr:{n}:") for p in probs), (n, [p for p in probs if p.startswith(f"t.vpr:{n}:")][:1]))
+
+    def test_the_global_root_is_a_declared_global_and_the_counts_are_the_allocations(self):
+        lines, mp = self.pair("real_gtsarr_call_owns")
+        n = self.row(lines, self.PUT, "requires", 0, "v")
+        for label, old, new in (("another global", "loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), j)", "loc(member(loc(member(loc(GB_zz__9(), 0), 0), k), 1), j)"),
+                                ("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 3)", "(j < 4)")):
+            with self.subTest(label=label):
+                probs = self.problems(self.edit(lines, n, old, new), mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (label, probs[:2]))
+
+
+class PartETsarrGlobalGroupTests(unittest.TestCase):
+    """Decision 0064 items 3, 9 and 17 (Part E, slice 3c-4; question 357's boundary is respected: nothing here is an amount, a guard or a kept-flag rule; briefing rule 4): `program_start`'s row group of a
+    STRUCTURE GLOBAL `static struct T gt` whose member array of structures has an element with an ARRAY LEAF of scalars (`member_sarr_global_group`).  The lifted refusals are the group's two messages at one line
+    each in 21 files of il200's self-test output (`gtsarr_*`): "the length facts of the array of structures `GB_gt` (member (0,)) are not followed by its row group" (the length-facts clause) and "the first row is
+    not the value permission ... of an array member `member(loc(GB_gt(), 0), k)` of a structure global" (the row group's first row).  Two real forms exist and only they are read: the VALUES listed element by element
+    (the leaves in declaration order, the array leaf's cells from 0 in order, the cells the list leaves out by one one-binder quantifier, every element listed), and the type's OWN range of an unknown value, one
+    quantifier per leaf over every element alone (the array leaf's with two bound variables).  The array leaf's N, M and field are those of the unit's own allocation (`_ELEM_ARRAYS`).  A zero rest over unreached
+    ELEMENTS and an array leaf first in the element have no emitted text and stay refused.  The fixtures are REAL output (build/m4.5e1e2d/tm9/il200-vir: il200, NOT a proved snapshot)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def span(lines):
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith("method program_start"))
+        b = next(i for i in range(a, len(lines) + 1) if lines[i - 1].strip() == "decreases _")
+        return a, b
+
+    def in_start(self, lines, mp):
+        a, b = self.span(lines)
+        return [p for p in self.problems(lines, mp) if (m := re.match(r"t\.vpr:(\d+):", p)) and a <= int(m.group(1)) <= b]
+
+    def refused(self, lines, mp, label):
+        self.assertTrue(self.in_start(lines, mp), label)
+
+    LISTED = "real_gtsarr_main_read"
+    UNKNOWN = "real_gtsarr_unknown_fail"
+
+    def test_the_real_groups_are_clean(self):
+        for name in (self.LISTED, self.UNKNOWN):
+            with self.subTest(name=name):
+                lines, mp = self.pair(name)
+                self.assertEqual(self.in_start(lines, mp), [])
+
+    def test_the_length_facts_and_the_leaf_rows_are_the_allocations_own(self):
+        lines, mp = self.pair(self.LISTED)
+        a, _b = self.span(lines)
+        for label, at, old, new in (("the length fact states 4 cells", a + 2, "== 3)", "== 4)"), ("another N in the length facts", a + 2, "(k < 2)", "(k < 3)"),
+                                    ("the array leaf's value row over 4 cells", a + 7, "(j < 3)", "(j < 4)"), ("the array leaf's value row over 3 elements", a + 7, "(k < 2)", "(k < 3)"),
+                                    ("the array leaf's flag row from cell 1", a + 8, "(0 <= j)", "(1 <= j)"), ("the array leaf's flags row over one element", a + 9, "(k < 2)", "(k < 1)"),
+                                    ("the cell leaf's flags row over 3 elements", a + 6, "(k < 2)", "(k < 3)")):
+            with self.subTest(label=label):
+                self.assertIn(old, lines[at - 1])
+                edited = lines[:]
+                edited[at - 1] = edited[at - 1].replace(old, new, 1)
+                self.refused(edited, mp, label)
+
+    def test_a_missing_swapped_or_other_field_leaf_row_is_refused(self):
+        lines, mp = self.pair(self.LISTED)
+        a, _b = self.span(lines)
+        cell_rows, arr_rows = [a + 4, a + 5, a + 6], [a + 7, a + 8, a + 9]
+        for label, make in (("the array leaf's flags row is missing", lambda L: L[:arr_rows[2] - 1] + L[arr_rows[2]:]),
+                            ("the cell leaf's flag-permission row is missing", lambda L: L[:cell_rows[1] - 1] + L[cell_rows[1]:]),
+                            ("the array leaf's rows come before the cell leaf's", lambda L: L[:cell_rows[0] - 1] + [L[i - 1] for i in arr_rows] + [L[i - 1] for i in cell_rows] + L[arr_rows[2]:]),
+                            ("the array leaf's flag row is of another field", lambda L: [l.replace("j).d_int)", "j).d_bool)") if i == arr_rows[1] else l for i, l in enumerate(L, start=1)] + ["field v_bool: Int", "field d_bool: Bool"])):
+            with self.subTest(label=label):
+                self.refused(make(lines[:]), mp, label)
+
+    def test_the_listed_values_are_the_elements_in_order_every_cell_once_and_the_rest_zero(self):
+        lines, mp = self.pair(self.LISTED)
+        a, b = self.span(lines)
+        vals = list(range(a + 10, b))  # the listed values and the rest quantifier
+        self.assertEqual(len(vals), 7)
+        for label, make in (("two listed cells swapped", lambda L: L[:vals[1] - 1] + [L[vals[2] - 1], L[vals[1] - 1]] + L[vals[3] - 1:]),
+                            ("a listed cell dropped", lambda L: L[:vals[2] - 1] + L[vals[3] - 1:]),
+                            ("the rest quantifier of the cells dropped", lambda L: L[:vals[6] - 1] + L[vals[6]:]),
+                            ("the rest quantifier starts at 2", lambda L: [l.replace("(1 <= j)", "(2 <= j)") if i == vals[6] else l for i, l in enumerate(L, start=1)]),
+                            ("the rest quantifier states 1, not zero", lambda L: [re.sub(r"== 0\)\s*$", "== 1)", l) if i == vals[6] else l for i, l in enumerate(L, start=1)]),
+                            ("the last element is not listed", lambda L: L[:vals[4] - 1] + L[b - 1:]),
+                            ("a value that is no literal of its type", lambda L: [l.replace(".v_int == 7", ".v_int == null") if i == vals[0] else l for i, l in enumerate(L, start=1)])):
+            with self.subTest(label=label):
+                edited = make(lines[:])
+                self.assertNotEqual(edited, lines, label)
+                self.refused(edited, mp, label)
+
+    def test_an_unknown_value_has_the_types_own_range_alone_per_leaf(self):
+        lines, mp = self.pair(self.UNKNOWN)
+        a, b = self.span(lines)
+        cell_q, arr_q = b - 2, b - 1
+        for label, at, old, new in (("the cell leaf's range is narrowed", cell_q, "<= 2147483647", "<= 100"), ("the cell leaf's lower bound is narrowed", cell_q, "(-2147483648)", "0"),
+                                    ("the array leaf's range is narrowed", arr_q, "<= 2147483647", "<= 100"), ("the array leaf's lower bound is narrowed", arr_q, "(-2147483648)", "0"),
+                                    ("the array leaf's range is over 2 cells", arr_q, "(j < 3)", "(j < 2)"), ("the cell leaf's range is over 1 element", cell_q, "(k < 2)", "(k < 1)")):
+            with self.subTest(label=label):
+                self.assertIn(old, lines[at - 1])
+                edited = lines[:]
+                edited[at - 1] = edited[at - 1].replace(old, new, 1)
+                self.refused(edited, mp, label)
+        for label, make in (("the array leaf's quantifier is missing", lambda L: L[:arr_q - 1] + L[arr_q:]),
+                            ("the leaves' quantifiers are swapped", lambda L: L[:cell_q - 1] + [L[arr_q - 1], L[cell_q - 1]] + L[arr_q:]),
+                            ("the cell leaf's quantifier is a zero rest", lambda L: [re.sub(r"==> .*$", "==> (loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 0), 0).v_int == 0)", l) if i == cell_q else l for i, l in enumerate(L, start=1)])):
+            with self.subTest(label=label):
+                self.refused(make(lines[:]), mp, label)
+
+    def test_a_second_allocation_that_states_the_leaf_with_other_counts_refuses_the_group_and_nothing_wider(self):
+        lines, mp = self.pair(self.LISTED)
+        lines = lines[:]
+        while lines and lines[-1] == "":
+            lines.pop()
+        a0 = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_1_T"))
+        a1 = next(i for i in range(a0, len(lines)) if lines[i].strip() == "decreases _")
+
+        def with_second(cols):
+            second = [l.replace("alloc_struct_1_T", "alloc_struct_9_X").replace("struct T", "struct X").replace("== 3)", f"== {cols})").replace("(j < 3)", f"(j < {cols})") for l in lines[a0 - 1:a1 + 1]]
+            added = []
+            for ml in mp.rstrip("\n").split("\n"):
+                f = ml.split("\t")
+                if a0 + 1 <= int(f[0]) <= a1 + 1:
+                    f[0] = str(int(f[0]) - (a0 + 1) + len(lines) + 3)
+                    added.append("\t".join(f))
+            return lines + [""] + second + [""], mp.rstrip("\n") + "\n" + "\n".join(added) + "\n"
+
+        same_l, same_mp = with_second(3)
+        self.assertEqual(self.in_start(same_l, same_mp), [])
+        diff_l, diff_mp = with_second(4)
+        self.assertTrue(self.in_start(diff_l, diff_mp))
+        # nothing wider: the allocations' own lines are clean (they are no rows of the group)
+        probs = [p for p in self.problems(diff_l, diff_mp) if re.match(r"t\.vpr:(\d+):", p) and a0 + 1 <= int(re.match(r"t\.vpr:(\d+):", p).group(1)) <= a1 + 1]
+        self.assertEqual(probs, [])
+
+
+class PartETsarrPlaceTests(unittest.TestCase):
+    """Decision 0064 items 3, 6, 10 and 17 (Part E, slice 3c-4; question 375: the kept-flag, amount and guard rule FUNCTIONS are textually identical to the good copy, `index_row_problem` and its kin untouched): the
+    PLACES of a member array of structures with an array leaf, where the rows over `block_of(X)` are the scope exits' marked `assert`s and `exhale`s of a structure local and the loop invariants of a function that
+    holds it: `X := loc(member(V, k), 0)` with V a structure local from a pinned `alloc_struct_...` (`member_sarr_places`: N, counts and fields from THAT allocation's own element rows) and
+    `X := loc(member(loc(GB_g(), 0), k), 0)` of a structure global (`member_sarr_global_leaves`: from `program_start`'s group); the rows are then judged by `agg_place_problem` and `index_row_problem`, as a
+    local array of structures' with an array leaf, unedited, and a global's place is never exited.  The lifted refusals: `index_row_problem`'s "a `exhale` row of a `...` over `0 <= k && k < 2` of `t__10`, which
+    is no local matrix of this method: a literal first range is the allocation's, or a marked `assert` permission row's" (134 `exhale` lines in 51 files and 12 `invariant` lines in 4 files of il200's self-test
+    output, record item 17), 8 of the invariant lines kept-flag or range rows of `tsarr_loop_fill` and its vacuity twin and 4 kept rows of `gtsarr_loop_reads` (listed in the report).  Not covered (a gap that
+    existed before and is listed): nothing ties a structure local's scope exit to the SET of rows its allocation gave, so a dropped row is not refused (a dropped `exhale` of a scalar leaf is not either)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def edit(self, lines, n, old, new):
+        self.assertIn(old, lines[n - 1])
+        lines = lines[:]
+        lines[n - 1] = lines[n - 1].replace(old, new, 1)
+        return lines
+
+    def refused_at(self, lines, mp, n, label):
+        probs = self.problems(lines, mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in probs), (label, probs[:2]))
+
+    @staticmethod
+    def find(lines, *fragments, nth=0):
+        hits = [i for i, l in enumerate(lines, start=1) if all(f in l for f in fragments)]
+        return hits[nth]
+
+    def test_the_real_places_are_clean(self):
+        for name in ("real_tsarr_local_rw", "real_tsarr_loop_fill", "real_gtsarr_loop_reads", "real_tsarr_owns_call"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    ROWS = (("another N", "(k < 2)", "(k < 1)"), ("another M", "(j < 3)", "(j < 2)"), ("a larger M", "(j < 3)", "(j < 4)"), ("the lower bound of j", "(0 <= j)", "(1 <= j)"),
+            ("the lower bound of k", "(0 <= k)", "(1 <= k)"), ("another leaf (the cell leaf's member)", ", 1), j)", ", 0), j)"))
+
+    def test_every_two_binder_row_of_a_scope_exit_is_tied_to_the_allocations_counts_leaf_and_field(self):
+        lines, mp = self.pair("real_tsarr_local_rw")
+        for what, kw, nth in (("a marked value row", "assert forall k: Int, j: Int", 0), ("a marked flag row", "assert forall k: Int, j: Int", 1),
+                              ("an exhale of the value permission", "exhale forall k: Int, j: Int", 0), ("an exhale of the flag permission", "exhale forall k: Int, j: Int", 1)):
+            n = self.find(lines, kw, nth=nth)
+            for label, old, new in self.ROWS:
+                with self.subTest(what=what, label=label):
+                    self.refused_at(self.edit(lines, n, old, new), mp, n, label)
+        n = self.find(lines, "exhale forall k: Int, j: Int", nth=0)
+        extra = lines + ["field v_bool: Int", "field d_bool: Bool"]
+        with self.subTest(what="another field"):
+            self.refused_at(self.edit(extra, n, "j).v_int)", "j).v_bool)"), mp, n, "field")
+
+    def test_the_place_is_known_only_by_its_own_form(self):
+        lines, mp = self.pair("real_tsarr_local_rw")
+        place = self.find(lines, "t__10 := loc(member(v_t__0, 0), 0)")
+        rows = [self.find(lines, "exhale forall k: Int, j: Int", nth=i) for i in (0, 1)]
+        for label, old, new in (("the place is another member of the structure", "t__10 := loc(member(v_t__0, 0), 0)", "t__10 := loc(member(v_t__0, 1), 0)"),
+                                ("the place is of a variable that is no allocation's structure", "t__10 := loc(member(v_t__0, 0), 0)", "t__10 := loc(member(v_zz__9, 0), 0)"),
+                                ("the place is a slot of the member", "t__10 := loc(member(v_t__0, 0), 0)", "t__10 := loc(member(v_t__0, 0), 1)"),
+                                ("the place is assigned twice", "t__10 := loc(member(v_t__0, 0), 0)", "t__10 := loc(member(v_t__0, 0), 0)\n  t__10 := loc(member(v_t__0, 0), 0)")):
+            with self.subTest(label=label):
+                probs = self.problems(self.edit(lines, place, old, new), mp)
+                self.assertTrue(any("two-binder" in p or "no local matrix" in p or "not a leaf of its allocation" in p or "t__10" in p for p in probs), (label, probs[:2]))
+        with self.subTest(label="the rows name a place that is nobody's"):
+            probs = self.problems(self.edit(lines, rows[0], "block_of(t__10)", "block_of(t__zz)"), mp)
+            self.assertTrue(any(p.startswith(f"t.vpr:{rows[0]}:") for p in probs), probs[:2])
+
+    def test_the_loops_rows_are_tied_and_their_kept_rows_are_the_unedited_rules(self):
+        lines, mp = self.pair("real_tsarr_loop_fill")
+        first = self.find(lines, "invariant forall k: Int, j: Int", "acc(loc(member(loc(block_of(t__9), k), 1), j).v_int)")
+        rows = {"value": first, "flag": first + 1, "kept flag": first + 4, "range": first + 5}
+        self.assertIn("old[lh_0]", lines[rows["kept flag"] - 1])
+        for what, n in rows.items():
+            for label, old, new in self.ROWS:
+                with self.subTest(what=what, label=label):
+                    self.refused_at(self.edit(lines, n, old, new), mp, n, label)
+        n = rows["kept flag"]
+        for label, old, new in (("the kept flag names no label", "old[lh_0](", "old("), ("the kept flag is of another place", "block_of(t__9)", "block_of(t__zz)")):
+            with self.subTest(what="kept flag", label=label):
+                self.refused_at(self.edit(lines, n, old, new), mp, n, label)
+
+    def test_a_calls_pointer_form_rows_over_the_place_keep_the_pointer_rules_and_the_allocations_leaf(self):
+        # the rows a call hands over (`offset_of(X) <= k < offset_of(X) + 2`, `X := loc(member(V, 0), 0)`): the place's leaf, counts and field are tied, the first range is the pointer rules' (a
+        # literal first range would be the allocation's: these rows are clean as emitted, and a first range of `0 <= k < 2` over the same place is judged as the scope exit's)
+        lines, mp = self.pair("real_tsarr_owns_call")
+        n = self.find(lines, "assert forall k: Int, j: Int", "block_of(t__9)", "acc(loc(member(loc(block_of(t__9), k), 1), j).v_int)")
+        self.assertIn("offset_of(t__9)", lines[n - 1])
+        for label, old, new in (("another M", "(j < 3)", "(j < 2)"), ("another leaf", ", 1), j)", ", 0), j)"), ("a lower bound of j", "(0 <= j)", "(1 <= j)")):
+            with self.subTest(label=label):
+                self.refused_at(self.edit(lines, n, old, new), mp, n, label)
+
+    def test_the_global_places_rows_are_tied_to_the_programs_group_and_a_global_is_never_exited(self):
+        lines, mp = self.pair("real_gtsarr_loop_reads")
+        first = self.find(lines, "invariant forall k: Int, j: Int", "acc(loc(member(loc(block_of(t__0), k), 1), j).v_int)")
+        kept_flag = self.find(lines, "invariant forall k: Int, j: Int", "old[lh_0](loc(member(loc(block_of(t__0), k), 1), j).d_int)")
+        kept_value = self.find(lines, "invariant forall k: Int, j: Int", "v_int == old[lh_0](loc(member(loc(block_of(t__0), k), 1), j).v_int)")
+        rows = {"value": first, "flag": first + 1, "kept flag": kept_flag, "range": kept_flag + 1, "kept value": kept_value}
+        for what, n in rows.items():
+            for label, old, new in self.ROWS:
+                with self.subTest(what=what, label=label):
+                    self.refused_at(self.edit(lines, n, old, new), mp, n, label)
+        place = self.find(lines, "t__0 := loc(member(loc(GB_gt__0(), 0), 0), 0)")
+        for label, old, new in (("the place is another member of the global", "loc(member(loc(GB_gt__0(), 0), 0), 0)", "loc(member(loc(GB_gt__0(), 0), 1), 0)"),
+                                ("the place is of another global", "loc(member(loc(GB_gt__0(), 0), 0), 0)", "loc(member(loc(GB_zz__9(), 0), 0), 0)")):
+            with self.subTest(label=label):
+                probs = self.problems(self.edit(lines, place, old, new), mp)
+                self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for n in rows.values() for p in probs), (label, probs[:2]))
+        with self.subTest(label="a global's place is exited"):
+            probs = self.problems(self.edit(lines, first, "invariant forall", "exhale forall"), mp)
+            self.assertTrue(any(p.startswith(f"t.vpr:{first}:") and "a global is never exited" in p for p in probs), probs[:2])
+
+    def second_allocation(self, name, cols):
+        """The unit `name` with a second pinned allocation `alloc_struct_9_X` assembled from `alloc_struct_1_T`'s own text with `cols` cells in the array leaf (not real output)."""
+        lines, mp = self.pair(name)
+        lines = lines[:]
+        while lines and lines[-1] == "":
+            lines.pop()
+        a0 = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_1_T"))
+        a1 = next(i for i in range(a0, len(lines)) if lines[i].strip() == "decreases _")
+        second = [l.replace("alloc_struct_1_T", "alloc_struct_9_X").replace("struct T", "struct X").replace("== 3)", f"== {cols})").replace("(j < 3)", f"(j < {cols})") for l in lines[a0 - 1:a1 + 1]]
+        added = []
+        for ml in mp.rstrip("\n").split("\n"):
+            f = ml.split("\t")
+            if a0 + 1 <= int(f[0]) <= a1 + 1:
+                f[0] = str(int(f[0]) - (a0 + 1) + len(lines) + 3)
+                added.append("\t".join(f))
+        return lines + [""] + second + [""], mp.rstrip("\n") + "\n" + "\n".join(added) + "\n"
+
+    def test_a_second_allocation_of_another_type_does_not_move_a_local_place(self):
+        # the local place is read from ITS OWN allocation (`alloc_struct_1_T`): a second allocation with the same triple, or with other counts (a table collision for the contract rows only), leaves a
+        # structure local's scope exit and loops clean
+        for name in ("real_tsarr_local_rw", "real_tsarr_loop_fill"):
+            for cols in (3, 4):
+                with self.subTest(name=name, cols=cols):
+                    self.assertEqual(self.problems(*self.second_allocation(name, cols)), [])
+
+    def test_a_second_allocation_that_states_the_global_groups_leaf_with_other_counts_refuses_the_group_and_its_place(self):
+        # the global's group and place are read through the unit's table: a (member, leaf) stated by two allocations with two triples is left out, and the group, its leaves and its place go with it
+        lines, mp = self.second_allocation("real_gtsarr_loop_reads", 3)
+        self.assertEqual(self.problems(lines, mp), [])  # the same triple twice: clean
+        lines, mp = self.second_allocation("real_gtsarr_loop_reads", 4)
+        probs = self.problems(lines, mp)
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith("method program_start"))
+        row = next(i for i, l in enumerate(lines, start=1) if l.lstrip().startswith("invariant forall k: Int, j: Int") and "acc(loc(member(loc(block_of(t__0), k), 1), j).v_int)" in l)
+        self.assertTrue(any(re.match(rf"t\.vpr:{a + 1}:|t\.vpr:{a + 2}:|t\.vpr:{a + 3}:", p) for p in probs), probs[:3])
+        self.assertTrue(any(p.startswith(f"t.vpr:{row}:") for p in probs), probs[:3])
+
+
+class PartETsarrCopyTests(unittest.TestCase):
+    """Decision 0064 items 3, 12 and 17 (Part E, slice 3d-m): the ELEMENT COPY of an element of a MEMBER array of structures with an array leaf (`t.v[i] = t.v[j]`, `p->v[1] = p->v[0]`, `gt.v[1] = gt.v[0]`): the
+    source's flags row `assert forall k :: { loc(block_of(t), k) } 0 <= k && k < 3 ==> loc(block_of(t), k).d_int` is over the first cell of the array leaf of an element, bound as `t := loc(member(loc(member(R, K),
+    e), a), 0)` (e a literal or a Viper variable) or `t := loc(member(S, a), 0)` with `S := loc(member(R, K), e)` (`_elem_leaf_block_counts`, a new root of `bound_locals`: the count is the allocation's own M for the member K and
+    the leaf a, `_ELEM_ARRAYS`, and R is a root).  The lifted refusals: `bound_locals`' two messages at one line per copy, 20 lines in 18 files of il200's self-test output (7 "the local `t` is bound to ..., whose
+    block is neither `GB_g()` ... nor `member(<chain>, k)`" for an element index other than 0 and 13 "no `alloc_struct_*` of the unit has an array member at (0, 1)" for the element 0, which reads like a nested
+    structure's slot), record items 3, 12 and 17.  Nothing here is an amount, a guard or a kept-flag rule (the row is a flags assertion; the amounts of the copy's other rows are `array_copy_call_problem`'s)."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    NAMES = ("real_tsarr_copy_between_two_structures", "real_tsarr_copy_symbolic", "real_gtsarr_copy_constant_distinct", "real_tsarr_copy_through_a_pointer")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def line(lines, *fragments):
+        hits = [i for i, l in enumerate(lines, start=1) if all(f in l for f in fragments)]
+        assert len(hits) == 1, (fragments, hits)
+        return hits[0]
+
+    def edit(self, lines, n, old, new):
+        self.assertIn(old, lines[n - 1])
+        lines = lines[:]
+        lines[n - 1] = lines[n - 1].replace(old, new, 1)
+        return lines
+
+    def flags_row(self, lines):
+        hits = [i for i, l in enumerate(lines, start=1) if l.startswith("  assert forall k: Int :: { loc(block_of(t__") and l.rstrip().endswith("k).d_int") and "(k < 3)" in l and "acc(" not in l and "==> loc(block_of" in l]
+        self.assertEqual(len(hits), 1, hits)
+        return hits[0]
+
+    def refused_at_row(self, lines, mp, row, label):
+        probs = self.problems(lines, mp)
+        self.assertTrue(any(p.startswith(f"t.vpr:{row}:") for p in probs), (label, probs[:2]))
+
+    def test_the_real_copies_are_clean(self):
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_blocks_count_is_the_allocations_own_for_the_member_and_the_leaf(self):
+        for name in self.NAMES:
+            lines, mp = self.pair(name)
+            row = self.flags_row(lines)
+            with self.subTest(name=name, label="another count"):
+                self.refused_at_row(self.edit(lines, row, "(k < 3)", "(k < 4)"), mp, row, "count")
+            with self.subTest(name=name, label="a count of 2"):
+                self.refused_at_row(self.edit(lines, row, "(k < 3)", "(k < 2)"), mp, row, "count 2")
+
+    def test_the_inline_form_is_tied_to_its_member_leaf_and_root(self):
+        lines, mp = self.pair("real_tsarr_copy_between_two_structures")
+        row = self.flags_row(lines)
+        d = self.line(lines, "  t__11 := loc(member(loc(member(v_u__1, 0), 0), 1), 0)")
+        for label, old, new in (("another array leaf", "), 1), 0)", "), 2), 0)"), ("the cell leaf as an array leaf", "), 1), 0)", "), 0), 0)"), ("another member array", "member(v_u__1, 0), 0)", "member(v_u__1, 1), 0)"),
+                                ("a root that is no structure", "v_u__1", "v_zz__9"), ("the second cell", "), 1), 0)", "), 1), 1)")):
+            with self.subTest(label=label):
+                self.refused_at_row(self.edit(lines, d, old, new), mp, row, label)
+
+    def test_the_slot_local_form_is_tied_to_its_slot_member_leaf_and_cell(self):
+        lines, mp = self.pair("real_tsarr_copy_symbolic")
+        row = self.flags_row(lines)
+        leaf = self.line(lines, "  t__13 := loc(member(t__14, 1), 0)")
+        slot = self.line(lines, "  t__14 := loc(member(v_t__2, 0), v_j__1)")
+        for label, n, old, new in (("another leaf", leaf, "member(t__14, 1)", "member(t__14, 2)"), ("the second cell", leaf, "member(t__14, 1), 0)", "member(t__14, 1), 1)"),
+                                   ("another member array", slot, "member(v_t__2, 0)", "member(v_t__2, 1)"), ("a slot that is an expression", slot, "v_j__1)", "(v_j__1 + 1))"),
+                                   ("a slot of a root that is no structure", slot, "v_t__2", "v_zz__9"),
+                                   ("the slot is assigned twice", slot, "t__14 := loc(member(v_t__2, 0), v_j__1)", "t__14 := loc(member(v_t__2, 0), v_j__1)\n  t__14 := loc(member(v_t__2, 0), v_i__0)")):
+            with self.subTest(label=label):
+                self.refused_at_row(self.edit(lines, n, old, new), mp, row if label != "the slot is assigned twice" else row, label) if label != "the slot is assigned twice" else \
+                    self.assertTrue(any("`t__13`" in p for p in self.problems(self.edit(lines, n, old, new), mp)))
+
+    def test_a_global_root_is_a_declared_global_and_a_pointers_root_is_its_formal_copy(self):
+        lines, mp = self.pair("real_gtsarr_copy_constant_distinct")
+        row = self.flags_row(lines)
+        d = self.line(lines, "  t__3 := loc(member(loc(member(loc(GB_gt__0(), 0), 0), 0), 1), 0)")
+        for label, old, new in (("another global", "GB_gt__0()", "GB_zz__9()"), ("another leaf", "), 1), 0)", "), 2), 0)"), ("another member array", "member(loc(GB_gt__0(), 0), 0)", "member(loc(GB_gt__0(), 0), 1)")):
+            with self.subTest(label=label):
+                self.refused_at_row(self.edit(lines, d, old, new), mp, row, label)
+        lines, mp = self.pair("real_tsarr_copy_through_a_pointer")
+        row = self.flags_row(lines)
+        d = self.line(lines, "  t__3 := loc(member(loc(member(v_p__0, 0), 0), 1), 0)")
+        for label, old, new in (("a root that is no structure", "v_p__0", "v_zz__9"), ("another leaf", "), 1), 0)", "), 2), 0)")):
+            with self.subTest(label=label):
+                self.refused_at_row(self.edit(lines, d, old, new), mp, row, label)
+
+    def test_a_second_allocation_that_states_the_leaf_with_another_count_refuses_the_row(self):
+        lines, mp = self.pair("real_tsarr_copy_between_two_structures")
+        lines = lines[:]
+        while lines and lines[-1] == "":
+            lines.pop()
+        a0 = next(i for i, l in enumerate(lines) if l.startswith("method alloc_struct_1_T"))
+        a1 = next(i for i in range(a0, len(lines)) if lines[i].strip() == "decreases _")
+
+        def with_second(cols):
+            second = [l.replace("alloc_struct_1_T", "alloc_struct_9_X").replace("struct T", "struct X").replace("== 3)", f"== {cols})").replace("(j < 3)", f"(j < {cols})") for l in lines[a0 - 1:a1 + 1]]
+            added = []
+            for ml in mp.rstrip("\n").split("\n"):
+                f = ml.split("\t")
+                if a0 + 1 <= int(f[0]) <= a1 + 1:
+                    f[0] = str(int(f[0]) - (a0 + 1) + len(lines) + 3)
+                    added.append("\t".join(f))
+            return lines + [""] + second + [""], mp.rstrip("\n") + "\n" + "\n".join(added) + "\n"
+
+        same_l, same_mp = with_second(3)
+        self.assertEqual(self.problems(same_l, same_mp), [])
+        diff_l, diff_mp = with_second(4)
+        self.refused_at_row(diff_l, diff_mp, self.flags_row(diff_l), "a second allocation with 4 cells")
+
+
+class PartECopySourceRootTests(unittest.TestCase):
+    """Audit round E3a, the ruling on instance 8's element-slot root (a root that "also admits other existing row forms over that place: the type range and `old(F.d) ==> F.d` in an `assert`", for which no real text
+    exists): a local bound by an ELEMENT COPY's roots only (`bound_locals`' `flags_only`: the member block of an element slot, `t := loc(member(s, k), 0)` with `s := loc(block_of(Y), offset_of(Y) + e)`, and the
+    array leaf of an element of a member array, `t := loc(member(loc(member(R, K), e), a), 0)`) has, among the rows that start at 0, the source's flags row only (`lint_copy_source_rows`).  The twins are on REAL
+    text: the flags row replaced by the type's range under the flag, by the type's range alone and by `old(F.d) ==> F.d` (they were accepted before this rule), for the local array form (instance 8's) and for the
+    member form (this instance's).  The pointer-form rows over the same local (`offset_of(t) <= k < ...`, a call's rows: `real_tsarr_cells_given_and_returned` has them over such a local) and the copy's amount rows
+    (`acc`) are not this rule's and stay clean."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    @staticmethod
+    def flags_row(lines, t):
+        hits = [i for i, l in enumerate(lines, start=1) if l.startswith(f"  assert forall k: Int :: {{ loc(block_of({t}), k) }}") and l.rstrip().endswith(f"loc(block_of({t}), k).d_int") and "acc(" not in l]
+        assert len(hits) == 1, hits
+        return hits[0]
+
+    def forms(self, t):
+        cell = f"loc(block_of({t}), k)"
+        rng = f"(((-2147483648) <= {cell}.v_int) && ({cell}.v_int <= 2147483647))"
+        return (("the type's range under the flag", f"{cell}.d_int", f"({cell}.d_int ==> {rng})"), ("the type's range alone", f"{cell}.d_int", rng),
+                ("the kept flag", f"{cell}.d_int", f"(old({cell}.d_int) ==> {cell}.d_int)"))
+
+    def test_the_real_copies_and_the_pointer_form_rows_over_such_a_local_are_clean(self):
+        for name in ("real_scopy_two_arrays", "real_scopy_symbolic", "real_scopy_pointer_place", "real_scopy_range", "real_tsarr_copy_between_two_structures", "real_tsarr_copy_symbolic",
+                     "real_gtsarr_copy_constant_distinct", "real_tsarr_copy_through_a_pointer", "real_tsarr_cells_given_and_returned"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_root_admits_the_source_flags_row_only(self):
+        for name, t in (("real_scopy_two_arrays", "t__7"), ("real_tsarr_copy_between_two_structures", "t__11"), ("real_tsarr_copy_symbolic", "t__13"), ("real_gtsarr_copy_constant_distinct", "t__3")):
+            lines, mp = self.pair(name)
+            row = self.flags_row(lines, t)
+            for label, old, new in self.forms(t):
+                with self.subTest(name=name, label=label):
+                    edited = lines[:]
+                    edited[row - 1] = edited[row - 1].replace(f"==> {old}", f"==> {new}")
+                    self.assertNotEqual(edited, lines)
+                    probs = self.problems(edited, mp)
+                    self.assertTrue(any(p.startswith(f"t.vpr:{row}:") and "source's flags row" in p for p in probs), (label, probs[:2]))
+
+
+class PartEBoolLeafUnknownTests(unittest.TestCase):
+    """Decision 0063 item 9 (a `bool` states no range) and 0064 items 9 and 17 (Part E, slice 3c-3u): `program_start`'s group of a global array of structures whose element has an ARRAY LEAF OF `bool` (`struct Q { int n;
+    bool a[2]; } g[2]`) of an UNKNOWN value states the type's own range of the `int` leaf and NO quantifier for the `bool` leaf (a `bool` has no range; the same exemption stands in `sarr_global_group`'s own "no zero rest" check).
+    The lifted refusal: `sarr_global_group`'s "the quantifier of the values is given for 1 of the 2 leaves (every leaf, in declaration order)", the group's last row line, in the two `e1e2e_gsarr_bool_leaf_unknown_*`
+    cases of il200's self-test output.  Only the TRAILING `bool` leaves of an unknown group are exempt.  Not covered (no real text): a `bool` leaf in the member form of a structure global."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    NAME = "real_gsarr_bool_leaf_unknown"
+
+    def pair(self):
+        return (self.DATA / f"{self.NAME}.vpr").read_text().split("\n"), (self.DATA / f"{self.NAME}.vpr.map").read_text()
+
+    def in_start(self, lines, mp):
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith("method program_start"))
+        b = next(i for i in range(a, len(lines) + 1) if lines[i - 1].strip() == "decreases _")
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if (m := re.match(r"t\.vpr:(\d+):", p)) and a <= int(m.group(1)) <= b and not any(t in p for t in self.FILTER)]
+
+    def test_the_real_group_is_clean(self):
+        lines, mp = self.pair()
+        self.assertEqual(self.in_start(lines, mp), [])
+
+    def test_the_int_leafs_range_is_the_types_own_and_every_other_row_is_still_read(self):
+        lines, mp = self.pair()
+        rng = next(i for i, l in enumerate(lines, start=1) if "<= 2147483647" in l and "forall k: Int ::" in l and "program_start" not in l and l.startswith("  ensures"))
+        flag = next(i for i, l in enumerate(lines, start=1) if l.startswith("  ensures forall k: Int, j: Int") and "loc(GB_g__0(), k)" in l and l.rstrip().endswith(".d_bool"))
+        for label, make in (("the int leaf's range is narrowed", lambda L: [l.replace("<= 2147483647", "<= 100") if i == rng else l for i, l in enumerate(L, start=1)]),
+                            ("the int leaf's quantifier is missing", lambda L: L[:rng - 1] + L[rng:]),
+                            ("the bool leaf's flags row is missing", lambda L: L[:flag - 1] + L[flag:]),
+                            ("a row of the bool leaf's values after the group (a range of a bool has no text)", lambda L: L[:rng] + [L[flag - 1].replace(".d_bool", ".v_bool").replace("==> ", "==> (true || ")[:-0 or None] + ")"] + L[rng:])):
+            with self.subTest(label=label):
+                edited = make(lines[:])
+                self.assertNotEqual(edited, lines)
+                self.assertTrue(self.in_start(edited, mp), label)
+
+
+class PartECellAtomLeafCountTests(unittest.TestCase):
+    """Question 374 (tightened by audit round E3a, finding 6, question 385; the branch of `block_clause_problem`): the structure's well-formedness conjunct inside a CELL ATOM's clause of a pointer to a structure
+    with a member array of structures whose elements have an ARRAY LEAF (`struct T { struct P v[2]; int k; }`: `owns(p->k)`, the clause holds `forall k :: ... len(member(loc(member(p, 0), k), 1)) == 3`).  The branch read
+    the matrix's column count only (`len(member(loc(...), 0)) == N`); it now reads the count of any member index of the elements, with the SAME ties: the conjunct must be textually the guarded conjunct of
+    the method's own well-formedness row for the pointer and the clause must hold a cell atom of it.  The lifted refusal: "a conjunct of an `owns_block` clause holds a quantifier that is neither a row nor the block
+    clause of a pointer its closure reaches", at the `requires` and the `ensures` clause of `e1e2e_tsarr_contract_read_other_member_atom_fail` (2 lines, il200's self-test output).  The fixture is REAL output."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+    NAME = "real_tsarr_cell_atom_leaf"
+
+    def pair(self):
+        return (self.DATA / f"{self.NAME}.vpr").read_text().split("\n"), (self.DATA / f"{self.NAME}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def clause_lines(self, lines):
+        return [i for i, l in enumerate(lines, start=1) if l.startswith(("  requires ", "  ensures ")) and "acc(loc(member(p_p__0, 1), 0).v_int)" in l and "== 3)" in l]
+
+    def test_the_real_clauses_are_clean(self):
+        lines, mp = self.pair()
+        self.assertEqual(len(self.clause_lines(lines)), 2)
+        self.assertEqual(self.problems(lines, mp), [])
+
+    def test_the_conjunct_must_be_the_methods_own_row_and_the_clause_must_hold_a_cell_atom(self):
+        lines, mp = self.pair()
+        for n in self.clause_lines(lines):
+            for label, make in (("the clause states 4 cells where the method's own row states 3", lambda L: [l.replace("== 3)", "== 4)", 1) if i == n else l for i, l in enumerate(L, start=1)]),
+                                ("the clause's conjunct is not textually the method's own row (its two length facts swapped, a fact that is the same by number)",
+                                 lambda L: [l.replace("((len(member(loc(member(p_p__0, 0), k), 0)) == 1) && (len(member(loc(member(p_p__0, 0), k), 1)) == 3))",
+                                                      "((len(member(loc(member(p_p__0, 0), k), 1)) == 3) && (len(member(loc(member(p_p__0, 0), k), 0)) == 1))", 1) if i == n else l for i, l in enumerate(L, start=1)]),
+                                ("the clause holds no cell atom of the pointer", lambda L: [l.replace("acc(loc(member(p_p__0, 1), 0).v_int)", "true").replace("acc(loc(member(p_p__0, 1), 0).d_int)", "true") if i == n else l for i, l in enumerate(L, start=1)])):
+                with self.subTest(line=n, label=label):
+                    edited = make(lines[:])
+                    self.assertNotEqual(edited, lines)
+                    self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in self.problems(edited, mp)), label)
+
+
+class PartEEnsuresCellClauseTieTests(unittest.TestCase):
+    """Question 386 (the two twins owed): an `ensures` cell clause of a FORMAL parameter is tied to the method's `requires` well-formedness row (the pointer is unchanged by the call: the fact is the same).  The twins on
+    REAL text (`real_mmp_cell_atom_read`: a `requires` row at one line, a cell clause in a `requires` and in an `ensures`): an `ensures` conjunct that DIFFERS from the `requires` row (here: its two member facts
+    swapped, which is the same fact by number and is therefore not caught by any count) is refused, and a formal with NO such row (the `requires` row replaced) is refused at the `ensures` clause."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self):
+        return (self.DATA / "real_mmp_cell_atom_read.vpr").read_text().split("\n"), (self.DATA / "real_mmp_cell_atom_read.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def test_an_ensures_conjunct_that_differs_from_the_requires_row_is_refused(self):
+        lines, mp = self.pair()
+        self.assertEqual(self.problems(lines, mp), [])
+        ens = next(i for i, l in enumerate(lines, start=1) if l.startswith("  ensures ") and "acc(loc(member(p_p__0, 0), 0).v_int)" in l)
+        old = "((len(member(p_p__0, 0)) == 1) && (len(member(p_p__0, 1)) == 2))"
+        self.assertIn(old, lines[ens - 1])
+        edited = lines[:]
+        edited[ens - 1] = edited[ens - 1].replace(old, "((len(member(p_p__0, 1)) == 2) && (len(member(p_p__0, 0)) == 1))", 1)
+        self.assertTrue(any(p.startswith(f"t.vpr:{ens}:") for p in self.problems(edited, mp)))
+
+    def test_a_formal_with_no_requires_row_of_its_own_is_refused_at_its_ensures_clause(self):
+        lines, mp = self.pair()
+        ens = next(i for i, l in enumerate(lines, start=1) if l.startswith("  ensures ") and "acc(loc(member(p_p__0, 0), 0).v_int)" in l)
+        row = next(i for i, l in enumerate(lines, start=1) if l.startswith("  requires ((p_p__0 == null) ||"))
+        edited = lines[:]
+        edited[row - 1] = "  requires true"
+        self.assertTrue(any(p.startswith(f"t.vpr:{ens}:") for p in self.problems(edited, mp)))
+
+
+class PartENestedMatrixGlobalGroupTests(unittest.TestCase):
+    """Decision 0064 items 3, 9, 13 and 17 (Part E, slice 3f; audit round E3a, finding 2 (d)): `program_start`'s row group of a MATRIX MEMBER reached THROUGH A BY-VALUE STRUCTURE MEMBER of a structure global
+    (`static struct V gv = {{7, {{1, 2, 3}, {4, 5, 6}}}, 8}` with `struct V { struct U u; int k; }`, `struct U { int n; int m[2][3]; }`: the chain (0, 1)).  `matrix_member_global_group` read one-step keys only; the key is
+    now a chain, the pseudo global is `GB_gv_m0_1` (`_pseudo_name`), and N, M and the cell's field are those of a matrix member of that chain in a pinned `alloc_struct_...` of the unit (`_MATRIX_CHAIN_PAIRS`, by number as
+    the one-step `_MATRIX_PAIRS` are).  The lifted refusals: `lint_globals`' "the length facts of the array of structures `GB_gv` (member (0, 1)) are not followed by its row group" and "the first row is not the value
+    permission ... of an array member of a structure global", 6 lines in the 3 `e1e2e_gvnested_main_read*` cases of il200's self-test output.  Nothing here is an amount, a guard or a kept-flag rule.  The
+    fixture is REAL output.  Not generalized (no real text): the places of such a member in code (`matrix_member_global_shapes`' one-step keys) and the contract rows over it."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self):
+        return (self.DATA / "real_gvnested_main_read.vpr").read_text().split("\n"), (self.DATA / "real_gvnested_main_read.vpr.map").read_text()
+
+    def in_start(self, lines, mp):
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith("method program_start"))
+        b = next(i for i in range(a, len(lines) + 1) if lines[i - 1].strip() == "decreases _")
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if (m := re.match(r"t\.vpr:(\d+):", p)) and a <= int(m.group(1)) <= b and not any(t in p for t in self.FILTER)]
+
+    def test_the_real_group_is_clean(self):
+        lines, mp = self.pair()
+        self.assertEqual(self.in_start(lines, mp), [])
+
+    def test_the_counts_the_order_and_the_values_are_tied(self):
+        lines, mp = self.pair()
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith("method program_start"))
+        lens, vperm, fperm = a + 2, a + 4, a + 5
+        vals = [i for i in range(a, len(lines)) if lines[i - 1].startswith("  ensures loc(member(loc(member(loc(member(loc(GB_gv__0(), 0), 0), 0), 1)")]
+        self.assertEqual(len(vals), 6)
+        for label, make in (("the length fact states 4 columns", lambda L: [l.replace("== 3)", "== 4)", 1) if i == lens else l for i, l in enumerate(L, start=1)]),
+                            ("the value row over 3 rows", lambda L: [l.replace("(k < 2)", "(k < 3)", 1) if i == vperm else l for i, l in enumerate(L, start=1)]),
+                            ("the value row over 2 columns", lambda L: [l.replace("(j < 3)", "(j < 2)", 1) if i == vperm else l for i, l in enumerate(L, start=1)]),
+                            ("the flag row over 3 columns", lambda L: [l.replace("(j < 3)", "(j < 4)", 1) if i == fperm else l for i, l in enumerate(L, start=1)]),
+                            ("two listed cells swapped", lambda L: L[:vals[1] - 1] + [L[vals[2] - 1], L[vals[1] - 1]] + L[vals[3] - 1:]),
+                            ("a listed cell dropped", lambda L: L[:vals[2] - 1] + L[vals[3] - 1:]),
+                            ("a listed value that is no literal", lambda L: [l.replace(".v_int == 1", ".v_int == null", 1) if i == vals[0] else l for i, l in enumerate(L, start=1)])):
+            with self.subTest(label=label):
+                edited = make(lines[:])
+                self.assertNotEqual(edited, lines, label)
+                self.assertTrue(self.in_start(edited, mp), label)
+
+
+class PartEMixedUnitTests(unittest.TestCase):
+    """Slice 3c-4's two new routes (`bound_locals`' leaf-block root, `array_global_group`'s member-sarr group) are keyed by the unit's own allocation, and a unit holds several structure types: the CONTROLS (advisor,
+    round of the hand-back).  (1) A nested by-value array member's block `loc(member(loc(member(v, 0), 0), 1), 0)` reads like the array leaf of an element of a member array of structures (K = (0,), a = 1); in a unit
+    that holds both, the older reading (`member_counts`) must keep it: `real_matrix_member_nested` (a real unit: `f_caller__3`'s `t__8` is the block of a nested by-value matrix member, count 2)
+    with a second pinned allocation that states an array leaf (0,) (1,) of 3 cells (assembled from `real_tsarr_local_rw`'s own text, not real output) keeps the count 2.  (2) A structure global's member array of
+    PLAIN structures (`real_gstruct_member_main`, count 1 everywhere) with the same second allocation stays on its own (C2) group rule.  Before the fix both units drew problems."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def with_allocation(self, name):
+        """The unit `name` with the allocation `alloc_struct_1_T` of `real_tsarr_local_rw` appended as `alloc_struct_9_Z` (its comment, text and map lines)."""
+        lines, mp = self.pair(name)
+        lines = lines[:]
+        while lines and lines[-1] == "":
+            lines.pop()
+        src_lines, src_mp = self.pair("real_tsarr_local_rw")
+        a0 = next(i for i, l in enumerate(src_lines) if l.startswith("method alloc_struct_1_T"))
+        a1 = next(i for i in range(a0, len(src_lines)) if src_lines[i].strip() == "decreases _")
+        block = [l.replace("alloc_struct_1_T", "alloc_struct_9_Z").replace("struct T", "struct Z") for l in src_lines[a0 - 1:a1 + 1]]
+        added = []
+        for ml in src_mp.rstrip("\n").split("\n"):
+            f = ml.split("\t")
+            if a0 + 1 <= int(f[0]) <= a1 + 1:
+                f[0] = str(int(f[0]) - (a0 + 1) + len(lines) + 3)
+                added.append("\t".join(f))
+        return lines + [""] + block + [""], mp.rstrip("\n") + "\n" + "\n".join(added) + "\n"
+
+    def test_a_nested_by_value_array_member_keeps_its_own_count_beside_an_allocation_with_an_array_leaf(self):
+        # `real_matrix_member_nested`: `f_caller__3`'s `t__8 := loc(member(loc(member(v_v__0, 0), 0), 1), 0)` is the block of a nested by-value matrix member (`member_counts` {2}); the second allocation
+        # states the array leaf (0,) (1,) of 3 cells, whose block text is the same
+        lines, mp = self.with_allocation("real_matrix_member_nested")
+        self.assertEqual(self.problems(lines, mp), [])
+        text = "\n".join(lines)
+        src = lv.split_source(text)
+        decls = lv.declarations(src)
+        self.assertEqual(lv._ELEM_ARRAYS, {((0,), (1,)): (2, 3, "int")})
+        d = next(x for x in decls if x.kind == "method" and x.name == "f_caller__3")
+        out = lv.bound_locals(src, d, decls, set(), lv.array_global_counts(src, decls), lv.struct_array_counts(src, decls))
+        self.assertEqual(out["t__8"], ({2}, ""))
+
+    def test_a_structure_globals_plain_member_array_stays_on_its_own_group_rule_beside_such_an_allocation(self):
+        lines, mp = self.pair("real_gstruct_member_main")
+        self.assertEqual(self.problems(lines, mp), [])
+        self.assertEqual(self.problems(*self.with_allocation("real_gstruct_member_main")), [])
+
+
+class PartECLevelStructTTests(unittest.TestCase):
+    """The C-LEVEL text of `struct T { struct W v[2]; int k; }` with `struct W { int a[4]; int n; }` (the array leaf FIRST in the element), regenerated by `cerastes verify --keep-vpr` in lane edg (HEAD 0dfa2bf6e3,
+    "edg46 on il197"; copies under build/m4.5e1e2d/tm9/c-level-T): the unguarded atoms `owns(*p)`, `reads(*p)` and `owns(gt)` of a zero-initialized `static struct T gt`, a member copy `p->v[i] = p->v[j]`, and the
+    nested global member `static struct V gv = ...` (the auditor's g05).  The self-test text never had an array leaf at member 0: its two-binder rows `loc(member(loc(member(p, 0), k), 0), j)` are the text of a
+    MATRIX member's rows, so (1) `member_sarr_row_problem` runs BEFORE `member_matrix_row_problem` (the table decides; a row whose (K, a) the allocation does not state falls through to the matrix rule), (2)
+    `lint_globals` does not route such a group to the matrix-member group (`_member_sarr_lens`: at least two member blocks and a table leaf with its count) and finds its first row (two bound variables), and (3) the member
+    group reads the ZERO REST from element 0 (a `static` structure with no initializer: per leaf in declaration order `0 <= k < N [&& 0 <= j < M] ==> cell == 0`, never mixed with an unknown range).  The lifted refusals:
+    85 problem lines in the 18 kept files (8 or 10 per file): "the rows over the member chain [0] of `p` run over 2 rows and 4 columns ...: no matrix member of a pinned `alloc_struct_...` ... has these counts" at
+    every two-binder contract row (`member_matrix_row_problem`) and the matrix group's two messages at `program_start`; items 3, 9, 13, 17."""
+
+    DATA = Path(__file__).resolve().parent / "testdata" / "part_e"
+    FILTER = ("`decreases` clause", "`decreases _`", "without a `decreases`")
+
+    def pair(self, name):
+        return (self.DATA / f"{name}.vpr").read_text().split("\n"), (self.DATA / f"{name}.vpr.map").read_text()
+
+    def problems(self, lines, mp):
+        return [p for p in lv.lint_vpr("\n".join(lines), mp, "t.vpr", "t.vpr.map") if not any(t in p for t in self.FILTER)]
+
+    def test_the_real_c_level_units_are_clean(self):
+        for name in ("real_ct_t_none_owns", "real_ct_t_none_reads", "real_ct_gt_none", "real_ct_ct_member_copy", "real_ct_g05"):
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(*self.pair(name)), [])
+
+    def test_the_contract_rows_with_the_array_leaf_first_are_tied_to_the_allocation(self):
+        for name, kw in (("real_ct_t_none_owns", "requires"), ("real_ct_t_none_reads", "requires"), ("real_ct_t_none_owns", "ensures")):
+            lines, mp = self.pair(name)
+            start = next(i for i, l in enumerate(lines, start=1) if l.startswith("method f_"))
+            n = next(i for i, l in enumerate(lines, start=1) if i > start and l.startswith(f"  {kw} forall k: Int, j: Int") and "acc(" in l)
+            for label, old, new in (("another N", "(k < 2)", "(k < 3)"), ("another M", "(j < 4)", "(j < 3)"), ("a lower bound", "(0 <= j)", "(1 <= j)")):
+                with self.subTest(name=name, kw=kw, label=label):
+                    edited = lines[:]
+                    self.assertIn(old, edited[n - 1])
+                    edited[n - 1] = edited[n - 1].replace(old, new, 1)
+                    self.assertTrue(any(p.startswith(f"t.vpr:{n}:") for p in self.problems(edited, mp)), label)
+
+    def test_the_zero_rest_group_is_tied_to_the_allocations_leaf_and_never_mixed(self):
+        lines, mp = self.pair("real_ct_gt_none")
+        a = next(i for i, l in enumerate(lines, start=1) if l.startswith("method program_start"))
+        b = next(i for i in range(a, len(lines) + 1) if lines[i - 1].strip() == "decreases _")
+        arr_rest = next(i for i in range(a, b) if lines[i - 1].startswith("  ensures forall k: Int, j: Int") and lines[i - 1].rstrip().endswith("v_int == 0)"))
+        cell_rest = next(i for i in range(a, b) if lines[i - 1].startswith("  ensures forall k: Int ::") and lines[i - 1].rstrip().endswith("v_int == 0)"))
+
+        def refused(edited, label):
+            probs = [p for p in self.problems(edited, mp) if (m := re.match(r"t\.vpr:(\d+):", p)) and a <= int(m.group(1)) <= b]
+            self.assertTrue(probs, label)
+
+        for label, make in (("the array leaf's rest states 1", lambda L: [l.replace("v_int == 0)", "v_int == 1)") if i == arr_rest else l for i, l in enumerate(L, start=1)]),
+                            ("the array leaf's rest over 3 cells", lambda L: [l.replace("(j < 4)", "(j < 3)", 1) if i == arr_rest else l for i, l in enumerate(L, start=1)]),
+                            ("the array leaf's rest from element 1", lambda L: [l.replace("(0 <= k)", "(1 <= k)", 1) if i == arr_rest else l for i, l in enumerate(L, start=1)]),
+                            ("the cell leaf's rest is missing", lambda L: L[:cell_rest - 1] + L[cell_rest:]),
+                            ("the array leaf's rest is missing", lambda L: L[:arr_rest - 1] + L[arr_rest:]),
+                            ("the leaves' rests are swapped", lambda L: L[:arr_rest - 1] + [L[cell_rest - 1], L[arr_rest - 1]] + L[cell_rest:]),
+                            ("a zero rest beside an unknown range", lambda L: [re.sub(r"==> .*$", "==> (((-2147483648) <= " + "loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), 0).v_int) && (loc(member(loc(member(loc(GB_gt__0(), 0), 0), k), 1), 0).v_int <= 2147483647))", l) if i == cell_rest else l for i, l in enumerate(L, start=1)] + [])):
+            with self.subTest(label=label):
+                edited = make(lines[:])
+                self.assertNotEqual(edited, lines, label)
+                refused(edited, label)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -46,7 +46,7 @@
   item 4). The other items 0064 amends (1, 2, 5, 7 to 10, 13 to 15) are built by its continuation: items 5 and 7
   to 10 and 13 for arrays of structures by its first session (2026-11-26), and **items 1 and 7's six leftovers of a
   structure with an array member (questions 292 to 294 and 306, partnerless atoms, written atoms) by its second
-  session, the same day (0064 item 15), for array members of scalars**; arrays of arrays (items 2 and 14) are still to come.
+  session, the same day (0064 item 15), for array members of scalars**; **arrays of arrays (items 2, 9, 13 and 14: matrices as globals, `static` locals and members of structures, and array types of arrays and of structures in the computed positions) by its fourth session (2026-11-27, 0064 item 13), except three dimensions and whole structure values that hold a matrix (0064's status line says what of them is built).**
 - **Milestone:** M4.5e1e1.
 - **Amends:** 0012 item 11 (the lint); 0024 item 6 (array types of scalars); 0028 items 5 and 16 (as built for
   arrays); 0041 items 2, 4, 5, 10 and 12; 0043 items 2, 3, 4, 6, 7, 8, 9, 11 and 13; 0044 items 2, 3, 4, 7 and 8;

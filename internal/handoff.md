@@ -1824,7 +1824,257 @@ numbered from 338):
   read D2b confirmed that the refusals in question are unchanged by the session's other lint work. **For the owner:** approve the lint rule (then a session applies it with its
   twins and restores the two files), or keep the shape listed.
 
-The next questions start at 358.
+**Settled with the advisor in the third session of M4.5e1e2's continuation (2026-11-26/27, Part E), for the
+owner's review** (written as each was settled; 363 is the owner's):
+- **358** (fail closed: test mechanics; invariant 2). The plan's 37 test files for Part E came to 44 by the
+  test-mutator's count. **Answer taken:** the 37 limits files, never must-fail rows: the `static` local
+  matrix gets a second failing function in the global matrix's twin, the typedef'd row spellings a row in
+  the spellings' twin that fails on the second index, and the loop's first-index twin stays cut (the same
+  bound row as the local matrix's). Alternative: three more files.
+- **359** (test mechanics). A local matrix appears in no contract, so it has no `f__wf` pair. **Answer
+  taken:** `f__wf` pairs only for the storages whose contract reads the record builds (a row parameter's
+  range, `v[i].a[j]`, and, with 362, a global matrix and a matrix member); sequencing pairs for those and
+  the local matrix.
+- **360** (test mechanics). C's lone `{0}` for a matrix sits in a positive under `#ifndef __cplusplus`.
+  **Answer taken:** as written, since no `expect:` row of any file sits inside such a block.
+- **361** (fail closed: an acceptance with a pin as its alternative). The encoder draft accepts a row
+  parameter forwarded whole as a call argument (`g(a)`). **Answer taken:** accepted, built with the row
+  parameters, on condition of a self-test case through Silicon for the `owns` and the `reads` form and a
+  test pair; if Silicon does not take it the encoder refuses it. Alternative: refuse it (one line).
+- **362** (a choice inside the record's rules; the record was silent). Contract reads of a matrix in
+  static storage and of a matrix member (`g[e][e2]`, `p->m[e][e2]`, `gt.m[e][e2]`, `r->m[e][e2]`).
+  **Answer taken:** built, as question 344's reads were in Part C2 (the encoder sends them down the row
+  parameter's branch); question 346's `old` limit and question 345's missing tie carry over. Alternative:
+  rejected with a pin (M4.5e2). Record 0064 item 13.
+- **363, FOR THE OWNER, first** (fail closed: a rejection). Record 0064 item 2's wording admits a matrix of
+  structures (`struct P m[2][2]`, a row parameter `struct P a[][2]`), and the encoder draft accepted it; no
+  spike fixture, no trusted method name and no planned test covers a row whose cells are structures. The
+  advisor ruled that leaving unbuilt a shape the record admits is not its to decide. **Taken until the
+  owner answers:** the encoder rejects it at its C line (`unsupported_type`), `check.cpp` keeps its
+  refusal, a pin holds a row per storage, item 1's table has the row. **Recommended:** M4.5e2 builds it
+  with question 348's shapes, after a spike fixture. **Alternative:** a part of its own in the next
+  session. An array of structures whose element has an array member (`v[i].a[j]`) is built.
+- **364** (fail closed: a rejection). A contract read of a cell of a matrix member of a structure passed
+  or returned by value (`v.m[i][j]`, `r.m[i][j]`). **Answer taken:** rejected (`unsupported_annotation`,
+  M4.5f3), as record item 12 rejects `t.v[1].y`; `g().m[1][2]` in code is rejected too, where `g().a[1]` is
+  accepted (listed). Question 353's test changes form, not strength: the order of cells inside the matrix
+  is pinned by the self-test, and the alignment of the matrix's cells against the members beside it (the
+  unsound direction) by a by-value pair with a `requires` on those members and a twin shifted by one cell.
+  Alternative: build a two-index value read (a new lowering shape with no fixture).
+- **365** (fail closed: a rejection kept). `sizeof(a[0])` of a row parameter verifies in code in all six
+  spellings and is rejected in a contract (`unsupported_type`, "an array type in sizeof …"). **Answer
+  taken:** record item 13 says "in code"; the contract form stays rejected, with a pin row. It is
+  over-strict: the frozen base accepts `sizeof` of a global array, of `g[0]` and of an array member in a
+  contract (probed). Alternative: accept it in a contract (the value is the front end's constant).
+- **366** (wording; fail closed either way). The encoder draft gave `&m[i]`, the address of a row,
+  `unsupported_expression`; the base prints `unsupported_type` for `&a` of a one-dimensional array.
+  **Answer taken:** every address of a row draws `unsupported_type`; `&u.m`, the address of a whole
+  member array, keeps the base's `unsupported_expression` (an existing row). Alternative: keep the
+  draft's tag and correct the new pin under question 160.
+- **367** (fail closed: a false alarm that the record's rule removes). The first lowering of ranges over
+  rows did not tie the entry and exit ghosts of `a[e][e2]` in `f__wf`, so `requires(reads_range(a, n) &&
+  a[0][0] != 0)` with `ensures(… r == 10 / a[0][0])` reported `division-by-zero`; the registered positive
+  found it at the second joined proof. **Answer taken:** record item 7 ties a parameter's range, so the
+  tie is built: only under a `reads` site, the key holding the formal and both indexes, with a twin under
+  `owns_range` and one over another cell; if it needs an assumed fact of a new shape it is listed and
+  pinned as question 345's is. Alternative: list it as a false alarm now.
+- **368** (test mechanics). A row parameter forwarded with a count the caller does not hold draws two
+  `permission` errors at the call, where the draft registered one. **Answer taken:** two expect lines:
+  record item 7 gives a forwarder two errors (the shape row and the first leaf's marked row) and a local
+  array one short a single one; a correction under question 277, listed in status.
+- **369** (fail closed in the verifier; a gap in the Viper lint that predates this session). The lint's
+  `leaf_value` accepts ANY literal range `lo <= v <= hi` as "the range of an unknown initial value" in
+  `program_start`'s rows for scalars, one-dimensional arrays and structure leaves: an existing fixture with
+  its upper bound changed to 5 lints clean (`build/m4.5e1e2d/tm4/lax/garr_narrow.vpr`). The lowering states
+  the type's own range, so nothing is wrong today; the lint would not catch a lowering bug there, and those
+  rows are trusted text. **Answer taken:** not edited in this session (it would change the lint's verdicts
+  under every earlier `program_start` with one late audit round to read it); this session's new group
+  rules (matrices, matrix members, arrays of structures with array members) require the type's own range,
+  with a narrowed twin. **For the owner (recommended): tighten `leaf_value` to the type's own range at the
+  start of the next session, checked against the whole regeneration.** **Answered by the owner on 2026-11-27
+  (in the session, about 03:38 UTC): "I'll follow your recommendation on the issue with 369 for the next
+  session."** The next session's first step tightens it (with question 373's rules, recommended with it).
+- **370** (test mechanics). Two depth-3 rows of the return-address pin: no new file; they go back into
+  `negative/matrix_return_local_address_members.c` with slice 4.
+- **371** (test mechanics). The staging pin for slice 4's constructs was registered from tags only; its
+  lines are registered from a probe run of the gate build before its first run.
+- **The lint's three lifted refusals for global matrices** (not a numbered question; for review with the
+  second audit round's reading): the row-length fact of a global matrix with a count other than 1 in a
+  contract, a literal first range over the global's array place in `main`'s loops, and two-index rows over a
+  global's block term were refused before and are admitted by new rules, each tied to `program_start`'s own
+  group for that global (record 0064 items 3, 9, 10 and 17); no amount, guard or kept-flag rule was touched
+  (question 357's boundary). Provisional until the audit has read the lint's diff.
+- **372** (test mechanics: how the lint's rules for a matrix member reached through a pointer get the
+  member's counts). **Answer taken:** a per-unit context that the lint sets from the unit's own pinned
+  `alloc_struct_<n>_<tag>` and resets for every unit, consulted only to accept rows equal to that
+  allocation's counts, with a self-test for the reset. Alternative: thread the counts through every caller.
+- **373** (fail closed in the verifier; gaps in older lint rules, found by audit round E2a's mutants). The
+  lint admits a one-index permission row over the slots of an array-of-STRUCTURES global's block (it reads
+  the elements flat), a row with an untied field over a one-dimensional global, and a doubled field in a
+  contract's rows (the auditor's mutants Z1, Z2, Z3 and A5, `build/m4.5e1e2d/audit-E2a/lint/`). No lowering
+  path emits any of them. **Answer taken:** not tightened in this session, as with 369; for a MATRIX the
+  flat row is refused now. **For the owner, with 369 (recommended): tighten these older rules at the start
+  of the next session, checked against the whole regeneration.**
+- **374, for the owner's review** (the Viper lint; nothing unsound was accepted by it: the verifier's
+  verdicts do not pass through the lint). A test-mutator lifted a refusal of the lint that is
+  guard-shaped, which the session's own rule said to stop on and report first (question 357's boundary:
+  no amount, guard or kept-flag rule is loosened to make a test's Viper pass). The rule: `block_clause_problem`
+  refused the structure's guarded well-formedness conjunct (`(p != null && offset_of(p) <
+  len(block_of(p))) ==> (the member lengths)`) inside a CELL atom's clause when the structure has a
+  matrix member, because the row-length quantifier in it was no known row. The new branch accepts that
+  conjunct only when a row-length fact in it has a column count other than 1, and judges its content with
+  the unedited rule for a structure's length facts. The agent reported it as provisional and gave the
+  revert. **Answer taken (the advisor):** it stands provisionally on conditions: refusing twins that tie
+  the guard (the guard on another root than the length facts; a guard that is not the canonical
+  null-and-bounds test; the conjunct inside a trusted method), written before the commit, and the third
+  audit round reads it first; without the twins the branch is reverted and the one self-test case that
+  holds the shape goes. **For the owner:** let it stand, or have it reverted (then that contract shape,
+  an atom on a scalar member beside a contract read of the matrix member, is an accepted program whose
+  Viper the lint refuses, listed). **What was done since (2026-11-27):** the twins are written and the
+  branch was tightened once by them (a guard and facts that both named another root than the clause's own
+  pointer were accepted, and are refused now). Measured: the lint before the branch, and the base's lint,
+  refuse the Viper of every program with an atom on a scalar member of a structure that has a matrix
+  member, programs the verifier accepts and the record accepts (item 13), so this branch is the lint's
+  side of that rule. **The third condition was narrowed by the advisor** (its first wording contradicted
+  the scalar-cell ruling): the pinned internal trusted methods (allocation, zero fill, copy) refuse the
+  conjunct; a DECLARED function's contract may hold it only for the root that has the cell atom in the
+  same clause (there the function's own first `ensures`, which the older rules admit, already states the
+  same length facts for the result: checked in the fixture `real_mmp_cell_atom_result.vpr`, lines 84 and
+  86, so the conjunct assumes nothing new). Still owed at the time of writing and checked by the third
+  audit round: a twin with another N or M inside the declared method, and what the branch's test "a
+  column count other than 1" does for a structure whose member array holds structures with an array
+  member (it is not a matrix and also has such a count).
+- **375** (the Viper lint; fail closed: without it the lint refuses the Viper of accepted programs). The
+  kept-flag and kept-value rows of a loop over a local array of structures whose element has an array
+  member (`v[i].a[j]`) were refused because the lint did not know the place. **Answer taken (the
+  advisor):** the place may be made known, on the terms of the earlier cases (a global matrix's place, a
+  matrix member's place): through a rule tied to the pinned allocation's own counts, member index, leaf
+  length and field; the kept-flag, amount and guard rule functions stay textually identical (the agent
+  shows the empty diff); refusing twins on real text; every kept-row line that stops being refused is
+  listed; if the rows do not pass once the place is known, the agent stops. Provisional until the third
+  audit round. The alternative: leave the rows refused, and then no loop over such an array passes the
+  full check's lint step.
+- **376** (fail closed: a false alarm). The contract pair `requires reads_range(p, n) && p[0].a[1] != 0`,
+  `ensures … 10 / p[0].a[1]` over structures with an array member reported `division-by-zero` on the
+  build that first accepted it: nothing tied the two states of `p[e].a[e2]`. **Answer taken (the
+  advisor):** build the tie, as question 367 was answered for a row parameter and as record 0064 item 7
+  sorts ties by root: `p[e].a[e2]` and `g[e].a[e2]` are tied (only under a `reads` site; every index and
+  the member path in the key; no assumed fact of a new shape, else stopped and listed); a member array
+  reached through a pointer (`p->v[e].a[e2]`) has no tie, question 345's listed false alarm. The
+  alternative: list all of them as 345's false alarm and write the contract with the guard in each clause.
+- **377** (fail closed: a rejection). A loop invariant that reads `p[e].a[e2]` under a range over
+  structures with an array member is not built; the encoder rejects it at the invariant's line. The
+  plan's test list for Part E names no such read, and this session's method (the advisor at the start:
+  a shape outside the list gets a test pair or stays refused with a pin) covers it: **taken as a listed
+  rejection with a pin row, M4.5e2**, in record 0064 item 10 and on the page. A local `v[e].a[e2]` in an
+  invariant is accepted. **For the owner's review**, because the plan lets a cut outside its list be
+  taken only by the owner, and one may read this as such a cut; the alternative is to build it in the
+  next session before Part F.
+- **378** (fail closed either way: a question of the category). `v[0].a[1] = v[0].a[1]++` on a local
+  array of structures with an array member is reported by the lowering as a verification error
+  (`unsequenced`), where its three siblings (`a[1] = a[1]++`, `v[0].x = v[0].x++`, `s.a[1] = s.a[1]++`)
+  are rejected like the compilers (`unsequenced_modification`), which is what record 0064 item 11 says
+  for the same leaf of a named array. **Answer taken (the advisor):** follow item 11: the Sequencer's key
+  gains the element's index, the member path and the member's index; if that is not in the slice-3
+  joined build, the difference is stated in item 11, pinned by a test that registers `unsequenced`, and
+  listed here. **Not built at this snapshot: the lowering's sub-step for it is pending**, and the form is reported as `unsequenced` until it lands.
+- **379 and 380** (the Viper lint; fail closed in the verifier: its verdicts do not pass through the
+  lint; two gaps in rules older than this session, found by a test-mutator's twins and NOT edited, on
+  question 357's boundary). **379:** the two-binder rows of a loop invariant, and of a loop body's marked
+  `assert` rows, over a parameter's range are not tied to the range's length facts (a row over `j < 4`
+  for a row of three cells is accepted by the lint; Silicon itself refuses such an invariant at entry).
+  **380:** the guarded well-formedness conjunct `len(member(p, k)) == N` in a `requires` or `ensures` is
+  not tied to the structure allocation's own N (changing 3 to 4 is accepted by the lint, also in text of
+  Part D; a function emitted so would be verified under a wrong length and no caller could call it).
+  **Answer taken (on question 373's ruling, the same class):** listed with 369 and 373 for the lint step
+  at the start of the next session, which the owner has agreed to; nothing is tightened in this session.
+  The alternative: tighten both now, which adds strictness to kept-flag-shaped rows without the whole
+  regeneration having been checked against it.
+- **381** (fail closed: a rejection). `cerastes_old(g[1].a[2])`, the entry value of a cell of an array
+  member of an element of a GLOBAL array of structures, is rejected by the encoder at the `ensures`. The
+  rule that rejects it was written in this session for a global structure's matrix member (question
+  346's limit) and reaches this form too; the lowering would accept it and has cases for it that verify
+  (reachable from the self-test only). Measured beside it, on the base and on this build: `old` of
+  `g[e].x`, of a global matrix's cell, of a row parameter's cell, of `p[e].a[e2]` in a range and of
+  `p->m[e][e2]` under the structure's atom are all accepted, each with a wrong twin failing. **Answer
+  taken (the advisor):** keep it rejected and pinned (`negative/array_rows_struct_elem_reject_old.c`), the
+  message reworded, a sentence in record 0064 item 7; nothing is opened that no audit round has read end
+  to end. **For the owner's review:** the alternative is to open it (narrow the encoder's rule to the
+  global structure's forms; the lowering is there), in the next session with an audit read.
+- **382 to 384, three rejections taken on audit round E3a's findings** (each fail closed; for the owner's
+  review, since each leaves unbuilt a shape that verified and was right in the auditor's probes).
+  **382:** an element structure that holds, by value, a structure with an array member (`struct N {
+  struct P p; int k; } v[2]`, `v[i].p.a[j]`) was accepted by the encoder and stopped at the checker's
+  refusal; neither record 0064 nor the plan's test list names it. **Answer taken (the advisor):** the
+  encoder rejects it in every storage and computed-type position, with a pin (record item 2); M4.5e2.
+  **383:** a marker (`ref_to_uninit`, `must_init`) over a range of structures whose element has an array
+  member verified, and emits a kept-flag row over two bound variables that the Viper lint refuses; a
+  lint rule for it would be a kept-flag rule (question 357's boundary). **Answer taken:** the plan's cut
+  (1), "a marker over a range of structures", for this element type only: rejected by the encoder with
+  a pin; markers over a range of structures without an array member and Part D's markers on a pointer
+  to one such structure stay accepted. **384:** an atom under a guard (`c == 0 || owns(*p)`, an arm of `?:`)
+  on one of Part E's objects verified, and emits a guarded well-formedness row that only a guard-shaped
+  lint rule could admit. **Answer taken:** rejected by the encoder with pins, for exactly the forms
+  measured to emit that row: an atom on a structure with a matrix member or with a member array of
+  structures that have an array member, and the whole-array atom of a global matrix or of a global
+  array of structures with an array member; the unguarded atoms stay accepted, as do guarded atoms on
+  Part D's structures and guarded ranges. The alternative for 383 and 384: accept them and write the two lint
+  rules, with the owner's word on question 357's boundary.
+- **385** (the Viper lint, question 374's branch; nothing unsound was accepted by the verifier). Audit
+  round E3a judged the branch "stands with a change": with a second structure type in the file whose
+  matrix member has other counts, the branch admitted a cell clause stating a row length that
+  contradicts the function's own well-formedness row, also in the trusted `ensures` of a declared
+  function, where a caller would assume both; and a clause holding only `p != null` and the conjunct,
+  with no cell atom, was admitted. **Answer taken (the auditor's change, as a tightening):** the conjunct
+  is accepted in a cell clause only when it is textually the guarded conjunct of the same method's
+  well-formedness row for that pointer, in the same kind of clause; the auditor's mutants become
+  refusing twins. Question 374 for the owner stands as written, with this change made.
+- **386** (the Viper lint, the tightening of question 385; nothing loosened in the verifier). A formal
+  parameter has a well-formedness row in the method's `requires` and none in its `ensures`, so the rule
+  "the conjunct equals the same method's well-formedness row, in the same kind of clause" would refuse
+  the Viper of an accepted program whose `ensures` holds a cell atom. **Answer taken (the advisor):** for
+  a formal only, an `ensures` cell clause is tied to the `requires` row (the length facts depend on the
+  pointer, not on the heap, and a formal does not change); refusing twins for a conjunct that differs
+  from that row and for a formal with no such row. On the last audit round's list.
+- **387** (test mechanics; a cost to know). `negative/matrix_loop_global_main.c` (four global matrices,
+  four loops and four checks in `main`) took 147 s in C and 90 s in C++ as single runs and 269 s in the
+  harness, past the plan's 120 s. Measured: no single loop carries the time and 2 by 2 matrices are no
+  faster; with the four loops in four functions it takes 11 s: the cost is the number of loops over
+  global matrices in ONE function. **Answer taken (the advisor):** restructure, keeping `main` (the test
+  is about loops in `main`): two loops per `main` if that is under the line, else one per file, each new
+  `main` with a control that verifies without the loop; the cost is listed in record 0064 item 10. Not
+  moved to `tests/long`: the slowness is not what the test must refute.
+- **388** (test mechanics, invariant 1's edge). A new test, `negative/matrix_typedef_wrong.c`, was
+  corrected once after its first run (two checks in one `main`: Silicon stops a path at the first), and
+  the correction was itself defective: its checks then failed because the value was unknown, not because
+  it was wrong. **Answer taken (the advisor):** a second edit is allowed (the values stated in the two
+  `requires`; no `expect:` line moves; the file had no harness run in between); listed. With it a rule
+  for this round's twins: every must-fail `check` twin written or corrected is shown to verify with the
+  right value.
+- **389** (the Viper lint; two edits a test-mutator made and flagged instead of settling; both fail
+  closed to revert; nothing in the verifier). (1) In question 374's branch one pattern was widened: the
+  row-length fact it looks for may stand at any member index, not only at member 0, so that the branch
+  also covers a structure whose member array holds structures with an array member (two lines of one
+  self-test case); the tie that carries the branch since question 385 (the conjunct is textually the
+  same method's own well-formedness row) is unchanged. (2) The rule for the `program_start` group of a
+  global array of structures with an array member does not ask for a range quantifier for a trailing
+  `bool` leaf whose values are unknown; that a `bool` cell has no range fact was written in
+  `internal/encoding.md` and in the lint's scalar rule, and is now in record 0064 item 9. **Answer
+  taken:** both stand provisionally and are on the last audit round's list. Also listed, not built: no
+  lint rule ties a structure local's scope exit to the rows its allocation gave (a dropped `exhale` is
+  not refused, for scalar leaves too: older than this session; for the lint step with 369 and 373).
+- **390** (the Viper lint; fail closed in the verifier). The last audit round (E3b) found three more
+  accepted shapes whose Viper the lint refuses for want of an ordinary rule (an element copy whose
+  source is an element of a global array; a one-cell array leaf in the element of a member array; an
+  element whose only member is an array, in a global structure's member array, copied in `main`), and
+  showed that the lint's table collision is one declaration away from every unit that uses the member
+  form. **Answer taken (the advisor):** listed, with questions 369, 373, 379 and 380, for the lint step
+  that opens the next session; no rule and no rejection was added, because either would have entered
+  the commit after the last audit read, and no test holds the shapes (record 0064 item 17 has the
+  list). The alternative: write the three rules, or reject the three shapes, before the commit, with
+  another audit read.
+
+The next questions start at 391.
 
 ### Questions for the owner (after the second session of M4.5e1e2's continuation, 2026-11-26)
 

@@ -1,0 +1,194 @@
+30	not.wellformed	internal	matrix_row_pass.c	28	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+31	not.wellformed	internal	matrix_row_pass.c	28	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+31	postcondition.violated	internal	matrix_row_pass.c	28	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+32	not.wellformed	internal	matrix_row_pass.c	28	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+32	postcondition.violated	internal	matrix_row_pass.c	28	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+33	not.wellformed	internal	matrix_row_pass.c	28	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+33	postcondition.violated	internal	matrix_row_pass.c	28	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+34	not.wellformed	internal	matrix_row_pass.c	28	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+34	postcondition.violated	internal	matrix_row_pass.c	28	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+35	not.wellformed	internal	matrix_row_pass.c	28	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+35	postcondition.violated	internal	matrix_row_pass.c	28	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+36	not.wellformed	internal	matrix_row_pass.c	28	7	internal check: well-formedness of the trusted contract of the allocation of an array of `int[3]`
+36	postcondition.violated	internal	matrix_row_pass.c	28	7	internal check: Silicon's own check of the trusted contract of the allocation of an array of `int[3]`
+41	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow`
+42	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow`
+43	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+44	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+45	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+46	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+47	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+48	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+49	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+50	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+51	not.wellformed	internal	matrix_row_pass.c	9	5	internal check: well-formedness of the contract of `setrow`
+52	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+52	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+53	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+53	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+54	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+54	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+55	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+55	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+56	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+56	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+57	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+57	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+58	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+58	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+59	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+59	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+60	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+60	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+61	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+61	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+62	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+62	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+63	not.wellformed	internal	matrix_row_pass.c	10	5	internal check: well-formedness of the contract of `setrow`
+63	postcondition.violated	internal	matrix_row_pass.c	10	5	internal check: Silicon's own check of the postcondition of `setrow`
+71	assert.failed	null-dereference	matrix_row_pass.c	12	8	dereferences `q`, which may be null
+72	assert.failed	lifetime	matrix_row_pass.c	12	8	uses `q` after the object it points to may have ended
+73	assert.failed	out-of-bounds	matrix_row_pass.c	12	8	writes `q[0]` outside the object `q` points into
+75	assert.failed	permission	matrix_row_pass.c	12	8	writes `q[0]` without owning it: the object it points to may have ended
+78	assert.failed	null-dereference	matrix_row_pass.c	13	8	dereferences `q`, which may be null
+79	assert.failed	lifetime	matrix_row_pass.c	13	8	uses `q` after the object it points to may have ended
+80	assert.failed	out-of-bounds	matrix_row_pass.c	13	8	writes `q[1]` outside the object `q` points into
+82	assert.failed	permission	matrix_row_pass.c	13	8	writes `q[1]` without owning it: the object it points to may have ended
+85	assert.failed	null-dereference	matrix_row_pass.c	14	8	dereferences `q`, which may be null
+86	assert.failed	lifetime	matrix_row_pass.c	14	8	uses `q` after the object it points to may have ended
+87	assert.failed	out-of-bounds	matrix_row_pass.c	14	8	writes `q[2]` outside the object `q` points into
+89	assert.failed	permission	matrix_row_pass.c	14	8	writes `q[2]` without owning it: the object it points to may have ended
+92	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	15	1	returns without owning `q[0..3)`, which its contract promises	matrix_row_pass.c:10:this is the postcondition
+93	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	15	1	returns without owning `q[0..3)`, which its contract promises	matrix_row_pass.c:10:this is the postcondition
+94	assert.failed	permission	matrix_row_pass.c	15	1	returns without owning `q[0..3)`, which its contract promises	matrix_row_pass.c:10:this is the postcondition
+95	assert.failed	permission	matrix_row_pass.c	15	1	returns without owning `q[0..3)`, which its contract promises	matrix_row_pass.c:10:this is the postcondition
+96	assert.failed	permission	matrix_row_pass.c	15	1	returns without owning `q[0..3)`, which its contract promises	matrix_row_pass.c:10:this is the postcondition
+97	assert.failed	permission	matrix_row_pass.c	15	1	returns without owning `q[0..3)`, which its contract promises	matrix_row_pass.c:10:this is the postcondition
+98	assert.failed	postcondition	matrix_row_pass.c	15	1	the postcondition of `setrow` may not hold	matrix_row_pass.c:10:this is the postcondition
+104	not.wellformed	internal	matrix_row_pass.c	17	5	internal check: well-formedness of the contract of `middle`
+105	not.wellformed	internal	matrix_row_pass.c	17	5	internal check: well-formedness of the contract of `middle`
+106	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+107	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+108	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+109	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+110	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+111	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+112	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+113	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+114	not.wellformed	internal	matrix_row_pass.c	18	5	internal check: well-formedness of the contract of `middle`
+115	not.wellformed	internal	matrix_row_pass.c	17	5	internal check: well-formedness of the contract of `middle`
+115	postcondition.violated	internal	matrix_row_pass.c	17	5	internal check: Silicon's own check of the postcondition of `middle`
+116	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+116	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+117	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+117	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+118	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+118	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+119	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+119	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+120	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+120	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+121	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+121	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+122	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+122	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+123	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+123	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+124	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+124	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+125	not.wellformed	internal	matrix_row_pass.c	19	5	internal check: well-formedness of the contract of `middle`
+125	postcondition.violated	internal	matrix_row_pass.c	19	5	internal check: Silicon's own check of the postcondition of `middle`
+130	assert.failed	null-dereference	matrix_row_pass.c	21	11	dereferences `q`, which may be null
+131	assert.failed	lifetime	matrix_row_pass.c	21	11	uses `q` after the object it points to may have ended
+132	assert.failed	out-of-bounds	matrix_row_pass.c	21	11	reads `q[1]` outside the object `q` points into
+133	assert.failed	permission	matrix_row_pass.c	21	11	reads `q[1]` without owning it: the object it points to may have ended
+134	assert.failed	uninitialized	matrix_row_pass.c	21	11	`q[1]` may be read here before it is given a value
+136	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	21	3	returns without the permission to read `q[0..3)` it borrowed	matrix_row_pass.c:19:this is the postcondition
+137	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	21	3	returns without the permission to read `q[0..3)` it borrowed	matrix_row_pass.c:19:this is the postcondition
+138	assert.failed	permission	matrix_row_pass.c	21	3	returns without the permission to read `q[0..3)` it borrowed	matrix_row_pass.c:19:this is the postcondition
+139	assert.failed	permission	matrix_row_pass.c	21	3	returns without the permission to read `q[0..3)` it borrowed	matrix_row_pass.c:19:this is the postcondition
+140	assert.failed	permission	matrix_row_pass.c	21	3	returns without the permission to read `q[0..3)` it borrowed	matrix_row_pass.c:19:this is the postcondition
+141	assert.failed	permission	matrix_row_pass.c	21	3	returns without the permission to read `q[0..3)` it borrowed	matrix_row_pass.c:19:this is the postcondition
+142	assert.failed	postcondition	matrix_row_pass.c	21	3	the postcondition of `middle` may not hold	matrix_row_pass.c:19:this is the postcondition
+144	assert.failed	missing-return	matrix_row_pass.c	22	1	control may reach the end of `middle` without returning a value
+150	not.wellformed	internal	matrix_row_pass.c	24	5	internal check: well-formedness of the contract of `use`
+151	not.wellformed	internal	matrix_row_pass.c	25	5	internal check: well-formedness of the contract of `use`
+152	not.wellformed	internal	matrix_row_pass.c	24	5	internal check: well-formedness of the contract of `use`
+152	postcondition.violated	internal	matrix_row_pass.c	24	5	internal check: Silicon's own check of the postcondition of `use`
+153	not.wellformed	internal	matrix_row_pass.c	26	5	internal check: well-formedness of the contract of `use`
+153	postcondition.violated	internal	matrix_row_pass.c	26	5	internal check: Silicon's own check of the postcondition of `use`
+173	call.precondition	internal	matrix_row_pass.c	28	7	internal check: Silicon's own check of the allocation of `m`
+174	assert.failed	out-of-bounds	matrix_row_pass.c	28	19	writes `m[0][0]`, whose first index may be outside `m`
+175	assert.failed	out-of-bounds	matrix_row_pass.c	28	19	writes `m[0][0]`, whose second index may be outside `m[0]`
+177	assert.failed	permission	matrix_row_pass.c	28	19	writes `m[0][0]` without owning it: a callee may have kept its object
+180	assert.failed	out-of-bounds	matrix_row_pass.c	28	22	writes `m[0][1]`, whose first index may be outside `m`
+181	assert.failed	out-of-bounds	matrix_row_pass.c	28	22	writes `m[0][1]`, whose second index may be outside `m[0]`
+183	assert.failed	permission	matrix_row_pass.c	28	22	writes `m[0][1]` without owning it: a callee may have kept its object
+186	assert.failed	out-of-bounds	matrix_row_pass.c	28	25	writes `m[0][2]`, whose first index may be outside `m`
+187	assert.failed	out-of-bounds	matrix_row_pass.c	28	25	writes `m[0][2]`, whose second index may be outside `m[0]`
+189	assert.failed	permission	matrix_row_pass.c	28	25	writes `m[0][2]` without owning it: a callee may have kept its object
+192	assert.failed	out-of-bounds	matrix_row_pass.c	28	30	writes `m[1][0]`, whose first index may be outside `m`
+193	assert.failed	out-of-bounds	matrix_row_pass.c	28	30	writes `m[1][0]`, whose second index may be outside `m[1]`
+195	assert.failed	permission	matrix_row_pass.c	28	30	writes `m[1][0]` without owning it: a callee may have kept its object
+198	assert.failed	out-of-bounds	matrix_row_pass.c	28	33	writes `m[1][1]`, whose first index may be outside `m`
+199	assert.failed	out-of-bounds	matrix_row_pass.c	28	33	writes `m[1][1]`, whose second index may be outside `m[1]`
+201	assert.failed	permission	matrix_row_pass.c	28	33	writes `m[1][1]` without owning it: a callee may have kept its object
+204	assert.failed	out-of-bounds	matrix_row_pass.c	28	36	writes `m[1][2]`, whose first index may be outside `m`
+205	assert.failed	out-of-bounds	matrix_row_pass.c	28	36	writes `m[1][2]`, whose second index may be outside `m[1]`
+207	assert.failed	permission	matrix_row_pass.c	28	36	writes `m[1][2]` without owning it: a callee may have kept its object
+210	assert.failed	out-of-bounds	matrix_row_pass.c	29	11	forms `&m[i][0]`, whose first index may be outside `m`
+211	assert.failed	out-of-bounds	matrix_row_pass.c	29	11	forms `&m[i][0]` beyond one past the end of `m[i]`
+214	assert.failed	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+215	assert.failed	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+217	assert.failed	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+218	assert.failed	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+219	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+220	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+221	assert.failed	uninitialized	matrix_row_pass.c	29	9	passes `&m[i][0]` to `setrow`, whose parameter `q` needs every element of `q[0..3)` to have a value; it may not have one here
+222	assert.failed	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+223	assert.failed	permission	matrix_row_pass.c	29	9	calls `setrow`, which needs to own `m[i][0..3)`, without owning it
+224	call.precondition	internal	matrix_row_pass.c	29	9	internal check: Silicon's own check of the precondition of `setrow`
+225	assert.failed	out-of-bounds	matrix_row_pass.c	30	21	forms `&m[i][0]`, whose first index may be outside `m`
+226	assert.failed	out-of-bounds	matrix_row_pass.c	30	21	forms `&m[i][0]` beyond one past the end of `m[i]`
+229	assert.failed	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+230	assert.failed	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+231	assert.failed	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+233	assert.failed	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+234	assert.failed	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+235	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+236	assert.failed[insufficient.permission]	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+237	assert.failed	uninitialized	matrix_row_pass.c	30	19	passes `&m[i][0]` to `middle`, whose parameter `q` needs every element of `q[0..3)` to have a value; it may not have one here
+238	assert.failed	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+239	assert.failed	permission	matrix_row_pass.c	30	19	calls `middle`, which needs to read `m[i][0..3)`, without the permission to read it
+240	call.precondition	internal	matrix_row_pass.c	30	19	internal check: Silicon's own check of the precondition of `middle`
+242	assert.failed	out-of-bounds	matrix_row_pass.c	31	20	reads `m[i][2]`, whose first index may be outside `m`
+243	assert.failed	out-of-bounds	matrix_row_pass.c	31	20	reads `m[i][2]`, whose second index may be outside `m[i]`
+244	assert.failed	permission	matrix_row_pass.c	31	20	reads `m[i][2]` without owning it: a callee may have kept its object
+245	assert.failed	uninitialized	matrix_row_pass.c	31	20	`m[i][2]` may be read here before it is given a value
+246	assert.failed	overflow	matrix_row_pass.c	31	14	signed `int` addition may overflow
+248	assert.failed[insufficient.permission]	lifetime	matrix_row_pass.c	31	3	the address of an element of `m` may still be in use when its lifetime ends
+249	assert.failed[insufficient.permission]	lifetime	matrix_row_pass.c	31	3	the address of an element of `m` may still be in use when its lifetime ends
+250	assert.failed	lifetime	matrix_row_pass.c	31	3	the address of `m` may still be in use when its lifetime ends
+254	assert.failed	postcondition	matrix_row_pass.c	31	3	the postcondition of `use` may not hold	matrix_row_pass.c:26:this is the postcondition
+256	assert.failed[insufficient.permission]	lifetime	matrix_row_pass.c	32	1	the address of an element of `m` may still be in use when its lifetime ends
+257	assert.failed[insufficient.permission]	lifetime	matrix_row_pass.c	32	1	the address of an element of `m` may still be in use when its lifetime ends
+258	assert.failed	lifetime	matrix_row_pass.c	32	1	the address of `m` may still be in use when its lifetime ends
+262	assert.failed	missing-return	matrix_row_pass.c	32	1	control may reach the end of `use` without returning a value
+268	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+269	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+270	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+271	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+272	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+273	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+274	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+275	not.wellformed	internal	matrix_row_pass.c	8	6	internal check: well-formedness of the contract of `setrow (well-formedness)`
+278	assert.failed	permission	matrix_row_pass.c	10	52	the contract of `setrow` reads `q[0]` without owning it
+279	assert.failed	permission	matrix_row_pass.c	10	65	the contract of `setrow` reads `q[1]` without owning it
+280	assert.failed	permission	matrix_row_pass.c	10	78	the contract of `setrow` reads `q[2]` without owning it
+285	not.wellformed	internal	matrix_row_pass.c	17	5	internal check: well-formedness of the contract of `middle (well-formedness)`
+286	not.wellformed	internal	matrix_row_pass.c	17	5	internal check: well-formedness of the contract of `middle (well-formedness)`
+287	not.wellformed	internal	matrix_row_pass.c	17	5	internal check: well-formedness of the contract of `middle (well-formedness)`
+288	not.wellformed	internal	matrix_row_pass.c	17	5	internal check: well-formedness of the contract of `middle (well-formedness)`
+291	assert.failed	permission	matrix_row_pass.c	19	61	the contract of `middle` reads `q[1]` without owning it
+296	not.wellformed	internal	matrix_row_pass.c	24	5	internal check: well-formedness of the contract of `use (well-formedness)`
+297	not.wellformed	internal	matrix_row_pass.c	24	5	internal check: well-formedness of the contract of `use (well-formedness)`
